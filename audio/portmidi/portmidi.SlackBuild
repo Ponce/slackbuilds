@@ -21,18 +21,16 @@
 # OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
 # WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. FURTHERMORE I AM NOT LIABLE IF
-# YOUR DATA IS DESTROYED, YOUR HOUSE BURNS DOWN OR YOUR DOG RUNS OFF.
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 # Thanks to Camarade_Tux, Fire|Bird, and Metrofox for their assistance in
 # getting the 64 bit build to work, and for putting up with constant cries
 # for help ;-)
 
-
 PRGNAM=portmidi
-VERSION=${VERSION:-184}
+VERSION=${VERSION:-200}
 ARCH=${ARCH:-i486}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 CWD=$(pwd)
@@ -51,10 +49,10 @@ elif [ "$ARCH" = "x86_64" ]; then
   LIBDIRSUFFIX="64"
 fi
 
-set -e 
+set -e
 
 rm -rf $PKG
-mkdir -p $TMP $PKG $OUTPUT
+mkdir -p $TMP $PKG/usr/lib$LIBDIRSUFFIX $OUTPUT
 cd $TMP
 rm -rf $PRGNAM
 unzip $CWD/$PRGNAM-src-$VERSION.zip
@@ -74,16 +72,32 @@ sed "s%@LIBDIR@%/usr/lib${LIBDIRSUFFIX}%" $CWD/fixup_java_path.diff | patch -p1
 cmake . \
   -DCMAKE_C_FLAGS="$SLKCFLAGS" \
   -DCMAKE_CXX_FLAGS="$SLKCFLAGS" \
-  -DCMAKE_INSTALL_PREFIX="/usr"
- 
-make
-make install DESTDIR=$PKG
+  -DCMAKE_INSTALL_PREFIX=/usr \
+  -DCMAKE_CACHEFILE_DIR=$PKG \
+  -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY="$PKG/usr/lib$LIBDIRSUFFIX" \
+  -DCMAKE_LIBRARY_OUTPUT_DIRECTORY="$PKG/usr/lib$LIBDIRSUFFIX" \
+  -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$PKG/usr/bin
 
-# Apparently that PREFIX="/usr" above was ignored...  no surprise, I guess,
-# considering the fact that pretty much everything else is hardcoded badly
-mv $PKG/usr/local/{bin,include,lib} $PKG/usr
-rm -rf $PKG/usr/local
-[ "$ARCH" = "x86_64" ] && mv $PKG/usr/lib $PKG/usr/lib64
+patch -p1 < $CWD/portmidi-shared.diff
+
+# Fixup for hardcoded usr/local
+find . \( -name cmake_install.cmake -o -name CMakeLists.txt -o -name Makefile \) \
+	-exec sed -i 's%/local%%g' '{}' \;
+
+make -j1 all CFLAGS="-fPIC" PMFLAGS="-DNEWBUFFER"
+make install DESTDIR=$PKG
+rm -f $PKG/usr/lib/libportmidi_s.a
+
+# I think this may cause problems unless it's renamed
+mv $PKG/usr/bin/test $PKG/usr/bin/portmiditest
+
+# Pinched from fc spec
+install -m 644 pm_common/pmutil.h $PKG/usr/include
+mkdir -p $PKG/usr/share/applications
+install -m 644 $CWD/pmdefaults.desktop $PKG/usr/share/applications
+
+mkdir -p $PKG/usr/share/icons/hicolor/128x128/apps
+install -m 644 pm_java/pmdefaults/pmdefaults-icon.png $PKG/usr/share/icons/hicolor/128x128/apps
 
 ( cd $PKG
   find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
