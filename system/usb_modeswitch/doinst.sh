@@ -10,7 +10,6 @@ config() {
   fi
   # Otherwise, we leave the .new copy for the admin to consider...
 }
-
 config etc/usb_modeswitch.conf.new
-
 chroot . /etc/rc.d/rc.udev reload
+
