@@ -1,0 +1,116 @@
+#!/bin/sh
+
+# Slackware build script for Exim
+
+# Written by Thomas Morper <thomas@beingboiled.info>
+# Thanks to Thales A. Tsailas <ttsailas@enforcingit.com> and the SBo team
+# for the previous version and the accompanying files.
+# Thanks to Debian for the manpages.
+
+PRGNAM=exim
+VERSION=${VERSION:-4.71}
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+# Check if the exim user and group exist. If not, then bail.
+if [ "$(id -g exim 2> /dev/null)" != "222" -o "$(id -u exim 2> /dev/null)" != "222" ]; then
+  echo "  You must have an 'exim' user and group to run this script."
+  echo "    # groupadd -g 222 exim"
+  echo "    # useradd -d /var/spool/exim -g exim -s /bin/false -u 222 exim"
+  exit 1
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+cat $CWD/exim.Makefile > Local/Makefile
+cat exim_monitor/EDITME > Local/eximon.conf
+
+make \
+  CFLAGS="$SLKCFLAGS -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE" \
+  LIBDIRSUFFIX=$LIBDIRSUFFIX
+make install DESTDIR=$PKG
+
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Ditch the symlink and move the binary to its final destination.
+rm -f $PKG/usr/sbin/exim
+mv $PKG/usr/sbin/exim-$VERSION-1 $PKG/usr/sbin/exim
+
+# Additional symlinks provide compatibility with sendmail
+mkdir -p $PKG/usr/lib     # no LIBDIRSUFFIX here!
+( cd $PKG/usr/lib;  ln -s /usr/sbin/exim sendmail )
+( cd $PKG/usr/sbin; ln -s /usr/sbin/exim sendmail )
+
+# Nobody should use an unedited default config.
+mv $PKG/etc/exim/exim.conf $PKG/etc/exim/exim.conf.example
+mv $PKG/etc/exim/aliases $PKG/etc/exim/aliases.example
+
+# Install accompanying scripts and configs.
+mkdir -p $PKG/etc/{cron.daily,logrotate.d,rc.d}
+install -m 0755 $CWD/contrib/rc.exim.new    $PKG/etc/rc.d/rc.exim.new
+install -m 0755 $CWD/contrib/exim.cron      $PKG/etc/cron.daily/exim.new
+install -m 0644 $CWD/contrib/exim.logrotate $PKG/etc/logrotate.d/exim.new
+
+# Prepare log- and spool-directories.
+mkdir -p $PKG/var/log/exim
+mkdir -p -m 0750 $PKG/var/spool/exim/
+mkdir -p -m 0750 $PKG/var/spool/exim/{db,input,msglog}
+chown -R exim.exim $PKG/var/{log,spool}/exim
+
+# Install the various manpages
+mkdir -p $PKG/usr/man/man8
+mv doc/exim.8 $PKG/usr/man/man8/
+install -m 0644 $CWD/manpages/*.8 $PKG/usr/man/man8/
+find $PKG/usr/man/man8 -type f -exec gzip -9 {} \;
+( cd $PKG/usr/man/man8
+  ln -s exim_db.8.gz exim_dumpdb.8.gz
+  ln -s exim_db.8.gz exim_fixdb.8.gz
+  ln -s exim_db.8.gz exim_tidydb.8.gz
+)
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  ABOUT ACKNOWLEDGMENTS CHANGES LICENCE NOTICE README* doc \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
