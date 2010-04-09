@@ -5,7 +5,7 @@
 # HDF5 support by Aleksandar Samardzic <asamardzic@matf.bg.ac.yu>
 
 PRGNAM="octave"
-VERSION="3.0.1"
+VERSION=${VERSION:-3.2.4}
 ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
@@ -14,6 +14,8 @@ CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM-$VERSION
 OUTPUT=${OUTPUT:-/tmp}
+
+DOCS="BUGS COPYING ChangeLog* INSTALL* NEWS* PROJECTS README* ROADMAP SENDING-PATCHES"
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
@@ -37,11 +39,16 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 chmod -R u+w,go+r-w,a-st .
 
-# The HDF5 API changed between versions 1.6.x and 1.8.x.  Octave
-# currently uses the 1.6.x API, so a compatibility flag is necessary.
-CPPFLAGS="-DH5_USE_16_API" \
-CFLAGS="$SLKCFLAGS -fno-strict-aliasing" \
-CXXFLAGS="$SLKCFLAGS -fno-strict-aliasing" \
+# qhull 2010.1 does not install qhull/qhull.h; this file is for "backwards
+# compatibility" and just redirects to qhull/libqhull.h.  Octave tries to
+# use the old header only to compile a test during ./configure.  The test
+# fails because the old header doesn't exist, and as a result Octave won't
+# use qhull.  This line fixes the test, but you may need to comment it out
+# if you intend on using an older version of qhull.
+sed -i 's/qhull\/qhull\.h/qhull\/libqhull\.h/g' configure aclocal.m4
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
 FFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
@@ -53,12 +60,14 @@ FFLAGS="$SLKCFLAGS" \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
   --enable-shared \
   --disable-static \
-  --enable-picky-flags \
+  --enable-strict-warning-flags \
   --build=$ARCH-slackware-linux
 
 make
-make install DESTDIR=$PKG
+make install-strip DESTDIR=$PKG
 
+# install-strip doesn't strip the files in usr/lib/octave-$VERSION,
+# so leave this in for now.
 ( cd $PKG 
   find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : \
     | xargs strip --strip-unneeded 2> /dev/null || true
@@ -67,19 +76,18 @@ make install DESTDIR=$PKG
 )
 
 ( cd $PKG/usr/man
-  find . -type f -exec gzip -9 {} \;
-  for i in $(find . -type l); do \
-    ln -s $(readlink $i).gz $i.gz; rm $i; \
-  done
+	find . -type f -exec gzip -9 {} \;
+	for i in $(find . -type l); do \
+		ln -s $(readlink $i).gz $i.gz; \
+		rm $i; \
+	done
 )
 
 rm -f $PKG/usr/info/dir
 gzip -9 $PKG/usr/info/*
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  BUGS COPYING ChangeLog* INSTALL* NEWS* PROJECTS README* ROADMAP SENDING-PATCHES THANKS \
-    $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
@@ -87,4 +95,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -p -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
