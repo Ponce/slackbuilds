@@ -1,0 +1,229 @@
+#!/bin/sh
+
+# Slackware build script for ATLAS
+
+# Copyright 2010 Serban Udrea <s.udrea@gsi.de>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification,
+# is permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR
+# IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
+# INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+# STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
+# IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=atlas
+VERSION=${VERSION:-3.8.3}
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+  BITSize="32" # Specifically for ATLAS
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+  BITSize="32" # Specifically for ATLAS
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+  BITSize="64" # Specifically for ATLAS
+fi
+
+# You may change this to adjust the maximal size IN BYTES(!) that ATLAS
+# is allowed to allocate. According to the ATLAS errata, a too small
+# value may strongly reduce threaded performance. The default value
+# here is 256MB. (The default value in the ATLAS source is 64MB.)
+#
+MAX_MALLOC=${MAX_MALLOC:-268435456}
+
+# If you don't want to use architectural defaults set the following to 
+# something like "no".
+USE_ARCH_DEFAULTS=${USE_ARCH_DEFAULTS:-yes}
+
+# The path to a reference BLAS library. By default it is assumed that you 
+# have installed the netlib BLAS reference using the appropriate slackbuild 
+# from slackbuilds.org.  If this is not the case, you have to run this script 
+# with another value for REF_BLAS.
+REF_BLAS=${REF_BLAS:-/usr/lib${LIBDIRSUFFIX}/libblas.a}
+
+# Let's do a little check (that we deal with a regular file we can read).
+[ -f "$REF_BLAS" -a -r "$REF_BLAS" ] || \
+{ echo "ERROR: Wrong path to reference BLAS library, exiting! " && exit 1; }
+
+# This is the system destination directory. When installing the
+# package produced by this script, ATLAS's files will be written to
+# $SYS_DESTDIR/include, $SYS_DESTDIR/include/atlas, $SYS_DESTDIR/lib
+# or $SYS_DESTDIR/lib64 ond appropriate platforms, etc.
+# Nevertheless, by default the documentation files go to
+# /usr/doc/$PRGNAM-$VERSION. You may change this through the variable
+# DEFAULT_DOCS, see below.
+#
+SYS_DESTDIR=${SYS_DESTDIR:-/usr}
+
+# Check if SYS_DESTDIR is an absolute path. If not, exit with error.
+# NOTE: The $ is used because echo adds a \n at the end of the string.
+echo $SYS_DESTDIR | grep -vE '/\.\./|/\.\.$' | grep -qE '^/' || \
+{ echo "ERROR: The system destination directory has no absolute path!" \
+&& echo "       The value of SYS_DESTDIR is $SYS_DESTDIR" \
+&& echo "       Please set it properly! " \
+&& exit 1; }
+
+# You may want to have the documentation files installed under
+# $SYS_DESTDIR/doc/$PRGNAM-$VERSION not /usr/doc/$PRGNAM-$VERSION.
+# To achieve this just set the following variable to something like
+# "no".
+#
+DEFAULT_DOCS=${DEFAULT_DOCS:-yes}
+
+# The build directory to be created within the source directory of
+# ATLAS.
+BLDdir=BuildDir
+
+# Get the CPU frequency for good timing.
+CPU_FREQ="$(cat /proc/cpuinfo |grep "cpu MHz"| head -n 1| cut -d ":" -s -f2| tr -d [:blank:])"
+
+set -e # Exit on most errors
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/${PRGNAM}${VERSION}.tar.bz2
+mv ATLAS $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+
+chown -R root:root .
+
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+# Make changes as suggested in the atlas errata.
+cat $CWD/atlas.patch | sed -e s%XXX_MaxMalloc_XXX%$MAX_MALLOC% | patch -p1
+
+# If architectural defaults are to be used, copy the file mentioned in the errata
+# to the architectural defaults directory.
+case "$USE_ARCH_DEFAULTS" in
+  [yY]|[yY][eE]|[yY][eE][sS]) cp "$CWD/AMD64K10h64SSE3.tgz" CONFIG/ARCHS; USE_ARCH_DEFAULTS="1" ;;
+                           *) USE_ARCH_DEFAULTS="0" ;;
+esac
+
+mkdir -p $BLDdir
+cd $BLDdir
+
+# Configure atlas.
+# IMPORTANT: Here we assume that we are on a x86 machine (be it 32 or 64 bits)
+#            and gcc or icc is the compiler to be used. This should be presently
+#            a reasonable assumption with Slackware. Under other circumstances
+#            "-DPentiumCPS=$CPU_FREQ" has to be exchanged with "-DWALL".
+#
+../configure -Si archdef "$USE_ARCH_DEFAULTS" -b "$BITSize" -D c \
+-DPentiumCPS="$CPU_FREQ" -Fa alg -fPIC
+
+# NOTES ON THE FLAGS FOR CONFIGURE
+#
+# -Si archdef "$USE_ARCH_DEFAULTS" means that we ignore or not architectural defaults depending
+#   upon the value of "$USE_ARCH_DEFAULTS".
+# -b "$BITSize" tells ATLAS about the platform's bitsize, 32 or 64.
+# -D c -DPentiumCPS="$CPU_FREQ" is for achieving good timing on x86 platforms with gcc or icc.
+# -Fa alg -fPIC is for beeing able to create dynamic libs too.
+
+# The next two variables are set and their values are finally saved
+# for using them to compile lapack.
+# Remember the compiler name.
+ATLAS_COMPILER="$(grep "F77 =" Make.inc | cut -d "=" -f1 --complement)"
+
+# Remember the fortran compilation flags.
+ATLAS_F77FLAGS="$(grep "F77FLAGS =" Make.inc | cut -d "=" -f1 --complement)"
+
+# Set the path to the reference BLAS.
+sed -i -e '/^ \+BLASlib/s%BLASlib = .*%BLASlib = '"$REF_BLAS"% \
+         Make.inc
+
+make
+make check
+
+# If parallel libraries have been compiled check them too.
+if [ -f lib/libptcblas.a ]; then
+  make ptcheck
+  PARALLEL_LIBS="yes" # We will use this when creating dynamic libs.
+fi
+
+# Install the static libs created during the build process.
+make install DESTDIR=$PKG$SYS_DESTDIR
+
+# Go to the ATLAS $BLDdir/lib directory and try to create and install
+# the dynamic libraries.
+# NOTE: The test for the presence of static parallel libs and the command to actually build the
+#       shared parallel libs are connected by a logical OR to make sure that the subshell
+#       does not exit with non-zero error code just because static parallel libs didn't
+#       get built. Therefore the test is successful if the variable PARALLEL_LIBS is unset or
+#       empty, i.e. when no static parallel libs got built.
+( cd lib && make shared && \
+  { [ "${PARALLEL_LIBS}1" = "1" ] || make ptshared; } && \
+  cp -p *.so "$PKG$SYS_DESTDIR/lib"
+)
+
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# This is probably the easiest way to make sure that we install in the
+# proper place.
+if [ ! -z $LIBDIRSUFFIX ]; then
+  mv $PKG$SYS_DESTDIR/lib $PKG$SYS_DESTDIR/lib${LIBDIRSUFFIX}
+fi
+
+# Create the doc directory for atlas and populate it.
+case "$DEFAULT_DOCS" in
+ [nN]|[nN][oO]) DOC_DIR="$PKG$SYS_DESTDIR/doc/$PRGNAM-$VERSION" ;;
+             *) DOC_DIR="$PKG/usr/doc/$PRGNAM-$VERSION" ;;
+esac
+
+mkdir -p $DOC_DIR
+cp -a ../INSTALL.txt ../README ../doc $DOC_DIR
+
+# The following makefiles may be needed to merge atlas and lapack.
+mkdir $DOC_DIR/MAKEFILES
+cp -p Make.inc $DOC_DIR/MAKEFILES
+cp -p lib/Makefile $DOC_DIR/MAKEFILES/Makefile.lib
+
+# Create a file with the build flags for atlas. Needed to merge
+# ATLAS and LAPACK. The LAPACK SlackBuild will just have to source
+# this file to find out the compiler used for ATLAS and the build
+# flags.
+echo "ATLAS_COMPILER=\"$ATLAS_COMPILER\"" > "$DOC_DIR/SETTINGS"
+echo "ATLAS_F77FLAGS=\"$ATLAS_F77FLAGS\"" >> "$DOC_DIR/SETTINGS"
+sed -i -e s'%=" %="%' "$DOC_DIR/SETTINGS" # Remove the extra space after the "=" sign
+echo "ATLAS_NOOPT=\"-O0\" #Eventually add more options within the quotes." >> "$DOC_DIR/SETTINGS"
+
+# Add the Slackbuild script and README.SLACKWARE to the docs.
+cat $CWD/$PRGNAM.SlackBuild > $DOC_DIR/$PRGNAM.SlackBuild
+cat $CWD/README.SLACKWARE > $DOC_DIR/README.SLACKWARE
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd "$PKG"
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
