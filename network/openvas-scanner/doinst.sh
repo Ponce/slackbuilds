@@ -18,4 +18,5 @@ if [ -e etc/rc.d/rc.openvassd ]; then
 fi
 
 config etc/rc.d/rc.openvassd.new
+config etc/rc.d/rc.openvas.conf.new
 
