@@ -1,0 +1,96 @@
+#!/bin/sh
+
+PRGNAM=xl2tpd
+VERSION=1.2.4
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+# patching make file
+patch -p0 -i $CWD/makefile.patch
+
+# build the program
+make
+make install DESTDIR=$PKG 
+
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+)
+
+# Add some sample config files
+mkdir -p $PKG/etc/{xl2tpd,ppp}
+cat examples/xl2tpd.conf > $PKG/etc/xl2tpd/xl2tpd.conf.new
+cat examples/ppp-options.xl2tpd > $PKG/etc/ppp/options.xl2tpd.new
+cat examples/chapsecrets.sample > $PKG/etc/ppp/chap-secrets.new
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+DOCFILES=`ls --color=never examples/xl2tpd-L2TP*`;
+if [ "$?" = "0" ]; then
+  mkdir $PKG/usr/doc/$PRGNAM-$VERSION/examples
+  for doc_file in $DOCFILES; do
+    if [ -f $doc_file ]; then
+      cat $doc_file > $PKG/usr/doc/$PRGNAM-$VERSION/$doc_file
+    fi
+  done
+fi
+
+cd doc
+DOCFILES="ipsecsaref.png l2tp.png l2tp.svg l2tpd.conf.sample \
+l2tp-secrets.sample origREADME README.passwordfd README.patents rfc2661.txt"
+for doc_file in $DOCFILES; do
+  if [ -f $doc_file ]; then
+    cp -a $doc_file $PKG/usr/doc/$PRGNAM-$VERSION/
+  fi
+done
+cd ..
+
+DOCFILES="BUGS CHANGES CREDITS LICENSE README.xl2tpd TODO"
+for doc_file in $DOCFILES; do
+	if [ -f $doc_file ]; then
+		cp -a $doc_file $PKG/usr/doc/$PRGNAM-$VERSION/
+	fi
+done
+
+find $PKG/usr/doc -type f -exec chmod 0644 {} \;
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
