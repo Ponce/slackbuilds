@@ -1,16 +1,22 @@
 config() {
   NEW="$1"
-  OLD="`dirname $NEW`/`basename $NEW .new`"
+  OLD="$(dirname $NEW)/$(basename $NEW .new)"
   # If there's no config file by that name, mv it over:
   if [ ! -r $OLD ]; then
     mv $NEW $OLD
-  elif [ "`cat $OLD | md5sum`" = "`cat $NEW | md5sum`" ]; then
+  elif [ "$(cat $OLD | md5sum)" = "$(cat $NEW | md5sum)" ]; then
    # toss the redundant copy 
    rm $NEW
   fi
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-# Add this package's version of boot-script, if only for documentation
+# Keep same perms on rc.unfsd.new:
+if [ -e etc/rc.d/rc.unfsd ]; then
+  cp -a etc/rc.d/rc.unfsd etc/rc.d/rc.unfsd.new.incoming
+  cat etc/rc.d/rc.unfsd.new > etc/rc.d/rc.unfsd.new.incoming
+  mv etc/rc.d/rc.unfsd.new.incoming etc/rc.d/rc.unfsd.new
+fi
+
 config etc/rc.d/rc.unfsd.new
 
