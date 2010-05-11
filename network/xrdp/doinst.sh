@@ -19,6 +19,7 @@ if [ -e etc/rc.d/rc.xrdp ]; then
 fi
 
 config etc/rc.d/rc.xrdp.new
+config etc/xrdp/xrdp-xinitrc.new
 config etc/xrdp/rsakeys.ini.new
 config etc/xrdp/sesman.ini.new
 config etc/xrdp/xrdp.ini.new
