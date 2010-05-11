@@ -1,5 +1,3 @@
-#!/bin/sh
-
 config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
@@ -16,3 +14,4 @@ config() {
 config etc/openmpi-totalview.tcl.new
 config etc/openmpi-mca-params.conf.new
 config etc/openmpi-default-hostfile.new
+
