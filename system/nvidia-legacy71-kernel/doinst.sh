@@ -1,0 +1,3 @@
+
+chroot . /sbin/depmod -a
+
