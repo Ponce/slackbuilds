@@ -1,0 +1,71 @@
+#!/bin/sh
+
+# Slackware build script for Lua
+
+# Written by Menno Duursma
+# Modified by the SlackBuilds.org project
+
+PRGNAM=lua
+VERSION=5.1.2
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP || exit 1
+rm -rf $PRGNAM-$VERSION
+tar xzvf $CWD/$PRGNAM-$VERSION.tar.gz || exit 1
+cd $PRGNAM-$VERSION || exit 1
+chown -R root:root .
+chmod -R a-s,u+rw,go-w+r .
+
+# Apply patch to make it compile the lib into a shared object
+cat $CWD/$PRGNAM-$VERSION-shared.diff | patch -p1 || exit 1
+
+# Let's use our custom CFLAGS from above
+sed -i "s/-DLUA_USE_LINUX/\"-DLUA_USE_LINUX $SLKCFLAGS\"/g" src/Makefile || exit 1
+
+make linux
+make install INSTALL_TOP=$PKG/usr || exit 1
+
+# Let's make sure all of the library symlinks correctly exist
+( cd $PKG/usr/lib
+  ln -sf liblua.so.5.1.2 liblua.so
+  ln -sf liblua.so.5.1.2 liblua.so.5
+)
+
+( cd $PKG
+  find . -type f | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+  find . -type f | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+)
+
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+)
+
+# Remove some empty directories, I can't imagine why these are here.
+rm -rf $PKG/usr/share $PKG/usr/lib/lua
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/{extras,html}
+cp -a COPYRIGHT HISTORY INSTALL README $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a doc/*.html doc/logo.gif doc/lua.css $PKG/usr/doc/$PRGNAM-$VERSION/html
+cp -a etc test $PKG/usr/doc/$PRGNAM-$VERSION/extras
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
