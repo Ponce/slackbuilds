@@ -1,0 +1,137 @@
+#!/bin/sh
+
+# Slackware build script for Webmin http://www.webmin.com
+
+# Copyright 2006-2007  David Somero (dsomero@hotmail.com)
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=webmin
+VERSION=1.400
+ARCH=noarch
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=${TMP}/package-${PRGNAM}
+OUTPUT=${OUTPUT:-/tmp}
+
+# Check if webmin is running - if so, the build will fail...
+if [ -e /etc/webmin/miniserv.conf ]; then
+  PIDFILE=$(grep "^pidfile=" /etc/webmin/miniserv.conf | sed -e 's/pidfile=//g')
+  if [ -e $PIDFILE ]; then
+    echo "Webmin is running or a stale pid file exists."
+    echo "Stop webmin and/or remove $PIDFILE"
+    exit 1
+  fi
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.*z*
+cd $PRGNAM-$VERSION
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+rm -f mount/{freebsd,openbsd,macos}-mounts* 
+
+( find . -name '*.cgi' ; find . -name '*.pl' ) | perl perlpath.pl /usr/bin/perl -
+
+install -d -m 0755 $PKG/usr/libexec/webmin
+install -d -m 0755 $PKG/var
+install -d -m 0755 $PKG/etc/rc.d/
+install -d -m 0755 $PKG/etc/webmin/
+install -d -m 0755 $PKG/var/log/webmin/
+install -m 0644 $CWD/rc.webmin $PKG/etc/rc.d/rc.webmin
+cp -rp * $PKG/usr/libexec/webmin
+echo "slackware" > $PKG/usr/libexec/webmin/install-type
+echo "/usr/libexec/webmin" > $PKG/usr/libexec/webmin/install-dir
+
+config_dir=$PKG/etc/webmin
+var_dir=$PKG/var/log/webmin
+perl=/usr/bin/perl
+autoos=1
+port=10000
+login=root
+crypt="XXX"
+host=$(hostname)
+ssl=0
+atboot=0
+nostart=1
+nochown=1
+autothird=1
+nouninstall=1
+noperlpath=1
+nopostinstall=1
+
+export config_dir var_dir perl autoos port login crypt host ssl atboot nostart nochown autothird nouninstall noperlpath nopostinstall 
+
+cd $PKG/usr/libexec/webmin
+  ./setup.sh 2>&1 
+cd -
+
+# Fixup the package files to use their real locations
+sed -i -e 's:^pidfile=.*$:pidfile=/var/run/webmin.pid:' $PKG/etc/webmin/miniserv.conf
+find $PKG -type f | xargs sed -i -e "s:$PKG::g"
+
+# Remove some stuff we don't need
+rm -rf $PKG/usr/libexec/webmin/acl/Authen-SolarisRBAC-0.1
+rm -f $PKG/usr/libexec/webmin/acl/Authen-SolarisRBAC-0.1.tar.gz
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENCE* README ${CWD}/webmin.SlackBuild $PKG/usr/doc/$PRGNAM-$VERSION
+chown -R root:root $PKG/usr/doc/$PRGNAM-$VERSION
+chmod 644 $PKG/usr/doc/$PRGNAM-$VERSION/*
+
+mkdir -p $PKG/install 
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+# Find config files and add the .new.
+# Used by the next block of code.
+get_config_files() {
+  for i in $(ls -1 $1); do
+    if [ -d "$1/$i" ]; then
+      get_config_files "$1/$i"
+    else
+      echo -n "$1/$i.new " | sed -e "s/^$(echo $PKG | sed -e 's/\//\\\//g')\///g"
+      mv "$1/$i" "$1/$i.new"
+    fi
+  done
+}
+
+# Finish the doinst.sh by adding the .new file list and config loop
+if [ -e $PKG/etc ]; then 
+  etc_files=$(get_config_files $PKG/etc)
+
+cat <<DOINST >> $PKG/install/doinst.sh
+for FILE in $etc_files
+do
+  config \$FILE
+done
+DOINST
+fi
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz

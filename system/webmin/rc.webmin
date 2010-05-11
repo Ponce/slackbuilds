@@ -1,0 +1,81 @@
+#!/bin/sh
+# Description: Start or stop the Webmin server
+
+start=/etc/webmin/start
+stop=/etc/webmin/stop
+lockfile=/var/lock/subsys/webmin
+confFile=/etc/webmin/miniserv.conf
+pidFile=$(grep "^pidfile=" $confFile | sed -e 's/pidfile=//g')
+
+pkg_postinst () {
+	echo "Running postinstall scripts .."
+	
+	local crypt=$(grep "^root:" /etc/shadow | cut -f 2 -d :)
+	crypt=${crypt//\\/\\\\}
+	crypt=${crypt//\//\\\/}
+	sed -i "s/root:XXX/root:${crypt}/" /etc/webmin/miniserv.users
+	
+	if [ -d /usr/libexec/webmin ]; then
+		cd /usr/libexec/webmin
+		WEBMIN_CONFIG=/etc/webmin WEBMIN_VAR=/var/log/webmin /usr/libexec/webmin/run-postinstalls.pl
+	fi
+	
+	echo "done"
+}
+
+case "$1" in
+'start')
+	if [ -e /etc/webmin/FIRSTRUN ]; then
+		pkg_postinst
+		rm -f /etc/webmin/FIRSTRUN
+	fi
+	$start >/dev/null 2>&1 </dev/null
+	RETVAL=$?
+	if [ "$RETVAL" = "0" ]; then
+		touch $lockfile >/dev/null 2>&1
+		echo "Webmin Started"
+	fi
+	;;
+'stop')
+	$stop
+	RETVAL=$?
+	if [ "$RETVAL" = "0" ]; then
+		rm -f $lockfile
+	fi
+	pidfile=`grep "^pidfile=" $confFile | sed -e 's/pidfile=//g'`
+	if [ "$pidfile" = "" ]; then
+		pidfile=$pidFile
+	fi
+	echo "Webmin Stopped"
+	rm -f $pidfile
+	;;
+'status')
+	pidfile=`grep "^pidfile=" $confFile | sed -e 's/pidfile=//g'`
+	if [ "$pidfile" = "" ]; then
+		pidfile=$pidFile
+	fi
+	if [ -s $pidfile ]; then
+		pid=`cat $pidfile`
+		kill -0 $pid >/dev/null 2>&1
+		if [ "$?" = "0" ]; then
+			echo "Webmin (pid $pid) is running"
+			RETVAL=0
+		else
+			echo "Webmin is stopped"
+			RETVAL=1
+		fi
+	else
+		echo "Webmin is stopped"
+		RETVAL=1
+	fi
+	;;
+'restart')
+	$stop ; $start
+	RETVAL=$?
+	;;
+*)
+	echo "Usage: $0 { start | stop | restart }"
+	RETVAL=1
+	;;
+esac
+exit $RETVAL
