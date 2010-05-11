@@ -3,7 +3,7 @@
 # Slackware build script for boost
 
 # Copyright 2007-2008 Eric Hameleers <alien@slackware.com>
-# Copyright 2007 Heinz Wiesinger
+# Copyright 2007-2008 Heinz Wiesinger <pprkut@liwjatan.at>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -29,22 +29,25 @@
 # -- no additional license terms and no copyright
 
 PRGNAM=boost
-VERSION=1_34_1
+VERSION=1_36_0
 ARCH=${ARCH:-i486}
-BUILD=${BUILD:-3}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-ICU=${ICU:-YES}
+ICU=${ICU:-no}
 PKG_VERSION=$(echo $VERSION | tr '_' '.')	# Leave this alone
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
 fi
 
 set -e
@@ -62,19 +65,22 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-if [ "$ICU" = "YES" ]; then
-    do_icu="-sICU_PATH=/usr"
+# Apply Hotfixes from http://svn.boost.org/trac/boost/wiki/ReleasePractices/HotFixes
+patch -p2 -i $CWD/patches/changeset_r48141.diff
+patch -p2 -i $CWD/patches/changeset_r48192.diff
+patch -p2 -i $CWD/patches/changeset_r48374.diff
+patch -p2 -i $CWD/patches/changeset_r48377.diff
+patch -p2 -i $CWD/patches/changeset_r48462.diff
+
+if [ "$ICU" = "no" ]; then
+    ICU_FLAGS=""
 else
-    do_icu=""
+    ICU_FLAGS="-sICU_PATH=/usr"
 fi
 
 # This is the python we build against:
 PYTHON_VERSION=$(python -c 'import sys; print sys.version[:3]')
 PYTHON_FLAGS="-sPYTHON_ROOT=/usr -sPYTHON_VERSION=$PYTHON_VERSION"
-
-# This fixes a critical bug that affects the construction of Boost.Function
-# objects in a multi-threaded context.
-patch -p1 < $CWD/boost-1_34_1-function-bugfix.diff
 
 # First build bjam, the boost build system:
 cd tools/jam/src
@@ -83,46 +89,56 @@ cd -
 
 BJAM=$(find tools/jam/src/ -name bjam -a -type f)
 
+# Change the build options from 'minimal' to what we want
+FLAGS="<threading>multi <threading>single <optimization>speed <inlining>full"
+
+sed -i "s/    <threading>multi/    $FLAGS/" Jamroot
+
+# disable static libraries
+sed -i "s/<link>shared <link>static/<link>shared/" Jamroot
+
 # Create build subdirectory
 mkdir obj
 
 # Next, we build boost using bjam
-$BJAM \
+ $BJAM \
   release \
-  "-sBUILD=<optimization>speed <inlining>full <threading>single/multi" \
   "-sNO_COMPRESSION=0" \
   "-sZLIB_INCLUDE=/usr/include" \
   "-sZLIB_LIBPATH=/usr/lib" \
   "-sBZIP2_INCLUDE=/usr/include" \
   "-sBZIP2_LIBPATH=/usr/lib" \
+  "-sEXPAT_INCLUDE=/usr/include" \
+  "-sEXPAT_LIBPATH=/usr/lib" \
   --toolset=gcc \
   --layout=system \
   --builddir=obj \
   --prefix=/usr \
+  --build-type=minimal \
   $PYTHON_FLAGS \
-  $do_icu \
-  stage
+  $ICU_FLAGS
 
 # And then install boost..
 mkdir -p $PKG/usr/{lib,include}
 
 $BJAM \
   release \
+  "-sEXPAT_INCLUDE=/usr/include" \
+  "-sEXPAT_LIBPATH=/usr/lib" \
   --toolset=gcc \
   --layout=system \
   --builddir=obj \
   --prefix=$PKG/usr \
+  --build-type=minimal \
   $PYTHON_FLAGS \
-  $do_icu \
+  $ICU_FLAGS \
   install
 
-( cd $PKG
-  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
-  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
-)
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$PKG_VERSION
-cp -a LICENSE_1_0.txt README $PKG/usr/doc/$PRGNAM-$PKG_VERSION
+cp -a LICENSE_1_0.txt INSTALL $PKG/usr/doc/$PRGNAM-$PKG_VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$PKG_VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
