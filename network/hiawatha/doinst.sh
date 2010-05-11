@@ -18,3 +18,10 @@ if [ -e etc/rc.d/rc.hiawatha ]; then
   mv etc/rc.d/rc.hiawatha.new.incoming etc/rc.d/rc.hiawatha.new
 fi
 
+# Keep same perms on rc.php-fcgi.new:
+if [ -e etc/rc.d/rc.php-fcgi ]; then
+  cp -a etc/rc.d/rc.php-fcgi etc/rc.d/rc.php-fcgi.new.incoming
+  cat etc/rc.d/rc.php-fcgi.new > etc/rc.d/rc.php-fcgi.new.incoming
+  mv etc/rc.d/rc.php-fcgi.new.incoming etc/rc.d/rc.php-fcgi.new
+fi
+
