@@ -1,0 +1,87 @@
+#!/bin/sh
+# Written to start/stop/restart varnishd.
+# by Cherife Li <cherife@dotimes.com>
+#
+
+VARNISH_VCL_CONF=/etc/default.vcl
+VARNISH_PIDFILE=/var/run/varnish.pid
+VARNISH_LOCKFILE=/var/lock/subsys/varnish
+VARNISH_DAEMON=/usr/sbin/varnishd
+VARNISH_PARAM="-p thread_pool_max=1500 -p thread_pools=5 -p listen_depth=512 -p client_http11=off"
+
+VARNISH_LOG_PIDFILE=/var/run/varnishlog.pid
+VARNISH_LOG_LOCKFILE=/var/lock/subsys/varnishlog
+VARNISH_LOG_DAEMON=/usr/bin/varnishlog
+LOGFILE=/var/log/varnish.log
+VARNISH_LOG_OPTS="-a -w ${LOGFILE} -D -P ${VARNISH_LOG_PIDFILE}"
+
+# Default address and port to bind to
+# Blank address means all IPv4 and IPv6 interfaces, otherwise specify
+# a host name, an IPv4 dotted quad, or an IPv6 address in brackets.
+VARNISH_LISTEN_ADDRESS=
+VARNISH_LISTEN_PORT=80
+
+# Telnet admin interface listen address and port
+VARNISH_ADMIN_LISTEN_ADDRESS=127.0.0.1
+VARNISH_ADMIN_LISTEN_PORT=81
+
+# The minimum number of worker threads to start
+VARNISH_MIN_THREADS=1
+
+# The Maximum number of worker threads to start
+VARNISH_MAX_THREADS=100
+
+# Idle timeout for worker threads
+VARNISH_THREAD_TIMEOUT=120
+
+# Cache file location
+VARNISH_STORAGE_FILE=/var/lib/varnish_storage.bin
+
+# Cache file size: in bytes, optionally using k / M / G / T suffix,
+# or in percentage of available disk space using the % suffix.
+VARNISH_STORAGE_SIZE=1G
+
+# Backend storage specification
+VARNISH_STORAGE="file,${VARNISH_STORAGE_FILE},${VARNISH_STORAGE_SIZE}"
+
+# Default TTL used when the backend does not specify one
+VARNISH_TTL=120
+
+# VARNISH_DAEMON_OPTS is used by the init script.  If you add or remove options, make
+# sure you update this section, too.
+VARNISH_DAEMON_OPTS="-a ${VARNISH_LISTEN_ADDRESS}:${VARNISH_LISTEN_PORT} \
+              -f ${VARNISH_VCL_CONF} \
+              -T ${VARNISH_ADMIN_LISTEN_ADDRESS}:${VARNISH_ADMIN_LISTEN_PORT} \
+              -t ${VARNISH_TTL} \
+              -w ${VARNISH_MIN_THREADS},${VARNISH_MAX_THREADS},${VARNISH_THREAD_TIMEOUT} \
+              -u nobody -g nobody \
+    	      -P ${VARNISH_PIDFILE} \
+              -s ${VARNISH_STORAGE}"
+
+case "$1" in
+'start')
+	echo -n "Starting varnish daemon..."
+	$VARNISH_DAEMON $VARNISH_DAEMON_OPTS $VARNISH_PARAM > /dev/null 2>&1
+	$VARNISH_LOG_DAEMON $VARNISH_LOG_OPTS 
+	touch $VARNISH_LOCKFILE $VARNISH_LOG_LOCKFILE
+	echo
+	;;
+'stop')
+	echo -n "Stopping varnish daemon..."
+	kill -9 $(cat $VARNISH_PIDFILE)
+	kill -9 $(cat $VARNISH_LOG_PIDFILE)
+  	rm -f $VARNISH_PIDFILE $VARNISH_LOG_PIDFILE $VARNISH_LOCKFILE $VARNISH_LOG_LOCKFILE
+  	killall varnishd 2> /dev/null
+  	echo
+	;;
+'restart')
+  	$0 stop
+	sleep 1
+	$0 start
+  	;;
+*)
+  	echo "usage $0 start|stop|restart"
+	exit 1
+esac
+
+exit 0
