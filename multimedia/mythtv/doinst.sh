@@ -24,6 +24,6 @@ echo
 echo "Extra configuration needed..."
 echo 
 echo "A mythtv mysql database needs to be setup and"
-echo "mythtv-setup has to be run; see the README"
+echo "mythtv-setup has to be run; see the README."
 echo
 
