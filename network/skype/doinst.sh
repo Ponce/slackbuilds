@@ -2,11 +2,11 @@
 
 config() {
   NEW="$1"
-  OLD="`dirname $NEW`/`basename $NEW .new`"
+  OLD="$(dirname $NEW)/$(basename $NEW .new)"
   # If there's no config file by that name, mv it over:
   if [ ! -r $OLD ]; then
     mv $NEW $OLD
-  elif [ "`cat $OLD | md5sum`" = "`cat $NEW | md5sum`" ]; then
+  elif [ "$(cat $OLD | md5sum)" = "$(cat $NEW | md5sum)" ]; then
     # toss the redundant copy
     rm $NEW
   fi
@@ -14,3 +14,8 @@ config() {
 }
 
 config etc/dbus-1/system.d/skype.conf.new
+
+if [ -x /usr/bin/update-desktop-database ]; then
+    /usr/bin/update-desktop-database -q usr/share/applications
+fi
+
