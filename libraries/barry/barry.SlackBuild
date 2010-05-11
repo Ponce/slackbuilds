@@ -1,0 +1,73 @@
+#!/bin/sh -e
+
+## Barry is a GPL C++ library for interfacing with the RIM BlackBerry
+## Handheld. It comes with a command line tool for exploring the device
+## and a GUI for making quick backups. This project's goal is to create
+## a fully functional syncing mechanism on Linux.
+## http://sourceforge.net/projects/barry/
+##
+## Written by "Vincent Batts <vbatts@batts.mine.nu>"
+
+VERSION=0.11
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-3}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-barry
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "s390" ]; then
+  SLKCFLAGS="-O2"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2"
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf barry-$VERSION
+tar xvf $CWD/barry-$VERSION.tar.bz2
+cd barry-$VERSION
+chown -R root:root .
+chmod -R a-s,u+rw,go+r-w .
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --mandir=/usr/man \
+  --build=i486-slackware-linux
+
+make || exit 1
+make install DESTDIR=$PKG || exit 1
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+)
+
+gzip -9 $PKG/usr/man/man?/*.?
+
+mkdir -p $PKG/usr/doc/barry-$VERSION
+cp -a README INSTALL TODO COPYING AUTHORS NEWS ChangeLog \
+  $PKG/usr/doc/barry-$VERSION
+
+mkdir -p $PKG/etc/udev/rules.d/
+cp -a udev/10-blackberry.rules udev/99-barry-perms \
+  $PKG/etc/udev/rules.d/
+
+mkdir -p $PKG/etc/modprobe.d
+echo "blacklist berry-charge" > $PKG/etc/modprobe.d/barry.new
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/barry-$VERSION-$ARCH-$BUILD$TAG.tgz
