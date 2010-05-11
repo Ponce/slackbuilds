@@ -10,8 +10,8 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-if [ -x usr/bin/update-desktop-database ]; then
-  usr/bin/update-desktop-database usr/share/applications >/dev/null 2>&1
+if [ -x /usr/bin/update-desktop-database ]; then
+  /usr/bin/update-desktop-database usr/share/applications >/dev/null 2>&1
 fi
 
 # Keep same perms on rc.wifi-radar.new:
@@ -21,10 +21,10 @@ if [ -e etc/rc.d/rc.wifi-radar ]; then
   mv etc/rc.d/rc.wifi-radar.new.incoming etc/rc.d/rc.wifi-radar.new
 fi
 
-config etc/wifi-radar/wifi-radar.conf.new
+config etc/wifi-radar.conf.new
 config etc/rc.d/rc.wifi-radar.new
 
-echo "Remember to edit /etc/wifi-radar/wifi-radar.conf to suit your needs..."
+echo "Remember to edit /etc/wifi-radar.conf to suit your needs..."
 echo 
 echo "To use wifi-radar with a normal user (with sudo) add:"
 echo "%users   ALL = NOPASSWD: /usr/sbin/wifi-radar"
