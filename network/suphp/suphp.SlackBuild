@@ -4,46 +4,47 @@
 
 # Written by Menno E. Duursma <druiloor@zonnet.nl>
 
-# Exit on most errors
-set -e
-
 PRGNAM=suphp
-VERSION=0.6.2
+VERSION=0.6.3
 ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}	# Drop the package in /tmp
 
-# The stock Apache on Slackware runs httpd onder system
+# The stock Apache on Slackware runs httpd under system
 # user/group account 'apache'. If you happen to use some
-# other account (which should improve security) change below
-# and make sure /etc/apache/suphp.conf matches
-HTTPD_USER=apache
-HTTPD_GROUP=apache
+# other account change the directives below
+HTTPD_USER=${HTTPD_USER:-apache}
+HTTPD_GROUP=${HTTPD_GROUP:-apache}
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
 fi
+
+set -e # Exit on most errors
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar -xzvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
 
-# Apply patch to have it globally honor the suPHP_Engine directive
-cat $CWD/suphp-0.6.2-vhosts.patch | patch -p0 --verbose
+# Apply a patch to have it globally honor the suPHP_Engine directive
+patch -p0 --verbose < $CWD/suphp-$VERSION-vhosts.patch
 
-# Default to secure settings, as any of the configuretion options 
-# can be overwritten in the config-file /etc/apache/suphp.conf anyways
+# Default to secure settings, as any of the configuration options 
+# can be overwritten in the config-file /etc/httpd/suphp.conf anyway
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -52,29 +53,28 @@ CXXFLAGS="$SLKCFLAGS" \
   --with-apxs=/usr/sbin/apxs \
   --sysconfdir=/etc/httpd \
   --with-apache-user=$HTTPD_USER \
-  --with-logfile=/var/log/apache/suphp_log
+  --with-logfile=/var/log/httpd/suphp_log \
+  --enable-static=no \
+  --build=$ARCH-slackware-linux \
+  --host=$ARCH-slackware-linux
 
-# Compile the application and install it into the $PKG directory
 make
-make install-strip DESTDIR=$PKG
+make install DESTDIR=$PKG
 
-# The above misses Apache module
 ( cd $PKG
-    strip --strip-unneeded usr/libexec/apache/mod_suphp.so
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
 )
 
-# Copy program documentation into the package
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a AUTHORS COPYING ChangeLog doc/* $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.SBo
 
-# Add a sample configuration file 
 mkdir -p $PKG/etc/httpd
-cat $CWD/suphp.conf \
-  | tr 'webserver_user=apache' "webserver_user=$HTTPD_USER" \
-    >> $PKG/etc/httpd/suphp.conf.new
+sed s/'webserver_user=apache'/"webserver_user=$HTTPD_USER"/g \
+  $CWD/suphp.conf >> $PKG/etc/httpd/suphp.conf.new
 
-# Copy the slack-desc (and a custom doinst.sh if necessary) into ./install
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
@@ -84,7 +84,6 @@ cat $CWD/doinst.sh > $PKG/install/doinst.sh
 echo "chgrp $HTTPD_GROUP usr/sbin/suphp" >> $PKG/install/doinst.sh
 echo "chmod 4750 usr/sbin/suphp" >> $PKG/install/doinst.sh
 
-# Make the package; be sure to leave it in $OUTPUT
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
 
