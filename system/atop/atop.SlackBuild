@@ -1,0 +1,71 @@
+#!/bin/sh
+
+# Slackware build script for atop
+
+# Written by Menno E. Duursma <druiloor@zonnet.nl>
+# Modified by Robby Workman <rworkman@slackbuilds.org>
+
+PRGNAM=atop
+VERSION=1.20
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-3}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+fi
+
+set -e	 # Exit on most errors
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+make CFLAGS="$SLKCFLAGS"
+
+# Install the binary sgid utmp in order to allow accounting
+install -D -o root -g utmp -m 2751 atop $PKG/usr/bin/atop
+
+# Add the init script and fix the paths in it
+patch -p1 < $CWD/atop.init.diff
+install -D -m 0755 atop.init $PKG/etc/rc.d/rc.atop.new
+
+mkdir -p $PKG/etc/{logrotate.d,cron.daily}
+install -m 0644 psaccs_atop $PKG/etc/logrotate.d/psaccs_atop.new
+install -m 0644 psaccu_atop $PKG/etc/logrotate.d/psaccu_atop.new
+install -m 0644 $CWD/psacct.logrotate $PKG/etc/logrotate.d/psacct.new
+install -m 0755 atop.daily $PKG/etc/cron.daily/atop.new
+
+mkdir -p $PKG/var/log/atop
+touch $PKG/var/log/atop/dummy_{before,after}
+# We'll create daily.log in doinst.sh so it doesn't get wiped on uninstall
+
+( cd $PKG
+  find . -type f | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+)
+
+mkdir -p $PKG/usr/man/man1
+gzip -9c man/atop.1 > $PKG/usr/man/man1/atop.1.gz
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a [A-Z][A-Z]* ChangeLog $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
