@@ -11,5 +11,6 @@ config() {
   fi
   # Otherwise, we leave the .new copy for the admin to consider...
 }
-config /etc/bitlbee/bitlbee.conf.new
-config /etc/bitlbee/motd.txt.new
+
+config etc/bitlbee/bitlbee.conf.new
+config etc/bitlbee/motd.txt.new
