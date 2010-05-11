@@ -12,11 +12,5 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/mono/1.0/machine.config.new
-config etc/mono/1.0/DefaultWsdlHelpGenerator.aspx.new
-config etc/mono/2.0/machine.config.new
-config etc/mono/2.0/web.config.new
-config etc/mono/2.0/DefaultWsdlHelpGenerator.aspx.new
-config etc/mono/config.new
-config etc/mono/browscap.ini.new
+for i in $(find etc/ -name "*.new" | xargs) ; do config $i ; done
 
