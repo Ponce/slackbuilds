@@ -1,0 +1,118 @@
+#!/bin/sh
+
+# Slackware build script for spamassassin
+
+# Copyright 2008 LukenShiro <lukenshiro@ngi.it>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=spamassassin
+VERSION=${VERSION:-3.2.5}
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+SRC_PRGNAM=Mail-SpamAssassin
+DOCFILES="Changes CREDITS INSTALL LICENSE NOTICE PACKAGING procmailrc.example \
+sample-nonspam.txt sample-spam.txt README TRADEMARK UPGRADE USAGE"
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRC_PRGNAM-$VERSION
+tar xvf $CWD/$SRC_PRGNAM-$VERSION.tar.bz2
+cd $SRC_PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+echo "y" | perl Makefile.PL INSTALLDIRS=vendor 
+
+CFLAGS="$SLKCFLAGS" CXXFLAGS="$SLKCFLAGS" \
+make
+make install DESTDIR=$PKG
+
+# Move man-pages to appropriate place
+mv $PKG/usr/share/man $PKG/usr/
+
+# Remove perlocal.pod, .packlist and .bs from $PKG
+( for i in perllocal.pod .packlist *.bs; do
+      find $PKG -name "$i" -exec rm -rf {} \;
+  done
+)
+
+# Remove empty directories
+find $PKG -depth -type d -empty -exec rm -rf {} \;
+
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+    
+# Compress man pages
+( cd $PKG/usr/man || exit 1
+  find . -type f -exec gzip -9 {} \;
+  for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+)
+
+# Preserve config files
+( cd $PKG/etc/mail/spamassassin
+  mv init.pre init.pre.new
+  mv local.cf local.cf.new
+  mv v310.pre v310.pre.new
+  mv v312.pre v312.pre.new
+  mv v320.pre v320.pre.new
+)
+
+# Copy init script to /etc/rc.d and modify it for name consistency
+mkdir -p $PKG/etc/rc.d/
+install -m 0755 spamd/slackware-rc-script.sh $PKG/etc/rc.d/rc.spamd.new
+sed -i "s#SNAME=rc.spamassassin#SNAME=rc.spamd#g" $PKG/etc/rc.d/rc.spamd.new
+
+# Create file for enabling rc.spamd's start
+cat > $PKG/etc/spamassassin.conf.new << EOF
+ENABLED=1
+EOF
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a $DOCFILES $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
