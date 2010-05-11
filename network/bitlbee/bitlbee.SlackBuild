@@ -1,0 +1,92 @@
+#!/bin/sh
+ 
+# SlackBuild Script for bitlbee
+# Written by Michiel van Wessem (BP{k}) <michiel@slackbuilds.org>
+
+set -e
+
+PRGNAM=bitlbee
+VERSION=1.0.3
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+CWD=`pwd`
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+DOCFILES="COPYING doc/AUTHORS doc/CHANGES doc/CREDITS doc/FAQ doc/INSTALL \
+  doc/README doc/bitlbee.xinetd doc/user-guide/user-guide.html 
+  doc/user-guide/user-guide.txt doc/user-guide/help.txt"
+
+if [ "$ARCH" = "i486" ]; then
+    SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+    SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $TMP/$PRGNAM-$VERSION
+tar -xzvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --config=/var/lib/bitlbee \
+  --etcdir=/etc/bitlbee \
+  --mandir=/usr/man \
+  --msn=1 \
+  --jabber=1 \
+  --oscar=1 \
+  --yahoo=1 \
+  --debug=0 \
+  --ipv6=1 \
+  --ssl=openssl 
+
+if [ -e Makefile.settings ]; then
+    sed -e "s/CPU=i686/CPU=$ARCH/g" Makefile.settings > Makefile.settings.temp
+    mv Makefile.settings.temp Makefile.settings
+else
+    echo "No Makefile.settings found .. exiting"
+    exit 1
+fi
+
+make all
+make install install-etc install-doc DESTDIR=$PKG
+
+( cd $PKG
+find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+)
+
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in `find . -type l` ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+)
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION $PKG/var/lib/$PRGNAM
+cp -a $DOCFILES $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+find $PKG/usr/doc/$PRGNAM-$VERSION -type f -exec chmod 644 {} \;
+
+# Rewrite the documentation to replace /usr/local/ with /usr 
+# and /etc/init.d/inetd wih /etc/rc.d/rc.inetd
+find $PKG/usr/doc/$PRGNAM-$VERSION -type f -exec sed -e -i 's#/usr/local/#/usr/#' {} \;
+find $PKG/usr/doc/$PRGNAM-$VERSION -type f -exec sed -i 's#/etc/init.d/inetd#/etc/rc.d/rc.inetd#' {} \;
+
+mv $PKG/etc/$PRGNAM/$PRGNAM.conf $PKG/etc/$PRGNAM/$PRGNAM.conf.new
+mv $PKG/etc/$PRGNAM/motd.txt $PKG/etc/$PRGNAM/motd.txt.new
+chown -R nobody:nogroup $PKG/var/lib/$PRGNAM
+
+mkdir $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
