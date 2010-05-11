@@ -1,4 +1,3 @@
 if [ -x usr/bin/gtk-update-icon-cache ]; then
-  find usr/share/icons -maxdepth 1 -type d -exec \
-    ./usr/bin/gtk-update-icon-cache -f -q {} \; &> /dev/null
+  usr/bin/gtk-update-icon-cache -f -q usr/share/icons/Tango &> /dev/null
 fi
