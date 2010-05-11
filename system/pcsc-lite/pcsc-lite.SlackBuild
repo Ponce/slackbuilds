@@ -2,7 +2,7 @@
 
 # Slackware build script for pcsc-lite
 
-# Copyright 2007  LukenShiro <lukenshiro@ngi.it>
+# Copyright 2007-8  LukenShiro <lukenshiro@ngi.it>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,7 +23,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=pcsc-lite
-VERSION=1.4.99
+VERSION=${VERSION:-1.4.102}
 ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
@@ -34,7 +34,11 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 DEBUGATR=${DEBUGATR:-0}	# Debug is off by default
-DOCFILES="DRIVERS SECURITY ChangeLog COPYING ChangeLog.svn HELP NEWS TODO AUTHORS INSTALL README"  
+APIDOC=${APIDOC:-0}	# API documentation building is off by default
+TEXTOPDFBIN="/usr/share/texmf/bin/pdflatex"	# program to convert .tex files into .pdf (for APIDOC)
+
+# README and README.DAEMON are not useful and partly outdated. ChangeLog.svn is empty.
+DOCFILES="DRIVERS SECURITY ChangeLog COPYING HELP NEWS TODO AUTHORS INSTALL"
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
@@ -48,7 +52,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
 cd $PRGNAM-$VERSION
 chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
@@ -59,12 +63,15 @@ patch -p0 < $CWD/docs-DRIVERS.diff || exit 1
 
 # ATR (answer to reset) debug parsing output 
 case "$DEBUGATR" in
-    0)	DEBUGATR_FLAG="disable-debugatr"
+    0)	DEBUGATR_FLAG="dis"
 	;;
-    *)	DEBUGATR_FLAG="enable-debugatr"
+    *)	DEBUGATR_FLAG="en"
 	;;
 esac
 
+# libusb and libhal support are mutually exclusive: using conservative behaviour (libusb)
+# --enable-runpid=/var/run/pcscd.pid is not supported anymore;
+# pid directory changed to /var/run/pcscd for consistency
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -72,13 +79,14 @@ CXXFLAGS="$SLKCFLAGS" \
   --sysconfdir=/etc \
   --enable-confdir=/etc \
   --localstatedir=/var \
-  --enable-ipcdir=/var/run \
-  --enable-runpid=/var/run/pcscd.pid \
+  --enable-ipcdir=/var/run/pcscd \
   --mandir=/usr/man \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --enable-libusb \
+  --disable-libhal \
   --enable-usbdropdir="/usr/lib/pcsc/drivers" \
   --enable-muscledropdir="/usr/lib/pcsc/services" \
-  --${DEBUGATR_FLAG}
+  --${DEBUGATR_FLAG}able-debugatr
 
 make
 make install DESTDIR=$PKG
@@ -111,17 +119,27 @@ mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/
 cp -a $DOCFILES $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.SBo
+# remove README.DAEMON, automatically installed by doc/Makefile.
+rm -f $PKG/usr/doc/$PRGNAM-$VERSION/README.DAEMON
+
 ## .pdf api documentation files seem not to be built from .tex sources during make
-## Most people don't need/want api docs anyway, so uncomment below if you do
-#( cd $PKG/usr/doc/$PRGNAM-$VERSION/
-#  if [ -x /usr/share/texmf/bin/pdflatex ]; then
-#    pdflatex ifdhandler-3.tex >/dev/null
-#    pdflatex pcsc-lite.tex >/dev/null
-#    for oldfiles in *.aux *.tex *.toc *.log *.bib *.out ; 
-#      do rm -f $oldfiles ; 
-#    done
-#  fi
-#)
+## Most people don't need/want api docs anyway. Nonetheless tex sources are removed.
+( cd $PKG/usr/doc/$PRGNAM-$VERSION/
+case "$APIDOC" in
+    1)	if [ -x $TEXTOPDFBIN ]; then
+	  $TEXTOPDFBIN ifdhandler-3.tex 
+	  $TEXTOPDFBIN pcsc-lite.tex
+	else
+	    echo "API .pdf documentation NOT built."
+	fi
+	;;
+    *) echo "API .pdf documentation NOT built."
+	;;
+esac
+for oldfiles in *.aux *.tex *.toc *.log *.bib *.out ; 
+    do rm -f $oldfiles ; 
+done
+)
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
