@@ -1,0 +1,128 @@
+#!/bin/sh
+
+# Slackware build script for nvidia-driver
+
+# Copyright 2007-2008 Heinz Wiesinger <pprkut@liwjatan.at>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Thanks to Robby Workman for suggestions to improve this script.
+
+PRGNAM=nvidia-legacy173-driver
+VERSION=173.14.12
+ARCH=${ARCH:-i586}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+SRCNAM=NVIDIA-Linux-x86-$VERSION-pkg1
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM
+sh $CWD/$SRCNAM.run --extract-only
+cd $SRCNAM
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+mkdir -p $PKG/usr/{bin,share,lib,sbin} $PKG/usr/include/GL \
+  $PKG/usr/lib/xorg/modules/{drivers,extensions}
+
+# Start with the libraries
+cd usr/lib
+  cp -a * $PKG/usr/lib
+  #Rename those files which would overwrite xorg's original files
+  for i in libGL.so.$VERSION libGLcore.so.$VERSION; do
+    mv $PKG/usr/lib/$i $PKG/usr/lib/$i-nvidia ;
+  done
+cd -
+
+# This is the driver itself
+cd usr/X11R6/lib
+  cp -a * $PKG/usr/lib/xorg/
+  for i in libXvMCNVIDIA.a libXvMCNVIDIA.so.$VERSION; do
+    mv $PKG/usr/lib/xorg/$i $PKG/usr/lib/ ;
+  done
+
+  # Rename those files which would overwrite xorg's original files
+  mv $PKG/usr/lib/xorg/modules/extensions/libglx.so.$VERSION \
+    $PKG/usr/lib/xorg/modules/extensions/libglx.so.$VERSION-nvidia
+cd -
+
+# These are the includes
+cd usr/include/GL
+  for i in glxext.h glext.h gl.h glx.h; do
+    cp -a $i $PKG/usr/include/GL/$i-nvidia
+  done
+cd -
+
+mkdir -p $PKG/usr/include/cuda/
+cd usr/include/cuda
+  cp -a * $PKG/usr/include/cuda/
+cd -
+
+# Next come the apps
+cp -a nvidia-installer $PKG/usr/bin/
+cd usr/bin
+  for i in nvidia*; do
+    cp -a $i $PKG/usr/bin/
+  done
+cd -
+
+# XDG stuff
+cd usr/share
+  for i in applications pixmaps; do
+    cp -a $i $PKG/usr/share/
+  done
+  cp -a man* $PKG/usr/
+cd -
+
+# Self written bash script which I use to switch between nvidia and nv.
+# It is now also used by doinst.sh to switch to the nvidia-driver right
+# after installation.
+install -m 0755 $CWD/nvidia-switch $PKG/usr/sbin/
+sed -i s/PKGVERSION/$VERSION/g $PKG/usr/sbin/nvidia-switch
+
+# These correct wrong paths
+sed -i 's|__LIBGL_PATH__|/usr/lib/|' $PKG/usr/lib/libGL.la
+sed -i 's|/usr/X11R6/lib|/usr/lib/|' $PKG/usr/lib/libGL.la
+sed -i 's|__UTILS_PATH__|/usr/bin|' \
+  $PKG/usr/share/applications/nvidia-settings.desktop
+sed -i 's|__PIXMAP_PATH__|/usr/share/pixmaps|' \
+  $PKG/usr/share/applications/nvidia-settings.desktop
+
+cd $TMP/$SRCNAM
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE pkg-history.txt ./usr/share/doc* $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.Slackware
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+sed s/PKGVERSION/$VERSION/g $CWD/slack-desc > $PKG/install/slack-desc
+sed s/PKGVERSION/$VERSION/g $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l n -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
