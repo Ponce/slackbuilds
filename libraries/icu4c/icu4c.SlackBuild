@@ -2,7 +2,7 @@
 
 # Slackware build script for icu4c
 
-# Copyright 2007  Heinz Wiesinger <hmwiesinger@gmx.at>
+# Copyright 2007-2008 Heinz Wiesinger <pprkut@liwjatan.at>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,9 +23,9 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=icu4c
-VERSION=3.8.1
+VERSION=4.0
 ARCH=${ARCH:-i486}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 CWD=$(pwd)
@@ -33,20 +33,22 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-# Pass STATIC=no on command line when running this script if you do not
+# Pass STATIC=yes on command line when running this script if you do
 # want to build the static library(ies)
-STATIC=${STATIC:-yes}
+STATIC=${STATIC:-no}
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
 fi
 
-if [ "$STATIC" = 'yes' ]; then
-  STATICOPT='en'
-else
+if [ "$STATIC" = 'no' ]; then
   STATICOPT='dis'
+else
+  STATICOPT='en'
 fi
 
 set -e
@@ -58,7 +60,17 @@ rm -rf icu
 tar xvf $CWD/$PRGNAM-$(echo $VERSION | tr . _)-src.tgz
 cd icu
 chown -R root:root .
-chmod -R u+w,go+r-w,a-s .
+find . \
+  \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+  -exec chmod 755 {} \; -o \
+  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 \
+  -o -perm 400 \) -exec chmod 644 {} \;
+
+# Fix incorrect @stable ICU 4.0 tags in ICU4C (Bug #6435)
+patch -p0 -i $CWD/changeset_r24398.diff
+
+# Fix time zone display name problem (Bug #6597)
+patch -p0 -i $CWD/icu4c-4.0-timezone.patch
 
 cd source/
   CFLAGS="$SLKCFLAGS" \
@@ -68,15 +80,16 @@ cd source/
     --enable-shared \
     --${STATICOPT}able-static \
     --sysconfdir=/etc \
-    --localstatedir=/var
+    --localstatedir=/var \
+    --build=$ARCH-slackware-linux \
+    --host=$ARCH-slackware-linux
+
   make
   make install DESTDIR=$PKG
 cd -
 
-( cd $PKG
-  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
-  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
-)
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 ( cd $PKG/usr/man
   find . -type f -exec gzip -9 {} \;
