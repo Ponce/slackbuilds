@@ -1,9 +1,5 @@
 #!/bin/sh
 
-LIGHTTPD_USER=lighttpd
-LIGHTTPD_GROUP=lighttpd
-LIGHTTPD_HOME=/var/www
-
 config() {
   NEW="$1"
   OLD="`dirname $NEW`/`basename $NEW .new`"
