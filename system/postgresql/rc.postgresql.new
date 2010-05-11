@@ -1,0 +1,118 @@
+#!/bin/bash
+
+# PostgreSQL startup script for Slackware Linux
+# Copyright 2007 Adis Nezirovic <adis _at_ linux.org.ba>
+# Licensed under GNU GPL v2
+
+# Do not source this script (since it contains exit() calls)
+
+# Before you can run postgresql you'll need to create the
+# database files in /var/lib/pgsql. The following should do
+# the trick.
+#
+#   $ su postgres -c "initdb -D /var/lib/pgsql/data"
+#
+
+LOGFILE=/var/log/postgresql
+DATADIR=/var/lib/pgsql/data
+POSTGRES=/usr/bin/postgres
+PIDFILE=postmaster.pid
+
+# Return values (according to LSB):
+# 0 - success
+# 1 - generic or unspecified error
+# 2 - invalid or excess argument(s)
+# 3 - unimplemented feature (e.g. "reload")
+# 4 - insufficient privilege
+# 5 - program is not installed
+# 6 - program is not configured
+# 7 - program is not running
+
+pg_ctl()
+{
+	CMD="/usr/bin/pg_ctl $@"
+	su - postgres -c "$CMD"
+}
+
+if [ ! -f $POSTGRES ]; then
+	echo "Could not find 'postgres' binary. Maybe PostgreSQL is not installed properly?"
+	exit 5
+fi
+
+case "$1" in
+
+	"start")
+		echo "Starting PostgreSQL"
+		touch $LOGFILE
+		chown postgres:wheel $LOGFILE
+		chmod 0640 $LOGFILE
+	
+		if [ ! -e $DATADIR/PG_VERSION ]; then
+			echo "You should initialize the PostgreSQL database at location $DATADIR"
+			exit 6
+		fi
+	
+		if [ `pgrep -f $POSTGRES` ]; then
+
+			echo "PostgreSQL daemon already running"
+			if [ ! -f $DATADIR/$PIDFILE ]; then
+				echo "Warning: Missing pid file $DATADIR/$PIDFILE"
+			fi
+			exit 1
+
+		else # remove old socket, if it exists and no daemon is running.
+
+			if [ ! -f $DATADIR/$PIDFILE ]; then
+				rm -f /tmp/.s.PGSQL.5432
+				rm -f /tmp/.s.PGSQL.5432.lock
+				pg_ctl start -w -l $LOGFILE -D $DATADIR
+				exit 0
+			else
+				echo "PostgreSQL daemon was not properly shut down"
+				echo "Please remove stale pid file $DATADIR/$PIDFILE"
+				exit 7
+			fi
+
+		fi	
+	;;
+
+	"stop")
+		echo "Shutting down PostgreSQL..."
+		pg_ctl stop -l $LOGFILE -D $DATADIR -m smart
+	;;
+
+	"restart")
+		echo "Restarting PostgreSQL..."
+		pg_ctl restart -l $LOGFILE -D $DATADIR -m smart
+	;;
+
+	"reload")
+		echo "Reloading configuration for PostgreSQL..."
+		pg_ctl reload -l $LOGFILE -D $DATADIR -m smart
+	;;
+
+	"status")
+		if [ `pgrep -f $POSTGRES` ]; then
+			echo "PostgreSQL is running"
+
+			if [ ! -e $DATADIR/$PIDFILE ]; then
+				echo "Warning: Missing pid file $DATADIR/$PIDFILE"
+			fi
+
+			exit 0
+		else
+			echo "PostgreSQL is stopped"
+
+			if [ -e $DATADIR/$PIDFILE ]; then
+				echo "Detected stale pid file $DATADIR/$PIDFILE"
+			fi
+
+			exit 0
+		fi
+	;;
+
+	*)
+		echo "Usage: $0 {start|stop|status|restart|reload}"
+		exit 1
+	;;
+esac	

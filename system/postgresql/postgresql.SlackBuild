@@ -1,0 +1,136 @@
+#!/bin/sh
+
+## Slackware build script for PostgreSQL
+## $Revision: 1addf65317c9 $
+## $Date: 2007/04/25 02:58:20 $
+## 
+## Copyright 2007 Adis Nezirovic <adis _at_ linux.org.ba>
+## Licensed under GNU GPL v2
+
+# Slightly modified by the SlackBuilds Project
+PRGNAM=postgresql
+VERSION=8.2.4
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:_SBo}
+CWD=`pwd`
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# Exit on any and all errors
+set -e
+
+# Bail out if user or group isn't valid on your system
+# For slackbuilds.org, assigned postgres uid/gid are 209/209
+# see http://slackbuilds.org/uid_gid.txt
+# Other popular choice is 26/26
+if ! grep ^postgres: /etc/group 2>&1 > /dev/null; then
+  echo "  Must have a postgres group to run this script."
+  echo "    # groupadd -g 209 postgres"
+  echo "  Or something similar."
+  exit 1
+elif ! grep ^postgres: /etc/passwd 2>&1 > /dev/null; then
+  echo "  Must have a postgres user to run this script."
+  echo "    # useradd -u 209 -g postgres -d /var/lib/pgsql postgres"
+  echo "  Or something similar."
+  exit 1
+fi
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2"
+fi
+
+# Make sure we start from clean state
+rm -rf $TMP/$PRGNAM-$VERSION $PKG
+mkdir -p $TMP $PKG $OUTPUT
+
+cd $TMP
+tar xjvf $CWD/$PRGNAM-$VERSION.tar.bz2 || exit 1
+
+# Fix permissions here.
+chmod -R a-s,u+w,go+r-w $PRGNAM-$VERSION
+chown -R root:root $PRGNAM-$VERSION
+
+cd $TMP/$PRGNAM-$VERSION
+
+CFLAGS="$SLKCFLAGS" \
+./configure \
+	--prefix=/usr \
+	--with-openssl \
+	--with-tcl \
+	--with-perl \
+	--with-python \
+	--enable-thread-safety || exit 1
+make || exit 1
+make DESTDIR=$PKG install-strip || exit 1
+
+# Two nice extensions:
+#   adminpack for pgAdmin
+#   tsearch2 for full text search
+cd $TMP/$PRGNAM-$VERSION/contrib/adminpack
+make || exit 1
+make DESTDIR=$PKG install-strip || exit 1
+
+cd $TMP/$PRGNAM-$VERSION/contrib/tsearch2
+make || exit 1
+make DESTDIR=$PKG install-strip || exit 1
+
+cd $TMP/$PRGNAM-$VERSION
+
+# man pages
+gzip -9 $PKG/usr/man/man?/*
+
+# docs
+mv $PKG/usr/doc/$PRGNAM $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a COPYRIGHT \
+      HISTORY \
+      README \
+      doc/* \
+      $PKG/usr/doc/$PRGNAM-$VERSION/
+rm -fr $PKG/usr/doc/$PRGNAM-$VERSION/{man.tar.gz,man1,manl,man7,postgres.tar.gz}
+
+# Ensure this flu^^^script spreads further
+SLACK_BUILD=$PKG/usr/share/$PRGNAM/SlackBuild
+mkdir -p $SLACK_BUILD
+cat $CWD/$PRGNAM.SlackBuild > $SLACK_BUILD/$PRGNAM.SlackBuild
+cat $CWD/$PRGNAM.info > $SLACK_BUILD/$PRGNAM.info
+cat $CWD/slack-desc > $SLACK_BUILD/slack-desc
+cat $CWD/doinst.sh > $SLACK_BUILD/doinst.sh
+cat $CWD/README > $SLACK_BUILD/README
+cat $CWD/rc.postgresql.new > $SLACK_BUILD/rc.postgresql.new
+cat $CWD/setup.postgresql > $SLACK_BUILD/setup.postgresql
+
+# base database directory
+# assumes you are using /var/lib/pgsql as a homedir for postgres user
+mkdir -p $PKG/var/lib/pgsql/data
+chown -R postgres:postgres $PKG/var/lib/pgsql
+chmod 700 $PKG/var/lib/pgsql
+# permissions for DATADIR should be u=rwx (0700)
+chmod 700 $PKG/var/lib/pgsql/data
+
+# description file
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+# pkgtool setup procedure
+mkdir -p $PKG/var/log/setup
+cat $CWD/setup.$PRGNAM > $PKG/var/log/setup/setup.$PRGNAM
+chmod 755 $PKG/var/log/setup/setup.$PRGNAM
+
+# rc script
+mkdir -p $PKG/etc/rc.d
+cat $CWD/rc.postgresql.new > $PKG/etc/rc.d/rc.postgresql.new
+
+# logrotation
+mkdir -p $PKG/etc/logrotate.d
+cat $CWD/postgresql.logrotate > $PKG/etc/logrotate.d/postgresql.new
+
+## make the package
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
