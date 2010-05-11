@@ -1,0 +1,177 @@
+#!/bin/sh
+
+# Slackware build script for dansguardian
+# http://dansguardian.org
+#
+# Parts of this SlackBuild are directly copied from 
+#   http://www.slackware.com/~alien/slackbuilds/dansguardian/
+# and are:
+#
+# Copyright (c) 2006-2008 Eric Hameleers <alien@slackware.com>
+# All rights reserved.
+#
+#   Permission to use, copy, modify, and distribute this software for
+#   any purpose with or without fee is hereby granted, provided that
+#   the above copyright notice and this permission notice appear in all
+#   copies.
+#
+#   THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESSED OR IMPLIED
+#   WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#   MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+#   IN NO EVENT SHALL THE AUTHORS AND COPYRIGHT HOLDERS AND THEIR
+#   CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+#   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+#   USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+#   ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+#   OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+#   OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+#   SUCH DAMAGE.
+#
+# All other are
+# Copyright 2006-2008  David Somero (dsomero@hotmail.com) Athens,TN USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=dansguardian
+VERSION=${VERSION:-2.9.9.8}
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# If these user accounts do not exist on the target system, you will have
+# to create them before you install the resulting package!
+PROXY_USR=${PROXY_USR:-nobody}
+PROXY_GRP=${PROXY_GRP:-nobody}
+
+if ! grep -q ^$PROXY_USR: /etc/passwd ; then
+  echo "  You must have a $PROXY_USR user to run this script."
+  exit 1
+fi
+
+if ! grep -q ^$PROXY_GRP: /etc/group ; then
+  echo "  You must have a $PROXY_GRP group to run this script."
+  exit 1
+fi
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+fi
+
+set -e 
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure --prefix=/usr \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --bindir=/usr/sbin \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --with-logdir=/var/log/dansguardian \
+  --with-proxyuser=${PROXY_USR} \
+  --with-proxygroup=${PROXY_GRP} \
+  --with-piddir=/var/run \
+  --enable-pcre \
+  --enable-commandline \
+  --enable-email \
+  --build=${ARCH}-slackware-linux
+
+make
+make install DESTDIR=$PKG
+
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+)
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a COPYING INSTALL README $PKG/usr/doc/$PRGNAM-$VERSION
+
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+mkdir -p $PKG/etc/{rc.d,logrotate.d}
+cat $PKG/usr/share/dansguardian/scripts/systemv-init > $PKG/etc/rc.d/rc.dansguardian
+
+# Note that the .new file left hanging around in /etc/logrotate.d/ will
+# probably/surely make cron'd logrotations fail, but not installing it
+# as .new here will clobber a potentially custom file.  Therefore, the
+# choice is either *we* do bad things, or the *user* screws up.  
+# This one's easy  ;-)  --rworkman
+cat $PKG/usr/share/dansguardian/scripts/dansguardian \
+  > $PKG/etc/logrotate.d/dansguardian
+chown ${PROXY_USR}:${PROXY_GRP} $PKG/var/log/dansguardian
+
+# Find config files and add the .new.
+# Used by the next block of code.
+get_config_files() {
+  for i in $(ls -1 $1); do
+    if [ -d "$1/$i" ]; then
+      get_config_files "$1/$i"
+    else
+      echo -n "$1/$i.new " | sed -e "s/^$(echo $PKG | sed -e 's/\//\\\//g')\///g"
+      mv "$1/$i" "$1/$i.new"
+    fi
+  done
+}
+
+# Finish the doinst.sh by adding the .new file list and config loop
+if [ -e $PKG/etc ]; then 
+  etc_files=$(get_config_files $PKG/etc)
+
+cat <<DOINST >> $PKG/install/doinst.sh
+for FILE in $etc_files
+do
+  config \$FILE
+done
+DOINST
+fi
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+
