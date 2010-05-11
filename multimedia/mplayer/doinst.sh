@@ -1,4 +1,3 @@
-
 config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
@@ -14,7 +13,7 @@ config() {
 
 config etc/mplayer/mplayer.conf.new
 
-if [ -x usr/bin/update-desktop-database ]; then
-  usr/bin/update-desktop-database -q usr/share/applications
+if [ -x /usr/bin/update-desktop-database ]; then
+  /usr/bin/update-desktop-database -q usr/share/applications
 fi
 

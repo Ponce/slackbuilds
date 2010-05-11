@@ -3,6 +3,7 @@
 # Slackware build script for MPlayer
 
 # Copyright 2006-2008  Robby Workman, Northport, AL, USA
+# Copyright 2007-2008  Eric Hameleers <alien@slackware.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,13 +23,12 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# Thanks to Niki Kovaks for some suggestions on this 
-# Thanks to Eric Hameleers for suggestions (and some code examples) :)
+# Thanks to Heinz Wiesinger and Niki Kovacs for suggestions and code
 
-PRGNAM=MPlayer
-VERSION=1.0rc2
-ARCH=${ARCH:-custom}
-BUILD=${BUILD:-3}
+PRGNAM=mplayer
+VERSION=${VERSION:-svn_r27865}
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 CWD=$(pwd)
@@ -36,14 +36,36 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-PKGVERSION=$VERSION	# This may change later in the script
-
 # If you installed the codecs package according to the instructions at
 # the MPlayer website, you'll probably want to change this variable
 # to /usr/local/lib/codecs.  Otherwise, you'll want to leave it alone
 # (if you installed the codecs using our SlackBuild script for them)
 # unless you placed the codecs in a non-standard location.
 CODECSDIR=${CODECSDIR:-/usr/lib/codecs}
+
+# This will activate runtime cpu-detection. This is a good choice,
+# if you build a package you want to use on different machines.
+# However, this does have a performance issue, so if that affects
+# you, you can turn it off here
+RUNTIME_CPU=${RUNTIME_CPU:-yes}
+
+if [ "$RUNTIME_CPU" = "yes" ]; then
+    do_cpu="en"
+else
+    do_cpu="dis"
+fi
+
+# This will configure MPlayer with correct support for DVD Menus.
+# MPlayer will normally find libdvdnav automatically if the correct version 
+# is installed. However, only with this option set to "yes" (and the external
+# libdvdnav installed) will you be able to navigate through the menus.
+DVDNAV=${DVDNAV:-no}
+
+if [ "$DVDNAV" = "yes" ]; then
+    do_dvdnav="--disable-dvdread-internal"
+else
+    do_dvdnav=""
+fi
 
 # The default MPlayer theme is Blue
 # http://www.mplayerhq.hu/MPlayer/skins/Blue-1.7.tar.bz2
@@ -53,17 +75,18 @@ CODECSDIR=${CODECSDIR:-/usr/lib/codecs}
 THEME=Blue
 THEME_VERSION=1.7
 
-# The fonts listed below should exist on a stock Slackware 11.0 system.
+# The fonts listed below should exist on a stock Slackware system.
 # If you want to change the default font after installation, that is probably 
 # best done by making a link to your preferred font in $HOME/.mplayer/ by:
 #   cd $HOME/.mplayer
 #   ln -s /path/to/preferred/font subfont.ttf 
-OSDFONTS="Arialuni.ttf arial.ttf DejaVuSans.ttf Vera.ttf"
+OSDFONTS="LiberationSans-Regular.ttf DejaVuSans.ttf Arialuni.ttf arial.ttf Vera.ttf"
 
-# This will build documentation for all languages - if you don't want some
-# of the, either change this or pass what you do want on the command line
-# when running the script:  LANGUAGES=en ./MPlayer.SlackBuild 
-LANGUAGES=${LANGUAGES:-"en nl fr de es"}
+# Change this with something like:  LANGUAGES=cs ./MPlayer.SlackBuild 
+# Choices are: bg cs de dk el en es fr hu it ja ko mk nb
+#              nl pl ro ru sk sv tr uk pt_BR zh_CN zh_TW
+# If you need more than one, they should be comma-separated -- e.g. "en,es,pt_BR"
+LANGUAGES=${LANGUAGES:-"en"}
 
 set -e
 
@@ -80,47 +103,33 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-# Apply some *almost* official patches.  To clarify, the actual work done
-# by the patch is identical to the official patches released by upstream.
-# I just reworked them to apply from the toplevel source directory with -p1
-#   --rworkman
-# Fix buffer overflow in url.c
-patch -p1 < $CWD/url_fix_20080120.diff
-# Fix buffer overflow in stream_cddb.c
-patch -p1 < $CWD/stream_cddb_fix_20080120.diff
-# Fix stack overflow in demux_audio.c
-patch -p1 < $CWD/demux_audio_fix_20080129.diff
-# Fix buffer overflow in demux_mov.c
-patch -p1 < $CWD/demux_mov_fix_20080129.diff 
-
-# Patch to account for linux-2.6.24.x including ivtv, but MPlayer won't
-# build against it.  See this link for more information and patch origin:
-# http://archives.free.net.ph/message/20080201.201454.1047775e.en.html
-patch -p1 < $CWD/ivtv_fix-2.6.24.x.diff 
-
 # The MPlayer developers will not support and/or deal with bug reports
-# if you don't allow it to automatically determine compiler flags,
-# so modify this at your own risk
-CFLAGS= \
+# using custom CFLAGS, and the intent here is not to build a redistributable
+# package anyway, we won't :-)
 ./configure \
   --prefix=/usr \
   --mandir=/usr/man \
   --confdir=/etc/mplayer \
-  --enable-color-console \
+  --disable-arts \
   --enable-gui \
   --enable-menu \
-  --enable-runtime-cpudetection \
-  --enable-largefiles \
+  --${do_cpu}able-runtime-cpudetection \
   --codecsdir="$CODECSDIR" \
-  --language="$LANGUAGES"
+  --language="$LANGUAGES" \
+  $do_dvdnav
 
 make
 make install DESTDIR=$PKG
 
-( cd $PKG
-  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+# Now let's build the html docs
+( cd DOCS/xml
+  for i in $(echo $LANGUAGES | tr , ' ') ; do 
+    make html-single-$i ;
+  done
 )
+
+( find $PKG | xargs file | grep -e "executable" -e "shared object" \
+  | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null )
 
 ( cd $PKG/usr/man
   find . -type f -exec gzip -9 {} \;
@@ -130,17 +139,17 @@ make install DESTDIR=$PKG
 mkdir -p $PKG/usr/share/mplayer/skins
 if [ -r $CWD/$THEME-$THEME_VERSION.tar.bz2 ]; then
   cd $PKG/usr/share/mplayer/skins
-  tar xf $CWD/$THEME-$THEME_VERSION.tar.bz2
-  ln -s $THEME default
+    tar xf $CWD/$THEME-$THEME_VERSION.tar.bz2
+    ln -s $THEME default
   cd -
 else
-  echo A usable theme tarball does not appear to exist in $CWD
-  echo \(or you didn't edit the script to reflect it, or something
-  echo else is broken\)
+  echo A usable theme tarball does not appear to exist in $CWD,
+  echo or you did not edit the script to reflect it, or something
+  echo else is broken.
   echo The script will continue to build a package, but some manual
   echo setup may be required after installation.
   echo
-  echo Type \'exit\' to quit or any other key to continue the script.
+  echo Type \"exit\" to quit or any other key to continue the script.
   read _continue
   if [ "$_continue" = "exit" ]; then
       exit 1
@@ -148,9 +157,12 @@ else
 fi
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS Copyright LICENSE README DOCS $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS Changelog Copyright LICENSE README DOCS/tech \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+# This isn't exactly ideal, but it's better than having the entire
+# script fail simply because the docs wouldn't build
+( cp -a DOCS/HTML-single $PKG/usr/doc/$PRGNAM-$VERSION/html 2>/dev/null )
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-rm -rf $PKG/usr/doc/$PRGNAM-$VERSION/DOCS/man
 
 # Don't clobber an existing config file
 cat etc/example.conf > $PKG/etc/mplayer/mplayer.conf.new
@@ -167,6 +179,7 @@ if [ ! -f usr/share/mplayer/subfont.ttf ]; then
   for font in $OSDFONTS ; do
     if [ -f usr/share/fonts/TTF/\$font ]; then
       ( cd usr/share/mplayer 
+        rm -f subfont.ttf
         ln -fs /usr/share/fonts/TTF/\$font subfont.ttf 
       )
       break
@@ -176,5 +189,5 @@ fi
 EOF
 
 cd $PKG
-chown -R root:root .	# Some files in /usr/share/mplayer are 103:99
-/sbin/makepkg -l y -c n -p $OUTPUT/$PRGNAM-$PKGVERSION-$ARCH-$BUILD$TAG.tgz
+chown -R root:root .	# Just in case
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
