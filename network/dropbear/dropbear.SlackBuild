@@ -1,0 +1,104 @@
+#!/bin/sh
+
+# Copyright 2007-2008, Piter Punk, São Paulo, Brazil 
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=dropbear
+VERSION=0.50
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-2}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/pkg-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+elif [ "$ARCH" = "s390" ]; then
+  SLKCFLAGS="-O2"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP || exit 1
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2 || exit 1
+cd $PRGNAM-$VERSION || exit 1
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+# Apply xauth path patch
+patch -p0 < $CWD/dropbear.xauth.patch
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --disable-syslog \
+  --disable-utmp \
+  --disable-utmpx \
+  --disable-wtmp \
+  --disable-wtmpx \
+  --disable-pututline \
+  --disable-pututxline \
+  --build=$ARCH-slackware-linux
+
+make PROGRAMS="dropbear dbclient dropbearkey dropbearconvert scp" MULTI="1" || exit 1
+make DESTDIR=$PKG MULTI="1" install || exit 1
+
+mkdir $PKG/usr/sbin
+
+# Copy manpages to package
+mkdir -p $PKG/usr/man/man{1,8}
+cp dbclient.1 $PKG/usr/man/man1
+cp dropbearkey.8 dropbear.8 $PKG/usr/man/man8
+
+if [ -d $PKG/usr/man ]; then
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in `find . -type l` ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+)
+fi
+
+# Link binaries to dropbearmulti
+cd $PKG/usr/bin
+  ln -s ../bin/dropbearmulti ../sbin/dropbear
+  for i in dbclient dropbearkey dropbearconvert scp ; do
+    ln -s dropbearmulti $i
+  done
+cd -
+
+mkdir -p $PKG/etc/rc.d
+cat $CWD/rc.dropbear.new > $PKG/etc/rc.d/rc.dropbear.new
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CHANGES INSTALL LICENSE MULTI README SMALL TODO \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh  > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
