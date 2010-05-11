@@ -12,4 +12,5 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config usr/share/lxpanel/default.new 
+config usr/share/lxpanel/profile/default/panels/panel.new 
+config usr/share/lxpanel/profile/default/config.new 
