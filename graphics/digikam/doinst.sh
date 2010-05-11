@@ -1,4 +1,3 @@
-if [ -x usr/bin/update-desktop-database ]; then
-  usr/bin/update-desktop-database -q opt/kde/share/applications
+if [ -x /usr/bin/update-desktop-database ]; then
+  /usr/bin/update-desktop-database -q usr/share/applications/kde
 fi
-
