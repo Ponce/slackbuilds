@@ -1,0 +1,93 @@
+#!/bin/sh
+
+# Slackware build script for RRDTool
+
+# Written by <youngmug@animeneko.net>
+# Modified by the SlackBuilds.org team.
+
+# Exit on most errors
+set -e
+
+PRGNAM=rrdtool
+VERSION=1.2.19
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+CWD=`pwd`
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvzf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $TMP/$PRGNAM-$VERSION
+chown -R root:root .
+chmod -R a-s,u+w,go+r-w .
+
+# The python library is not added by default in the linking stage
+sed -i -r 's/^(LIBS = .*)/\0 -lpython2.4/' bindings/python/Makefile.in
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+RRDDOCDIR=/usr/doc/$PRGNAM-$VERSION \
+./configure \
+  --prefix=/usr \
+  --enable-perl-site-install
+
+make
+
+# Correct man paths in the Perl bindings.
+sed -r -i 's|/usr/share/man|/usr/man|g' bindings/perl-piped/Makefile
+sed -r -i 's|/usr/share/man|/usr/man|g' bindings/perl-shared/Makefile
+
+make install DESTDIR=$PKG
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+)
+
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in `find . -type l` ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+)
+
+# Remove perllocal.pod and other special files that don't need to be installed,
+# as they will overwrite what's already on the system.
+( cd $PKG
+  # Remove 'special' files
+  find . -name perllocal.pod \
+    -o -name ".packlist" \
+    -o -name "*.bs" \
+    | xargs rm -f
+)
+
+# And remove the directory leftovers
+rm -rf $PKG/usr/lib/perl5/5.8.8
+rm -rf $PKG/usr/lib/perl5/site_perl/5.8.8/i486-linux/auto/RRDp
+
+# Set correct permissions (mostly on the Perl bindings)
+( cd $PKG
+  find . -perm 444 -exec chmod 0644 {} \;
+  find . -perm 555 -exec chmod 0755 {} \;
+)
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CHANGES CONTRIBUTORS COPYING COPYRIGHT NEWS README THREADS TODO \
+  WIN32-BUILD-TIPS.txt $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
