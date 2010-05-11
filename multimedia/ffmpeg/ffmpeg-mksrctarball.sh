@@ -9,7 +9,7 @@ VERSION=$(date +"%Y%m%d")
 SVNSERVER=svn://svn.mplayerhq.hu
 
 echo "--> Downloading sourcecode from $SVNSERVER"
-svn checkout $SVNSERVER/$PRGNAM/trunk $PRGNAM-$VERSION 2>&1 | tee svn-$PRGNAM-$VERSION.log
+svn export $SVNSERVER/$PRGNAM/trunk $PRGNAM-$VERSION 2>&1 | tee svn-$PRGNAM-$VERSION.log
 
 echo "--> Making the sourcecode tarball: $PRGNAM-$VERSION.tar.bz2 "
 tar -c $PRGNAM-$VERSION/ | bzip2 > $PRGNAM-$VERSION.tar.bz2
