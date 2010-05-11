@@ -11,4 +11,6 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 # List of configuration files (they should end in .new)
+
 config etc/mybashburnrc.new
+
