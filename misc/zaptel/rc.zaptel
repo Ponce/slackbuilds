@@ -1,0 +1,209 @@
+#!/bin/sh
+#
+# This shell script takes care of loading and unloading
+# Zapata Telephony interfaces
+#
+# This script is a heavily modified version of zaptel.init found
+# in the zaptel source archive and thus is covered under the GNU
+# General Public License version 2.
+#
+# Some parts Copyright 2007, Alan Hicks, Lizella, GA
+#
+
+# What modules should we try to load on 'start'?  By default, we'll
+# attempt to load the driver for the popular Digium WildCat cards.  If
+# this fails or no modules are specified, the ztdummy module will be
+# automatically loaded to provide a timing mechanism in the kernel.
+# If you need some other modules loaded, seperate them with spaces.
+# MODULES="foo bar"
+MODULES="wctdm"
+
+ZTCFG_CMD=/sbin/ztcfg
+FXOTUNE=/sbin/fxotune
+LOCKFILE=/var/lock/subsys/zaptel
+
+# The default syncer Astribank. Usually set automatically to a sane
+# value by xpp_sync(1) if you have an Astribank. You can set this to an
+# explicit Astribank (e.g: 01).
+XPP_SYNC=auto
+
+# The maximal timeout (seconds) to wait for udevd to finish generating 
+# device nodes after the modules have loaded and before running ztcfg. 
+ZAP_DEV_TIMEOUT=20
+
+#####################################################################
+##                                                                 ##
+##         NOTHING BELOW HERE SHOULD NEED TO BE CHANGED            ##
+##                                                                 ##
+#####################################################################
+
+# recursively unload a module and its dependencies, if possible.
+# For some reason, modprobe can't seem to remove these modules
+# on its own, so we kludge this here.
+# inputs: module to unload.
+# returns: the result from 
+unload_module() {
+	module="$1"
+	line=$(lsmod 2>/dev/null | grep "^$1 ")
+	if [ "$line" = '' ]; then return; fi # module was not loaded
+
+	set -- $line
+	# $1: the original module, $2: size, $3: refcount, $4: deps list
+	mods=$(echo $4 | tr , ' ')
+	# xpp_usb keeps the xpds below busy if an xpp hardware is
+	# connected. Hence must be removed before them:
+	case "$module" in xpd_*) mods="xpp_usb $mods";; esac
+	for mod in $mods; do
+		# run in a subshell, so it won't step over our vars:
+		(unload_module $mod) 
+		# TODO: the following is probably the error handling we want:
+		# if [ $? != 0 ]; then return 1; fi
+	done
+	rmmod $module
+}
+
+# I have not tested this function in the least, so I cannot say if it
+# works properly with Slackware or not.  If you can, please test this
+# and report back any problems or successes you may have so we can fix
+# this in the SlackBuild script.  With that said, I don't see any reason
+# why this function would not work.
+# -- Alan Hicks
+hpec_start() {
+	# HPEC license found
+	if ! echo /var/lib/digium/licenses/HPEC-*.lic | grep -v '\*' | grep -q .; then
+		return
+	fi
+
+	# zaphpec_enable not installed in /usr/sbin
+	if [ ! -f /usr/sbin/zaphpec_enable ]; then
+		echo -n "Running zaphpec_enable: Failed"
+		echo -n "."
+		echo "  The zaphpec_enable binary is not installed in /usr/sbin."
+		return
+	fi
+
+	# zaphpec_enable not set executable
+	if [ ! -x /usr/sbin/zaphpec_enable ]; then
+		echo -n "Running zaphpec_enable: Failed"
+		echo -n "."
+		echo "  /usr/sbin/zaphpec_enable is not set as executable."
+		return
+	fi
+
+	# zaphpec_enable properly installed
+		action "Running zaphpec_enable: " /usr/sbin/zaphpec_enable
+	if [ $? = 0 ]; then
+		echo -n "done"
+		echo "."
+	else
+		echo -n "Failed"
+		echo -n "."
+		echo "  This can be caused if you had already run zaphpec_enable, or if your HPEC license is no longer valid."
+	fi
+}
+
+
+# Check that telephony is up.
+#[ "${TELEPHONY}" = "yes" ] || exit 0
+
+if [ ! -f /etc/zaptel.conf ]; then
+   echo "Could not find /etc/zaptel.conf! Abandon ship!"
+   exit 1
+fi
+
+if [ "${DEBUG}" = "yes" ]; then
+	ARGS="debug=1"
+fi
+
+RETVAL=0
+
+# See how we were called.
+case "$1" in
+  start)
+	# Load drivers
+	rmmod wcusb 2> /dev/null
+	rmmod wcfxsusb 2> /dev/null
+	rmmod audio 2> /dev/null
+
+	echo "Loading zaptel framework: "
+        modprobe zaptel ${ARGS}
+
+	echo -n "Waiting for zap to come online..."
+	TMOUT=$ZAP_DEV_TIMEOUT # max secs to wait
+	while [ ! -d /dev/zap ] ; do
+                echo -n "$TMOUT "
+ 		sleep 1
+		TMOUT=$(expr $TMOUT - 1)
+		if [ $TMOUT -eq 0 ] ; then
+                        echo " " # line break
+			echo "Error: missing /dev/zap!"
+			exit 1
+		fi
+	done
+	echo "OK"
+	echo -n "Loading zaptel hardware modules:"
+	for x in $MODULES; do 
+	  if modprobe ${x} ${ARGS} 2> /dev/null; then
+	    echo "Loaded module: ${x}."
+	  fi
+	done
+	sleep 3 # TODO: remove it
+	
+	if [ ! -e /proc/zaptel/1 ]; then
+		echo "No functioning zap hardware found in /proc/zaptel, loading ztdummy"
+		modprobe ztdummy 2> /dev/null
+	fi
+
+        echo "Running ztcfg: " 
+        $ZTCFG_CMD 2> /dev/null
+	RETVAL=$?
+
+	if [ $RETVAL -eq 0 ]; then
+	  touch $LOCKFILE
+	else
+	  echo "Something went wrong.  Try running ztcfg -vvv."
+        fi
+
+	# This is allowed to fail (or not even run).  These files may not
+        # be present, and aren't required for Asterisk.
+	if [ -x "$FXOTUNE" ] && [ -r /etc/fxotune.conf ]; then
+		$FXOTUNE -s || : 
+	fi
+
+	hpec_start
+	;;
+  stop)
+	# Unload drivers
+	echo -n "Unloading zaptel hardware drivers:"
+  	unload_module zaptel
+	RETVAL=$?
+	echo "."
+
+	[ $RETVAL -eq 0 ] && rm -f $LOCKFILE
+	;;
+  unload)
+	# We don't have zaptel helper, so let's not replicate too much code:
+	# allow others to use the unload command.
+	unload_module zaptel
+	;;
+  restart)
+	$0 stop
+	$0 start
+	;;
+  reload)
+	echo "Reloading ztcfg: "
+	if $ZTCFG_CMD 2> /dev/null; then
+          echo -n "done"
+          RETVAL=0
+        else
+          echo "ztcfg failed. Are your modules loaded?"
+	  RETVAL=1
+        fi
+	;;
+  *)
+	echo "Usage: zaptel {start|stop|restart|reload}"
+	exit 1
+esac
+
+exit $RETVAL
+
