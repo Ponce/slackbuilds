@@ -1,0 +1,263 @@
+diff -ru herrie-2.1-autoquit/herrie-2.1/src/config.c herrie-2.1-filters/herrie-2.1/src/config.c
+--- herrie-2.1-autoquit/herrie-2.1/src/config.c	2008-07-18 10:40:34.000000000 -0500
++++ herrie-2.1-filters/herrie-2.1/src/config.c	2008-07-18 10:27:31.000000000 -0500
+@@ -172,6 +172,8 @@
+ 	{ "scrobbler.username",		"",		NULL,		NULL },
+ #endif /* BUILD_SCROBBLER */
+ 	{ "vfs.dir.hide_dotfiles",	"yes",		valid_bool,	NULL },
++        { "vfs.dir.hide_extfiles",      "no",           valid_bool,     NULL },
++        { "vfs.ext.whitelist",          "mp3 wav ogg",  NULL,           NULL },
+ #ifdef G_OS_UNIX
+ 	{ "vfs.lockup.chroot",		"",		NULL,		NULL },
+ 	{ "vfs.lockup.user",		"",		NULL,		NULL },
+diff -ru herrie-2.1-autoquit/herrie-2.1/src/playq.c herrie-2.1-filters/herrie-2.1/src/playq.c
+--- herrie-2.1-autoquit/herrie-2.1/src/playq.c	2008-07-18 10:40:34.000000000 -0500
++++ herrie-2.1-filters/herrie-2.1/src/playq.c	2008-07-18 10:53:53.000000000 -0500
+@@ -153,7 +153,7 @@
+ /**
+  * @brief If true, quit when end of list reached
+  */
+-int			playq_autoquit = 0;
++int                    playq_autoquit = 0;
+ 
+ /**
+  * @brief Infinitely play music in the playlist, honouring the
+@@ -182,19 +182,19 @@
+ 
+ 			/* Try to start a new song when we're not stopped */
+ 			if (!(playq_flags & PF_STOP)) {
+-			    if ((nvr = funcs->give()) != NULL) {
+-				/* We've got work to do */
+-				break;
+-			    }
+-			    else {
+-				if (playq_autoquit_ready && playq_autoquit) {
+-					/* Time to quit - Send ourself the SIGTERM */
+-					int res = getpid();
+-  					if (res !=0){
+-    						kill(res,SIGTERM);
+-  					}
+-			        }
+-			    }
++				if ((nvr = funcs->give()) != NULL) {
++					/* We've got work to do */
++					break;
++				}
++				else {
++					if (playq_autoquit_ready && playq_autoquit) {
++						/* Time to quit - Send ourself the SIGTERM */
++						int res = getpid();
++						if (res !=0){
++							kill(res,SIGTERM);
++						}
++					}
++				}
+ 			}
+ 
+ 			/* Wait for new events to occur */
+@@ -282,12 +282,20 @@
+ 	if (autoquit || config_getopt_bool("playq.autoquit"))
+ 		playq_autoquit = 1;
+ 
++	/* Create and compile Whitelist regex */
++	vfs_create_whitelist(config_getopt("vfs.ext.whitelist"));
++
+ 	filename = config_getopt("playq.dumpfile");
+ 	if (load_dumpfile && filename[0] != '\0') {
+ 		/* Autoload playlist */
+ 		vr = vfs_lookup(filename, NULL, NULL, 0);
+ 		if (vr != NULL) {
+-			vfs_unfold(&playq_list, vr);
++			if (config_getopt_bool("vfs.dir.hide_extfiles"))
++				vfs_unfold(&playq_list, vr, 1);
++			else {
++				/* Don't filter out files at this time */
++				vfs_unfold(&playq_list, vr, 0);
++			}
+ 			vfs_close(vr);
+ 		}
+ 	}
+@@ -336,7 +344,7 @@
+ 	struct vfslist newlist = VFSLIST_INITIALIZER;
+ 
+ 	/* Recursively expand the item */
+-	vfs_unfold(&newlist, vr);
++	vfs_unfold(&newlist, vr, 1);
+ 	if (vfs_list_empty(&newlist))
+ 		return;
+ 
+@@ -359,7 +367,7 @@
+ 	struct vfslist newlist = VFSLIST_INITIALIZER;
+ 
+ 	/* Recursively expand the item */
+-	vfs_unfold(&newlist, vr);
++	vfs_unfold(&newlist, vr, 1);
+ 	if (vfs_list_empty(&newlist))
+ 		return;
+ 
+@@ -469,7 +477,7 @@
+ 	struct vfslist newlist = VFSLIST_INITIALIZER;
+ 
+ 	/* Recursively expand the item */
+-	vfs_unfold(&newlist, nvr);
++	vfs_unfold(&newlist, nvr, 1);
+ 	if (vfs_list_empty(&newlist))
+ 		return;
+ 
+@@ -491,7 +499,7 @@
+ 	struct vfslist newlist = VFSLIST_INITIALIZER;
+ 
+ 	/* Recursively expand the item */
+-	vfs_unfold(&newlist, nvr);
++	vfs_unfold(&newlist, nvr, 1);
+ 	if (vfs_list_empty(&newlist))
+ 		return;
+ 
+diff -ru herrie-2.1-autoquit/herrie-2.1/src/vfs.c herrie-2.1-filters/herrie-2.1/src/vfs.c
+--- herrie-2.1-autoquit/herrie-2.1/src/vfs.c	2008-07-15 10:59:07.000000000 -0500
++++ herrie-2.1-filters/herrie-2.1/src/vfs.c	2008-07-18 10:27:31.000000000 -0500
+@@ -185,6 +185,11 @@
+ 	return g_string_free(npath, FALSE);
+ }
+ 
++struct vfsmatch * vfs_get_vm_whitelist()
++{
++	return vm_whitelist;
++}
++
+ const char *
+ vfs_lockup(void)
+ {
+@@ -245,6 +250,27 @@
+ 	g_slice_free(struct vfsent, ve);
+ }
+ 
++void
++vfs_create_whitelist(const char* whitelist)
++{
++	char res[128] = "";
++	char *expr = "|[.]";
++	strcat(res, "[.]");
++
++	int i,j;
++	for (i=0,j=strlen(res); i < strlen(whitelist); i++) {
++		if (whitelist[i] == ' ') {
++			strcat(res, expr);
++			j+=strlen(expr);
++		}
++		else
++			res[j++] = whitelist[i];
++	}
++	res[j] = '\0';
++
++	vm_whitelist = vfs_match_new(res);
++}
++
+ struct vfsref *
+ vfs_lookup(const char *filename, const char *name, const char *basepath,
+     int strict)
+@@ -363,7 +389,7 @@
+ }
+ 
+ void
+-vfs_unfold(struct vfslist *vl, const struct vfsref *vr)
++vfs_unfold(struct vfslist *vl, const struct vfsref *vr, int useWhiteList)
+ {
+ 	struct vfsref *cvr;
+ 
+@@ -374,8 +400,14 @@
+ 		/* See if we can recurse it */
+ 		vfs_populate(vr);
+ 		VFS_LIST_FOREACH(&vr->ent->population, cvr) {
+-			if (cvr->ent->recurse)
+-				vfs_unfold(vl, cvr);
++			if (cvr->ent->recurse) {
++				/* Ignore Whitelist if it is not valid
++				 * Make sure directories aren't filtered
++				 */
++				if (!useWhiteList || vm_whitelist == NULL || !vfs_playable(cvr) ||
++				   vfs_match_compare(vm_whitelist, vfs_filename(cvr)))
++					vfs_unfold(vl, cvr, useWhiteList);
++			}
+ 		}
+ 	}
+ }
+diff -ru herrie-2.1-autoquit/herrie-2.1/src/vfs.h herrie-2.1-filters/herrie-2.1/src/vfs.h
+--- herrie-2.1-autoquit/herrie-2.1/src/vfs.h	2008-07-15 10:59:07.000000000 -0500
++++ herrie-2.1-filters/herrie-2.1/src/vfs.h	2008-07-18 10:27:31.000000000 -0500
+@@ -164,11 +164,21 @@
+ };
+ 
+ /**
++ * @brief The compiled regex for the whitelist
++ */
++static struct vfsmatch                *vm_whitelist;
++
++/**
+  * @brief Contents of an empty VFS list structure.
+  */
+ #define VFSLIST_INITIALIZER { NULL, NULL, 0 }
+ 
+ /**
++ * @brief Returns the whitelist
++ */
++struct vfsmatch * vfs_get_vm_whitelist();
++
++/**
+  * @brief Run-time initialize a VFS list structure.
+  */
+ static inline void
+@@ -362,6 +372,14 @@
+ const char	*vfs_lockup(void);
+ 
+ /**
++ * @brief Create the compiled regex for the whitelist.
++ * The input string should be formatted similar to
++ * "ext1 ext2 ext3" and this will be converted into a 
++ * Regular Expr like "[.]ext1|[.]ext2|[.]ext3".
++ */
++void vfs_create_whitelist(const char* whitelist);
++
++/**
+  * @brief Create a VFS reference from a filename. The name argument is
+  *        optional. It only allows you to display entities with a
+  *        different name (inside playlists). When setting the basepath
+@@ -390,7 +408,7 @@
+  * @brief Recursively expand a VFS reference to all their usable
+  *        children and append them to the specified list.
+  */
+-void		vfs_unfold(struct vfslist *vl, const struct vfsref *vr);
++void            vfs_unfold(struct vfslist *vl, const struct vfsref *vr, int useWhiteList);
+ /**
+  * @brief Recursively search through a VFS reference and add all
+  *        matching objects to a list. The VFS reference itself will be
+diff -ru herrie-2.1-autoquit/herrie-2.1/src/vfs_regular.c herrie-2.1-filters/herrie-2.1/src/vfs_regular.c
+--- herrie-2.1-autoquit/herrie-2.1/src/vfs_regular.c	2008-07-15 10:59:07.000000000 -0500
++++ herrie-2.1-filters/herrie-2.1/src/vfs_regular.c	2008-07-18 10:27:31.000000000 -0500
+@@ -73,9 +73,13 @@
+ 	GDir *dir;
+ 	const char *sfn;
+ 	struct vfsref *nvr, *svr;
+-	int hide_dotfiles;
++	struct vfsmatch *whitelist;
++	int hide_dotfiles, hide_extfiles;
+ 
+ 	hide_dotfiles = config_getopt_bool("vfs.dir.hide_dotfiles");
++	hide_extfiles = config_getopt_bool("vfs.dir.hide_extfiles");
++
++	whitelist = vfs_get_vm_whitelist();
+ 
+ 	if ((dir = g_dir_open(ve->filename, 0, NULL)) == NULL)
+ 		return (-1);
+@@ -88,6 +92,11 @@
+ 		if ((nvr = vfs_lookup(sfn, NULL, ve->filename, 1)) == NULL)
+ 			continue;
+ 
++		/* Hide files (not directories) that are not whitelisted */
++		if (hide_extfiles && whitelist != NULL && vfs_playable(nvr) && 
++		   !vfs_match_compare(whitelist, vfs_filename(nvr)))
++			continue;
++
+ 		/*
+ 		 * Add the items to the tailq in a sorted manner.
+ 		 */

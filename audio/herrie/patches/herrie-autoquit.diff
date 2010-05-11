@@ -1,0 +1,187 @@
+diff -ru herrie-autoplay/herrie-2.0.2/src/config.c herrie-autoquit/herrie-2.0.2/src/config.c
+--- herrie-autoplay/herrie-2.0.2/src/config.c	2008-05-16 20:49:55.000000000 -0500
++++ herrie-autoquit/herrie-2.0.2/src/config.c	2008-05-16 02:31:56.000000000 -0500
+@@ -163,6 +163,7 @@
+ 	{ "gui.input.may_quit",		"yes",		valid_bool,	NULL },
+ 	{ "gui.vfslist.scrollpages",	"no",		valid_bool,	NULL },
+ 	{ "playq.autoplay",		"no",		valid_bool,	NULL },
++	{ "playq.autoquit",		"no",		valid_bool,	NULL },
+ 	{ "playq.dumpfile",		CONFHOMEDIR PLAYQ_DUMPFILE, NULL, NULL },
+ 	{ "playq.xmms",			"no",		valid_bool,	NULL },
+ #ifdef BUILD_SCROBBLER
+diff -ru herrie-autoplay/herrie-2.0.2/src/main.c herrie-autoquit/herrie-2.0.2/src/main.c
+--- herrie-autoplay/herrie-2.0.2/src/main.c	2008-05-16 20:49:55.000000000 -0500
++++ herrie-autoquit/herrie-2.0.2/src/main.c	2008-05-16 02:33:37.000000000 -0500
+@@ -99,7 +99,7 @@
+ static void
+ usage(void)
+ {
+-	g_printerr("%s: " APP_NAME " [-pvx] [-c configfile] "
++	g_printerr("%s: " APP_NAME " [-pqvx] [-c configfile] "
+ 	    "[file ...]\n", _("usage"));
+ 	exit(1);
+ }
+@@ -110,7 +110,7 @@
+ int
+ main(int argc, char *argv[])
+ {
+-	int ch, i, show_version = 0, autoplay = 0, xmms = 0;
++	int ch, i, show_version = 0, autoplay = 0, autoquit = 0, xmms = 0;
+ 	char *cwd;
+ 	const char *errmsg;
+ 	struct vfsref *vr;
+@@ -128,7 +128,7 @@
+ 	config_load(CONFFILE, 1);
+ 	config_load(CONFHOMEDIR "config", 1);
+ 
+-	while ((ch = getopt(argc, argv, "c:pvx")) != -1) {
++	while ((ch = getopt(argc, argv, "c:pqvx")) != -1) {
+ 		switch (ch) {
+ 		case 'c':
+ 			config_load(optarg, 0);
+@@ -136,6 +136,9 @@
+ 		case 'p':
+ 			autoplay = 1;
+ 			break;
++		case 'q':
++			autoquit = 1;
++			break;
+ 		case 'v':
+ 			show_version = 1;
+ 			break;
+@@ -173,7 +176,7 @@
+ #ifdef BUILD_SCROBBLER
+ 	scrobbler_init();
+ #endif /* BUILD_SCROBBLER */
+-	playq_init(autoplay, xmms, (argc == 0));
++	playq_init(autoplay, autoquit, xmms, (argc == 0));
+ 
+ 	/* Draw all the windows */
+ 	gui_draw_init_post();
+diff -ru herrie-autoplay/herrie-2.0.2/src/playq.c herrie-autoquit/herrie-2.0.2/src/playq.c
+--- herrie-autoplay/herrie-2.0.2/src/playq.c	2008-05-16 20:49:55.000000000 -0500
++++ herrie-autoquit/herrie-2.0.2/src/playq.c	2008-05-25 00:25:02.000000000 -0500
+@@ -151,6 +151,11 @@
+ static volatile int	playq_seek_time;
+ 
+ /**
++ * @brief If true, quit when end of list reached
++ */
++int			playq_autoquit = 0;
++
++/**
+  * @brief Infinitely play music in the playlist, honouring the
+  *        playq_flags.
+  */
+@@ -163,6 +168,8 @@
+ 
+ 	gui_input_sigmask();
+ 
++	/* Used to prevent autoquit occuring at startup when autoplay is enabled on an empty list */
++	int playq_autoquit_ready = 0;
+ 	do {
+ 		/* Wait until there's a song available */
+ 		playq_lock();
+@@ -174,10 +181,20 @@
+ 			}
+ 
+ 			/* Try to start a new song when we're not stopped */
+-			if (!(playq_flags & PF_STOP) &&
+-			    (nvr = funcs->give()) != NULL) {
++			if (!(playq_flags & PF_STOP)) {
++			    if ((nvr = funcs->give()) != NULL) {
+ 				/* We've got work to do */
+ 				break;
++			    }
++			    else {
++				if (playq_autoquit_ready && playq_autoquit) {
++					/* Time to quit - Send ourself the SIGTERM */
++					int res = getpid();
++  					if (res !=0){
++    						kill(res,SIGTERM);
++  					}
++			        }
++			    }
+ 			}
+ 
+ 			/* Wait for new events to occur */
+@@ -188,6 +205,9 @@
+ 		}
+ 		playq_unlock();
+ 
++		/* Safe to autoquit now */
++		playq_autoquit_ready = 1;
++
+ 		cur = audio_file_open(nvr);
+ 		if (cur == NULL) {
+ 			/* Skip broken songs */
+@@ -242,7 +262,7 @@
+ }
+ 
+ void
+-playq_init(int autoplay, int xmms, int load_dumpfile)
++playq_init(int autoplay, int autoquit, int xmms, int load_dumpfile)
+ {
+ 	const char *filename;
+ 	struct vfsref *vr;
+@@ -259,6 +279,9 @@
+ 		playq_repeat = 1;
+ 	}
+ 
++	if (autoquit || config_getopt_bool("playq.autoquit"))
++		playq_autoquit = 1;
++
+ 	filename = config_getopt("playq.dumpfile");
+ 	if (load_dumpfile && filename[0] != '\0') {
+ 		/* Autoload playlist */
+diff -ru herrie-autoplay/herrie-2.0.2/src/playq.h herrie-autoquit/herrie-2.0.2/src/playq.h
+--- herrie-autoplay/herrie-2.0.2/src/playq.h	2008-05-16 20:49:55.000000000 -0500
++++ herrie-autoquit/herrie-2.0.2/src/playq.h	2008-05-16 02:38:12.000000000 -0500
+@@ -33,7 +33,7 @@
+ /**
+  * @brief Initialize the playlist locking.
+  */
+-void playq_init(int autoplay, int xmms, int load_dumpfile);
++void playq_init(int autoplay, int autoquit, int xmms, int load_dumpfile);
+ /**
+  * @brief Spawn the playback thread.
+  */
+diff -ru herrie-autoplay/herrie-2.0.2/src/playq_modules.h herrie-autoquit/herrie-2.0.2/src/playq_modules.h
+--- herrie-autoplay/herrie-2.0.2/src/playq_modules.h	2008-04-23 14:29:24.000000000 -0500
++++ herrie-autoquit/herrie-2.0.2/src/playq_modules.h	2008-05-16 03:01:29.000000000 -0500
+@@ -36,6 +36,11 @@
+ extern int playq_repeat;
+ 
+ /**
++ * @brief Flag whether autoquit is turned on by the user.
++ */
++extern int playq_autoquit;
++
++/**
+  * @brief Herrie's routine to fetch the next song from the playlist
+  *        (always the first song).
+  */
+diff -ru herrie-autoplay/herrie-2.0.2/src/playq_party.c herrie-autoquit/herrie-2.0.2/src/playq_party.c
+--- herrie-autoplay/herrie-2.0.2/src/playq_party.c	2008-04-23 14:29:24.000000000 -0500
++++ herrie-autoquit/herrie-2.0.2/src/playq_party.c	2008-05-16 03:57:41.000000000 -0500
+@@ -49,7 +49,7 @@
+ 	nvr = vfs_dup(vr);
+ 	gui_playq_notify_pre_removal(1);
+ 	vfs_list_remove(&playq_list, vr);
+-	if (playq_repeat) {
++	if (playq_repeat && !playq_autoquit) {
+ 		/* Add it back to the tail */
+ 		vfs_list_insert_tail(&playq_list, vr);
+ 		gui_playq_notify_post_insertion(vfs_list_items(&playq_list));
+diff -ru herrie-autoplay/herrie-2.0.2/src/playq_xmms.c herrie-autoquit/herrie-2.0.2/src/playq_xmms.c
+--- herrie-autoplay/herrie-2.0.2/src/playq_xmms.c	2008-05-16 20:49:55.000000000 -0500
++++ herrie-autoquit/herrie-2.0.2/src/playq_xmms.c	2008-05-16 02:50:17.000000000 -0500
+@@ -61,7 +61,7 @@
+ 		/* Song after current song */
+ 		cursong = vfs_list_next(cursong);
+ 		/* We've reached the end */
+-		if (cursong == NULL && playq_repeat)
++		if (cursong == NULL && playq_repeat && !playq_autoquit)
+ 			cursong = vfs_list_first(&playq_list);
+ 	} else {
+ 		cursong = vfs_list_first(&playq_list);
