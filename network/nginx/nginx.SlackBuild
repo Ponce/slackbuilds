@@ -1,16 +1,33 @@
 #!/bin/sh
 #
-# Building nginx in the Slackware way.
-# 
-# Notes:
-# + Don't forget to check the VERSION number.
-# + You may want to customize the configure options.
-# 
-# Written by Cherife Li <cherife@dotimes.com>.
+# Slackware build script for nginx
 #
+# Copyright 2008 Cherife Li <cherife@dotimes.com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+# Notes:
+# + This SlackBuild is for v0.7.0 and newer.
+# + You may want to customize the configure options.
 
 PRGNAM=nginx
-VERSION=0.6.28
+VERSION=0.7.5
 ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
@@ -24,9 +41,11 @@ NGINXUSER=${NGINXUSER:-nobody}
 NGINXGROUP=${NGINXGROUP:-nobody}
 
 if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
 elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+   SLKCFLAGS="-O2 -fPIC"
 fi
 
 set -e
@@ -35,10 +54,14 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz || exit 1
 cd $PRGNAM-$VERSION
 chown -R root:root .
-chmod -R u+w,go+r-w,a-s .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -49,14 +72,16 @@ CXXFLAGS="$SLKCFLAGS" \
   --error-log-path=/var/log/nginx_error.log \
   --pid-path=/var/run/nginx.pid \
   --lock-path=/var/lock/nginx \
-  --user=$NGINXUSER \
-  --group=$NGINXGROUP \
+  --user=${NGINXUSER} \
+  --group=${NGINXGROUP} \
   --with-http_ssl_module \
   --with-http_realip_module \
   --with-http_addition_module \
   --with-http_sub_module \
+  --with-http_dav_module \
+  --with-http_flv_module \
+  --with-http_gzip_static_module \
   --with-http_stub_status_module \
-  --without-http_proxy_module \
   --http-log-path=/var/log/nginx_access.log \
   --http-client-body-temp-path=/var/spool/nginx_client_body_temp \
   --http-proxy-temp-path=/var/spool/nginx_proxy_temp \
@@ -66,18 +91,14 @@ CXXFLAGS="$SLKCFLAGS" \
   --without-mail_smtp_module \
   --with-debug
 
-make
-make install DESTDIR=$PKG
+make || exit 1
+make install DESTDIR=$PKG || exit 1
 
-mkdir -p $PKG/etc/{nginx,rc.d} $PKG/usr/sbin \
-  $PKG/var/spool/{nginx_client_body_temp,nginx_proxy_temp}
-cp $CWD/rc.nginx $PKG/etc/rc.d/rc.nginx.new
-cp -a conf/* $PKG/etc/nginx
-cp -a objs/nginx $PKG/usr/sbin/nginx
-
-mkdir -p $PKG/usr/doc/nginx-$VERSION
+mkdir -p $PKG/{etc/rc.d,usr/doc/nginx-$VERSION}
 cp -a CHANGES CHANGES.ru LICENSE README $PKG/usr/doc/nginx-$VERSION
 cat $CWD/nginx.SlackBuild > $PKG/usr/doc/nginx-$VERSION/nginx.SlackBuild
+cat $CWD/rc.nginx > $PKG/etc/rc.d/rc.nginx.new
+mv $PKG/usr/html $PKG/usr/doc/nginx-$VERSION
 
 ( cd $PKG
   find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -89,12 +110,12 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 # Let's not clobber config files on upgrade
-cd $PKG/etc/nginx
-  for i in fastcgi_params koi-utf koi-win mime.types nginx.conf win-utf ; do
-    mv $i $i.new ;
-    echo "config etc/nginx/$i.new" >> $PKG/install/doinst.sh ;
+( cd $PKG/etc/nginx
+  for i in fastcgi_params mime.types nginx.conf koi-utf koi-win win-utf; do
+    mv $i $i.new;
+    echo "config etc/nginx/$i.new" >> $PKG/install/doinst.sh;
   done
-cd -
+)
 
 cd $PKG
-makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
