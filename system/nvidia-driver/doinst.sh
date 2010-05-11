@@ -1,6 +1,5 @@
-
-if [ -x usr/bin/update-desktop-database ]; then
-  ./usr/bin/update-desktop-database ./usr/share/applications >/dev/null 2>&1
+if [ -x /usr/bin/update-desktop-database ]; then
+  ./usr/bin/update-desktop-database -q usr/share/applications
 fi
 
 if ! [ -e usr/lib/xorg/modules/libwfb.so ]; then
@@ -24,5 +23,4 @@ fi
 ( cd usr/lib ; rm -rf libcuda.so )
 ( cd usr/lib ; ln -sf libcuda.so.1 libcuda.so )
 
-/usr/sbin/nvidia-switch --nvidia
-
+/usr/sbin/nvidia-switch --install

@@ -2,8 +2,8 @@
 
 # ***************************************************************************
 # *   Copyright (C) 2007-2008 by Heinz Wiesinger                            *
-# *   HMWiesinger@gmx.at                                                    *
-# *   http://hw.3kisses.net                                                 *
+# *   pprkut@liwjatan.at                                                    *
+# *   http://www.liwjatan.at                                                *
 # *                                                                         *
 # *   This program is free software; you can redistribute it and/or modify  *
 # *   it under the terms of the GNU General Public License as published by  *
@@ -20,205 +20,512 @@
 # *   Free Software Foundation, Inc.,                                       *
 # *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
 # ***************************************************************************/
-# nvidia-switch utility 0.5
+# nvidia-switch utility 0.7.5
 #
 # A tool to switch between nvidia-binary-driver and stock xorg-driver
 # if both are installed in parallel.
 
 set -e
 
-INC="/usr/include/GL"
-LIB="/usr/lib"
-XMOD="/usr/lib/xorg/modules"
+ROOT="/"
+CWD=$(pwd)
+INC="${ROOT}usr/include/GL"
+LIB="${ROOT}usr/lib"
+XMOD="${ROOT}usr/lib/xorg/modules"
 XLIB="$XMOD/extensions"
 NV_VERSION='PKGVERSION' # This will be replaced in the build script
 GL_VERSION="1.2"
 
-if [ "$1" = '--nvidia' ]; then
-	echo $'Switching to nvidia-driver files!\n'
+remove_link(){
+if [ -L "$1" ]; then
+  rm -f "$1"
+fi
+}
 
-	echo "You have to ENABLE the nvidia driver in /etc/X11/xorg.conf."
-	echo "Otherwise, this may lead to improperly working drivers."
+remove_existing(){
+if [ -e "$1" ]; then
+  rm -f $1
+fi
+}
 
-	#Change to includes path
-	cd $INC
-	#if gl*.h exists and is a link, then remove the old link and create the new one
-	#else, if it exists and is not a link, move it to gl*.h-xorg and create a link.
-	#else, it it does not exist, create a link to gl*.h-nvidia
-	for i in glxext.h glext.h glx.h gl.h; do
+move_existing(){
+if [ -e "$1" ]; then
+  mv $1 $2
+fi
+}
 
-		if [ -L $i ]; then
-			rm -f $i
-			ln -s $i-nvidia $i
-		elif [ -e $i ]; then
-			mv $i $i-xorg
-			ln -s $i-nvidia $i
-		else
-			ln -s $i-nvidia $i
-		fi
+setup_link(){
+  if [ "$1" = "mv" ]; then
+    mv "$2" "$3"
+  else
+    rm -f $2
+  fi
+  ln -s "$3" "$2"
+}
 
-	done
+# Move and rename files in /usr/include
+# $1 = from
+# $2 = to
+incs(){
+cd "$INC"
 
-	for i in $LIB/libGL.so $XLIB/libglx.so; do
-
-		#If libGL.so.$NV_VERSION-nvidia does exists, then remove the -nvidia and make it usable that way
-		if [ -e "$i.$NV_VERSION-nvidia" ]; then
-			rm -f $i.$NV_VERSION
-			ln -s $i.$NV_VERSION-nvidia $i.$NV_VERSION
-		fi
-
-	done
-
-	#if libGL.so.$GL_VERSION does exist, move it to libGL.so.$GL_VERSION-xorg, as it conflicts if nvidia's libGL.so
-	# then remove the libGL.so.1 symlink and create a new one pointing to nvidia's libGL.so
-	if [ -e "$LIB/libGL.so.$GL_VERSION" ]; then
-		cd $LIB
-		mv libGL.so.$GL_VERSION libGL.so.$GL_VERSION-xorg
-		rm -f libGL.so.1
-		ln -s $LIB/libGL.so.$NV_VERSION libGL.so.1
-	fi
-
-	#If libGLcore.so.$NV_VERSION-nvidia does exists, then remove the -nvidia and make it usable that way
-	if [ -e "$LIB/libGLcore.so.$NV_VERSION-nvidia" ]; then
-		rm -f $LIB/libGLcore.so.$NV_VERSION $LIB/libGLcore.so.1
-		ln -s $LIB/libGLcore.so.$NV_VERSION-nvidia $LIB/libGLcore.so.$NV_VERSION
-		ln -s $LIB/libGLcore.so.$NV_VERSION $LIB/libGLcore.so.1
-	fi
-
-
-	for i in libGLcore.so libGLcore.la libglx.la; do
-
-		#If this library exists, move it to *-xorg
-		if [ -e "$XLIB/$i" ]; then
-			mv $XLIB/$i $XLIB/$i-xorg
-		fi
-
-	done
-
-	# if libglx.so is not a link, back it up to *-xorg, and create a symlink to nvidia's one
-	# if it's a link, then remove it and create a new one.
-	if ! [ -L "$XLIB/libglx.so" ]; then
-		cd $XLIB
-		mv libglx.so libglx.so-xorg
-		ln -s $XLIB/libglx.so.$NV_VERSION libglx.so
-	else
-		cd $XLIB
-		rm -f libglx.so
-		ln -s $XLIB/libglx.so.$NV_VERSION libglx.so
-	fi
-	
-	#Recreate the link removed by --xorg
-	if ! [ -e "$XMOD/libwfb.so" ]; then
-		ln -s $XMOD/libnvidia-wfb.so.1 $XMOD/libwfb.so
-	fi
-
-	/sbin/ldconfig
-
-	#Generate correct symink for that lib
-	/sbin/ldconfig -l /usr/lib/libGL.so.169.09-nvidia
-
-elif [ "$1" = '--xorg' ]; then
-	echo $'Switching to stock xorg files.\n'
-
-	echo "You have to DISABLE the nvidia driver in /etc/X11/xorg.conf."
-	echo "Otherwise, this may lead to improperly working drivers."
-
-	#Change to includes path
-	cd $INC
-	#if gl*.h exists and is a link, then remove the old link and create the new one
-	#else, if it exists and is not a link, move it to gl*.h-xorg and create a link.
-	#else, it it does not exist, create a link to gl*.h-xorg
-	for i in glxext.h glext.h glx.h gl.h; do
-
-		if [ -L $i ]; then
-			rm -f $i
-			ln -s $i-xorg $i
-		elif [ -e $i ]; then
-			mv $i $i-xorg
-			ln -s $i-xorg $i
-		else
-			ln -s $i-xorg $i
-		fi
-
-	done
-
-	for i in libGL.so libGLcore.so; do
-
-		#if this link exists, remove it, if it's a file, move it to *.nvidia
-		if [ -L "$LIB/$i.$NV_VERSION" ]; then
-			rm -f $LIB/$i.$NV_VERSION
-		elif [ -e "$LIB/$i.$NV_VERSION" ]; then
-			mv $LIB/$i.$NV_VERSION $LIB/$i.$NV_VERSION-nvidia
-		fi
-
-		if [ -L "$LIB/$i.1" ]; then
-			rm -f $LIB/$i.1
-		fi
-
-	done
-
-	#if libGL.so.$GL_VERSION does not exist and libGL.so.$GL_VERSION-xorg does, move it to libGL.so.$GL_VERSION
-	# then remove the libGL.so.1 symlink and create a new one pointing to nvidia's libGL.so
-	if ! [ -e "$LIB/libGL.so.$GL_VERSION" ]; then
-		if [ -e "$LIB/libGL.so.$GL_VERSION-xorg" ]; then
-			cd $LIB
-			mv $LIB/libGL.so.$GL_VERSION-xorg $LIB/libGL.so.$GL_VERSION
-			ln -s $LIB/libGL.so.$GL_VERSION libGL.so.1
-		fi
-	fi
-
-	for i in libGLcore.so libGLcore.la libglx.la; do
-
-		#If libGLcore.so does not exist, and *-xorg does, then remove the -xorg
-		if ! [ -e "$XLIB/$i" ]; then
-			if [ -e "$XLIB/$i-xorg" ]; then
-				mv $XLIB/$i-xorg $XLIB/$i
-			fi
-		fi
-
-	done
-
-	#if this library exists, move it to *-nvidia
-	if [ -L "$XLIB/libglx.so.$NV_VERSION" ]; then
-		rm $XLIB/libglx.so.$NV_VERSION
-	elif [ -e "$XLIB/libglx.so.$NV_VERSION" ]; then
-		mv $XLIB/libglx.so.$NV_VERSION $XLIB/libglx.so.$NV_VERSION-nvidia
-	fi
-
-	# if libglx.so exists and is a link, remove it and create a new one
-	# If it does exists and is not a link, remove the old one, and create the new one.
-	# if it does not exist, create a symlink
-	if [ -L "$XLIB/libglx.so" ]; then
-		cd $XLIB
-		rm libglx.so
-		ln -s libglx.so-xorg libglx.so
-	elif [ -e "$XLIB/libglx.so" ]; then
-		cd $XLIB
-		mv libglx.so libglx.so-xorg
-		ln -s libglx.so-xorg libglx.so
-	else
-		cd $XLIB
-		ln -s libglx.so-xorg libglx.so
-	fi
-
-	# Not handled by removepkg/upgradepkg automatically.
-	if [ -L "$XMOD/libwfb.so" ]; then
-		rm -f $XMOD/libwfb.so
-	fi
-
-	/sbin/ldconfig
-
-	#Generate correct symink for that lib
-	/sbin/ldconfig -l /usr/lib/libGL.so.1.2
-
-	#Remove so-link, recreated by ldconfig
-	if [ -L $LIB/libGLcore.so.1 ]; then
-		rm -f $LIB/libGLcore.so.1
-	fi
-
+if [ "$2" = "cleanup" ]; then
+  CMD="mv"
+  THREE="$1"
 else
-	echo "Usage:"
-	echo " --nvidia	Switch to nvidia driver files"
-	echo " --xorg		Switch to stock xorg files"
+  CMD="ln -s"
+  THREE="$2"
 fi
 
+for i in glxext.h glext.h glx.h gl.h; do
+  if [ -L "$i" ]; then
+    rm -f "$i"
+    $CMD "$i-$THREE" "$i"
+  elif [ -e "$i" ]; then
+    if [ "$2" = "cleanup" ]; then
+      rm -f "$i-$1"
+    else
+      mv "$i" "$i-$1"
+      ln -s "$i-$THREE" "$i"
+    fi
+  else
+    $CMD "$i-$THREE" "$i"
+  fi
+done
+
+cd "$CWD"
+}
+
+libs(){
+for i in libGLcore.so libGLcore.la libglx.la; do
+  if [ "$1" = "nvidia" ]; then
+    #If this library exists, move it to *-xorg
+    move_existing "$XLIB/$i" "$XLIB/$i-xorg"
+  else
+    #If .so does not exist, and *-xorg does, then remove the -xorg
+    if [ -e "$XLIB/$i" ]; then
+      remove_existing "$XLIB/$i-xorg"
+    else
+      move_existing "$XLIB/$i-xorg" "$XLIB/$i"
+    fi
+  fi
+done
+}
+
+libs_basic(){
+for i in libGL.so libGLcore.so; do
+  #if this link exists, remove it, if it's a file, move it to *.nvidia
+  if [ -L "$LIB/$i.$NV_VERSION" ]; then
+    rm -f "$LIB/$i.$NV_VERSION"
+  elif [ -e "$LIB/$i.$NV_VERSION" ]; then
+    mv "$LIB/$i.$NV_VERSION" "$LIB/$i.$NV_VERSION-nvidia"
+  fi
+  remove_link "$LIB/$i.1"
+done
+}
+
+libgl_nvidia(){
+#if libGL.so.$GL_VERSION does exist, move it to libGL.so.$GL_VERSION-xorg, as it conflicts if nvidia's libGL.so
+# then remove the libGL.so.1 symlink and create a new one pointing to nvidia's libGL.so
+if [ -e "$LIB/libGL.so.$GL_VERSION" ]; then
+  cd "$LIB"
+  mv libGL.so.$GL_VERSION libGL.so.$GL_VERSION-xorg
+  setup_link "" "libGL.so.1" "libGL.so.$NV_VERSION"
+  cd "$CWD"
+fi
+}
+
+libgl_xorg(){
+#if libGL.so.$GL_VERSION does not exist and libGL.so.$GL_VERSION-xorg does, move it to libGL.so.$GL_VERSION
+# then remove the libGL.so.1 symlink and create a new one pointing to nvidia's libGL.so
+if [ -e "$LIB/libGL.so.$GL_VERSION" ]; then
+  remove_existing "$LIB/libGL.so.$GL_VERSION-xorg"
+else
+  if [ -e "$LIB/libGL.so.$GL_VERSION-xorg" ]; then
+    cd "$LIB"
+    mv libGL.so.$GL_VERSION-xorg libGL.so.$GL_VERSION
+    ln -s libGL.so.$GL_VERSION libGL.so.1
+    cd "$CWD"
+  fi
+fi
+}
+
+
+libglcore_nvidia(){
+#If libGLcore.so.$NV_VERSION-nvidia does exists, then remove the -nvidia and make it usable that way
+if [ -e "$LIB/libGLcore.so.$NV_VERSION-nvidia" ]; then
+  cd "$LIB"
+  rm -f libGLcore.so.$NV_VERSION libGLcore.so.1
+  ln -s libGLcore.so.$NV_VERSION-nvidia libGLcore.so.$NV_VERSION
+  ln -s libGLcore.so.$NV_VERSION libGLcore.so.1
+  cd "$CWD"
+fi
+}
+
+lib_nvidia(){
+for i in libGL.so libglx.so; do
+  if [ "$i" = "libGL.so" ]; then
+    cd "$LIB"
+  elif [ "$i" = "libglx.so" ]; then
+    cd "$XLIB"
+  fi
+  #If libGL.so.$NV_VERSION-nvidia does exists, then remove the -nvidia and make it usable that way
+  if [ -e "$i.$NV_VERSION-nvidia" ]; then
+    setup_link "" "$i.$NV_VERSION" "$i.$NV_VERSION-nvidia"
+  fi
+  cd "$CWD"
+done
+}
+
+libglx_base(){
+for i in $(ls libglx.so* | grep -v -); do
+  if ! [ "$i" = "libglx.so.$NV_VERSION" ]; then
+    rm -f $i
+  fi
+done
+ln -s libglx.so.$NV_VERSION libglx.so
+}
+
+libglx_nvidia(){
+# if libglx.so is not a link, back it up to *-xorg, and create a symlink to nvidia's one
+# if it's a link, then remove it and create a new one.
+if ! [ -L "$XLIB/libglx.so" ]; then
+  cd $XLIB
+  mv libglx.so libglx.so-xorg
+  libglx_base
+else
+  cd $XLIB
+  libglx_base
+fi
+cd $CWD
+}
+
+libglx_xorg(){
+if [ "$1" = "xorg" ]; then
+  CMD="ln -s"
+else
+  CMD="mv"
+fi
+
+#if this library exists, move it to *-nvidia
+if [ -L "$XLIB/libglx.so.$NV_VERSION" ]; then
+  rm $XLIB/libglx.so.$NV_VERSION
+elif [ -e "$XLIB/libglx.so.$NV_VERSION" ]; then
+  mv $XLIB/libglx.so.$NV_VERSION $XLIB/libglx.so.$NV_VERSION-nvidia
+fi
+
+# if libglx.so exists and is a link, remove it and create a new one
+# If it does exists and is not a link, remove the old one, and create the new one.
+# if it does not exist, create a symlink
+if [ -L "$XLIB/libglx.so" ]; then
+  cd $XLIB
+  rm libglx.so
+  $CMD libglx.so-xorg libglx.so
+elif [ -e "$XLIB/libglx.so" ]; then
+  if [ "$1" = "xorg" ]; then
+    cd $XLIB
+    setup_link "mv" "libglx.so" "libglx.so-xorg"
+  else
+    remove_existing "$XLIB/libglx.so-xorg"
+  fi
+else
+  cd $XLIB
+  $CMD libglx.so-xorg libglx.so
+fi
+cd $CWD
+}
+
+libwfb_nvidia(){
+#Recreate the link removed by --xorg
+if ! [ -e "$XMOD/libwfb.so" ]; then
+  cd $XMOD
+  ln -s libnvidia-wfb.so.1 libwfb.so
+  cd $CWD
+fi
+}
+
+nvidia_ldconfig(){
+/sbin/ldconfig
+#Generate correct symink for that lib
+/sbin/ldconfig -l $1
+
+if [ "$2" = "xorg" ]; then
+  #Remove so-link, recreated by ldconfig
+  cd $LIB
+  remove_link "libGLcore.so.1"
+  cd $CWD
+fi
+}
+
+check(){
+  echo -n "checking $2...."
+  if [ -e "$1/$2" ]; then
+    if [ "$3" = "exist" ]; then
+      echo "ERROR: $1/$2 does exist!!!!!"
+    else
+      echo -n "exists"
+      if [ -h "$1/$2" ]; then
+        echo "(link)"
+        echo -n " points to:"
+        ls -o "$1/$2" | cut -d ">" -f 2
+      else
+        if [ "$3" = "link" ]; then
+          echo " (!)"
+        else
+          echo ""
+        fi
+      fi
+    fi
+  else
+    if [ "$3" = "exist" ]; then
+      echo "does not exist"
+    else
+      echo "ERROR: $1/$2 does not exist!!!!!"
+    fi
+  fi
+}
+
+check_includes(){
+  if [ "$1" = "cleanup" ]; then
+    cleanup=""
+    cleanup2="exist"
+  else
+    cleanup="link"
+    cleanup2=""
+  fi
+
+  for i in glext.h glxext.h gl.h glx.h; do
+    check $INC $i $cleanup
+    check $INC $i-nvidia
+    check $INC $i-xorg $cleanup2
+    echo ""
+  done
+}
+
+check_glcore(){
+  if [ "$1" = "nvidia" ]; then
+    CHECK="link"
+    EXT=""
+  else
+    CHECK="exist"
+    EXT="-xorg"
+  fi
+
+  for i in libGLcore.so.1 libGLcore.so.$NV_VERSION libGLcore.so.$NV_VERSION-nvidia; do
+    if [ "$i" = "libGLcore.so.1" ]; then
+      check $LIB $i $CHECK
+    elif [ "$i" = "libGLcore.so.$NV_VERSION" ]; then
+      check $LIB $i $CHECK
+    else
+      check $LIB $i
+    fi
+  done
+
+  echo ""
+
+  for i in libGLcore.so libGLcore.la libGLcore.so-xorg libGLcore.la-xorg; do
+    if [ "$i" = "libGLcore.so$EXT" ]; then
+      check $XLIB $i "exist"
+    elif [ "$i" = "libGLcore.la$EXT" ]; then
+      check $XLIB $i "exist"
+    else
+      check $XLIB $i
+    fi
+  done
+
+  echo ""
+}
+
+check_glx(){
+  if [ "$1" = "xorg" ]; then
+    xorg="exist"
+    cleanup="link"
+    cleanup2=""
+    EXT="-xorg"
+  elif [ "$1" = "cleanup" ]; then
+    xorg="exist"
+    cleanup=""
+    cleanup2="exist"
+    EXT="-xorg"
+  else
+    xorg="link"
+    cleanup="link"
+    cleanup2=""
+    EXT=""
+  fi
+
+  for i in libglx.la libglx.so libglx.so.$NV_VERSION libglx.so.$NV_VERSION-nvidia \
+    libglx.so-xorg libglx.la-xorg; do
+    if [ "$i" = "libglx.so" ]; then
+      check $XLIB $i $cleanup
+    elif [ "$i" = "libglx.so-xorg" ]; then
+      check $XLIB $i $cleanup2
+    elif [ "$i" = "libglx.so.$NV_VERSION" ]; then
+      check $XLIB $i $xorg
+    elif [ "$i" = "libglx.la$EXT" ]; then
+      check $XLIB $i "exist"
+    else
+      check $XLIB $i
+    fi
+  done
+
+  echo ""
+}
+
+check_wfb(){
+  for i in libwfb.so libwfb.la libnvidia-wfb.so.1 libnvidia-wfb.so.$NV_VERSION; do
+    if [ "$i" = "libnvidia-wfb.so.1" ]; then
+      check $XMOD $i "link"
+    else
+      check $XMOD $i
+    fi
+  done
+}
+
+check_gl(){
+  if [ "$1" = "nvidia" ]; then
+    nvidia="link"
+    EXT=""
+  else
+    nvidia="exist"
+    EXT="-xorg"
+  fi
+
+  for i in libGL.la libGL.so libGL.so.1 libGL.so.$NV_VERSION libGL.so.$NV_VERSION-nvidia \
+    libGL.so.$GL_VERSION libGL.so.$GL_VERSION-xorg; do
+    if [ "$i" = "libGL.so" ]; then
+      check $LIB $i "link"
+    elif [ "$i" = "libGL.so.1" ]; then
+      check $LIB $i "link"
+    elif [ "$i" = "libGL.so.$NV_VERSION" ]; then
+      check $LIB $i $nvidia
+    elif [ "$i" = "libGL.so.${GL_VERSION}${EXT}" ]; then
+      check $LIB $i "exist"
+    else
+      check $LIB $i
+    fi
+  done
+
+  echo ""
+}
+
+nvidia_check(){
+  check_includes
+
+  check_gl "nvidia"
+
+  check_glcore "nvidia"
+
+  check_glx
+
+  check_wfb
+}
+
+xorg_check(){
+  check_includes
+
+  check_gl
+
+  check_glcore
+
+  check_glx "xorg"
+
+  check_wfb
+}
+
+cleanup_check(){
+  check_includes "cleanup"
+
+  check_gl
+
+  check_glcore
+
+  check_glx "cleanup"
+
+  check_wfb
+}
+
+nvidia(){
+  echo $'Switching to nvidia-driver files!\n'
+  echo "You have to ENABLE the nvidia driver in /etc/X11/xorg.conf."
+  echo "Otherwise, this may lead to improperly working drivers."
+
+  incs "xorg" "nvidia"
+  lib_nvidia
+  libgl_nvidia
+  libglcore_nvidia
+  libs "nvidia"
+  libglx_nvidia
+  libwfb_nvidia
+
+  LD_NVIDIA="/usr/lib/libGL.so.$NV_VERSION-nvidia"
+  nvidia_ldconfig $LD_NVIDIA
+}
+
+xorg(){
+  echo $'Switching to stock xorg files.\n'
+  if [ "$1" = "cleanup" ]; then
+    echo $'Cleaning up symlinks.\n'
+  fi
+  echo "You have to DISABLE the nvidia driver in /etc/X11/xorg.conf."
+  echo "Otherwise, this may lead to improperly working drivers."
+
+  if [ "$1" = "cleanup" ]; then
+    incs "xorg" "cleanup"
+  else
+    incs "xorg" "xorg"
+  fi
+
+   libs_basic
+   libgl_xorg
+   libs ""
+   if [ "$1" = "cleanup" ]; then
+     libglx_xorg ""
+   else
+     libglx_xorg "xorg"
+   fi
+   remove_link "$XMOD/libwfb.so"
+
+   LD_NVIDIA="/usr/lib/libGL.so.1.2"
+   nvidia_ldconfig $LD_NVIDIA "xorg"
+}
+
+usage(){
+  echo "Usage:"
+  echo " --nvidia		Switch to nvidia driver files"
+  echo " --xorg			Switch to stock xorg files"
+  echo " --cleanup		Switch to stock xorg files and remove all created symlinks"
+  echo " --install		Switch to nvidia driver files"
+  echo "			  This is used on installation to handle installroot correctly"
+  echo "			  Please use --nvidia for after-install switches instead"
+  echo " --check-nvidia		Check if everything is setup correctly for nvidia's driver"
+  echo " --check-xorg		Check if everything is setup correctly for xorg's driver"
+  echo " --check-cleanup	Check if everything has been cleaned up correctly"
+  echo " --help			Show this help message"
+}
+
+if [ "$1" = '--nvidia' ]; then
+  nvidia
+elif [ "$1" = '--install' ]; then
+  ROOT=""
+  CWD=$(pwd)
+  INC="${ROOT}usr/include/GL"
+  LIB="${ROOT}usr/lib"
+  XMOD="${ROOT}usr/lib/xorg/modules"
+  XLIB="$XMOD/extensions"
+  nvidia
+elif [ "$1" = '--xorg' ]; then
+  xorg ""
+elif [ "$1" = '--check-nvidia' ]; then
+  nvidia_check
+elif [ "$1" = '--check-xorg' ]; then
+  xorg_check
+elif [ "$1" = '--check-cleanup' ]; then
+  cleanup_check
+elif [ "$1" = '--cleanup' ]; then
+  xorg "cleanup"
+elif [ "$1" = '--help' ]; then
+  usage
+else
+  usage
+fi
