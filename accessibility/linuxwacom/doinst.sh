@@ -1,0 +1,3 @@
+# As depmod is run by /etc/rc.d/rc.modules (at boot) also
+# i'd figure this wount hurt any here either ...
+depmod -a
