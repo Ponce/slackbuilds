@@ -1,6 +1,6 @@
-#!/bin/bash
+#!/bin/sh
 
-# Slackware build script for OpenOffice.org (binary repackaging)
+# Slackware build script for OpenOffice.org
 
 # Copyright 2006-2008  Robby Workman, Northport, Alabama, ASA
 # All rights reserved.
@@ -25,12 +25,12 @@
 # Thanks to Sandman1, Larhzu, and MacIver for early assistance.
 # Thanks to Fred Emmott (http://slamd64.com) for some better code in a few
 #  places and ideas to include the Optimization Solver and disable javaldx.
-# Thanks to eroc for the idea to include support for other languages.
+# Thanks to hba for the idea to include support for other languages.
 
 PRGNAM=openoffice.org
-VERSION=2.4.0
+VERSION=3.0.0
 ARCH=i586	# The binaries are built for i586 - leave this alone
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
 
 CWD=$(pwd)
@@ -54,77 +54,64 @@ PKG_LANG=$(echo $OOLANG | sed s/-/_/)	# Leave this alone
 # According to Fred Emmott, this is *highly* desirable on 64 bit systems
 DISABLE_JAVA=${DISABLE_JAVA:-NO}
 
-# If you want to include the new experimental Optimization Solver, 
-# download "scsolver.uno.zip" from the following location:
-# http://wiki.services.openoffice.org/wiki/Optimization_Solver
-# and place it in the same directory as the SlackBuild script ($CWD)
-# Set the following variable to "YES"   Default is "NO"
-ADD_SOLVER=${ADD_SOLVER:-NO}
-
 # Yes, I know there is a Slackware integration file in the desktop-integration
 # directory, but it's worthless to us.  I mailed the maintainer of this
 # module with suggestions on how to make it more compliant with standard 
 # Slackware packaging, but I received no response.  Anyway, to sum up, we're 
 # not using that file...
 
-set -e # Require the script to exit if any command fails
+set -e
 
 # Ignore this - it's just to get the toplevel directory name of the 
 # extracted tarball archive
-SOURCEDIR=$(tar -tzf $CWD/OOo_${VERSION}_LinuxIntel_install_${OOLANG}.tar.gz | head -1 | tr -d \/)
+SOURCEDIR=$(tar tzf $CWD/OOo_${VERSION}_LinuxIntel_install_${OOLANG}.tar.gz | head -1 | tr -d \/)
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
-cd $TMP
-rm -rf $SOURCEDIR
-tar xvf $CWD/OOo_${VERSION}_LinuxIntel_install_${OOLANG}.tar.gz
-cd $SOURCEDIR/RPMS/
-mv desktop-integration/openoffice.org-freedesktop-menus-*.noarch.rpm .
+rm -rf $TMP/$SOURCEDIR
+tar xvf $CWD/OOo_${VERSION}_LinuxIntel_install_${OOLANG}.tar.gz -C $TMP
+cd $TMP/$SOURCEDIR/RPMS/
+mv desktop-integration/openoffice.org3.0-freedesktop-menus-3.0-9354.noarch.rpm .
+rm *onlineupdate*.rpm # We don't want this
 for FILE in *.rpm ; do rpm2cpio < $FILE | cpio -imdv ; done
 rm -rf desktop-integration *.rpm
 mv opt usr $PKG
 cd $PKG
 
-# Create symlinks in /usr/bin to actual binaries and edit the 
-# included wrapper scripts in /usr/bin to correct the paths
-( cd $PKG/usr/bin
-  for FILE in sbase scalc sdraw simpress smath soffice spadmin swriter unopkg ; do 
-    rm -f $FILE
-    ln -sf ../../opt/openoffice.org2.4/program/$FILE . ;
+# Create symlinks in /usr/bin to actual binaries
+cd $PKG/usr/bin
+  for FILE in \
+    sbase scalc sdraw simpress smath soffice spadmin swriter unopkg ; do 
+      rm -f $FILE
+      ln -sf /opt/openoffice.org3/program/$FILE . ;
   done 
-  for i in $(find . -type f) ; do sed -i 's/etc/opt/g' $i ; done
-)
-
-# Correct symlinks in /usr/share/applications
-( cd $PKG/usr/share/applications
-  for APP in base calc draw extension impress math printeradmin writer qstart ; do
-    rm -f openoffice.org2.4-$APP.desktop
-    ln -sf ../../../opt/openoffice.org2.4/share/xdg/$APP.desktop \
-      openoffice.org2.4-$APP.desktop ;
-  done
-)
+cd -
 
 # Fix Exec commands in the desktop files
 # See http://bugzilla.xfce.org/show_bug.cgi?id=2430 
-patch -p1 < $CWD/desktop-file-fix-2.4.0.diff
+patch -p1 < $CWD/desktop-file-fix-3.0.0.diff
 
-# Move docs to their correct locations
+# Install dictionary extensions for spellchecking
+UNOPKG_BIN=$PKG/opt/openoffice.org3/program/unopkg
+DICT_DIR=$PKG/opt/openoffice.org3/share/extension/install
+if [ -x "$UNOPKG_BIN" ]; then
+  UNOPKG_TMP=$TMP/$$$$$$
+  find $DICT_DIR -type f -name "dict-*.oxt" \
+    -exec $UNOPKG_BIN add --shared {} \
+    "-env:UserInstallation=file:///$UNOPKG_TMP" \;
+  rm -rf $UNOPKG_TMP 	# Clean up after ourselves
+fi
+
+# Move docs to their expected locations
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-for i in README README.html LICENSE LICENSE.html THIRDPARTYLICENSEREADME.html ; do
-  mv $PKG/opt/openoffice.org2.4/$i $PKG/usr/doc/$PRGNAM-$VERSION/$i ;
-done
+cd $PKG/opt/openoffice.org3
+  mv README* *LICENSE* readmes licenses $PKG/usr/doc/$PRGNAM-$VERSION
+cd -
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 # Disable Java support if desired (see above)
 if [ "$DISABLE_JAVA" = "YES" ]; then
-  chmod -x $PKG/opt/openoffice.org2.4/program/javaldx
-fi
-
-# Add optimization solver if desired (see above)
-if [ "$ADD_SOLVER" = "YES" -a -f "$CWD/scsolver.uno.zip" ]; then
-  ( cd $PKG/opt/openoffice.org2.4
-    program/unopkg add --shared $CWD/scsolver.uno.zip
-  )
+  chmod -x $PKG/opt/openoffice.org/ure/bin/javaldx
 fi
 
 mkdir -p $PKG/install
