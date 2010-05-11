@@ -1,0 +1,79 @@
+#!/bin/sh
+
+# Slackware build script for ion-3ds
+# Written by Vasilis Papavasileiou <el03020 at mail dot ntua dot gr>
+# Modified by the SlackBuilds.org project
+# (assumed to be in public domain per our submission policy)
+
+PRGNAM=ion-3ds
+VERSION=20070318
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP || exit 1
+rm -rf $PRGNAM-$VERSION
+tar -xzvf $CWD/$PRGNAM-$VERSION.tar.gz || exit 1
+cd $PRGNAM-$VERSION || exit 1
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+# correcting makefiles, so we can install cleanly with DESTDIR
+# solution borrowed from gentoo ion ebuild, thank you guys
+find . -name Makefile -exec sed -i -e \
+  's!\($(INSTALL\w*)\|rm -f\|ln -s\)\(.*\)\($(\w\+DIR)\)!\1\2$(DESTDIR)\3!g' \
+  {} \;
+sed -i -e \
+  's!\($(INSTALL\w*)\|rm -f\|ln -s\)\(.*\)\($(\w\+DIR)\)!\1\2$(DESTDIR)\3!g' \
+  build/rules.mk
+
+( cd build/ac;
+  # we will use autoconf to generate a configure script, we could
+  # alternatively edit the system.mk file
+  autoreconf || exit 1
+
+  CFLAGS="$SLKCFLAGS" \
+  ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc/X11 \
+    || exit 1
+) || exit 1
+
+make || exit 1
+make install DESTDIR=$PKG || exit 1
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+)
+
+mv $PKG/usr/share/man $PKG/usr
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+)
+
+mv $PKG/usr/share/doc $PKG/usr
+mv $PKG/usr/doc/ion3 $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Install an xinitrc file so that ion will show up in xwmconfig
+install -D -m 0755 $CWD/xinitrc.ion $PKG/etc/X11/xinit/xinitrc.ion
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
