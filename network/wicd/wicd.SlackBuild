@@ -20,11 +20,17 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# I should give a big thanks to Adam Blackburn and Dan O'Reilly (wicd devs)
+# for their outstanding work on this, not the least of which was their
+# cooperation in making it very Slackware-friendly.  Thanks, guys!
+
 PRGNAM=wicd
-VERSION=${VERSION:-1.4.2}
+VERSION=${VERSION:-1.5.4}
 ARCH=noarch
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+
+PMUTILS=${PMUTILS:-NO}
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
@@ -35,43 +41,42 @@ set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
-cd $PKG	# Yes, we'll do this all inside $PKG :)
+cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/${PRGNAM}_${VERSION}-src.tar.bz2
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
 chown -R root:root .
-find . -type f -exec chmod 0644 {} \;
-find . -type f -name "*.py" -exec chmod 0755 {} \;
 
-# Unapplied patches - use them at your own risk.
-# Thanks to nawcom for the ideas on this
-#patch -p1 < $CWD/dhcpcd_daemon.py.diff
-#patch -p1 < $CWD/dhcpcd_networking.py.diff
+python setup.py configure
+python setup.py install --root=$PKG
 
-# Move the init script to Slackware's place and name it accordingly
-# Also, let's not clobber it on upgrades
-mkdir -p etc/rc.d
-mv etc/init.d/wicd etc/rc.d/rc.wicd.new
-chmod 0755 etc/rc.d/rc.wicd.new
-rmdir etc/init.d
+# This sets dhcpcd as the default dhcp client in the Preferences dialog
+cat << EOF > $PKG/etc/wicd/manager-settings.conf.new
+[Settings]
+dhcp_client = 2
+EOF
 
-# Don't clobber the config file either
-mv etc/dbus-1/system.d/wicd.conf etc/dbus-1/system.d/wicd.conf.new
+# Don't clobber init script on upgrade
+mv $PKG/etc/rc.d/rc.wicd $PKG/etc/rc.d/rc.wicd.new
 
-# Give the menu entry desktop file a sane name (really doesn't matter though)
-mv usr/share/applications/hammer-00186ddbac.desktop \
-  usr/share/applications/wicd.desktop
+# Compress the man pages and add a couple of things to the package docs
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild 
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
 
-# We don't have pm-utils on Slackware, so this can go
-rm -rf etc/acpi
+# If pm-utils is installed, or the user wants support for it later, then
+# we'll install the hook; otherwise, this defaults to NO
+if ls /var/log/packages/pm-utils-* 1>/dev/null 2>/dev/null ; then
+  PMUTILS=YES
+fi
+if [ "$PMUTILS" = "YES" ]; then
+  mkdir -p $PKG/usr/lib/pm-utils/sleep.d
+  cp -a other/55-wicd $PKG/usr/lib/pm-utils/sleep.d
+fi
 
-mkdir -p usr/doc/$PRGNAM-$VERSION
-cat $CWD/README > usr/doc/$PRGNAM-$VERSION/README
-# The source code does not include a copy of the the gpl-2.0
-# license so lets add it for them.
-zcat $CWD/gpl-2.0.txt.gz > usr/doc/$PRGNAM-$VERSION/LICENSE
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
-mkdir -p install
-cat $CWD/slack-desc > install/slack-desc
-cat $CWD/doinst.sh > install/doinst.sh
-
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+cd $PKG
+/sbin/makepkg -c n -l y $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
