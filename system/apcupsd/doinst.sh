@@ -1,3 +1,5 @@
+#!/bin/sh
+
 config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
@@ -11,25 +13,6 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-for i in \
-  apccontrol.new \
-  apcupsd.conf.new \
-  apcupsd.css.new \
-  changeme.new \
-  commfailure.new \
-  commok.new \
-  hosts.conf.new \
-  multimon.cgi.new \
-  multimon.conf.new \
-  offbattery.new \
-  onbattery.new \
-  upsfstats.cgi.new \
-  upsimage.cgi.new \
-  upsstats.cgi.new; 
-do \
-  config etc/apcupsd/$i; 
-done
-
 # Keep same perms on rc.apcupsd.new:
 if [ -e etc/rc.d/rc.apcupsd ]; then
   cp -a etc/rc.d/rc.apcupsd etc/rc.d/rc.apcupsd.new.incoming
@@ -38,4 +21,14 @@ if [ -e etc/rc.d/rc.apcupsd ]; then
 fi
 
 config etc/rc.d/rc.apcupsd.new
+config etc/apcupsd/apccontrol.new
+config etc/apcupsd/apcupsd.conf.new
+config etc/apcupsd/apcupsd.css.new
+config etc/apcupsd/changeme.new
+config etc/apcupsd/commfailure.new
+config etc/apcupsd/commok.new
+config etc/apcupsd/hosts.conf.new
+config etc/apcupsd/multimon.conf.new
+config etc/apcupsd/offbattery.new
+config etc/apcupsd/onbattery.new
 
