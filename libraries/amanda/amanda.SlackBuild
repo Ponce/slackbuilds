@@ -1,0 +1,104 @@
+#!/bin/sh
+
+# Slackware build script for amanda
+# Written by Christopher Walker <kris240376@gmail.com>
+
+PRGNAM=amanda
+VERSION=${VERSION:-2.5.2p1}
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAB:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+AMANDAUSR=${AMANDAUSR:-amanda}
+AMANDAGRP=${AMANDAGRP:-amanda}
+AMANDAUID=${AMANDAUID:-211}
+AMANDAGID=${AMANDAGID:-211}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+fi
+
+do_exit() {
+  echo ; echo "You must have the ${AMANDAUSR} user and ${AMANDAGRP} group in"
+  echo "order to build amanda.  Sample lines to do so are below:"
+  echo "# groupadd -g ${AMANDAGID} ${AMANDAGRP}"
+  echo "# useradd -u ${AMANDAUID} -d /var/lib/amanda -s /bin/false -g ${AMANDAGRP} ${AMANDAUSR}"
+  echo "Exiting..." ; echo ; exit 1
+}
+
+# Check for Amanada user and group availability
+if ! grep -q ^${AMANDAGRP}: /etc/group 2>/dev/null ; then
+  do_exit ; 
+elif ! grep -q ^${AMANDAUSR}: /etc/passwd 2>/dev/null ; then
+  do_exit ; 
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz || exit 1
+cd $PRGNAM-$VERSION
+chown -R root:root .
+chmod -R a-s,u+w,go+r-w .
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --mandir=/usr/man \
+  --sysconfdir=/etc \
+  --localstatedir=/var/lib \
+  --with-user=$AMANDAUSR \
+  --with-group=$AMANDAGRP\
+  --with-owner=root \
+  --with-bsdudp-security \
+  --with-ssh-security \
+  --with-bsdtcp-security \
+  --disable-static
+
+make || exit 1
+make install DESTDIR=$PKG || exit 1
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+)
+
+chown -R root:root $PKG/usr/man
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS COPYRIGHT COPYRIGHT-APACHE COPYRIGHT-REGEX ChangeLog INSTALL \
+  NEWS README ReleaseNotes $CWD/README-SLACKWARE $PKG/usr/doc/$PRGNAM-$VERSION
+# Move documentation to Slackware'esque location
+mv $PKG/usr/share/amanda/* $PKG/usr/doc/$PRGNAM-$VERSION
+rm -rf $PKG/usr/share
+chown -R root:root $PKG/usr/doc/$PRGNAM-$VERSION
+chmod 644 $PKG/usr/doc/$PRGNAM-$VERSION/*
+
+mkdir -p $PKG/etc/$PRGNAM
+for i in 3hole.ps 8.5x11.ps DIN-A4.ps DLT.ps EXB-8500.ps \
+  HP-DAT.ps amanda-client.conf amanda.conf chg-mcutil.conf \
+  chg-multi.conf chg-scsi.conf disklist ; do
+    cp -a example/$i $PKG/etc/$PRGNAM/$i.new;
+done
+
+chown -R root.root $PKG/etc/$PRGNAM
+chmod 644 $PKG/etc/$PRGNAM/*
+
+mkdir -p $PKG/var/lib/amanda
+chown -R $AMANDAUSR:$AMANDAGRP $PKG/var/lib/amanda
+
+mkdir $PKG/install
+cp $CWD/doinst.sh $CWD/slack-desc $PKG/install
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
