@@ -1,0 +1,174 @@
+#!/bin/sh
+#
+# cdemu-daemon: CDEmu daemon
+#
+
+### BEGIN INIT INFO
+# Provides:          cdemu-daemon
+# Short-Description: Start the CDEmu daemon
+# Description:       System mode startup script for
+#                    the CDEmu daemon.
+### END INIT INFO
+
+# This script is based on the ubuntu and fedora init script.
+# Modified by Nille Åkerström
+
+NAME="cdemud"
+DESC="cdemu-daemon"
+LOCK="/var/lock/${DESC}.lock"
+PID=$(/sbin/pidof -o %PPID ${NAME})
+
+# Get the configuration information from /etc/rc.d/rc.cdemud.conf:
+. /etc/rc.d/rc.cdemud.conf
+
+start() 
+{
+    # Check if already started
+    if [ -n "${PID}" ] ;then
+	echo "${DESC} is already running at pid: ${PID}"
+	return ${RETVAL}
+	exit
+    fi
+
+    # Load module
+    if [ -n "${MODULE}" ]; then
+        echo -n "Inserting ${MODULE} kernel module"
+        modprobe "${MODULE}" >/dev/null 2>&1
+        RETVAL=$?
+	if [ ${RETVAL} -eq 0 ]; then
+            echo -e "\t\t\t\t\t[  OK  ]\r"
+        else
+            echo -e "\t\t\t\t\t[FAILED]\r"
+        fi
+    fi
+    
+    # Wait until control device is created...
+    if [ -n "${CTL_DEVICE}" ]; then
+        echo -n "Waiting for ${CTL_DEVICE} to be created"
+
+        CTL_WAIT=30 # Wait at most 30 seconds
+        RETVAL=1
+        until [ ${CTL_WAIT} -eq 0 ]; do
+            if [ -c "${CTL_DEVICE}" ]; then
+                CTL_WAIT=0
+                RETVAL=0
+            else
+                CTL_WAIT=$((CTL_WAIT-1))
+                sleep 1
+            fi
+        done
+
+	if [ ${RETVAL} -eq 0 ]; then
+            echo -e "\t\t\t\t[  OK  ]\r"
+        else
+            echo -e "\t\t\t\t[FAILED]\r"
+        fi
+    fi
+
+
+    # Daemon arguments
+    DAEMON_ARGS="--daemonize"
+    
+    if [ -n "${DEVICES}" ]; then
+        DAEMON_ARGS="${DAEMON_ARGS} --num-devices=${DEVICES}"
+    fi
+    if [ -n "${CTL_DEVICE}" ]; then
+        DAEMON_ARGS="${DAEMON_ARGS} --ctl-device=${CTL_DEVICE}"
+    fi
+    if [ -n "${AUDIO_DRIVER}" ]; then
+        DAEMON_ARGS="${DAEMON_ARGS} --audio-driver=${AUDIO_DRIVER}"
+    fi
+    if [ -n "${BUS}" ]; then
+        DAEMON_ARGS="${DAEMON_ARGS} --bus=${BUS}"
+    fi
+
+    # Start daemon
+    echo -n "Starting ${DESC}"
+    $NAME ${DAEMON_ARGS} >/dev/null 2>&1
+    RETVAL=$?
+    if [ ${RETVAL} -eq 0 ] && touch ${LOCK} ; then
+        echo -e "\t\t\t\t\t\t[  OK  ]\r"
+        else
+        echo -e "\t\t\t\t\t\t[FAILED]\r"
+    fi
+    return ${RETVAL}
+}
+
+stop() 
+{
+        # Stopping daemon
+        echo -n "Stopping ${DESC}"
+	if [ -n "${PID}" ] ;then
+            $NAME -k >/dev/null 2>&1
+            RETVAL=$?
+            if [ ${RETVAL} -eq 0 ]; then
+                echo -e "\t\t\t\t\t\t[  OK  ]\r"
+                else
+                echo -e "\t\t\t\t\t\t[FAILED]\r"
+            fi
+	 else 
+            echo -e "\t\t\t\tWarning: ${DESC} isn't running"
+	    RETVAL=0
+	 fi
+					    
+
+          # Unload module
+          echo -n "Removing ${MODULE} kernel module"
+          LOADED=`lsmod | grep -o -e ^${MODULE} -`
+          if [ "${LOADED}" = "${MODULE}" ]; then
+              modprobe -r "${MODULE}" >/dev/null 2>&1
+              RETVAL=$?
+              if [ ${RETVAL} -eq 0 ]; then
+                  echo -e "\t\t\t\t\t[  OK  ]\r"
+                  else
+                  echo -e "\t\t\t\t\t[FAILED]\r"
+              fi
+          return ${RETVAL}
+          if [ $RETVAL -eq 0 ]; then
+	      rm -f $LOCK
+          fi
+          else
+              echo -e "\t\t\tWarning: ${MODULE} isn't loaded"
+              RETVAL=0
+          fi
+          return ${RETVAL}
+}
+
+restart() {
+          stop
+          RETVAL=$?
+          if [ ${RETVAL} -eq 0 ]; then
+              PID=$(/sbin/pidof -o %PPID ${NAME})
+              start
+              RETVAL=$?
+              if [ ${RETVAL} -ne 0 ]; then
+		  echo "Couldn't start ${DESC} retry in 3sec."
+		  sleep 3
+		  start
+		  RETVAL=$?
+              fi
+          fi
+          return ${RETVAL}
+}
+
+# See how we were called.
+case "$1" in
+    "start")
+        start
+        ;;
+    "stop")
+        stop
+        ;;
+    "restart")
+        restart
+        ;;
+    "force-reload" | "reload")
+        echo "Warning: Not implemented"
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|force-reload|reload}"
+        ;;
+esac
+
+exit ${RETVAL}
+
