@@ -1,0 +1,103 @@
+#!/bin/sh
+
+# Slackware build script for hdf5
+
+# Copyright 2007  LukenShiro <lukenshiro@ngi.it>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Thanks to Fedora Core 7 hdf5 package's maintainer for a hack taken from his gcc4
+# patch to allow neat compilation using gcc4.x fortran.
+
+# Exit on most errors
+set -e
+
+PRGNAM=hdf5
+VERSION=1.6.6
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+DOCFILES="COPYING MANIFEST README.txt release_docs/RELEASE.txt release_docs/HISTORY.txt"
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvzf $CWD/$PRGNAM-$VERSION.tar.gz || exit 1
+cd $PRGNAM-$VERSION
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+# F9X=gfortran is needed to compile fortran interface using gcc-gfortran 4.x;
+# autodetection and g95 seem not to work
+# CXXFLAGS is not used, use CPPFLAGS instead
+CFLAGS="$SLKCFLAGS" \
+CPPFLAGS="$SLKCFLAGS" \
+F9X=gfortran \
+./configure \
+  --prefix=/usr \
+  --with-pthread \
+  --enable-threadsafe \
+  --enable-cxx \
+  --enable-fortran \
+  --with-ssl \
+  --with-zlib \
+  --without-szlib
+
+make || exit 1
+make prefix=$PKG/usr install || exit 1	# No DESTDIR support
+
+# --docdir configure flag seems to be completely ignored; move docs to usual directory
+mv $PKG/usr/doc/$PRGNAM $PKG/usr/doc/$PRGNAM-$VERSION
+
+# html documentation files are not installed in 'make install' phase
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/html/
+cp -a doc/html $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a $DOCFILES $PKG/usr/doc/$PRGNAM-$VERSION/
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+find $PKG/usr/doc -type f -exec chmod 0644 {} \;
+
+# installation seems to copy a lot of useless files and empty directories
+( find $PKG/usr/doc/$PRGNAM-$VERSION/ -name Makefile\* -exec rm -f {} \;
+  find $PKG/usr/doc/$PRGNAM-$VERSION/ -name Dependencies -exec rm -f {} \;
+  rm -f $PKG/usr/lib/*.settings
+  rm -rf $PKG/usr/doc/$PRGNAM-$VERSION/html/{cpplus,PSandPDF}
+)
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+)
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
