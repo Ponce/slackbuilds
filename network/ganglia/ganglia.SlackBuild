@@ -1,0 +1,92 @@
+#!/bin/sh
+
+# Slackware build script for ganglia
+# Written by Cherife Li <cherife@dotimes.com>
+# Modified by Robby Workman <rworkman@slackbuilds.org>
+
+PRGNAM=ganglia
+VERSION=3.0.7
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+WWWPATH=${WWWPATH:-/var/gweb}
+DOCUMENTATION="AUTHORS COPYING ChangeLog INSTALL NEWS ganglia.html README"
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT 
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+if [ -n "$OPT" ]; then
+   if [ "$OPT" = 'gmetad' ]; then
+      OPT='--with-gmetad'
+   else
+      unset -v OPT
+   fi
+fi
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --sysconfdir=/etc \
+  --enable-gexeca \
+  $OPT
+
+make 
+make install DESTDIR=$PKG
+
+mkdir -p $PKG/etc/rc.d
+cat gmond/gmond.init > $PKG/etc/rc.d/rc.gmond.new
+./gmond/gmond -t > $PKG/etc/gmond.conf.new
+
+if [ -n "$OPT" ]; then
+  cat gmetad/gmetad.init > $PKG/etc/rc.d/rc.gmetad.new
+  cat gmetad/gmetad.conf > $PKG/etc/gmetad.conf.new
+fi
+
+mkdir -p $PKG/$WWWPATH
+mv web/* $PKG/$WWWPATH
+( cd $PKG/$WWWPATH ; rm -f AUTHORS COPYING ChangeLog Makefile.am version.php.in )
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+)
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a $DOCUMENTATION $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/usr/man/man1
+cp -a mans/*.1 $PKG/usr/man/man1
+
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+)
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
