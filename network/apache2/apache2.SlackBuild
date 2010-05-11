@@ -1,0 +1,176 @@
+#!/bin/bash
+
+## Slackware build for Apache 2.2
+## 
+## Version: 2.1.0
+## Date: 2007-02-26
+## Copyright (c) 2007 Adis Nezirović <adis _at_ linux.org.ba>
+## Licensed under GNU GPL v2
+
+# Modified by the SlackBuilds.org team  <http://www.slackbuilds.org>
+
+# Exit on errors
+set -e
+
+PRGNAM=apache
+VERSION=2.2.4
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-2}
+TAG=${TAG:-_SBo}
+CWD=$(pwd)
+TMP=/tmp/SBo
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+ORIG_PRGNAM=httpd
+
+if [ "$ARCH" = "i486" ]; then
+	SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+	SLKCFLAGS="-O2 -march=i686 -fomit-frame-pointer -pipe"
+elif [ "$ARCH" = "x86_64" ]; then
+	SLKCFLAGS="-O2"
+fi
+
+## Apache user & group. *MUST* exist before package creation
+# See http://slackbuilds.org/uid_gid.txt for current recomendations.
+# If you change this, please update httpd.conf.diff in patches directory.
+HTTPD_USER=apache2
+HTTPD_GROUP=apache2
+
+if ! grep ^$HTTPD_GROUP: /etc/group > /dev/null 2>&1; then
+	echo "$0: Error: HTTP group ($HTTPD_GROUP) doesn't exist."
+	echo "$0: Try creating one with: groupadd -g 207 $HTTPD_GROUP"
+	exit 1
+fi
+
+if ! grep ^$HTTPD_USER: /etc/passwd > /dev/null 2>&1; then
+	echo "$0: Error: HTTP user ($HTTPD_USER) doesn't exist."
+	echo "$0: Try creating one with: useradd -u 207 -g $HTTPD_GROUP -d /var/www $HTTPD_USER"
+	exit 1
+fi
+
+# MPM_FLAVOR lets the user enable their choice of apache2 multiprocessing module:
+# 'worker' is multithreaded module
+# 'prefork' is "old style" process based module
+#
+# If you want or *must* use mod_php, select "prefork", but consider
+# security issues (all your php scripts run as apache user)
+# The opposite aproach is to use SuEXEC + mod_fcgid + php-cgi, with "worker" MPM
+#
+# We've chosen prefork as the default, because it will work with mod_php.
+# worker should not be used for mod_php as many php extensions are not
+# thread safe.  To select worker, just run this script like so:
+#
+#  MPM_FLAVOR=worker; ./apache2.SlackBuild
+MPM_FLAVOR=${MPM_FLAVOR:-"prefork"}
+
+# Make sure we start from clean state
+rm -rf $TMP/$PRGNAM-$VERSION $PKG
+
+# Output directories
+mkdir -p $TMP $PKG $OUTPUT $CWD/patches
+mkdir -p $PKG/{install,etc/rc.d,etc/apache2,srv/www/vhosts,etc/logrotate.d}
+
+cd $TMP
+tar xjvf $CWD/$ORIG_PRGNAM-$VERSION.tar.bz2
+mv $TMP/$ORIG_PRGNAM-$VERSION $TMP/$PRGNAM-$VERSION 
+cd $TMP/$PRGNAM-$VERSION
+
+# patch config.layout to comply with FHS (except we use libexec dir)
+patch --verbose -p1 < $CWD/patches/config.layout.patch
+
+## Fix permissions and ownership
+chmod -R a-s,u+w,go+r-w .
+chown -R root:root .
+
+## To enable SuEXEC support pass
+## following options to configure:
+#
+#	--enable-suexec \
+#	--with-suexec-bin=/usr/sbin/suexec \
+#	--with-suexec-docroot=/var/www \
+#	--with-suexec-caller=apache2 \
+#	--with-suexec-uidmin=1000 \
+#	--with-suexec-gidmin=1000 \
+#
+## Defaults for suexec-uidmin suexec-gidmin are 100/100
+## but I don't like system accounts running web scripts
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+	--enable-layout=Slackware-FHS \
+	--with-mpm=$MPM_FLAVOR \
+	--with-apr=/usr \
+	--with-apr-util=/usr \
+	--enable-so \
+	--enable-modules=most \
+	--enable-mods-shared=most \
+	--enable-cgi \
+	--enable-ssl \
+	--enable-rewrite \
+	--enable-vhost-alias \
+	--enable-cache \
+	--enable-file-cache \
+	--enable-disk-cache \
+	--enable-mem-cache \
+	--enable-proxy \
+	--enable-proxy-http \
+	--enable-proxy-ftp \
+	--enable-proxy-balancer \
+	--disable-speling \
+	--enable-dav \
+	--enable-ldap \
+	|| exit 1
+
+make || exit 1
+make DESTDIR=$PKG install || exit 1
+
+## Tweak default apache configuration
+cd $PKG/etc/apache2
+patch --verbose -p1 < $CWD/patches/httpd.conf.diff
+patch --verbose -p1 < $CWD/patches/httpd_extra.diff
+
+chmod 700 $PKG/var/log/apache2
+
+## strip 
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+)
+
+## gzip man pages
+gzip -9 $PKG/usr/man/man?/*
+
+## copy startup script
+cp $CWD/rc.httpd $PKG/etc/rc.d/rc.httpd.new
+
+## copy logrotate script
+cp $CWD/logrotate.apache $PKG/etc/logrotate.d/apache
+
+## add description file and install script
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+## add documentation
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/
+cat $CWD/apache2.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/apache2.SlackBuild
+rm -fr $PKG/opt/apache2/share/manual
+cp -a $TMP/$PRGNAM-$VERSION/{ABOUT_APACHE,CHANGES,INSTALL,LAYOUT,LICENSE,NOTICE,README,ROADMAP,VERSIONING,docs} \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+
+## We don't want to overwrite config files
+cd $PKG/etc/apache2
+mv httpd.conf httpd.conf.new
+
+for conf_file in extra/*; do
+	mv $conf_file "$conf_file.new";
+done
+
+# Don't need this laying around.
+rm $PKG/etc/apache2/httpd.conf~
+
+# and finally, make the package
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
