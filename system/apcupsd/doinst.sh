@@ -1,10 +1,10 @@
 config() {
   NEW="$1"
-  OLD="`dirname $NEW`/`basename $NEW .new`"
+  OLD="$(dirname $NEW)/$(basename $NEW .new)"
   # If there's no config file by that name, mv it over:
   if [ ! -r $OLD ]; then
     mv $NEW $OLD
-  elif [ "`cat $OLD | md5sum`" = "`cat $NEW | md5sum`" ]; then
+  elif [ "$(cat $OLD | md5sum)" = "$(cat $NEW | md5sum)" ]; then
     # toss the redundant copy
     rm $NEW
   fi
@@ -29,6 +29,13 @@ for i in \
 do \
   config etc/apcupsd/$i; 
 done
+
+# Keep same perms on rc.apcupsd.new:
+if [ -e etc/rc.d/rc.apcupsd ]; then
+  cp -a etc/rc.d/rc.apcupsd etc/rc.d/rc.apcupsd.new.incoming
+  cat etc/rc.d/rc.apcupsd.new > etc/rc.d/rc.apcupsd.new.incoming
+  mv etc/rc.d/rc.apcupsd.new.incoming etc/rc.d/rc.apcupsd.new
+fi
 
 config etc/rc.d/rc.apcupsd.new
 
