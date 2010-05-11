@@ -17,4 +17,8 @@ if [ -e etc/rc.d/rc.dropbear ]; then
   mv etc/rc.d/rc.dropbear.new.incoming etc/rc.d/rc.dropbear.new
 fi
 
+if [ -e usr/bin/scp ]; then
+  mv usr/bin/scp usr/bin/scp.openssh
+fi
+
 config etc/rc.d/rc.dropbear.new
