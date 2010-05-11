@@ -1,0 +1,83 @@
+#!/bin/sh
+# Start/stop/restart/reload the Squid Internet Object Cache (squid)
+# To make Squid start automatically at boot, make this
+# file executable:  chmod 755 /etc/rc.d/rc.Squid
+#
+# Written for Slackware Linux by Erik Jan Tromp
+# Modified by David Somero <xgizzmo@slackbuilds.org>
+
+SQUIDCFG=/etc/squid/squid.conf
+SQUIDCMD=/usr/sbin/squid
+
+if [ ! -r $SQUIDCFG ]; then
+  echo "Please set the correct path to $SQUIDCFG"
+  exit 1
+fi
+
+if [ ! -x $SQUIDCMD ]; then
+  echo "$SQUIDCMD not found"
+  exit 1
+fi
+
+squid_start() {
+  # Create cache directory hierarchy if needed
+  ALL_DIRS=$(awk '/^cache_dir/ {print $3}' $SQUIDCFG)
+  [ -z "$ALL_DIRS" ] && ALL_DIRS=/var/cache/squid
+
+  for CACHE_DIR in $ALL_DIRS ; do
+    if [ ! -d $CACHE_DIR/00 ] ; then
+      echo "Creating swap directories:  $SQUIDCMD -z"
+      $SQUIDCMD -z 2> /dev/null
+      break
+    fi
+  done
+
+  echo "Starting Squid:  $SQUIDCMD -DF"
+  $SQUIDCMD -DF
+}
+
+squid_stop() {
+  COUNTDOWN=$(awk '/^shutdown_lifetime/ {print $2}' $SQUIDCFG)
+  [ -z "$COUNTDOWN" ] && COUNTDOWN=30
+
+  echo -n "Shutting down Squid in $COUNTDOWN seconds:  "
+  $SQUIDCMD -k shutdown 2> /dev/null
+  while $SQUIDCMD -k check 2> /dev/null ; do
+    sleep 1
+    echo -n .
+    COUNTDOWN=$[ $COUNTDOWN - 1 ]
+    if [ $COUNTDOWN -le 0 ] ; then
+      $SQUIDCMD -k interrupt 2> /dev/null
+      sleep 1
+      break
+    fi
+  done
+  echo
+}
+
+squid_restart() {
+  squid_stop
+  sleep 1
+  squid_start
+}
+
+squid_reload() {
+  $SQUIDCMD -k reconfigure 2> /dev/null
+}
+
+case "$1" in
+'start')
+  squid_start
+  ;;
+'stop')
+  squid_stop
+  ;;
+'restart')
+  squid_restart
+  ;;
+'reload')
+  squid_reload
+  ;;
+*)
+  echo "usage: $0 start|stop|restart|reload"
+esac
