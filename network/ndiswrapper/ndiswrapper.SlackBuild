@@ -22,56 +22,62 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# Modified by the SlackBuilds.org project
-
-set -e
+# Maintained by Robby Workman <rworkman@slackbuilds.org> now
 
 PRGNAM=ndiswrapper
-VERSION=1.47
-KERNEL=$(uname -r | tr '-' '_') # This does not seem configurable
+VERSION=${VERSION:-1.53}
 ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
+# This *should* work, but if it doesn't, let me know.  I've walked through
+# the relevant Makefiles and if everything does what I think it does, you
+# should be able to build for something other than the running kernel.  
+# Again, let me know if I'm wrong.  --rworkman
+KERNEL=${KERNEL:-$(uname -r)}
+
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
 fi
+
+set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar -zxvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-chmod -R a-s,u+w,go+r-w .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
-make
-make install DESTDIR=$PKG
+make KVERS=$KERNEL
+make install KVERS=$KERNEL DESTDIR=$PKG
 
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-( cd $PKG
-  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
-  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
-)
-
-
-if [ -d $PKG/usr/man ]; then
-( cd $PKG/usr/man
+( cd $PKG/usr/man || exit 1
   find . -type f -exec gzip -9 {} \;
   for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
 )
-fi
 
-# Cleaning up a few things
+# Clean up a few things
 rm $PKG/lib/modules/*/modules.*
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
@@ -84,4 +90,4 @@ cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n \
-  $OUTPUT/$PRGNAM-${VERSION}_$KERNEL-$ARCH-$BUILD$TAG.tgz
+  $OUTPUT/$PRGNAM-${VERSION}_$(echo $KERNEL | tr - _)-$ARCH-$BUILD$TAG.tgz
