@@ -14,3 +14,4 @@ config() {
 
 config etc/bitlbee/bitlbee.conf.new
 config etc/bitlbee/motd.txt.new
+
