@@ -1,0 +1,105 @@
+#!/bin/sh
+
+# Slackware build script for Intel 3945 Wireless Card driver
+
+# Copyright 2006,2007 by Yalla-One <yallaone@gmail.com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Modified by the SlackBuilds.org Project
+
+PRGNAM=ipw3945
+VERSION=1.2.0
+UCODEVERSION=1.14.2
+BINARYVERSION=1.7.22
+
+# You should not need changing anything below here...
+
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+CWD=`pwd`
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+UCODENAM=${PRGNAM}-ucode-${UCODEVERSION}
+BINARYNAM=${PRGNAM}d-${BINARYVERSION}
+
+UCODEDIR=$(sed -ne "s:^FIRMWARE_DIR=\([^, ]*\).*:\1:p" \
+	/etc/hotplug/firmware.agent)
+KVER=${KVER:-`uname -r`}
+KMDIR=/lib/modules/${KVER}/kernel/drivers/net/wireless/
+DOCDIR=${PKG}/usr/doc/${PRGNAM}-${VERSION}
+
+# Prepare and unpack the archives
+rm -rf $PKG 
+mkdir -p $TMP $PKG
+cd $TMP
+tar -xzvf $CWD/${PRGNAM}-${VERSION}.tgz || exit 1
+tar -xzvf $CWD/${UCODENAM}.tgz || exit 1
+tar -xzvf $CWD/${BINARYNAM}.tgz || exit 1
+
+# Create directory structure and extract files from archives
+mkdir -p ${PKG}/etc/modprobe.d ${PKG}/sbin ${PKG}${UCODEDIR} ${PKG}${KMDIR} ${DOCDIR}
+
+#Start building
+cd ${TMP}/${PRGNAM}-${VERSION}
+make || exit 1
+
+# Install files
+cp ${TMP}/${PRGNAM}-${VERSION}/${PRGNAM}.ko ${PKG}${KMDIR}
+cp ${TMP}/${UCODENAM}/${PRGNAM}.ucode ${PKG}${UCODEDIR}
+cp ${TMP}/${BINARYNAM}/x86/${PRGNAM}d ${PKG}/sbin
+
+# Install the auto-loader of the module with correct parameters
+cat <<EOT > $PKG/etc/modprobe.d/ipw3945
+# Module parameter initialization for ipw3945.
+# The loop is required for the binary daemon to load in case
+# /var is located on a separate partition, which is mounted
+# after the modules are probed.
+install ipw3945 /sbin/modprobe --ignore-install ipw3945 && \\
+{ \\
+while [ ! -d /var/run ]; do \\
+  sleep 1; \\
+done; \\
+until [ -e /var/run/ipw3945d.pid ]; do \\
+  /sbin/ipw3945d --quiet; \\
+  sleep 1; \\
+done; \\
+} &
+remove ipw3945 /sbin/ipw3945d --kill ; /sbin/modprobe -r --ignore-remove ipw3945
+EOT
+
+# Copy documents
+cd $TMP/${PRGNAM}-${VERSION}
+cp CHANGES LICENSE README* INSTALL ISSUES $DOCDIR/
+cd $TMP/${UCODENAM}
+cp LICENSE.* README.* $DOCDIR/
+cd $TMP/${BINARYNAM}
+cp LICENSE.* README.* $DOCDIR/
+
+# Add slack-desc and SlackBuild
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/${PRGNAM}.SlackBuild > ${DOCDIR}/${PRGNAM}.SlackBuild
+
+# Build the package...
+cd ${PKG}
+/sbin/makepkg -l y -c n $OUTPUT/${PRGNAM}-${VERSION}_${KVER}-$ARCH-$BUILD$TAG.tgz
+
