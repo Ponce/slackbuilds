@@ -1,0 +1,148 @@
+#!/bin/bash
+#
+# Slackware build script of openoffice.org (binary repackaging)
+
+# Copyright 2006-2007  Robby Workman  (http://rlworkman.net) 
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Thanks to Sandman1, Larhzu, and MacIver for early assistance.
+# Thanks to Fred Emmott (http://slamd64.com) for some better code in a few
+# places and ideas to include the Optimization Solver and disable javaldx.
+# Thanks to eroc for the idea to include support for other languages.
+
+PRGNAM=openoffice.org
+VERSION=2.2.1
+ARCH=i586	# The binaries are built for i586 - leave this alone
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# This should allow you to either pass a different value of OOLANG when you
+# run the script (OOLANG=pt-BR ./openoffice.org.SlackBuild for example) or
+# change it in this script.  Note that you will need to have the correct
+# tarball in the build directory for this to work...
+# TODO: Find where someone can obtain these localized tarballs...
+OOLANG=${OOLANG:-en-US}
+PKG_LANG=$(echo $OOLANG | sed s/-/_/)	# Leave this alone
+
+# If you want to disable java support by removing executable permissions
+# form OOo's java loader (this will not affect other apps), set this
+# variable to "YES"   Default is "NO"
+# According to Fred Emmott, this is *highly* desirable on 64 bit systems
+DISABLE_JAVA=${DISABLE_JAVA:-NO}
+
+# If you want to include the new experimental Optimization Solver, 
+# download "scsolver.uno.zip" from the following location:
+# http://wiki.services.openoffice.org/wiki/Optimization_Solver
+# and place it in the same directory as the SlackBuild script ($CWD)
+# Set the following variable to "YES"   Default is "NO"
+ADD_SOLVER=${ADD_SOLVER:-NO}
+
+# Yes, I know there is a slackware integration file in the desktop-integration
+# directory, but it's mostly worthless to us.  I mailed the maintainer of this
+# module with suggestions on how to make it more compliant with standard 
+# Slackware packaging, but I received no response.  Anyway, to sum up, we're 
+# not using that file...
+
+# Require the script to exit if any command fails
+set -e
+
+# Ignore this - it's just to get the toplevel directory name of the 
+# extracted tarball archive
+SOURCEDIR=$(tar -tzf $CWD/OOo_${VERSION}_LinuxIntel_install_${OOLANG}.tar.gz | head -1 | tr -d \/)
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SOURCEDIR
+tar -xzf $CWD/OOo_${VERSION}_LinuxIntel_install_${OOLANG}.tar.gz || exit 1
+cd $SOURCEDIR/RPMS/
+mv desktop-integration/openoffice.org-freedesktop-menus-*.noarch.rpm .
+rm -rf desktop-integration
+for FILE in *.rpm ; do rpm2cpio < $FILE | cpio -imdv ; done
+mv opt usr $PKG
+cd $PKG
+
+# Create symlinks in /usr/bin to actual binaries and edit the 
+# included wrapper scripts /usr/bin to correct the paths
+( cd $PKG/usr/bin
+  rm -f unopkg_gui	# Broken upstream?
+  for FILE in sbase scalc sdraw simpress smath soffice spadmin swriter unopkg ; do 
+    rm -f $FILE
+    ln -sf ../../opt/openoffice.org2.2/program/$FILE . ;
+  done 
+  for i in $(find . -type f) ; do sed -i 's/etc/opt/g' $i ; done
+)
+
+# Correct symlinks in /usr/share/applications
+( cd $PKG/usr/share/applications
+  for APP in base calc draw extension impress math printeradmin writer qstart ; do
+    rm -f openoffice.org2.2-$APP.desktop
+    ln -sf ../../../opt/openoffice.org2.2/share/xdg/$APP.desktop \
+      openoffice.org2.2-$APP.desktop ;
+  done
+)
+
+# Correct icon paths and Exec commands in the desktop files
+# See http://bugzilla.xfce.org/show_bug.cgi?id=2430 for why we want to
+# change the Exec lines 
+cat $CWD/desktop-file-fix-2.2.diff | patch -p1
+
+# Add /usr/share/pixmaps directory and link icons to it
+mkdir -p $PKG/usr/share/pixmaps
+( cd $PKG/usr/share/pixmaps
+  for APP in base calc draw extension impress math printeradmin writer ; do
+    ln -sf ../../../usr/share/icons/hicolor/48x48/apps/openofficeorg22-$APP.png . ;
+  done
+)
+
+# Move docs to their correct locations
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+for i in README README.html LICENSE LICENSE.html THIRDPARTYLICENSEREADME.html ; do
+  mv $PKG/opt/openoffice.org2.2/$i $PKG/usr/doc/$PRGNAM-$VERSION/$i ;
+done
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Fix the permissions on a few icons that are executable
+find $PKG/usr/share/icons -name "*.png" -exec chmod 0644 {} \;
+
+# Disable Java support if desired (see above)
+if [ "$DISABLE_JAVA" = "YES" ]; then
+  chmod -x $PKG/opt/openoffice.org2.2/program/javaldx
+fi
+
+# Add optimization solver if desired (see above)
+if [ "$ADD_SOLVER" = "YES" -a -f "$CWD/scsolver.uno.zip" ]; then
+  ( cd $PKG/opt/openoffice.org2.2
+    program/unopkg add --shared $CWD/scsolver.uno.zip
+  )
+fi
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+# Fix ownership and permissions and make the package
+#chown -R root:root .
+find . -type d -exec chmod 755 {} \;
+chmod -R u+rw,go+r-w,a-s .
+/sbin/makepkg -p -c n -l y $OUTPUT/$PRGNAM-${VERSION}_${PKG_LANG}-$ARCH-$BUILD$TAG.tgz
