@@ -1,0 +1,134 @@
+#!/bin/sh
+
+# Slackware build script for lirc
+
+# Copyright 2007  David Somero <dsomero@hotmail.com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Modified by Robby Workman of the SlackBuilds.org project
+# No additional license terms and no copyright claim :-)
+
+PRGNAM=lirc
+VERSION=0.8.2
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-2}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+PKG_VERSION=${PKG_VERSION:-$VERSION} # Only changes if BLASTER=yes
+
+# Any of these can be changed by passing the desired value on command line
+# when executing the build script.  For example:
+# BLASTER=yes ./lirc.SlackBuild
+# Note that IRQ and PORT are only important if BLASTER is "yes"
+BLASTER=${BLASTER:-no}
+IRQ=${IRQ:-4}
+PORT=${PORT:-0x3f8}
+KERNEL=${KERNEL:-$(uname -r)}
+
+if [ "${ARCH}" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+elif [ "${ARCH}" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP 
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
+cd $PRGNAM-$VERSION
+chown -R root:root .
+chmod -R a-s,u+w,go+r-w .
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --exec-prefix=/usr \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --enable-sandboxed \
+  --with-driver=userspace \
+  --with-x \
+  --program-prefix="" \
+  --program-suffix=""
+
+make
+make install DESTDIR=$PKG
+
+if [ "$BLASTER" = "yes" ] ;then 
+  make distclean
+
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  ./configure \
+    --prefix=/usr \
+    --exec-prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --enable-sandboxed \
+    --with-driver=serial \
+    --with-transmitter \
+    --with-x \
+    --with-major=61 \
+    --with-port=$PORT\
+    --with-irq=$IRQ \
+    --with-moduledir=/lib/modules/$KERNEL/misc
+
+  make 
+  make install DESTDIR=$PKG
+  PKG_VERSION=${VERSION}_$(echo $KERNEL | tr '-' '_')
+fi
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$PKG_VERSION
+cp -a ANNOUNCE AUTHORS COPYING ChangeLog INSTALL NEWS README TODO \
+  doc/lirc.hwdb contrib/lircrc $PKG/usr/doc/$PRGNAM-$PKG_VERSION
+install -m 0644 $CWD/$PRGNAM.SlackBuild $PKG/usr/doc/$PRGNAM-$PKG_VERSION
+
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+)
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+)
+
+install -D -m 0644 contrib/lircd.conf $PKG/etc/lircd.conf.new
+install -D -m 0644 contrib/lircmd.conf $PKG/etc/lircmd.conf.new
+install -D -m 0644 contrib/lircrc $PKG/etc/lircrc.new
+install -D -m 0644 contrib/lirc.rules $PKG/etc/udev/rules.d/96-lirc.rules
+
+rm -rf $PKG/dev 	# We don't need this
+
+mkdir -p $PKG/install
+install -m 0644 $CWD/doinst.sh $PKG/install/doinst.sh
+install -m 0644 $CWD/slack-desc $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$PKG_VERSION-$ARCH-$BUILD$TAG.tgz
