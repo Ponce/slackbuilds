@@ -25,4 +25,4 @@ config etc/rc.d/rc.squid.new
 config etc/squid/mime.conf.new
 config etc/squid/squid.conf.new
 config etc/squid/cachemgr.conf.new
-
+config etc/logrotate.d/squid.new
