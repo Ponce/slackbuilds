@@ -1,0 +1,224 @@
+#!/bin/sh
+
+# ***************************************************************************
+# *   Copyright (C) 2007-2008 by Heinz Wiesinger                            *
+# *   HMWiesinger@gmx.at                                                    *
+# *   http://hw.3kisses.net                                                 *
+# *                                                                         *
+# *   This program is free software; you can redistribute it and/or modify  *
+# *   it under the terms of the GNU General Public License as published by  *
+# *   the Free Software Foundation; either version 3 of the License, or     *
+# *   (at your option) any later version.                                   *
+# *                                                                         *
+# *   This program is distributed in the hope that it will be useful,       *
+# *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+# *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+# *   GNU General Public License for more details.                          *
+# *                                                                         *
+# *   You should have received a copy of the GNU General Public License     *
+# *   along with this program; if not, write to the                         *
+# *   Free Software Foundation, Inc.,                                       *
+# *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+# ***************************************************************************/
+# nvidia-switch utility 0.5
+#
+# A tool to switch between nvidia-binary-driver and stock xorg-driver
+# if both are installed in parallel.
+
+set -e
+
+INC="/usr/include/GL"
+LIB="/usr/lib"
+XMOD="/usr/lib/xorg/modules"
+XLIB="$XMOD/extensions"
+NV_VERSION='PKGVERSION' # This will be replaced in the build script
+GL_VERSION="1.2"
+
+if [ "$1" = '--nvidia' ]; then
+	echo $'Switching to nvidia-driver files!\n'
+
+	echo "You have to ENABLE the nvidia driver in /etc/X11/xorg.conf."
+	echo "Otherwise, this may lead to improperly working drivers."
+
+	#Change to includes path
+	cd $INC
+	#if gl*.h exists and is a link, then remove the old link and create the new one
+	#else, if it exists and is not a link, move it to gl*.h-xorg and create a link.
+	#else, it it does not exist, create a link to gl*.h-nvidia
+	for i in glxext.h glext.h glx.h gl.h; do
+
+		if [ -L $i ]; then
+			rm -f $i
+			ln -s $i-nvidia $i
+		elif [ -e $i ]; then
+			mv $i $i-xorg
+			ln -s $i-nvidia $i
+		else
+			ln -s $i-nvidia $i
+		fi
+
+	done
+
+	for i in $LIB/libGL.so $XLIB/libglx.so; do
+
+		#If libGL.so.$NV_VERSION-nvidia does exists, then remove the -nvidia and make it usable that way
+		if [ -e "$i.$NV_VERSION-nvidia" ]; then
+			rm -f $i.$NV_VERSION
+			ln -s $i.$NV_VERSION-nvidia $i.$NV_VERSION
+		fi
+
+	done
+
+	#if libGL.so.$GL_VERSION does exist, move it to libGL.so.$GL_VERSION-xorg, as it conflicts if nvidia's libGL.so
+	# then remove the libGL.so.1 symlink and create a new one pointing to nvidia's libGL.so
+	if [ -e "$LIB/libGL.so.$GL_VERSION" ]; then
+		cd $LIB
+		mv libGL.so.$GL_VERSION libGL.so.$GL_VERSION-xorg
+		rm -f libGL.so.1
+		ln -s $LIB/libGL.so.$NV_VERSION libGL.so.1
+	fi
+
+	#If libGLcore.so.$NV_VERSION-nvidia does exists, then remove the -nvidia and make it usable that way
+	if [ -e "$LIB/libGLcore.so.$NV_VERSION-nvidia" ]; then
+		rm -f $LIB/libGLcore.so.$NV_VERSION $LIB/libGLcore.so.1
+		ln -s $LIB/libGLcore.so.$NV_VERSION-nvidia $LIB/libGLcore.so.$NV_VERSION
+		ln -s $LIB/libGLcore.so.$NV_VERSION $LIB/libGLcore.so.1
+	fi
+
+
+	for i in libGLcore.so libGLcore.la libglx.la; do
+
+		#If this library exists, move it to *-xorg
+		if [ -e "$XLIB/$i" ]; then
+			mv $XLIB/$i $XLIB/$i-xorg
+		fi
+
+	done
+
+	# if libglx.so is not a link, back it up to *-xorg, and create a symlink to nvidia's one
+	# if it's a link, then remove it and create a new one.
+	if ! [ -L "$XLIB/libglx.so" ]; then
+		cd $XLIB
+		mv libglx.so libglx.so-xorg
+		ln -s $XLIB/libglx.so.$NV_VERSION libglx.so
+	else
+		cd $XLIB
+		rm -f libglx.so
+		ln -s $XLIB/libglx.so.$NV_VERSION libglx.so
+	fi
+	
+	#Recreate the link removed by --xorg
+	if ! [ -e "$XMOD/libwfb.so" ]; then
+		ln -s $XMOD/libnvidia-wfb.so.1 $XMOD/libwfb.so
+	fi
+
+	/sbin/ldconfig
+
+	#Generate correct symink for that lib
+	/sbin/ldconfig -l /usr/lib/libGL.so.169.09-nvidia
+
+elif [ "$1" = '--xorg' ]; then
+	echo $'Switching to stock xorg files.\n'
+
+	echo "You have to DISABLE the nvidia driver in /etc/X11/xorg.conf."
+	echo "Otherwise, this may lead to improperly working drivers."
+
+	#Change to includes path
+	cd $INC
+	#if gl*.h exists and is a link, then remove the old link and create the new one
+	#else, if it exists and is not a link, move it to gl*.h-xorg and create a link.
+	#else, it it does not exist, create a link to gl*.h-xorg
+	for i in glxext.h glext.h glx.h gl.h; do
+
+		if [ -L $i ]; then
+			rm -f $i
+			ln -s $i-xorg $i
+		elif [ -e $i ]; then
+			mv $i $i-xorg
+			ln -s $i-xorg $i
+		else
+			ln -s $i-xorg $i
+		fi
+
+	done
+
+	for i in libGL.so libGLcore.so; do
+
+		#if this link exists, remove it, if it's a file, move it to *.nvidia
+		if [ -L "$LIB/$i.$NV_VERSION" ]; then
+			rm -f $LIB/$i.$NV_VERSION
+		elif [ -e "$LIB/$i.$NV_VERSION" ]; then
+			mv $LIB/$i.$NV_VERSION $LIB/$i.$NV_VERSION-nvidia
+		fi
+
+		if [ -L "$LIB/$i.1" ]; then
+			rm -f $LIB/$i.1
+		fi
+
+	done
+
+	#if libGL.so.$GL_VERSION does not exist and libGL.so.$GL_VERSION-xorg does, move it to libGL.so.$GL_VERSION
+	# then remove the libGL.so.1 symlink and create a new one pointing to nvidia's libGL.so
+	if ! [ -e "$LIB/libGL.so.$GL_VERSION" ]; then
+		if [ -e "$LIB/libGL.so.$GL_VERSION-xorg" ]; then
+			cd $LIB
+			mv $LIB/libGL.so.$GL_VERSION-xorg $LIB/libGL.so.$GL_VERSION
+			ln -s $LIB/libGL.so.$GL_VERSION libGL.so.1
+		fi
+	fi
+
+	for i in libGLcore.so libGLcore.la libglx.la; do
+
+		#If libGLcore.so does not exist, and *-xorg does, then remove the -xorg
+		if ! [ -e "$XLIB/$i" ]; then
+			if [ -e "$XLIB/$i-xorg" ]; then
+				mv $XLIB/$i-xorg $XLIB/$i
+			fi
+		fi
+
+	done
+
+	#if this library exists, move it to *-nvidia
+	if [ -L "$XLIB/libglx.so.$NV_VERSION" ]; then
+		rm $XLIB/libglx.so.$NV_VERSION
+	elif [ -e "$XLIB/libglx.so.$NV_VERSION" ]; then
+		mv $XLIB/libglx.so.$NV_VERSION $XLIB/libglx.so.$NV_VERSION-nvidia
+	fi
+
+	# if libglx.so exists and is a link, remove it and create a new one
+	# If it does exists and is not a link, remove the old one, and create the new one.
+	# if it does not exist, create a symlink
+	if [ -L "$XLIB/libglx.so" ]; then
+		cd $XLIB
+		rm libglx.so
+		ln -s libglx.so-xorg libglx.so
+	elif [ -e "$XLIB/libglx.so" ]; then
+		cd $XLIB
+		mv libglx.so libglx.so-xorg
+		ln -s libglx.so-xorg libglx.so
+	else
+		cd $XLIB
+		ln -s libglx.so-xorg libglx.so
+	fi
+
+	# Not handled by removepkg/upgradepkg automatically.
+	if [ -L "$XMOD/libwfb.so" ]; then
+		rm -f $XMOD/libwfb.so
+	fi
+
+	/sbin/ldconfig
+
+	#Generate correct symink for that lib
+	/sbin/ldconfig -l /usr/lib/libGL.so.1.2
+
+	#Remove so-link, recreated by ldconfig
+	if [ -L $LIB/libGLcore.so.1 ]; then
+		rm -f $LIB/libGLcore.so.1
+	fi
+
+else
+	echo "Usage:"
+	echo " --nvidia	Switch to nvidia driver files"
+	echo " --xorg		Switch to stock xorg files"
+fi
+
