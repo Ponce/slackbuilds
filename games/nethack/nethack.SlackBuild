@@ -1,0 +1,151 @@
+#!/bin/sh
+
+## Written by hollywoodb (hollywoodb@fastmail.fm)
+## Edited by the SlackBuilds project team.
+
+## Feel free to use, modify, redistribute this script.
+## If you make changes please modify the "Written by"
+## so that I don't recieve emails about a script I
+## did not write.  Thanks.
+
+# Modified by the SlackBuilds.org project
+
+set -e
+
+PRGNAM=nethack
+VERSION=3.4.3
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+CWD=`pwd`
+TMP=${TMP:-/tmp/SBo}
+PKG=${PKG:-$TMP/package-$PRGNAM}
+OUTPUT=${OUTPUT:-/tmp}
+
+# FLAVOR lets the user enable their choice of
+# interfaces. TTY is enabled under any circumstance.
+# Don't change this. If you want to enable X11 or Qt
+# simply pass this variable to the script.
+#  $ FLAVOR=_X11 nethack.SlackBuild
+#
+FLAVOR=${FLAVOR:-}
+
+# Fixes for poor values of FLAVOR
+if [ "$FLAVOR" = "x11" -o "$FLAVOR" = "X11" ]; then
+  FLAVOR=_X11
+elif [ "$FLAVOR" = "qt" -o "$FLAVOR" = "Qt" -o "$FLAVOR" = "QT" ]; then
+  FLAVOR=_Qt
+fi
+
+rm -rf {$PKG,$TMP/$PRGNAM-$VERSION}
+mkdir -p {$TMP,$PKG,$OUTPUT}
+cd $TMP
+tar zxvf $CWD/$PRGNAM-343-src.tgz
+cd $PRGNAM-$VERSION
+
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+# Nethack doesn't have any form of auto-configuration...
+# nethack-enviro.patch MUST be applied. It includes fixes for
+# DESTDIR and installation paths among other things.
+patch -p1 < $CWD/files/nethack-enviro.patch
+
+# Standard configuration: since we want to be able to use the
+# X11 client even when Qt is enabled as well, we want these
+# steps for the X11 client to be done whether FLAVOR is
+# "X11" or "Qt"
+if [ "$FLAVOR" = "_X11" -o "$FLAVOR" = "_Qt" ]; then
+    patch -p1 < $CWD/files/$PRGNAM-x11.patch
+
+    # Global configuration file
+    mkdir -p $PKG/etc/X11/{app-defaults,nethack}
+    cat win/X11/NetHack.ad > $PKG/etc/X11/app-defaults/NetHack
+
+    # We can avoid installing special fonts by using existing ones
+    sed -i 's#nh10#-*-fixed-medium-r-*-*-12-*-*-*-*-*-*-*#' \
+        $PKG/etc/X11/app-defaults/NetHack
+
+    # Enable the x11 tileset
+    sed -i 's#^!NetHack.tile_file#NetHack.tile_file#' \
+        $PKG/etc/X11/app-defaults/NetHack
+
+    # We want a menu entry whether its for X11 or Qt
+    mkdir -p $PKG/usr/share/{applications,pixmaps}
+    cp win/X11/nh_icon.xpm $PKG/usr/share/pixmaps/$PRGNAM.xpm
+    cat $CWD/files/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+    # Add the TTY and X11 interface for X11 and Qt builds
+    mkdir -p $PKG/usr/games
+    cat $CWD/files/$PRGNAM-tty > $PKG/usr/games/$PRGNAM-tty
+    chmod +x $PKG/usr/games/$PRGNAM-tty
+    cat $CWD/files/$PRGNAM-x11 > $PKG/usr/games/$PRGNAM-x11
+    chmod +x $PKG/usr/games/$PRGNAM-x11
+
+    # .nethackrc suited for X11 client
+    cat win/X11/nethack.rc > $PKG/etc/X11/nethack/nethackrc.x11
+
+    # Install nethack's fonts
+    mkdir -p $PKG/usr/X11R6/lib/X11/fonts/misc
+    bdftopcf win/X11/nh10.bdf > $PKG/usr/X11R6/lib/X11/fonts/misc/nh10.pcf
+    bdftopcf win/X11/ibm.bdf > $PKG/usr/X11R6/lib/X11/fonts/misc/ibm.pcf
+    gzip $PKG/usr/X11R6/lib/X11/fonts/misc/*.pcf
+    mkdir -p $PKG/install
+    echo "mkfontdir /usr/X11R6/lib/X11/fonts/misc" > $PKG/install/doinst.sh
+fi
+
+# nethack-Qt.patch enables the Qt interface. 
+# It is incremental in the manner that the tty and X11
+# interfaces remain enabled
+if [ "$FLAVOR" = "_Qt" ]; then
+    patch -p1 < $CWD/files/$PRGNAM-qt.patch
+
+    # .nethackrc suited for Qt client
+    cat $CWD/files/nethackrc.qt > $PKG/etc/X11/nethack/nethackrc.qt
+
+    # Add the Qt interface
+    cat $CWD/files/$PRGNAM-qt > $PKG/usr/games/$PRGNAM-qt
+    chmod +x $PKG/usr/games/$PRGNAM-qt
+
+    # Convert menu entry from X11 to Qt configuration
+    sed -i 's#X11#Qt#' $PKG/usr/share/applications/$PRGNAM.desktop
+    sed -i 's#Exec=nethack-x11#Exec=nethack-qt#' $PKG/usr/share/applications/$PRGNAM.desktop
+fi
+
+sh sys/unix/setup.sh
+make all
+make install DESTDIR=$PKG
+
+chown -R root:games $PKG/var/games
+chmod 0664 $PKG/var/games/nethack/{logfile,perm,record}
+chmod 0775 $PKG/var/games/nethack
+chmod 0775 $PKG/var/games/nethack/save
+
+# NetHack's Makefile installs the binary suid root
+# We'll set it sgid games and all should be fine.
+chown root:games $PKG/usr/games/nethack
+chmod 0755 $PKG/usr/games/nethack
+chown -R root:games $PKG/usr/share/games/nethack
+chmod 2755 $PKG/usr/share/games/nethack/nethack
+chmod g+w $PKG/usr/share/games/nethack/nhdat
+
+find $PKG | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+
+# Install the man pages
+mkdir -p $PKG/usr/man/man6
+cp -a doc/*.6 $PKG/usr/man/man6/
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $(find $PKG/usr/man -type l) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/usr/doc/$PRGNAM$FLAVOR-$VERSION/history
+cp -a {doc/Guidebook.tex,doc/*.txt} $PKG/usr/doc/$PRGNAM$FLAVOR-$VERSION
+mv $PKG/usr/share/games/nethack/license $PKG/usr/doc/$PRGNAM$FLAVOR-$VERSION
+cp -a doc/fixes* $PKG/usr/doc/$PRGNAM$FLAVOR-$VERSION/history
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM$FLAVOR-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n -p $OUTPUT/$PRGNAM$FLAVOR-$VERSION-$ARCH-$BUILD$TAG.tgz
