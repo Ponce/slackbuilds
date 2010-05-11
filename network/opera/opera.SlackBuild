@@ -3,6 +3,7 @@
 # Slackware build script for opera
 
 # Copyright 2006  Martin Lefebvre <dadexter@gmail.com>
+# Copyright 2008  Robby Workman, Northport, Alabama, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,12 +23,9 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# Modified by Robby Workman <rworkman@slackbuilds.org> for version 9.25
-
 PRGNAM=opera
-VERSION=9.26
-DATESTRING='20080218.6'
-ARCH=i386	# Leave this alone for opera
+VERSION=9.62
+ARCH=i386	# Leave this alone 
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -36,54 +34,79 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
+# If you want Chinese in Opera to not be fugly, set this to "YES",
+# otherwise leave it be.
+# This can be specified on the command line when calling the build script:
+#   CHINESE_FIX=YES ./opera.SlackBuild
+# Note that this makes Opera use wqy-zenhei as the default font
+# for Chinese AND Japanese
+CHINESE_FIX=${CHINESE_FIX:-NO}
+
+# Don't bother this - it's for easier manipulation and sed'ing later
+TOPDIR=$(tar tf $CWD/$PRGNAM-${VERSION}.gcc4-shared-qt3.i386.tar.bz2 |head -1)
+
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP 
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION-$DATESTRING-shared-qt.i386-en.tar.bz2
-cd $(tar -tf $CWD/$PRGNAM-$VERSION-$DATESTRING-shared-qt.i386-en.tar.bz2 |head -1|tr -d \/)
+rm -rf $TOPDIR
+tar xvf $CWD/$PRGNAM-${VERSION}.gcc4-shared-qt3.i386.tar.bz2
+cd $TOPDIR
 chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
 
-# Fix the path for opera to detect mozilla plugins
-sed -i 's#/usr/X11R6/lib/mozilla/plugins=1#/usr/lib/mozilla/plugins=1#' \
-  ini/pluginpath.ini || return 1
+# No, the --DESTDIR isn't documented.  In fact, the presence of OPERADESTDIR
+# at the top of install.sh is damn misleading.  I shouldn't have to actually
+# read the install script to figure out DESTDIR - the --help should show it.
+# --rworkman
+./install.sh \
+  --prefix=/usr \
+  --exec_prefix=/usr/lib/opera-$VERSION \
+  --sharedir=/usr/share/opera \
+  --wrapperdir=/usr/bin \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/opera-$VERSION \
+  --plugindir=/usr/lib/mozilla/plugins \
+  --DESTDIR=$PKG
 
-/bin/sh ./install.sh DESTDIR=$PKG
+# Fix a potential security issue (minor, but still) with a hardcoded path to
+# the build directory lingering in /usr/bin/opera
+# Theoretically, a malicious user looks at that in /usr/bin/opera and later
+# recreates the directory and does some unknown havoc.  It may very well be
+# completely safe and unexploitable and I'm just being Chicken Little here,
+# but it's easy enough to fix and I'd rather be safe than sorry.  --rworkman
+sed -i "s|$TMP/$TOPDIR|/usr/bin/|g" $PKG/usr/bin/opera
 
 # Include config files
-mkdir -p $PKG/etc
-cat config/opera6rc > $PKG/etc/opera6rc.new
-cat config/opera6rc.fixed > $PKG/etc/opera6rc.fixed.new
+mv etc $PKG
+mv $PKG/etc/opera6rc $PKG/etc/opera6rc.new
+mv $PKG/etc/opera6rc.fixed $PKG/etc/opera6rc.fixed.new
 
 # Add an opera.desktop file and link the icon to /usr/share/pixmaps
-mkdir -p $PKG/usr/share/{applications,pixmaps}
+mv usr/share/icons usr/share/pixmaps $PKG/usr/share
+mkdir -p $PKG/usr/share/applications
 install -m 0644 $CWD/opera.desktop $PKG/usr/share/applications
-( cd $PKG/usr/share/pixmaps ; ln -s ../opera/images/opera.xpm opera.xpm )
 
-# Relocate man pages and docs
-mv $PKG/usr/share/man $PKG/usr/man
-mv $PKG/usr/share/doc $PKG/usr
-mv $PKG/usr/doc/opera $PKG/usr/doc/$PRGNAM-$VERSION
+# Add a copy of the build script to the docs
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
-( cd $PKG
-  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
-)
+# Compress the man page
+gzip -9 $PKG/usr/man/man?/*.?
 
-if [ -d $PKG/usr/man ]; then
-  ( cd $PKG/usr/man
-    find . -type f -exec gzip -9 {} \;
-    for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
-  )
-fi
+# Strip symbols we don't need
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
+
+# Patch for Chinese font handling
+if [ "$CHINESE_FIX" = "YES" ]; then
+  patch -p0 < $CWD/opera_chinese_font_fix.diff
+fi
+
 /sbin/makepkg -p -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
