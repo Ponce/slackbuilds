@@ -1,4 +1,3 @@
-
 if [ ! -e etc/leafnode/local.groups ]; then
   touch etc/leafnode/local.groups
 fi
