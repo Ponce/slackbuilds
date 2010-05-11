@@ -1,0 +1,131 @@
+#!/bin/sh
+
+# Slackware build script for pcsc-lite
+
+# Copyright 2007  LukenShiro <lukenshiro@ngi.it>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=pcsc-lite
+VERSION=1.4.99
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+DEBUGATR=${DEBUGATR:-0}	# Debug is off by default
+DOCFILES="DRIVERS SECURITY ChangeLog COPYING ChangeLog.svn HELP NEWS TODO AUTHORS INSTALL README"  
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+fi
+
+set -e 	# Exit on most errors
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+# Fix the DRIVERS file to reflect the correct drivers directory as built
+# with this script
+patch -p0 < $CWD/docs-DRIVERS.diff || exit 1
+
+# ATR (answer to reset) debug parsing output 
+case "$DEBUGATR" in
+    0)	DEBUGATR_FLAG="disable-debugatr"
+	;;
+    *)	DEBUGATR_FLAG="enable-debugatr"
+	;;
+esac
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --sysconfdir=/etc \
+  --enable-confdir=/etc \
+  --localstatedir=/var \
+  --enable-ipcdir=/var/run \
+  --enable-runpid=/var/run/pcscd.pid \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --enable-usbdropdir="/usr/lib/pcsc/drivers" \
+  --enable-muscledropdir="/usr/lib/pcsc/services" \
+  --${DEBUGATR_FLAG}
+
+make
+make install DESTDIR=$PKG
+
+# formaticc manpage is not automatically installed
+mkdir -p $PKG/usr/man/man1
+install -m 0644 doc/formaticc.1 $PKG/usr/man/man1/
+
+# PC/SC-lite slackware-compliant daemon
+mkdir -p $PKG/etc/rc.d
+install -m 0755 $CWD/rc.pcscd $PKG/etc/rc.d/rc.pcscd.new
+
+# Don't clobber the config file
+mv $PKG/etc/reader.conf.d/reader.conf $PKG/etc/reader.conf.d/reader.conf.new
+
+# Create the directory for drivers and such (not included with this package)
+mkdir -p $PKG/usr/lib/pcsc/{drivers,services}
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+)
+
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+)
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/
+cp -a $DOCFILES $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.SBo
+## .pdf api documentation files seem not to be built from .tex sources during make
+## Most people don't need/want api docs anyway, so uncomment below if you do
+#( cd $PKG/usr/doc/$PRGNAM-$VERSION/
+#  if [ -x /usr/share/texmf/bin/pdflatex ]; then
+#    pdflatex ifdhandler-3.tex >/dev/null
+#    pdflatex pcsc-lite.tex >/dev/null
+#    for oldfiles in *.aux *.tex *.toc *.log *.bib *.out ; 
+#      do rm -f $oldfiles ; 
+#    done
+#  fi
+#)
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
