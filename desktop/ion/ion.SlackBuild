@@ -2,6 +2,7 @@
 
 # Slackware build script for ion
 # Written by Vasilis Papavasileiou <el03020 at mail dot ntua dot gr>
+# Updated by Jorge Gajon <gajon@gajon.org> for Slackware64 compatibility
 # Modified by the SlackBuilds.org project
 # (assumed to be in public domain per our submission policy)
 
@@ -20,38 +21,54 @@ SRC_VERSION=$(echo $VERSION | tr _ -)
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
 fi
+
+set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
-cd $TMP || exit 1
+cd $TMP
 rm -rf $PRGNAM-$SRC_VERSION
-tar xvf $CWD/$PRGNAM-$SRC_VERSION.tar.gz || exit 1
-cd $PRGNAM-$SRC_VERSION || exit 1
-#chown -R root:root .
+tar xvf $CWD/$PRGNAM-$SRC_VERSION.tar.gz
+cd $PRGNAM-$SRC_VERSION
+chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
 
-# If you have installed lua on your own, the binary might be stored under
-# /usr/local/bin or any other destination you have specified.
-# However, if lua is not located under /usr/bin, change the following
-# variable or run this script with the following command:
-# LUABINDIR="PATH_TO_BIN_DIRECTORY" ./ion.SlackBuild
-LUABINDIR=${LUABINDIR:-/usr}
-sed -i "s#+LUA_DIR=.*#+LUA_DIR=$LUABINDIR#" $CWD/system.mk.diff || exit 1
+# Patch system.mk after filtering it through sed to replace a few path issues,
+# x86_64-specific things, and add optimization flags
+sed -e "s%@VERSION@%$VERSION%g" -e "s%@LIBDIRSUFFIX@%$LIBDIRSUFFIX%g" \
+  $CWD/system.mk.diff | patch -p1
 
-# Patch system.mk (mainly path fixes)
-patch -p0 < $CWD/system.mk.diff || exit 1
+make OPTS="$SLKCFLAGS" -j1
 
-SLKCFLAGS=$SLKCFLAGS make || exit 1
+# The Makefile doesn't support DESTDIR :/
+make install \
+  BINDIR=$PKG/usr/bin \
+  ETCDIR=$PKG/etc/ion3 \
+  SHAREDIR=$PKG/usr/share/ion3 \
+  MANDIR=$PKG/usr/man \
+  DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION \
+  INCDIR=$PKG/usr/include/ion3 \
+  LIBDIR=$PKG/usr/lib${LIBDIRSUFFIX} \
+  LOCALEDIR=$PKG/usr/share/locale
 
-# DOCVER is used to get the proper version number for $DOCDIR 
-make install DESTDIR=$PKG DOCVER="-$VERSION" || exit 1
+# Install an xinitrc file so that ion will show up in xwmconfig
+# We also need to patch the reference to the X11 lib directory when
+# running on x86_64.
+install -D -m 0755 $CWD/xinitrc.ion $PKG/etc/X11/xinit/xinitrc.ion
 
 ( cd $PKG
-  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null
 )
 
 ( cd $PKG/usr/man
@@ -61,11 +78,8 @@ make install DESTDIR=$PKG DOCVER="-$VERSION" || exit 1
 
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
-# Install an xinitrc file so that ion will show up in xwmconfig
-install -D -m 0755 $CWD/xinitrc.ion $PKG/etc/X11/xinit/xinitrc.ion
-
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
