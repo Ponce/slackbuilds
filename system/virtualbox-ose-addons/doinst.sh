@@ -12,7 +12,7 @@ config() {
 }
 
 # Prepare the new configuration files
-for file in etc/rc.d/rc.vboxadd.new etc/rc.d/rc.vboxadd-timesync.new; do
+for file in etc/rc.d/rc.vboxadd.new etc/rc.d/rc.vboxadd-service.new; do
   if [ -e $(dirname $file)/$(basename $file .new) -a -x $(dirname $file)/$(basename $file .new) ]; then
     chmod 0755 $file
   else
@@ -20,4 +20,9 @@ for file in etc/rc.d/rc.vboxadd.new etc/rc.d/rc.vboxadd-timesync.new; do
   fi
   config $file
 done
+
+# remove existing fdi cache to recognize newly installed fdi files
+# and restart hal to regenerate the cache
+rm -f var/cache/hald/fdi-cache
+chroot . /etc/rc.d/rc.hald restart
 

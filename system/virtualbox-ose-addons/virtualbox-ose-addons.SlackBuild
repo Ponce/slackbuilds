@@ -2,7 +2,7 @@
 
 # Slackware build script for virtualbox-ose-addons
 
-# Copyright 2008-2009 Heinz Wiesinger <pprkut@liwjatan.at>
+# Copyright 2008-2009 Heinz Wiesinger, Amsterdam, The Netherlands
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -24,9 +24,9 @@
 
 PRGNAM=virtualbox-ose-addons
 SRCNAM=VirtualBox
-VERSION=2.1.4
+VERSION=3.1.2
 ARCH=${ARCH:-i486}
-BUILD=${BUILD:-3}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 CWD=$(pwd)
@@ -45,10 +45,16 @@ JOBS=${JOBS:-3}
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+  TARGET="x86"
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+  TARGET="x86"
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+  TARGET="amd64"
 fi
 
 set -e
@@ -57,16 +63,16 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $SRCNAM-${VERSION}_OSE
-tar xvf $CWD/$SRCNAM-${VERSION}-3-OSE.tar.bz2
+tar xvf $CWD/$SRCNAM-${VERSION}-OSE.tar.bz2
 cd $SRCNAM-${VERSION}_OSE
 chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
 
-# We set the environment variables manually to avoid dependency on dev86 and acpica
+# We set the environment variables manually to avoid dependency on acpica
 export BUILD_PLATFORM="linux"
-export BUILD_PLATFORM_ARCH="x86"
+export BUILD_PLATFORM_ARCH="$TARGET"
 export BUILD_TARGET="linux"
-export BUILD_TARGET_ARCH="x86"
+export BUILD_TARGET_ARCH="$TARGET"
 export BUILD_TARGET_CPU="$ARCH"
 export BUILD_TYPE="release"
 export PATH_KBUILD="$TMP/$SRCNAM-${VERSION}_OSE/kBuild"
@@ -81,38 +87,54 @@ unset path_kbuild_bin path_dev_bin
 
 kmk -j ${JOBS} LOCALCFG=$CWD/LocalConfig.kmk
 
-mkdir -p $PKG/sbin \
-  $PKG/usr/{src,bin,sbin,share/autostart} \
+mkdir -p $PKG/lib/udev/rules.d $PKG/sbin \
   $PKG/etc/{xdg/autostart,rc.d} \
-  $PKG/usr/lib/xorg/modules/{drivers,input} \
-  $PKG/lib/udev/rules.d
+  $PKG/usr/{src,bin,sbin,share/autostart} \
+  $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/{drivers,input} \
+  $PKG/usr/share/hal/fdi/policy/20thirdparty
 
+patch -d src/VBox/Additions/linux/installer/ -i $CWD/rc.vboxadd.diff
 cp -f src/VBox/Additions/linux/installer/vboxadd.sh $PKG/etc/rc.d/rc.vboxadd.new
-cp -f src/VBox/Additions/linux/installer/vboxadd-timesync.sh $PKG/etc/rc.d/rc.vboxadd-timesync.new
+cp -f src/VBox/Additions/linux/installer/vboxadd-service.sh $PKG/etc/rc.d/rc.vboxadd-service.new
 
-cp -f src/VBox/Additions/x11/installer/vboxclient.desktop $PKG/etc/xdg/autostart/
-cp -f src/VBox/Additions/x11/installer/vboxclient.desktop $PKG/usr/share/autostart/
-install -m 755 src/VBox/Additions/x11/installer/VBoxRandR.sh $PKG/usr/bin/VBoxRandR
+cp -f src/VBox/Additions/x11/Installer/vboxclient.desktop $PKG/etc/xdg/autostart/
+cp -f src/VBox/Additions/x11/Installer/vboxclient.desktop $PKG/usr/share/autostart/
+install -m 755 src/VBox/Additions/x11/Installer/VBoxRandR.sh $PKG/usr/bin/VBoxRandR
+install -m 755 src/VBox/Additions/x11/Installer/98vboxadd-xclient $PKG/usr/bin/VBoxClient-all
+install -m 644 src/VBox/Additions/linux/installer/90-vboxguest.fdi \
+  $PKG/usr/share/hal/fdi/policy/20thirdparty
 
-echo "KERNEL==\"vboxadd\", NAME=\"vboxadd\", OWNER=\"vboxadd\", MODE=\"0660\"" \
+echo "KERNEL==\"vboxguest\", NAME=\"vboxguest\", OWNER=\"vboxadd\", MODE=\"0660\"" \
  > $PKG/lib/udev/rules.d/60-vboxadd.rules
+echo "KERNEL==\"vboxuser\", NAME=\"vboxuser\", OWNER=\"vboxadd\", MODE=\"0666\"" \
+ >> $PKG/lib/udev/rules.d/60-vboxadd.rules
 
-cd out/linux.x86/release/bin/additions
-  cp -rf src/vboxadd $PKG/usr/src/vboxadd-$VERSION
+cd out/linux.$TARGET/release/bin/additions
+  cp -rf src/vboxguest $PKG/usr/src/vboxguest-$VERSION
   cp -rf src/vboxvfs $PKG/usr/src/vboxvfs-$VERSION
+  cp -rf src/vboxvideo $PKG/usr/src/vboxvideo-$VERSION
   install -m 755 VBoxControl $PKG/usr/bin/
   install -m 755 VBoxClient $PKG/usr/bin/
-  install -m 755 vboxadd-timesync $PKG/usr/sbin/
-  install -m 4755 mountvboxsf $PKG/sbin/mount.vboxsf
-  install -m 644 vboxvideo_drv_14.so $PKG/usr/lib/xorg/modules/drivers/vboxvideo_drv.so
-  install -m 644 vboxmouse_drv_14.so $PKG/usr/lib/xorg/modules/input/vboxmouse_drv.so
+  install -m 755 VBoxService $PKG/usr/sbin/
+  install -m 4755 mount.vboxsf $PKG/sbin/mount.vboxsf
+  install -m 644 vboxvideo_drv_16.so $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/drivers/vboxvideo_drv.so
+  install -m 644 vboxmouse_drv_16.so $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/input/vboxmouse_drv.so
 
-  chown vboxadd:1 $PKG/usr/bin/VBoxClient
-  chmod 4755 $PKG/usr/bin/VBoxClient
+  install -m 644 VBoxOGLcrutil.so $PKG/usr/lib$LIBDIRSUFFIX
+  install -m 644 VBoxOGLerrorspu.so $PKG/usr/lib$LIBDIRSUFFIX
+  install -m 644 VBoxOGLarrayspu.so $PKG/usr/lib$LIBDIRSUFFIX
+  install -m 644 VBoxOGLfeedbackspu.so $PKG/usr/lib$LIBDIRSUFFIX
+  install -m 644 VBoxOGLpackspu.so $PKG/usr/lib$LIBDIRSUFFIX
+  install -m 644 VBoxOGLpassthroughspu.so $PKG/usr/lib$LIBDIRSUFFIX
+  install -m 644 VBoxOGL.so $PKG/usr/lib$LIBDIRSUFFIX
+
+  mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/dri
+  ln -s /usr/lib$LIBDIRSUFFIX/VBoxOGL.so $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/dri/vboxvideo_dri.so
 cd -
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -f COPYING COPYING.CDDL $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
@@ -120,4 +142,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
