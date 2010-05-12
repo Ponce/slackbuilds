@@ -22,14 +22,12 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# Safety and debugging first
-set -e
-
 PRGNAM=dosemu
 VERSION=1.4.0
 ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
@@ -39,18 +37,18 @@ OUTPUT=${OUTPUT:-/tmp}
 # To enable X, run the build script as:  WITH_X=yes ./dosemu.SlackBuild
 WITH_X=${WITH_X:-no}
 
-if [ ! -e $CWD/dosemu-freedos-1.0-bin.tgz ]; then
-  echo "Please download dosemu-freedos-1.0-bin.tgz first from"
-  echo "http://downloads.sourceforge.net/dosemu/dosemu-freedos-1.0-bin.tgz"
-  echo "and place it in the same directory as the dosemu source."
-  exit 1
+if [ "$ARCH" = "i486" ]; then
+   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+   LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+   LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+   SLKCFLAGS="-O2 -fPIC"
+   LIBDIRSUFFIX="64"
 fi
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-fi
+set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -61,12 +59,17 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 chmod -R a-s,u+w,go+r-w .
 
+# patch to upgrade version to 1.4.0.1 (1.4.1 pre-release)
+# http://dosemu.sourceforge.net/prereleases/patch-1.4.0.1.gz
+zcat $CWD/patch-1.4.0.1.gz | patch -p1
+
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
   --sysconfdir=/etc \
   --localstatedir=/var \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
   --with-x="$WITH_X" \
   --with-svgalib \
   --with-fdtarball=$CWD/dosemu-freedos-1.0-bin.tgz
@@ -75,16 +78,16 @@ make
 make install DESTDIR=$PKG
 
 ( cd $PKG
-  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
-  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
 )
 
-if [ -d $PKG/usr/man ]; then
-  ( cd $PKG/usr/man
-    find . -type f -exec gzip -9 {} \;
-    for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
-  )
-fi
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+)
 
 mkdir -p $PKG/usr/doc
 mv $PKG/usr/share/doc/dosemu $PKG/usr/doc/$PRGNAM-$VERSION
@@ -102,4 +105,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
