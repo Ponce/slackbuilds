@@ -1,0 +1,118 @@
+#!/bin/sh
+
+# Slackware build script for airpwn
+
+# Written by Larry Hajali <larryhaja[at]gmail[dot]com>
+
+PRGNAM=airpwn
+VERSION=${VERSION:-1.4}
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tgz
+cd $PRGNAM-$VERSION
+tar xvf lorcon-current.tgz
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+# Remove some unneeded directories and change a file to Unix.
+find . -type d -name "CVS" | xargs rm -rf {} \;
+find . -type d -name ".cvs" | xargs rm -rf {} \;
+sed -i 's/\r//g' content/ftp_resp
+
+# First we need to install lorcon
+cd lorcon
+  CFLAGS="$SLKCFLAGS" \
+  ./configure \
+    --prefix=/usr \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --mandir=/usr/man \
+    --datadir=/usr/share/$PRGNAM \
+    --enable-static=no \
+    --build=$ARCH-slackware-linux
+
+  make
+  make install DESTDIR=$PKG
+cd ..
+
+# Fix airpwn files so we can use it with a Python version other than 2.4.
+PYTHON_VERSION1=$(python -c 'import sys; print sys.version[:3]')
+PYTHON_VERSION2=$(echo $PYTHON_VERSION1 | tr . _)
+
+for FILE in configure.ac conf.h config.h.in; do
+  sed -i "s|python2.4|python${PYTHON_VERSION1}|g" $FILE
+done
+sed -i "s|Python2.4|Python${PYTHON_VERSION1}|g" configure.ac
+sed -i "s|PYTHON2_4|PYTHON${PYTHON_VERSION2}|g" config.h.in
+
+autoreconf
+
+CFLAGS="$SLKCFLAGS" \
+LDFLAGS="-L${PKG}/usr/lib${LIBDIRSUFFIX}" \
+CPPFLAGS="-I${PKG}/usr/include" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --mandir=/usr/man \
+  --build=$ARCH-slackware-linux
+
+make
+make install DESTDIR=$PKG
+
+# Install some scripts to help get wireless devices into monitor mode.
+install -m 0755 mac80211_prep.sh $PKG/usr/sbin
+install -m 0755 madwifing_prep.sh $PKG/usr/sbin
+install -m 0755 madwifiold_prep.sh $PKG/usr/sbin
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null
+)
+
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+)
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  COPYING LICENSE lorcon/{BUGS,README,THANKS,TODO} content conf pyscripts \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+chmod 0644 $PKG/usr/doc/$PRGNAM-$VERSION/*
+chmod 0755 $PKG/usr/doc/$PRGNAM-$VERSION/{content,conf,pyscripts}
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
