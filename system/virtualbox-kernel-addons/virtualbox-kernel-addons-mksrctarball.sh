@@ -14,13 +14,14 @@ VERSION=$(VBoxControl --help 2>/dev/null | grep OSE | cut -d " " -f 9 | cut -d "
 mkdir $PRGNAM
 
 echo "--> Copying sourcecode from /usr/src"
-cp -rf /usr/src/vboxadd-$VERSION $PRGNAM/vboxadd
+cp -rf /usr/src/vboxguest-$VERSION $PRGNAM/vboxguest
 cp -rf /usr/src/vboxvfs-$VERSION $PRGNAM/vboxvfs
+cp -rf /usr/src/vboxvideo-$VERSION $PRGNAM/vboxvideo
 
-echo "--> Making the sourcecode tarball: $PRGNAM-src-$VERSION.tar.bz2 "
-tar -c $PRGNAM/ | bzip2 > $PRGNAM-$VERSION.tar.bz2
+echo "--> Making the sourcecode tarball: $PRGNAM-src-$VERSION.tar.xz"
+tar -cJf $PRGNAM-$VERSION.tar.xz $PRGNAM
 
 echo "--> Erasing the sourcecode directory: $PRGNAM/"
 rm -rf $PRGNAM/
 
-echo "--> Sourcecode tarball for $PRGNAM: $PRGNAM-$VERSION.tar.bz2"
+echo "--> Sourcecode tarball for $PRGNAM: $PRGNAM-$VERSION.tar.xz"
