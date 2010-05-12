@@ -23,7 +23,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=znc
-VERSION=0.062
+VERSION=0.076
 ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
@@ -31,6 +31,7 @@ TAG=${TAG:-_SBo}
 ZNC_USER=${ZNC_USER:-znc}
 WITH_SSL=${WITH_SSL:-yes}
 WITH_IPV6=${WITH_IPV6:-yes}
+WITH_CARES=${WITH_CARES:-no}
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
@@ -38,9 +39,14 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+   LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+   SLKCFLAGS="-O2 -fPIC"
+   LIBDIRSUFFIX="64"
 fi
 
 # Bail if user and/or group isn't valid on your system
@@ -76,19 +82,35 @@ else
   do_ipv6="--enable-ipv6"
 fi
 
+if [ "$WITH_CARES" != "yes" ]; then
+  do_cares="--disable-c-ares"
+else
+  do_cares="--enable-c-ares"
+fi
+
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --mandir=/usr/man \
   --build=$ARCH-slackware-linux \
+  --enable-extra \
   $do_openssl \
-  $do_ipv6
+  $do_ipv6 \
+  $do_cares
 
 make all
 make install DESTDIR=$PKG
+
+( cd $PKG
+  find . -exec file {} + | sed -n '/ELF.*executable\|shared object/s/:.*$//p' | \
+  	xargs strip --strip-unneeded 2> /dev/null || true
+  find . -exec file {} + | sed -n '/current ar archive/s/:.*$//p' | \
+  	xargs strip --strip-debug 2> /dev/null || true
+)
 
 # Change the ownership of the configuration directory
 mkdir -p $PKG/etc/znc
@@ -96,7 +118,7 @@ chown -R $ZNC_USER $PKG/etc/znc
 
 # Install an init script 
 mkdir -p $PKG/etc/rc.d
-sed -e "s/_ZNC_USER_/$ZNC_USER/g" -e "s/_VERSION_/$VERSION/g" $CWD/rc.znc \
+sed -e "s/@ZNC_USER@/$ZNC_USER/g" -e "s/@VERSION@/$VERSION/g" $CWD/rc.znc \
   > $PKG/etc/rc.d/rc.znc.new
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
@@ -104,12 +126,12 @@ cp -a \
   AUTHORS LICENSE* README \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-sed s/_ZNC_USER_/$ZNC_USER/g $CWD/README.SBo > \
-  $PKG/usr/doc/$PRGNAM-$VERSION/README.SBo
+sed s/@ZNC_USER@/$ZNC_USER/g $CWD/README.SLACKWARE > \
+  $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
