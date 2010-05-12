@@ -2,7 +2,7 @@
 
 # Slackware build script for 3proxy
 
-# Copyright 2008 Ilya INSTE Ponetayev, <inste@mail.ru>
+# Copyright 2008, 2009 Ilya INSTE Ponetayev, <inste@mail.ru>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -21,11 +21,9 @@
 #  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-# Modified by Slackbuilds.org
 
 PRGNAM=3proxy
-VERSION=${VERSION:-0.5.3k}
+VERSION=${VERSION:-0.6}
 ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
@@ -35,17 +33,14 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i386" ]; then
-  SLKCFLAGS="-O2 -march=i386 -mtune=i686"
-  OPTPATCH="3proxy.x86.i386.flags.diff.gz"
-elif [ "$ARCH" = "i486" ]; then
+if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
-  OPTPATCH="3proxy.x86.i486.flags.diff.gz"
-elif [ "$ARCH" = "s390" ]; then
-  SLKCFLAGS="-O2"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  OPTPATCH="3proxy.x86_64.flags.diff.gz"
+elif [ "$ARCH" = "s390" ]; then
+  SLKCFLAGS="-O2"
 fi
 
 set -e
@@ -53,62 +48,52 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
+rm -rf $PRGNAM
 rm -rf $PRGNAM-$VERSION
-mkdir $PRGNAM-$VERSION
-cd $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tgz
-chown -R root:root .
-find . \
- \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+cd $PRGNAM-$VERSION
 
-# installing correct Makefile
-zcat $CWD/$OPTPATCH | patch -p2
-ln -s Makefile.unix Makefile
+patch -p1 < $CWD/patches/Makefile.Linux.patch
+patch -p1 < $CWD/patches/fix_etcdir.patch
+patch -p1 < $CWD/patches/add3proxyuser.sh.patch
+patch -p1 < $CWD/patches/fixup_manpages.patch
 
-# Build and install:
-make
+make -f Makefile.Linux \
+  EXTRA_CFLAGS="$SLKCFLAGS" \
+  prefix=/usr \
+  man_prefix=/usr
 
-mkdir $PKG/usr
-mkdir $PKG/usr/bin
-cp src/3proxy    $PKG/usr/bin
-cp src/dighosts  $PKG/usr/bin
-cp src/ftppr     $PKG/usr/bin
-cp src/mycrypt   $PKG/usr/bin
-cp src/pop3p     $PKG/usr/bin
-cp src/proxy     $PKG/usr/bin
-cp src/socks     $PKG/usr/bin
-cp src/tcppm     $PKG/usr/bin
-cp src/udppm     $PKG/usr/bin
-mkdir $PKG/usr/man
-mkdir $PKG/usr/man/man3
-mkdir $PKG/usr/man/man8
-cp man/*.8 $PKG/usr/man/man8
-cp man/*.3 $PKG/usr/man/man3
+make install -f Makefile.Linux \
+  EXTRA_CFLAGS="$SLKCFLAGS" \
+  prefix=/usr \
+  man_prefix=/usr \
+  DESTDIR=$PKG
 
-chmod 755 -R $PKG/usr/bin
-chmod 755 -R $PKG/usr/man
-chown root.root -R $PKG
+# I think I fixed all the references to /usr/local/etc and such in the
+# source, but time will tell... :-)  --rworkman
+mv $PKG/usr/etc $PKG
+cat $CWD/3proxy.cfg.sample > $PKG/etc/3proxy/3proxy.cfg.sample
 
-# Strip binaries:
+mkdir -p $PKG/etc/rc.d
+cat $CWD/rc.3proxy > $PKG/etc/rc.d/rc.3proxy.new
+chmod 0755 $PKG/etc/rc.d/rc.3proxy.new
+
 ( cd $PKG
-  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null
 )
 
-# Compress and link manpages.
 ( cd $PKG/usr/man
   find . -type f -exec gzip -9 {} \;
   for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 )
 
-# Add a documentation directory:
-mkdir -p $PKG/usr/doc/${PRGNAM}-$VERSION
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  Changelog License Readme Release.notes doc cfg \
-  $PKG/usr/doc/${PRGNAM}-$VERSION
+  Changelog authors copying Readme news doc cfg contrib scripts \
+  $PKG/usr/doc/$PRGNAM-$VERSION
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
