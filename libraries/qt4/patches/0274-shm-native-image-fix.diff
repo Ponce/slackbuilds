@@ -1,0 +1,97 @@
+qt-bugs@ issue : none
+Qt Software task ID : none
+bugs.kde.org number : none
+applied: no 
+author: Fredrik Höglund <fredrik@kde.org>
+
+This patch makes the raster graphics system use shared images instead
+of shared pixmaps.
+
+Shared memory pixmaps are deprecated since they are slower than shared
+images with modern graphics hardware. They are also not supported by EXA
+drivers and can be disabled in the latest version of the NVidia driver.
+
+Index: src/gui/kernel/qapplication_x11.cpp
+===================================================================
+--- src/gui/kernel/qapplication_x11.cpp (revision 934506)
++++ src/gui/kernel/qapplication_x11.cpp (working copy)
+@@ -1943,7 +1943,7 @@ void qt_init(QApplicationPrivate *priv,
+             // to determine whether the display is local or not (not 100 % accurate)
+             bool local = displayName.isEmpty() || displayName.lastIndexOf(QLatin1Char(':')) == 0;
+             if (local && (qgetenv("QT_X11_NO_MITSHM").toInt() == 0))
+-                X11->use_mitshm = mitshm_pixmaps;
++                X11->use_mitshm = true;
+         }
+ #endif // QT_NO_MITSHM
+ 
+Index: src/gui/image/qnativeimage_p.h
+===================================================================
+--- src/gui/image/qnativeimage_p.h	(revision 930645)
++++ src/gui/image/qnativeimage_p.h	(working copy)
+@@ -85,7 +85,6 @@
+ 
+ #elif defined(Q_WS_X11) && !defined(QT_NO_MITSHM)
+     XImage *xshmimg;
+-    Pixmap xshmpm;
+     XShmSegmentInfo xshminfo;
+ 
+ #elif defined(Q_WS_MAC)
+Index: src/gui/image/qnativeimage.cpp
+===================================================================
+--- src/gui/image/qnativeimage.cpp	(revision 930645)
++++ src/gui/image/qnativeimage.cpp	(working copy)
+@@ -140,7 +140,6 @@
+ {
+     if (!X11->use_mitshm) {
+         xshmimg = 0;
+-        xshmpm = 0;
+         image = QImage(width, height, format);
+         return;
+     }
+@@ -184,11 +183,6 @@
+             shmctl(xshminfo.shmid, IPC_RMID, 0);
+         return;
+     }
+-    xshmpm = XShmCreatePixmap(X11->display, DefaultRootWindow(X11->display), xshmimg->data,
+-                              &xshminfo, width, height, dd);
+-    if (!xshmpm) {
+-        qWarning() << "QNativeImage: Unable to create shared Pixmap.";
+-    }
+ }
+ 
+ 
+@@ -197,10 +191,6 @@
+     if (!xshmimg)
+         return;
+ 
+-    if (xshmpm) {
+-        XFreePixmap(X11->display, xshmpm);
+-        xshmpm = 0;
+-    }
+     XShmDetach(X11->display, &xshminfo);
+     xshmimg->data = 0;
+     XDestroyImage(xshmimg);
+Index: src/gui/painting/qwindowsurface_raster.cpp
+===================================================================
+--- src/gui/painting/qwindowsurface_raster.cpp	(revision 930645)
++++ src/gui/painting/qwindowsurface_raster.cpp	(working copy)
+@@ -228,9 +228,16 @@
+ 
+     QRect br = rgn.boundingRect().translated(offset);
+ #ifndef QT_NO_MITSHM
+-    if (d_ptr->image->xshmpm) {
+-        XCopyArea(X11->display, d_ptr->image->xshmpm, widget->handle(), d_ptr->gc,
+-                  br.x(), br.y(), br.width(), br.height(), wbr.x(), wbr.y());
++    if (d_ptr->image->xshmimg && (br.width() * br.height() > 65536)) {
++        const QImage &src = d->image->image;
++        br = br.intersected(src.rect());
++        // Hack to make sure we satisify the PutImage() constraints in the X server,
++        // since the doShmPutImage() route currently forces a migration to system ram.
++        wbr.setX(wbr.x() - br.x());
++        br.setX(0);
++        br.setWidth(src.width());
++        XShmPutImage(X11->display, widget->handle(), d_ptr->gc, d_ptr->image->xshmimg,
++                     br.x(), br.y(), wbr.x(), wbr.y(), br.width(), br.height(), False);
+         XSync(X11->display, False);
+     } else
+ #endif
