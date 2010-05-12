@@ -25,7 +25,7 @@
 PRGNAM=ulogd
 VERSION=1.24
 ARCH=${ARCH:-i486}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 CWD=$(pwd)
@@ -33,10 +33,30 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
+WITH_MYSQL=${WITH_MYSQL:-yes}
+WITH_SQLITE=${WITH_SQLITE:-yes}
+
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+fi
+
+if [ "$WITH_MYSQL" != "yes" ]; then
+  do_mysql="--without-mysql"
+else
+  do_mysql="--with-mysql"
+fi
+
+if [ "$WITH_SQLITE" != "yes" ]; then
+  do_sqlite="--without-sqlite3"
+else
+  do_sqlite="--with-sqlite3"
 fi
 
 set -e
@@ -53,15 +73,28 @@ chmod -R a-s,u+w,go+r-w .
 CFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
-  --localstatedir=/var
+  --localstatedir=/var \
+  --build=$ARCH-slackware-linux \
+  $do_mysql \
+  $do_sqlite
+
+# "mysql_config --libs" shows -rdynamic, but it causes the mysql plugin
+# to barf on compilation (and running too, according to bug reports in 
+# other distributions), so we'll remove that flag
+if [ "$WITH_MYSQL" = "yes" ]; then
+  sed -i 's%-rdynamic %%' Rules.make
+fi
 
 make
 make install DESTDIR=$PKG
 
 ( cd $PKG
-  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
-  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null
 )
 
 install -D -m 0755 $CWD/rc.ulogd $PKG/etc/rc.d/rc.ulogd.new
