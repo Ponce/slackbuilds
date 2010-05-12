@@ -22,3 +22,10 @@ if [ -e usr/bin/scp ]; then
 fi
 
 config etc/rc.d/rc.dropbear.new
+
+# Create a logfile if one doesn't already exist
+if [ ! -e var/log/dropbear.log ]; then
+  touch var/log/dropbear.log
+  chmod 600 var/log/dropbear.log
+fi
+
