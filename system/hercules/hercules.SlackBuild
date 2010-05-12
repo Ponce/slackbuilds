@@ -1,0 +1,100 @@
+#!/bin/sh
+
+# Slackware build script for Hercules:
+# the System/370, ESA/390 and z/Architecture  emulator
+
+# Written by Niels Horn - niels.horn@gmail.com
+# revision date 2009/12/19
+
+set -e
+
+PRGNAM=hercules
+VERSION=${VERSION:-svn_20091219}
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+fi
+
+rm -rf $TMP/$PRGNAM-$VERSION $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+# Apply patch to resolve directory of Hercules modules in x86_64
+patch -p1 < $CWD/moddir.patch
+
+# Generate configure etc. first...
+sh autogen.sh
+
+CFLAGS="$SLKCFLAGS" \
+  ./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --enable-external-gui \
+  --build=$ARCH-slackware-linux
+
+make
+make install DESTDIR=$PKG
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null
+)
+
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+)
+
+# Copy standard configuration file to /etc
+mkdir -p $PKG/etc
+cat hercules.cnf > $PKG/etc/hercules.cnf.new
+
+# Copy icon & desktop file to package
+mkdir -p $PKG/usr/share/{applications,pixmaps}
+cat $CWD/hercules.desktop > $PKG/usr/share/applications/hercules.desktop
+cat $CWD/hercules.png > $PKG/usr/share/pixmaps/hercules.png
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/html
+cp -a \
+  ABOUT-NLS CHANGES COPYRIGHT INSTALL README.* RELEASE.NOTES \
+    $PKG/usr/doc/$PRGNAM-$VERSION
+find $PKG/usr/doc/$PRGNAM-$VERSION -type f -exec chmod 644 {} \;
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# The hercules Makefile does not accept the docdir correctly for the html files
+# so we move them manually
+mv $PKG/usr/share/hercules/*.{html,css} $PKG/usr/doc/$PRGNAM-$VERSION/html/
+mv $PKG/usr/share/hercules/images $PKG/usr/doc/$PRGNAM-$VERSION/html/
+mv $PKG/usr/share/hercules/include $PKG/usr/doc/$PRGNAM-$VERSION/html/
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
