@@ -11,6 +11,5 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/GeoIP.conf.default.new
 config etc/GeoIP.conf.new
 
