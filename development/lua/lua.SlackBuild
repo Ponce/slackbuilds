@@ -4,11 +4,16 @@
 
 # Written by Menno Duursma
 # Modified by the SlackBuilds.org project
+# Modified by Aaron W. Hsu
+
+# This program is free software. It comes without any warranty.
+# Granted WTFPL, Version 2, as published by Sam Hocevar. See
+# http://sam.zoy.org/wtfpl/COPYING for more details.
 
 PRGNAM=lua
-VERSION=5.1.4
+VERSION=${VERSION:-5.1.4}
 ARCH=${ARCH:-i486}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-4}
 TAG=${TAG:-_SBo}
 
 CWD=$(pwd)
@@ -25,59 +30,70 @@ elif [ "$ARCH" = "i686" ]; then
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
 fi
 
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
-cd $TMP || exit 1
+cd $TMP
 rm -rf $PRGNAM-$VERSION
-# Note: You must use the patched source at
-# http://slackbuilds.org/sources/12.2/lua-5.1.4_autotools.tar.bz2
-# or this build will fail.
-tar xvf $CWD/$PRGNAM-${VERSION}_autotools.tar.bz2|| exit 1
-cd $PRGNAM-$VERSION || exit 1
+tar xvf $CWD/$PRGNAM-${VERSION}.tar.gz
+cd $PRGNAM-$VERSION
 chown -R root:root .
-chmod -R a-s,u+rw,go-w+r .
-chmod u+x autogen.sh config.guess \
-          config.sub configure depcomp \
-          install-sh missing
 
-CFLAGS="$SLKCFLAGS" \
-./configure \
-  --with-readline \
-  --prefix=/usr \
-  --libdir=/usr/lib$LIBDIRSUFFIX || exit 1
+# Fix up a to-be-installed header and the pkgconfig file
+sed -i "s|/usr/local|/usr|" src/luaconf.h
+sed -i "s|lib/lua|lib$LIBDIRSUFFIX/lua|" src/luaconf.h
+sed -i "s|/usr/local|/usr|" etc/lua.pc
+sed -i "s|prefix}/lib|prefix}/lib${LIBDIRSUFFIX}|g" etc/lua.pc
 
-sed -i 's|^hardcode_libdir_flag_spec=.*|hardcode_libdir_flag_spec=""|g' libtool
-sed -i 's|^runpath_var=LD_RUN_PATH|runpath_var=DIE_RPATH_DIE|g' libtool
+make linux \
+  CFLAGS="$SLKCFLAGS \$(MYCFLAGS)" \
+  INSTALL_TOP=/usr \
+  INSTALL_LIB=/usr/lib${LIBDIRSUFFIX} \
+  INSTALL_LMOD=/usr/share/lua/5.1 \
+  INSTALL_CMOD=/usr/lib${LIBDIRSUFFIX}/lua/5.1
 
-make 
-make install DESTDIR=/$PKG
+make linux install \
+  CFLAGS="$SLKCFLAGS \$(MYCFLAGS)" \
+  INSTALL_TOP=$PKG/usr \
+  INSTALL_LIB=$PKG/usr/lib${LIBDIRSUFFIX} \
+  INSTALL_LMOD=$PKG/usr/share/lua/5.1 \
+  INSTALL_CMOD=$PKG/usr/lib${LIBDIRSUFFIX}/lua/5.1
 
-# Let's make sure all of the library symlinks correctly exist
-( cd $PKG/usr/lib$LIBDIRSUFFIX
-  ln -sf liblua.so.${VERSION} liblua.so.5
-  ln -sf liblua.so.${VERSION} liblua.so
-  chmod 0755 liblua.so.${VERSION}
-)
+# Now let's build the shared library
+mkdir -p shared
+cd shared
+  ar -x $PKG/usr/lib${LIBDIRSUFFIX}/liblua.a
+  gcc -ldl -lreadline -lhistory -lncurses -shared *.o -o liblua.so.5.1.4
+  cp -a liblua.so.5.1.4 $PKG/usr/lib${LIBDIRSUFFIX}
+  ( cd $PKG/usr/lib${LIBDIRSUFFIX}
+    ln -s liblua.so.5.1.4 liblua.so.5.1
+    ln -s liblua.so.5.1.4 liblua.so.5
+    ln -s liblua.so.5.1.4 liblua.so
+  )
+cd -
+
+# and install the pkgconfig file
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig
+cat etc/lua.pc > $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/lua.pc
 
 ( cd $PKG
   find . -type f | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
-    xargs strip --strip-unneeded 2> /dev/null
+    xargs strip --strip-unneeded 2> /dev/null || true
   find . -type f | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
     xargs strip --strip-unneeded 2> /dev/null
-  strip -g usr/lib/*.a
+  strip -g usr/lib${LIBDIRSUFFIX}/*.a
 )
 
 ( cd $PKG/usr/man
   find . -type f -exec gzip -9 {} \;
   for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
 )
-
-# Remove some empty directories, I can't imagine why these are here.
-rm -rf $PKG/usr/share $PKG/usr/lib/lua
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/{extras,html}
 cp -a COPYRIGHT HISTORY INSTALL README $PKG/usr/doc/$PRGNAM-$VERSION
@@ -89,4 +105,4 @@ mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
