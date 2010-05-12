@@ -5,7 +5,7 @@
 # Based on Patrick Volkerding's official build script for python
 
 PRGNAM=python3
-VERSION=${VERSION:-3.0.1}
+VERSION=${VERSION:-3.1.1}
 ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
@@ -15,20 +15,22 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-# Location for Python site-packages:
-SITEPK=$PKG/usr/lib/python3.0/site-packages
-# same as above without $PKG
-TOOLSDIR=/usr/lib/python3.0/site-packages
-
-# Normally I don't trust -O3, but it is the Python default so
-# I'll assume that in this case it has been well tested.
+# Don't set any SLKCFLAGS here, or OPT="$SLKCFLAGS" before the ./configure.
+# Python gets the compile options right without any help.
 if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O3 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O3 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  LIBDIRSUFFIX="64"
 fi
 
-set -e
+set -eu
+
+# Location for Python site-packages:
+SITEPK=$PKG/usr/lib${LIBDIRSUFFIX}/python3.1/site-packages
+# same as above without $PKG
+TOOLSDIR=/usr/lib${LIBDIRSUFFIX}/python3.1/site-packages
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -37,27 +39,39 @@ rm -rf Python-$VERSION
 tar xvf $CWD/Python-$VERSION.tar.bz2
 cd Python-$VERSION
 chown -R root:root .
-find . \
- \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+chmod -R u+w,go+r-w,a-s+X .
 
-OPT="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
   --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
   --with-ncurses \
   --with-threads \
   --enable-ipv6 \
-  --enable-shared
+  --enable-shared \
+  --with-computed-gotos \
+  --build=$ARCH-slackware-linux
 
-make
-make altinstall DESTDIR=$PKG
+# --libdir seems to be ignored - Makefile.pre.in has it hardcoded as
+# LIBDIR = $(exec_prefix)/lib and besides, there's also a SCRIPTDIR
+# that should probably be /usr/lib64 as well
+make \
+  LIBDIR=/usr/lib${LIBDIRSUFFIX} \
+  SCRIPTDIR=/usr/lib${LIBDIRSUFFIX}
+make altinstall \
+  LIBDIR=/usr/lib${LIBDIRSUFFIX} \
+  SCRIPTDIR=/usr/lib${LIBDIRSUFFIX} \
+  DESTDIR=$PKG
+
+# Install some python-demo files:
+mkdir -p $PKG/usr/doc/python3-$VERSION
+cp -a Demo $PKG/usr/doc/python3-$VERSION
 
 # We'll install the python-tools under site-packages:
 mkdir -p $SITEPK
-( cd Tools ; cp -a * $SITEPK )
+cp -a Tools/* $SITEPK
+
 mkdir -p $PKG/usr/doc/python3-$VERSION
 mv $SITEPK/README $PKG/usr/doc/python3-$VERSION/README.python-tools
 ( cd $PKG/usr/doc/python3-$VERSION
@@ -66,14 +80,12 @@ mv $SITEPK/README $PKG/usr/doc/python3-$VERSION/README.python-tools
 
 # Install docs:
 mkdir -p $PKG/usr/doc/python3-$VERSION
-cp -a Misc README $PKG/usr/doc/python3-$VERSION
+cp -a README LICENSE $PKG/usr/doc/python3-$VERSION
+cp -a Misc $PKG/usr/doc/python3-$VERSION
+cp -a Doc $PKG/usr/doc/python3-$VERSION
 
-# Resolve name conflicts regarding 2.x releases:
-( cd $PKG/usr/bin
-  mv idle idle3.0
-  mv smtpd.py smtpd3.0.py
-  mv pydoc pydoc3.0
-)
+# Python 2.6 already has this script.
+rm -f $PKG/usr/bin/2to3
 
 ( cd $PKG
   find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
@@ -82,8 +94,13 @@ cp -a Misc README $PKG/usr/doc/python3-$VERSION
     xargs strip --strip-unneeded 2> /dev/null
 )
 
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+)
+
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
