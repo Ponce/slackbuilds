@@ -1,0 +1,359 @@
+diff -Naur audiere/configure.in audiere.tpg/configure.in
+--- audiere/configure.in	2004-11-07 23:41:37.000000000 +0000
++++ audiere.tpg/configure.in	2008-06-03 18:13:32.000000000 +0000
+@@ -66,7 +66,7 @@
+     AC_MSG_ERROR(could not find pthread library))
+ 
+ dnl Look for FLAC
+-AC_CHECK_LIB(FLAC, FLAC__seekable_stream_decoder_process_single,
++AC_CHECK_LIB(FLAC, FLAC__stream_decoder_process_single,
+     LIBS="-lFLAC -lm $LIBS"
+     EXTRA_LIBS="-lFLAC -lm $EXTRA_LIBS"
+     HAVE_FLAC=true
+diff -Naur audiere/src/debug.h audiere.tpg/src/debug.h
+--- audiere/src/debug.h	2004-04-09 09:33:50.000000000 +0000
++++ audiere.tpg/src/debug.h	2008-06-03 18:38:53.000000000 +0000
+@@ -60,7 +60,8 @@
+   #define ADR_IF_DEBUG     if (true)
+ 
+   #ifdef _MSC_VER
+-    #define ADR_ASSERT(condition, label) if (!(condition)) { __asm int 3 }
++    #include <intrin.h>
++    #define ADR_ASSERT(condition, label) if (!(condition)) { __debugbreak(); }
+   #else  // assume x86 gcc
+     #define ADR_ASSERT(condition, label) assert(condition && label);
+   #endif
+diff -Naur audiere/src/input_flac.cpp audiere.tpg/src/input_flac.cpp
+--- audiere/src/input_flac.cpp	2003-10-23 03:41:17.000000000 +0000
++++ audiere.tpg/src/input_flac.cpp	2008-06-03 18:39:53.000000000 +0000
+@@ -19,8 +19,8 @@
+ 
+   FLACInputStream::~FLACInputStream() {
+     if (m_decoder) {
+-      FLAC__seekable_stream_decoder_finish(m_decoder);
+-      FLAC__seekable_stream_decoder_delete(m_decoder);
++      FLAC__stream_decoder_finish(m_decoder);
++      FLAC__stream_decoder_delete(m_decoder);
+       m_decoder = 0;
+     }
+   }
+@@ -31,19 +31,19 @@
+     m_file = file;
+ 
+     // initialize the decoder
+-    m_decoder = FLAC__seekable_stream_decoder_new();
++    m_decoder = FLAC__stream_decoder_new();
+     if (!m_decoder) {
+       m_file = 0;
+       return false;
+     }
+-
++/*
+ #define SET_CALLBACK(name)                                   \
+-  FLAC__seekable_stream_decoder_set_##name##_callback(       \
++  FLAC__stream_decoder_set_##name##_callback(       \
+     m_decoder,                                               \
+     name##_callback)
+ 
+     // set callbacks
+-    FLAC__seekable_stream_decoder_set_client_data      (m_decoder, this);
++    FLAC__stream_decoder_set_client_data      (m_decoder, this);
+     SET_CALLBACK(read);
+     SET_CALLBACK(seek);
+     SET_CALLBACK(tell);
+@@ -52,39 +52,50 @@
+     SET_CALLBACK(write);
+     SET_CALLBACK(metadata);
+     SET_CALLBACK(error);
+-
+-    FLAC__SeekableStreamDecoderState state =
+-      FLAC__seekable_stream_decoder_init(m_decoder);
+-    if (state != FLAC__SEEKABLE_STREAM_DECODER_OK) {
+-      FLAC__seekable_stream_decoder_finish(m_decoder);
+-      FLAC__seekable_stream_decoder_delete(m_decoder);
++*/
++    FLAC__StreamDecoderInitStatus state = FLAC__stream_decoder_init_stream(
++      m_decoder,
++      read_callback,
++      seek_callback,
++      tell_callback,
++      length_callback,
++      eof_callback,
++      write_callback,
++      metadata_callback,
++      error_callback,
++      this
++    );
++
++    if (state != FLAC__STREAM_DECODER_INIT_STATUS_OK) {
++      FLAC__stream_decoder_finish(m_decoder);
++      FLAC__stream_decoder_delete(m_decoder);
+       m_decoder = 0;
+       m_file = 0;
+       return false;
+     }
+ 
+     // make sure we have metadata before we return!
+-    if (!FLAC__seekable_stream_decoder_process_until_end_of_metadata(m_decoder)) {
+-      FLAC__seekable_stream_decoder_finish(m_decoder);
+-      FLAC__seekable_stream_decoder_delete(m_decoder);
++    if (!FLAC__stream_decoder_process_until_end_of_metadata(m_decoder)) {
++      FLAC__stream_decoder_finish(m_decoder);
++      FLAC__stream_decoder_delete(m_decoder);
+       m_decoder = 0;
+       m_file = 0;
+       return false;
+     }
+ 
+     // process one frame so we can do something!
+-    if (!FLAC__seekable_stream_decoder_process_single(m_decoder)) {
+-      FLAC__seekable_stream_decoder_finish(m_decoder);
+-      FLAC__seekable_stream_decoder_delete(m_decoder);
++    if (!FLAC__stream_decoder_process_single(m_decoder)) {
++      FLAC__stream_decoder_finish(m_decoder);
++      FLAC__stream_decoder_delete(m_decoder);
+       m_decoder = 0;
+       m_file = 0;
+       return false;
+     }
+ 
+     // get info about the flac file
+-    m_channel_count = FLAC__seekable_stream_decoder_get_channels(m_decoder);
+-    m_sample_rate   = FLAC__seekable_stream_decoder_get_sample_rate(m_decoder);
+-    int bps         = FLAC__seekable_stream_decoder_get_bits_per_sample(m_decoder);
++    m_channel_count = FLAC__stream_decoder_get_channels(m_decoder);
++    m_sample_rate   = FLAC__stream_decoder_get_sample_rate(m_decoder);
++    int bps         = FLAC__stream_decoder_get_bits_per_sample(m_decoder);
+     if (bps == 16) {
+       m_sample_format = SF_S16;
+     } else if (bps == 8) {
+@@ -120,7 +131,7 @@
+       
+       // if the buffer is empty, ask FLAC to fill it p
+       if (m_buffer.getSize() < frame_size) {
+-        if (!FLAC__seekable_stream_decoder_process_single(m_decoder)) {
++        if (!FLAC__stream_decoder_process_single(m_decoder)) {
+           return frames_read;
+         }
+ 
+@@ -147,7 +158,7 @@
+   void
+   FLACInputStream::reset() {
+     m_file->seek(0, File::BEGIN);
+-    FLAC__seekable_stream_decoder_seek_absolute(m_decoder, 0);
++    FLAC__stream_decoder_seek_absolute(m_decoder, 0);
+     m_position = 0;
+     m_buffer.clear();
+   }
+@@ -167,7 +178,7 @@
+ 
+   void
+   FLACInputStream::setPosition(int position) {
+-    if (FLAC__seekable_stream_decoder_seek_absolute(m_decoder, position)) {
++    if (FLAC__stream_decoder_seek_absolute(m_decoder, position)) {
+       m_position = position;
+     }
+   }
+@@ -218,56 +229,58 @@
+   }
+ 
+ 
+-  FLAC__SeekableStreamDecoderReadStatus FLACInputStream::read_callback(
+-    const FLAC__SeekableStreamDecoder* decoder,
++  FLAC__StreamDecoderReadStatus FLACInputStream::read_callback(
++    const FLAC__StreamDecoder* decoder,
+     FLAC__byte buffer[],
+-    unsigned *bytes,
++    size_t *bytes,
+     void* client_data)
+   {
+     *bytes = getFile(client_data)->read(buffer, *bytes);
+     if (*bytes == 0) {
+-      return FLAC__SEEKABLE_STREAM_DECODER_READ_STATUS_ERROR;
++      // was: FLAC__STREAM_DECODER_READ_STATUS_ERROR
++      return FLAC__STREAM_DECODER_READ_STATUS_END_OF_STREAM;
+     } else {
+-      return FLAC__SEEKABLE_STREAM_DECODER_READ_STATUS_OK;
++      // was: FLAC__STREAM_DECODER_READ_STATUS_OK
++      return FLAC__STREAM_DECODER_READ_STATUS_CONTINUE;
+     }
+   }
+ 
+ 
+-  FLAC__SeekableStreamDecoderSeekStatus FLACInputStream::seek_callback(
+-    const FLAC__SeekableStreamDecoder* decoder,
++  FLAC__StreamDecoderSeekStatus FLACInputStream::seek_callback(
++    const FLAC__StreamDecoder* decoder,
+     FLAC__uint64 absolute_byte_offset,
+     void* client_data)
+   {
+     if (getFile(client_data)->seek(static_cast<int>(absolute_byte_offset), File::BEGIN)) {
+-      return FLAC__SEEKABLE_STREAM_DECODER_SEEK_STATUS_OK;
++      return FLAC__STREAM_DECODER_SEEK_STATUS_OK;
+     } else {
+-      return FLAC__SEEKABLE_STREAM_DECODER_SEEK_STATUS_ERROR;
++      return FLAC__STREAM_DECODER_SEEK_STATUS_ERROR;
+     }
+   }
+ 
+ 
+-  FLAC__SeekableStreamDecoderTellStatus FLACInputStream::tell_callback(
+-    const FLAC__SeekableStreamDecoder* decoder,
++  FLAC__StreamDecoderTellStatus FLACInputStream::tell_callback(
++    const FLAC__StreamDecoder* decoder,
+     FLAC__uint64* absolute_byte_offset,
+     void* client_data)
+   {
+     *absolute_byte_offset = getFile(client_data)->tell();
+-    return FLAC__SEEKABLE_STREAM_DECODER_TELL_STATUS_OK;
++    return FLAC__STREAM_DECODER_TELL_STATUS_OK;
+   }
+ 
+ 
+-  FLAC__SeekableStreamDecoderLengthStatus FLACInputStream::length_callback(
+-    const FLAC__SeekableStreamDecoder* decoder,
++  FLAC__StreamDecoderLengthStatus FLACInputStream::length_callback(
++    const FLAC__StreamDecoder* decoder,
+     FLAC__uint64* stream_length,
+     void* client_data)
+   {
+     *stream_length = GetFileLength(getFile(client_data));
+-    return FLAC__SEEKABLE_STREAM_DECODER_LENGTH_STATUS_OK;
++    return FLAC__STREAM_DECODER_LENGTH_STATUS_OK;
+   }
+ 
+ 
+   FLAC__bool FLACInputStream::eof_callback(
+-    const FLAC__SeekableStreamDecoder* decoder,
++    const FLAC__StreamDecoder* decoder,
+     void* client_data)
+   {
+     File* file = getFile(client_data);
+@@ -276,7 +289,7 @@
+ 
+ 
+   FLAC__StreamDecoderWriteStatus FLACInputStream::write_callback(
+-    const FLAC__SeekableStreamDecoder* decoder,
++    const FLAC__StreamDecoder* decoder,
+     const FLAC__Frame* frame,
+     const FLAC__int32* const buffer[],
+     void* client_data)
+@@ -286,7 +299,7 @@
+ 
+ 
+   void FLACInputStream::metadata_callback(
+-    const FLAC__SeekableStreamDecoder* decoder,
++    const FLAC__StreamDecoder* decoder,
+     const FLAC__StreamMetadata *metadata,
+     void* client_data)
+   {
+@@ -298,7 +311,7 @@
+ 
+ 
+   void FLACInputStream::error_callback(
+-    const FLAC__SeekableStreamDecoder* decoder,
++    const FLAC__StreamDecoder* decoder,
+     FLAC__StreamDecoderErrorStatus status,
+     void* client_data)
+   {
+diff -Naur audiere/src/input_flac.h audiere.tpg/src/input_flac.h
+--- audiere/src/input_flac.h	2003-07-01 18:45:44.000000000 +0000
++++ audiere.tpg/src/input_flac.h	2008-06-03 18:42:04.000000000 +0000
+@@ -2,7 +2,7 @@
+ #define INPUT_FLAC_H
+ 
+ 
+-#include <FLAC/seekable_stream_decoder.h>
++#include <FLAC/stream_decoder.h>
+ #include "audiere.h"
+ #include "basic_source.h"
+ #include "utility.h"
+@@ -34,37 +34,37 @@
+       const FLAC__Frame* frame,
+       const FLAC__int32* const buffer[]);
+ 
+-    static FLAC__SeekableStreamDecoderReadStatus read_callback(
+-      const FLAC__SeekableStreamDecoder* decoder,
++    static FLAC__StreamDecoderReadStatus read_callback(
++      const FLAC__StreamDecoder* decoder,
+       FLAC__byte buffer[],
+-      unsigned* bytes,
++      size_t* bytes,
+       void* client_data);
+-    static FLAC__SeekableStreamDecoderSeekStatus seek_callback(
+-      const FLAC__SeekableStreamDecoder* decoder,
++    static FLAC__StreamDecoderSeekStatus seek_callback(
++      const FLAC__StreamDecoder* decoder,
+       FLAC__uint64 absolute_byte_offset,
+       void* client_data);
+-    static FLAC__SeekableStreamDecoderTellStatus tell_callback(
+-      const FLAC__SeekableStreamDecoder* decoder,
++    static FLAC__StreamDecoderTellStatus tell_callback(
++      const FLAC__StreamDecoder* decoder,
+       FLAC__uint64* absolute_byte_offset,
+       void* client_data);
+-    static FLAC__SeekableStreamDecoderLengthStatus length_callback(
+-      const FLAC__SeekableStreamDecoder* decoder,
++    static FLAC__StreamDecoderLengthStatus length_callback(
++      const FLAC__StreamDecoder* decoder,
+       FLAC__uint64* stream_length,
+       void* client_data);
+     static FLAC__bool eof_callback(
+-      const FLAC__SeekableStreamDecoder* decoder,
++      const FLAC__StreamDecoder* decoder,
+       void* client_data);
+     static FLAC__StreamDecoderWriteStatus write_callback(
+-      const FLAC__SeekableStreamDecoder* decoder,
++      const FLAC__StreamDecoder* decoder,
+       const FLAC__Frame* frame,
+       const FLAC__int32* const buffer[],
+       void* client_data);
+     static void metadata_callback(
+-      const FLAC__SeekableStreamDecoder* decoder,
++      const FLAC__StreamDecoder* decoder,
+       const FLAC__StreamMetadata* metadata,
+       void* client_data);
+     static void error_callback(
+-      const FLAC__SeekableStreamDecoder* decoder,
++      const FLAC__StreamDecoder* decoder,
+       FLAC__StreamDecoderErrorStatus status,
+       void* client_data);
+ 
+@@ -74,7 +74,7 @@
+ 
+     FilePtr m_file;
+ 
+-    FLAC__SeekableStreamDecoder* m_decoder;
++    FLAC__StreamDecoder* m_decoder;
+ 
+     /**
+      * This is the buffer used to combine the different channels from FLAC
+diff -Naur audiere/src/mci_device.h audiere.tpg/src/mci_device.h
+--- audiere/src/mci_device.h	2004-07-30 02:30:47.000000000 +0000
++++ audiere.tpg/src/mci_device.h	2008-06-03 18:43:02.000000000 +0000
+@@ -41,7 +41,11 @@
+         0, 0, 0, 0,
+         NULL, NULL, GetModuleHandle(NULL), NULL);
+       if (m_window) {
++        #if defined(_M_X64)
++        SetWindowLongPtr(m_window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
++        #else
+         SetWindowLong(m_window, GWL_USERDATA, reinterpret_cast<LONG>(this));
++        #endif
+       } else {
+         ADR_LOG("MCI notification window creation failed");
+       }
+@@ -96,7 +100,13 @@
+     static LRESULT CALLBACK notifyWindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM lparam) {
+       switch (msg) {
+         case MM_MCINOTIFY: {
++          #if defined(_M_X64)
++          MCIDevice* This = reinterpret_cast<MCIDevice*>(
++            GetWindowLongPtr(window, GWLP_USERDATA)
++          );
++          #else
+           MCIDevice* This = reinterpret_cast<MCIDevice*>(GetWindowLong(window, GWL_USERDATA));
++          #endif
+           if (This) {
+             This->notify(wparam);
+           }
