@@ -21,7 +21,6 @@ config etc/postfix/main.cf.default.new
 config etc/postfix/main.cf.new
 config etc/postfix/makedefs.out.new
 config etc/postfix/master.cf.new
-config etc/postfix/postfix-files.new
 config etc/postfix/relocated.new
 config etc/postfix/transport.new
 config etc/postfix/virtual.new
