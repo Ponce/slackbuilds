@@ -2,12 +2,30 @@
 
 # Slackware build script for glest
 
-# Written by Larry Hajali <larryhaja[at]gmail[dot]com>
+# Copyright 2009 Larry Hajali <larryhaja[at]gmail[dot]com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=glest
 VERSION=${VERSION:-3.2.2}
 ARCH=${ARCH:-i486}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 CWD=$(pwd)
@@ -40,18 +58,16 @@ cd $PRGNAM-$VERSION
 unzip $CWD/${PRGNAM}_source_${VERSION}.zip
 
 # Fix up files so they aren't in MS format.
-# Taken from the glest slackbuild availabe at
-# http://ftp.darkstarlinux.ro/.
+# Taken from the glest slackbuild available
+# at http://ftp.darkstarlinux.ro/.
 find source mk docs -type f | while read FILE; do
   echo $FILE
   sed \
     -e 's|\x0D$||g' \
     < $FILE > $FILE.new
-
     mv -f $FILE.new $FILE
 done
 
-# Fix permissions.
 chown -R root:root .
 find . \
  \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
@@ -61,19 +77,33 @@ find . \
 
 # Allow glest to be built against xerces-c vs. 2.x or 3.x.
 # From the gentoo guys. http://bugs.gentoo.org/show_bug.cgi?id=263217
-patch -p0 < $CWD/glest-xerces-c.patch
+patch -p0 < $CWD/patches/glest-xerces-c.patch
+# Fix for the home directory. This gets rid of the wrapper script.
+patch -p0 < $CWD/patches/glest-home-directory.patch
+# Add support for the glest_g3dviewer for linux.
+patch -p0 < $CWD/patches/g3d_viewer.patch
+# Fix glest to build against newer glibc versions.
+patch -p0 < $CWD/patches/glest-3.2.2-glibc210.patch
 # Fix an innocuous version mismatch in configure.ac.
-sed -i "s|3.1.2|$VERSION|" mk/linux/configure.ac
+sed -i "s|3.1.2|${VERSION}|" mk/linux/configure.ac
+# Fix the config file for languages.
+sed -i 's|\.lng||' mk/linux/$PRGNAM.ini 2>/dev/null || true
 
+# Determine if we compile against wxPython for the optional map editor.
 if [ "$HAVE_WX" == "yes" ]; then
   unset USE_WX
 else
-  USE_WX="--with-wx-config=disable_wx"
+  USE_WX="--with-wx-config=disabled_wx"
 fi
 
 cd mk/linux
 
-  [ -f ./configure ] || chmod a+x autogen.sh && ./autogen.sh
+  if [ ! -f configure ]; then
+    chmod a+x autogen.sh
+    ./autogen.sh
+  else
+    chmod +x configure
+  fi
 
   CFLAGS="$SLKCFLAGS" \
   CXXFLAGS="$SLKCFLAGS" \
@@ -87,29 +117,23 @@ cd mk/linux
     --program-prefix="" \
     --program-suffix="" \
     $USE_WX \
-    --build=$ARCH-slackware-linux \
-    --host=$ARCH-slackware-linux
+    --build=$ARCH-slackware-linux
 
   jam -q
 
 cd -
 
 # Glest doesn't come with a nice installer. So we'll do it ourselves.
-install -d -m 0755 $PKG/usr/{bin,share/$PRGNAM,lib${LIBDIRSUFFIX}/$PRGNAM}
-install -d -m 0755 $PKG/etc/$PRGNAM
+install -d -m 0755 $PKG/usr/{bin,share/$PRGNAM}
+install -m 0755 mk/linux/$PRGNAM $PKG/usr/bin
+install -m 0644 mk/linux/$PRGNAM.ini $PKG/usr/share/$PRGNAM
 cp -ar source/glest_game/* $PKG/usr/share/$PRGNAM
-install -m 0755 mk/linux/$PRGNAM $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM
-install -m 0644 mk/linux/$PRGNAM.ini $PKG/etc/$PRGNAM
-install -m 0755 $CWD/$PRGNAM.sh $PKG/usr/bin/$PRGNAM.sh
-sed -i "s|\/lib\/|\/lib${LIBDIRSUFFIX}\/|g" $PKG/usr/bin/$PRGNAM.sh
 
 # Install the editor if the user requests it.
-if [ "$HAVE_WX" == "yes" ]; then
+if [ "${HAVE_WX}" == "yes" ]; then
   install -m 0755 mk/linux/${PRGNAM}_editor $PKG/usr/bin
+  install -m 0755 mk/linux/${PRGNAM}_g3dviewer $PKG/usr/bin
 fi
-
-# Let's not clobber this file on upgrades.
-mv $PKG/etc/$PRGNAM/$PRGNAM.ini $PKG/etc/$PRGNAM/$PRGNAM.ini.new
 
 ( cd $PKG
   find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
@@ -124,21 +148,23 @@ gzip -9 $PKG/usr/man/man?/*.?
 
 # Make a desktop item.
 mkdir -p $PKG/usr/share/{applications,pixmaps}
-cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
-install -m 0644 $CWD/$PRGNAM.xpm $PKG/usr/share/pixmaps
-if [ "$HAVE_WX" == "yes" ]; then
+install -m 0644 $CWD/$PRGNAM.desktop $PKG/usr/share/applications/
+install -m 0644 $CWD/$PRGNAM.xpm $PKG/usr/share/pixmaps/
+if [ "${HAVE_WX}" == "yes" ]; then
   install -m 0644 $CWD/$PRGNAM-editor.desktop \
-    $PKG/usr/share/applications/$PRGNAM-editor.desktop
+    $PKG/usr/share/applications/
+  install -m 0644 $CWD/$PRGNAM-g3d-viewer.desktop \
+    $PKG/usr/share/applications/
 fi
-chmod 0644 $PKG/usr/share/applications/*
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a docs/* $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+chmod 0644 $PKG/usr/doc/$PRGNAM-$VERSION/*
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
