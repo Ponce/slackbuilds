@@ -1,0 +1,142 @@
+#!/bin/sh
+
+# Slackware build script for amanda
+
+# Copyright (c) 2009  Chris Walker <kris240376@gmail.com> 
+# All rights reserved.
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are
+# met:
+#
+# * Redistributions of source code must retain the above copyright
+#   notice, this list of conditions and the following disclaimer.
+# * Redistributions in binary form must reproduce the above
+#   copyright notice, this list of conditions and the following disclaimer
+#   in the documentation and/or other materials provided with the
+#   distribution.
+# * Neither the name of the {company} nor the names of its
+#   contributors may be used to endorse or promote products derived from
+#   this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=amanda
+VERSION=${VERSION:-2.6.1p1}
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-2}
+TAG=${TAB:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+AMANDAUSR=${AMANDAUSR:-amanda}
+AMANDAGRP=${AMANDAGRP:-amanda}
+AMANDAUID=${AMANDAUID:-211}
+AMANDAGID=${AMANDAGID:-211}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+fi
+
+do_exit() {
+  echo ; echo "You must have the ${AMANDAUSR} user and ${AMANDAGRP} group in"
+  echo "order to build amanda.  Sample lines to do so are below:"
+  echo "# groupadd -g ${AMANDAGID} ${AMANDAGRP}"
+  echo "# useradd -u ${AMANDAUID} -d /var/lib/amanda -s /bin/false -g ${AMANDAGRP} ${AMANDAUSR}"
+  echo "Exiting..." ; echo ; exit 1
+}
+
+# Check for Amanada user and group availability
+if ! getent group | grep -q ^${AMANDAGRP}: 2>/dev/null ; then
+  do_exit;
+elif ! getent passwd | grep -q ^${AMANDAUSR}: 2>/dev/null ; then
+  do_exit;
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+chmod -R a-s,u+w,go+r-w .
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --mandir=/usr/man \
+  --sysconfdir=/etc \
+  --localstatedir=/var/lib \
+  --with-user=$AMANDAUSR \
+  --with-group=$AMANDAGRP\
+  --with-owner=root \
+  --with-bsdudp-security \
+  --with-ssh-security \
+  --with-bsdtcp-security \
+  --disable-static \
+  --build=$ARCH-slackware-linux
+
+make
+make install DESTDIR=$PKG
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+)
+
+chown -R root:root $PKG/usr/man
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+
+mkdir -p $PKG/etc/$PRGNAM
+for i in 3hole.ps 8.5x11.ps DIN-A4.ps DLT.ps EXB-8500.ps \
+  HP-DAT.ps amanda-client.conf amanda.conf chg-mcutil.conf \
+  chg-multi.conf chg-scsi.conf disklist ; do
+    cat example/$i > $PKG/etc/$PRGNAM/$i.new ;
+done
+
+mkdir -p $PKG/var/lib/amanda
+chown -R $AMANDAUSR:$AMANDAGRP $PKG/var/lib/amanda
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS INSTALL README $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+( cd $PKG/usr/doc/$PRGNAM-$VERSION
+  for i in template.d example ChangeLog COPYRIGHT NEWS ReleaseNotes ; do
+    ln -s ../../share/amanda/$i $i ;
+  done
+)
+
+mkdir $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
