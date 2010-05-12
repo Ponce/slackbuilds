@@ -1,0 +1,159 @@
+--- /net80211/ieee80211_wireless.c (revision 3080)
++++ /net80211/ieee80211_wireless.c (revision 3811)
+@@ -1552,4 +1552,5 @@
+ struct iwscanreq {		/* XXX: right place for this declaration? */
+ 	struct ieee80211vap *vap;
++	struct iw_request_info *info;
+ 	char *current_ev;
+ 	char *end_buf;
+@@ -1557,4 +1558,11 @@
+ };
+ 
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 27) && !defined(IW_REQUEST_FLAG_COMPAT)
++#define	iwe_stream_add_event(a, b, c, d, e)	iwe_stream_add_event(b, c, d, e)
++#define	iwe_stream_add_point(a, b, c, d, e)	iwe_stream_add_point(b, c, d, e)
++#define	iwe_stream_add_value(a, b, c, d, e, f)	\
++	iwe_stream_add_value(b, c, d, e, f)
++#define	iwe_stream_lcp_len(a)			IW_EV_LCP_LEN
++#endif
+ static int
+ giwscan_cb(void *arg, const struct ieee80211_scan_entry *se)
+@@ -1591,5 +1599,6 @@
+ 	else
+ 		IEEE80211_ADDR_COPY(iwe.u.ap_addr.sa_data, se->se_bssid);
+-	current_ev = iwe_stream_add_event(current_ev, end_buf, &iwe, IW_EV_ADDR_LEN);
++	current_ev = iwe_stream_add_event(req->info, current_ev, end_buf,
++					&iwe, IW_EV_ADDR_LEN);
+ 
+ 	/* We ran out of space in the buffer. */
+@@ -1604,9 +1613,9 @@
+ 		iwe.u.data.length = vap->iv_des_nssid > 0 ?
+ 			vap->iv_des_ssid[0].len : 0;
+-		current_ev = iwe_stream_add_point(current_ev,
++		current_ev = iwe_stream_add_point(req->info, current_ev,
+ 			end_buf, &iwe, vap->iv_des_ssid[0].ssid);
+ 	} else {
+ 		iwe.u.data.length = se->se_ssid[1];
+-		current_ev = iwe_stream_add_point(current_ev,
++		current_ev = iwe_stream_add_point(req->info, current_ev,
+ 			end_buf, &iwe, (char *) se->se_ssid+2);
+ 	}
+@@ -1622,6 +1631,6 @@
+ 		iwe.u.mode = se->se_capinfo & IEEE80211_CAPINFO_ESS ?
+ 			IW_MODE_MASTER : IW_MODE_ADHOC;
+-		current_ev = iwe_stream_add_event(current_ev,
+-			end_buf, &iwe, IW_EV_UINT_LEN);
++		current_ev = iwe_stream_add_event(req->info, current_ev,
++				end_buf, &iwe, IW_EV_UINT_LEN);
+ 
+ 		/* We ran out of space in the buffer. */
+@@ -1635,6 +1644,6 @@
+ 	iwe.u.freq.m = se->se_chan->ic_freq * 100000;
+ 	iwe.u.freq.e = 1;
+-	current_ev = iwe_stream_add_event(current_ev,
+-		end_buf, &iwe, IW_EV_FREQ_LEN);
++	current_ev = iwe_stream_add_event(req->info, current_ev,
++			end_buf, &iwe, IW_EV_FREQ_LEN);
+ 
+ 	/* We ran out of space in the buffer. */
+@@ -1646,6 +1655,6 @@
+ 	iwe.cmd = IWEVQUAL;
+ 	set_quality(&iwe.u.qual, se->se_rssi, ATH_DEFAULT_NOISE);
+-	current_ev = iwe_stream_add_event(current_ev,
+-		end_buf, &iwe, IW_EV_QUAL_LEN);
++	current_ev = iwe_stream_add_event(req->info, current_ev,
++			end_buf, &iwe, IW_EV_QUAL_LEN);
+ 
+ 	/* We ran out of space in the buffer */
+@@ -1661,5 +1670,6 @@
+ 		iwe.u.data.flags = IW_ENCODE_DISABLED;
+ 	iwe.u.data.length = 0;
+-	current_ev = iwe_stream_add_point(current_ev, end_buf, &iwe, "");
++	current_ev = iwe_stream_add_point(req->info, current_ev,
++					end_buf, &iwe, "");
+ 
+ 	/* We ran out of space in the buffer. */
+@@ -1670,5 +1680,5 @@
+ 	last_ev = current_ev;
+ 	iwe.cmd = SIOCGIWRATE;
+-	current_val = current_ev + IW_EV_LCP_LEN;
++	current_val = current_ev + iwe_stream_lcp_len(req->info);
+ 	/* NB: not sorted, does it matter? */
+ 	for (j = 0; j < se->se_rates[1]; j++) {
+@@ -1676,7 +1686,7 @@
+ 		if (r != 0) {
+ 			iwe.u.bitrate.value = r * (1000000 / 2);
+-			current_val = iwe_stream_add_value(current_ev,
+-				current_val, end_buf, &iwe,
+-				IW_EV_PARAM_LEN);
++			current_val = iwe_stream_add_value(req->info,
++					current_ev, current_val, end_buf,
++					&iwe, IW_EV_PARAM_LEN);
+ 		}
+ 	}
+@@ -1685,11 +1695,11 @@
+ 		if (r != 0) {
+ 			iwe.u.bitrate.value = r * (1000000 / 2);
+-			current_val = iwe_stream_add_value(current_ev,
+-				current_val, end_buf, &iwe,
+-				IW_EV_PARAM_LEN);
++			current_val = iwe_stream_add_value(req->info,
++					current_ev, current_val, end_buf,
++					&iwe, IW_EV_PARAM_LEN);
+ 		}
+ 	}
+ 	/* remove fixed header if no rates were added */
+-	if ((current_val - current_ev) > IW_EV_LCP_LEN) {
++	if ((current_val - current_ev) > iwe_stream_lcp_len(req->info)) {
+ 		current_ev = current_val;
+ 	} else {
+@@ -1705,5 +1715,6 @@
+ 	snprintf(buf, sizeof(buf), "bcn_int=%d", se->se_intval);
+ 	iwe.u.data.length = strlen(buf);
+-	current_ev = iwe_stream_add_point(current_ev, end_buf, &iwe, buf);
++	current_ev = iwe_stream_add_point(req->info, current_ev,
++					end_buf, &iwe, buf);
+ 
+ 	/* We ran out of space in the buffer. */
+@@ -1729,6 +1740,6 @@
+ #endif
+ 		if (iwe.u.data.length != 0) {
+-			current_ev = iwe_stream_add_point(current_ev, end_buf,
+-				&iwe, buf);
++			current_ev = iwe_stream_add_point(req->info,
++					current_ev, end_buf, &iwe, buf);
+ 			
+ 			/* We ran out of space in the buffer */
+@@ -1755,6 +1766,6 @@
+ #endif
+ 		if (iwe.u.data.length != 0) {
+-			current_ev = iwe_stream_add_point(current_ev, end_buf,
+-				&iwe, buf);
++			current_ev = iwe_stream_add_point(req->info,
++					current_ev, end_buf, &iwe, buf);
+ 			
+ 			/* We ran out of space in the buffer. */
+@@ -1774,6 +1785,6 @@
+ 			wme_leader, sizeof(wme_leader) - 1);
+ 		if (iwe.u.data.length != 0) {
+-			current_ev = iwe_stream_add_point(current_ev, end_buf,
+-				&iwe, buf);
++			current_ev = iwe_stream_add_point(req->info,
++					current_ev, end_buf, &iwe, buf);
+ 
+ 			/* We ran out of space in the buffer. */
+@@ -1792,6 +1803,6 @@
+ 			ath_leader, sizeof(ath_leader) - 1);
+ 		if (iwe.u.data.length != 0) {
+-			current_ev = iwe_stream_add_point(current_ev, end_buf,
+-				&iwe, buf);
++			current_ev = iwe_stream_add_point(req->info,
++					current_ev, end_buf, &iwe, buf);
+ 
+ 			/* We ran out of space in the buffer. */
+@@ -1816,4 +1827,5 @@
+ 
+ 	req.vap = vap;
++	req.info = info;
+ 	req.current_ev = extra;
+ 	if (data->length == 0) {
