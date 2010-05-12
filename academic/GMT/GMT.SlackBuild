@@ -1,0 +1,135 @@
+#!/bin/sh
+
+# SlackBuild for the Generic Mapping Tools (GMT).
+#
+# Copyright 2009 Pierre Cazenave <pwcazenave {at} gmail [dot] com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=GMT
+VERSION=4.4.0
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+fi
+
+# Shewchuk's triangulation routine used in some parts of GMT is not 
+# distributed under the GNU Public Licence. If you work for a for-profit
+# organisation, you should read Shewchuk's copyright statement (in 
+# $PKG/src/README.TRIANGLE) first. 
+# This script enables the (much faster) Shewchuk triangulation routine 
+# by default; should you need to change this behaviour, set SHEWCHUK to 
+# "no" below:
+SHEWCHUK=${SHEWCHUK:-yes}
+
+# There are a number of different resolution coastline files available
+# for GMT, and their size on disk varies from <2MB (low) to 61.7MB 
+# (full). They come in 3 separate archives (GSHHS1.10_coast, 
+# GSHHS1.10_high and GSHHS1.10_full). The first contains the low, intermediate
+# and coarse resolutions, the second the high resolution, and the third
+# the full resolution. I prefer to have them all installed (disk space
+# is cheap), but you may not. By default, all three sets will be installed, 
+# unless you choose otherwise below.
+# e.g. ${COASTS:-"coast"} would install only the low, intermediate and
+# coarse resolutions. At least one resolution is required.
+COASTS=${COASTS:-"coast high full"}
+
+if [ $SHEWCHUK == "yes" ]; then
+   SHEWCHUK_STATUS="--enable-triangle"
+else
+   SHEWCHUK_STATUS=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+for SUFFIX in doc share src suppl; do
+   tar xvf $CWD/${PRGNAM}${VERSION}_${SUFFIX}.tar.bz2
+done
+if [ $SHEWCHUK == "yes" ]; then
+   tar xvf $CWD/${PRGNAM}${VERSION}_triangle.tar.bz2
+fi
+for RES in $COASTS; do
+   tar xvf $CWD/GSHHS1.10_${RES}.tar.bz2 -C ${PRGNAM}${VERSION}
+done
+cd ${PRGNAM}${VERSION}
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+   --prefix=/usr \
+   --sysconfdir=/etc \
+   --localstatedir=/var \
+   --mandir=/usr/man \
+   --libdir=/usr/lib${LIBDIRSUFFIX} \
+   --docdir=/usr/doc/${PRGNAM}-${VERSION} \
+   --enable-netcdf=/usr \
+   --disable-mex \
+   --build=$ARCH-slackware-linux \
+   $SHEWCHUK_STATUS
+
+make all
+make install-all DESTDIR=$PKG
+
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+( cd $PKG/usr/man || exit 1
+   find . -type f -exec gzip -9 {} +
+   for i in $(find . -type l); do
+      ln -s $(readlink $i).gz $i.gz
+      rm $i
+   done
+)
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+if [ $SHEWCHUK == "yes" ]; then
+   cp -a src/README.TRIANGLE $PKG/usr/doc/$PRGNAM-$VERSION
+fi
+cp -a COPYING ChangeLog README README.gshhs $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README$TAG
+
+find $PKG/usr/doc/$PRGNAM-$VERSION -type f -exec chmod 644 {} +
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
