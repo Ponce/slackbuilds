@@ -11,18 +11,25 @@
 ## opensync consideration added thanks
 ##   to "Heinz Wiesinger <HMWiesinger@gmx.at>"
 
-PKGNAME=barry
+# Modified by Robby Workman <rworkman@slackbuilds.org>
+
+PRGNAM=barry
 VERSION=0.14
 ARCH=${ARCH:-i486}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
-PKG=$TMP/package-$PKGNAME
+PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-# Enable opensync-plugin
+# If you want to use a group other than "plugdev" for barry,
+# specify it on the command line as BARRY_GROUP - for example:
+#   BARRY_GROUP=barry ./barry.SlackBuild
+BARRY_GROUP=${BARRY_GROUP:-plugdev}
+
+# Enable opensync-plugin?
 OPENSYNC=${OPENSYNC:-no}
 
 if [ "$OPENSYNC" = "no" ]; then
@@ -44,9 +51,9 @@ fi
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PKGNAME-$VERSION
-tar xvf $CWD/$PKGNAME-$VERSION.tar.bz2
-cd $PKGNAME-$VERSION
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
+cd $PRGNAM-$VERSION
 chown -R root:root .
 chmod -R a-s,u+rw,go+r-w .
 
@@ -55,6 +62,7 @@ CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
   --mandir=/usr/man \
+  --disable-static \
   --${opensync_opt}able-opensync-plugin \
   --build=$ARCH-slackware-linux
 
@@ -66,22 +74,30 @@ make install DESTDIR=$PKG || exit 1
   find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
 )
 
-gzip -9 $PKG/usr/man/man?/*.?
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+)
 
-mkdir -p $PKG/usr/doc/$PKGNAME-$VERSION
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a README TODO COPYING AUTHORS NEWS ChangeLog \
-  $PKG/usr/doc/$PKGNAME-$VERSION
+  $PKG/usr/doc/$PRGNAM-$VERSION
 
-mkdir -p $PKG/etc/udev/rules.d/
-cp -a udev/10-blackberry.rules udev/99-$PKGNAME-perms \
-  $PKG/etc/udev/rules.d/
+mkdir -p $PKG/lib/udev/rules.d/
+sed s/SYSFS/ATTR/g udev/10-blackberry.rules > \
+  $PKG/lib/udev/rules.d/10-blackberry.rules
+sed -e s/SYSFS/ATTR/g udev/99-barry-perms > \
+  $PKG/lib/udev/rules.d/99-barry-permissions.rules
+if [ "$BARRY_GROUP" != "barry" ]; then
+  sed -i "s/GROUP=\"barry\""/GROUP=\"$BARRY_GROUP\"/ \
+    $PKG/lib/udev/rules.d/99-barry-permissions.rules
+fi
 
 mkdir -p $PKG/etc/modprobe.d
-echo "blacklist berry-charge" > $PKG/etc/modprobe.d/$PKGNAME.new
+echo "blacklist berry-charge" > $PKG/etc/modprobe.d/barry
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PKGNAME-$VERSION-$ARCH-${BUILD}${TAG}.tgz
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-${BUILD}${TAG}.tgz
