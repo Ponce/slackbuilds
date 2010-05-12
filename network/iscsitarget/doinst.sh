@@ -25,5 +25,5 @@ config etc/initiators.deny.new
 config etc/initiators.allow.new
 config etc/ietd.conf.new
 
-chroot . depmod -a 2>/dev/null 1>/dev/null
+chroot . depmod -a @KERNEL@ 2>/dev/null 1>/dev/null
 

@@ -1,8 +1,30 @@
 #!/bin/sh
 
-# Slackware build script for iscsitarget 0.4.16
-
-# Written by Thales A. Tsailas <ttsailas@enforcingit.com>
+# Slackware SlackBuild script
+# ===========================
+# By:        Thales A. Tsailas <ttsailas@enforcingit.com>
+# For:       iSCSI target
+# Descr:     Provides an open source professional iSCSI target solution for Linux
+# URL:       http://iscsitarget.sourceforge.net/
+#
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=iscsitarget
 VERSION=0.4.17
@@ -10,7 +32,7 @@ ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-kernel=${kernel:-$(uname -r)}
+KERNEL=${KERNEL:-$(uname -r)}
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
@@ -19,10 +41,13 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  SRCARCH=x86	# Needed for the kernel module building
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  SRCARCH=x86	# Needed for the kernel module building
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
+  SRCARCH=x86	# Needed for the kernel module building
 fi
 
 set -e
@@ -36,14 +61,22 @@ cd $TMP/$PRGNAM-$VERSION
 chown -R root:root .
 chmod -R a-s,u+w,go+r-w .
 
+# Patch the source to fix compiling issue with 2.6.29 kernels 
+patch -p0 < $CWD/iscsitarget-0.4.17-2.6.29.patch
+
+# Allow use of our SLKCFLAGS for the non-kernel parts
+patch -p1 < $CWD/iscsitarget-0.4.17-add_OPTS_cflags.patch
+
 make \
+  OPTS="$SLKCFLAGS" \
   MANDIR=/usr/man \
   DOCDIR=/usr/doc/$PRGNAM-$VERSION \
-  KSRC=/lib/modules/$kernel/build
+  KSRC=/lib/modules/$KERNEL/build \
+  SRCARCH=$SRCARCH
 make install \
   MANDIR=/usr/man \
   DOCDIR=/usr/doc/$PRGNAM-$VERSION \
-  KSRC=/lib/modules/$kernel/build \
+  KSRC=/lib/modules/$KERNEL/build \
   DISTDIR=$PKG
 
 # Rename init script and don't clobber existing config files on upgrade
@@ -56,22 +89,23 @@ mv $PKG/etc/ietd.conf $PKG/etc/ietd.conf.new
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 # Remove some cruft that shouldn't be in the package 
-# (if I'm wrong, let me know) --rworkman
-rm -f $PKG/lib/modules/$kernel/modules*
+rm -f $PKG/lib/modules/$KERNEL/modules*
 
 ( cd $PKG
-  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null
 )
 
 ( cd $PKG/usr/man || exit 1
   find . -type f -exec gzip -9 {} \;
-  for i in `find . -type l` ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
 )
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-cat $CWD/doinst.sh > $PKG/install/doinst.sh
+sed "s%@KERNEL@%$KERNEL%" $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}

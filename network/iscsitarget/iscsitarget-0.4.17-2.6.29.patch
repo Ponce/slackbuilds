@@ -1,0 +1,79 @@
+Fix build with 2.6.29.
+
+Addresses these changes:
+http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commitdiff;h=30c40d2c01f68c7eb1a41ab3552bdaf5dbf300d4;hp=9a1c3542768b5a58e45a9216921cd10a3bae1205
+http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commitdiff;h=b189db5d299c6824780af5590564ff608adb3dea;hp=a20fd0a783551831bb6b9b69710e5bbb93dc2730
+Lubomir Rintel <lkundrak@v3.sk>
+
+Index: kernel/block-io.c
+===================================================================
+--- kernel/block-io.c	(revision 198)
++++ kernel/block-io.c	(working copy)
+@@ -13,6 +13,7 @@
+ #include <linux/blkdev.h>
+ #include <linux/parser.h>
+ #include <linux/buffer_head.h>
++#include <linux/version.h>
+ 
+ #include "iscsi.h"
+ #include "iscsi_dbg.h"
+@@ -154,14 +155,22 @@
+ {
+ 	struct blockio_data *bio_data = volume->private;
+ 	struct block_device *bdev;
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,29)
+ 	int flags = LUReadonly(volume) ? MS_RDONLY : 0;
++#else
++	fmode_t flags = LUReadonly(volume) ? FMODE_READ : (FMODE_READ | FMODE_WRITE);
++#endif
+ 	int err = 0;
+ 
+ 	bio_data->path = kstrdup(path, GFP_KERNEL);
+ 	if (!bio_data->path)
+ 		return -ENOMEM;
+ 
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,29)
+ 	bdev = open_bdev_excl(path, flags, THIS_MODULE);
++#else
++	bdev = open_bdev_exclusive(path, flags, THIS_MODULE);
++#endif
+ 	if (IS_ERR(bdev)) {
+ 		err = PTR_ERR(bdev);
+ 		eprintk("Can't open device %s, error %d\n", path, err);
+@@ -324,8 +333,17 @@
+ {
+ 	struct blockio_data *bio_data = volume->private;
+ 
+-	if (bio_data->bdev)
++	if (bio_data->bdev) {
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,29)
+ 		close_bdev_excl(bio_data->bdev);
++#else
++		if (LUReadonly(volume)) {
++			close_bdev_exclusive(bio_data->bdev, FMODE_READ);
++		} else {
++			close_bdev_exclusive(bio_data->bdev, FMODE_READ|FMODE_WRITE);
++		}
++#endif
++	}
+ 	kfree(bio_data->path);
+ 
+ 	kfree(volume->private);
+Index: kernel/conn.c
+===================================================================
+--- kernel/conn.c	(revision 198)
++++ kernel/conn.c	(working copy)
+@@ -46,9 +46,13 @@
+ 				 "%u.%u.%u.%u", NIPQUAD(inet_sk(sk)->daddr));
+ 			break;
+ 		case AF_INET6:
++#ifdef NIP6
+ 			snprintf(buf, sizeof(buf),
+ 				 "[%04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x]",
+ 				 NIP6(inet6_sk(sk)->daddr));
++#else
++			snprintf(buf, sizeof(buf), "[%p6]", &inet6_sk(sk)->daddr);
++#endif
+ 			break;
+ 		default:
+ 			break;
