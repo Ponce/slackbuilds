@@ -1,0 +1,119 @@
+#!/bin/sh
+
+# Slackware build script for OpenOffice.org
+
+# Copyright 2006-2009  Robby Workman, Northport, Alabama, ASA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Thanks to Sandman1, Larhzu, and MacIver for early assistance.
+# Thanks to Fred Emmott (http://slamd64.com) for some better code in a few
+#   places and ideas to include the Optimization Solver and disable javaldx.
+# Thanks to hba for the idea to include support for other languages.
+# Thanks to Nille Akerstrom for the diff to support w/JRE tarballs
+
+PRGNAM=broffice.org
+VERSION=3.0.1
+ARCH=i586	# The binaries are built for i586 - leave this alone
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# Work just for pt-BR. Other languages must use the OpenOffice.org slackbuild.
+OOLANG="pt-BR" # Leave this alone
+PKG_LANG=$(echo $OOLANG | sed s/-/_/)	# Leave this alone
+
+# If you want to disable java support by removing executable permissions
+# form OOo's java loader (this will not affect other apps), set this
+# variable to "YES"   Default is "NO"
+# According to Fred Emmott, this is *highly* desirable on 64 bit systems
+DISABLE_JAVA=${DISABLE_JAVA:-NO}
+
+# Yes, I know there is a Slackware integration file in the desktop-integration
+# directory, but it's worthless to us.  I'd prefer to do things correctly.
+
+# Ignore this - it's just to get the toplevel directory name of the 
+# extracted tarball archive
+SOURCEDIR=$(tar tzf $CWD/BrOo_${VERSION}_LinuxIntel_install_${OOLANG}.tar.gz | head -1 | tr -d \/)
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+rm -rf $TMP/$SOURCEDIR
+
+tar xvf $CWD/BrOo_${VERSION}_LinuxIntel_install_${OOLANG}.tar.gz -C $TMP
+
+cd $TMP/$SOURCEDIR/RPMS/
+mv desktop-integration/*-freedesktop-menus-*.rpm .
+rm *onlineupdate*.rpm *ooofonts*.rpm 	# We don't want/need these
+for FILE in *.rpm ; do rpm2cpio < $FILE | cpio -imdv ; done
+rm -rf desktop-integration *.rpm
+mv opt usr $PKG
+cd $PKG
+
+# Create symlinks in /usr/bin to actual binaries
+cd $PKG/usr/bin
+  for FILE in \
+    sbase scalc sdraw simpress smath soffice spadmin swriter unopkg ; do 
+      rm -f $FILE
+      ln -sf ../../opt/broffice.org3/program/$FILE $FILE ;
+  done 
+cd -
+
+# Fix Exec commands in the desktop files
+# See http://bugzilla.xfce.org/show_bug.cgi?id=2430 
+patch -p1 < $CWD/desktop-file-fix-${VERSION}-${PKG_LANG}.diff
+
+# Install dictionary extensions for spellchecking
+UNOPKG_BIN=$PKG/opt/broffice.org3/program/unopkg
+DICT_DIR=$PKG/opt/broffice.org3/share/extension/install
+if [ -x "$UNOPKG_BIN" ]; then
+  UNOPKG_TMP=$TMP/$$$$$$
+  find $DICT_DIR -type f -name "dict-*.oxt" \
+    -exec $UNOPKG_BIN add --shared {} \
+    "-env:UserInstallation=file:///$UNOPKG_TMP" \;
+  rm -rf $UNOPKG_TMP 	# Clean up after ourselves
+fi
+
+# Move docs to their expected locations
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cd $PKG/opt/broffice.org3
+  mv README* *LICENSE* readmes licenses $PKG/usr/doc/$PRGNAM-$VERSION
+cd -
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Disable Java support if desired (see above)
+if [ "$DISABLE_JAVA" = "YES" ]; then
+  chmod -x $PKG/opt/broffice.org/ure/bin/javaldx
+fi
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+# Fix ownership and permissions and make the package
+chown -R root:root .
+find . -type d -exec chmod 755 {} \;
+chmod -R u+rw,go+r-w,a-s .
+/sbin/makepkg -c n -l y $OUTPUT/$PRGNAM-${VERSION}_${PKG_LANG}-$ARCH-$BUILD$TAG.tgz
