@@ -1,4 +1,2 @@
-#!/bin/sh
-
-chroot . /sbin/depmod -a
+chroot . /sbin/depmod -a @VERSION@
 
