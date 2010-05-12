@@ -11,4 +11,5 @@ config() {
 }
 
 config etc/timidity.cfg.new
+config etc/rc.d/rc.timidity.new
 
