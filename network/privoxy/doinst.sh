@@ -1,4 +1,3 @@
-#!/bin/sh
 config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
@@ -19,6 +18,14 @@ if [ -e etc/rc.d/rc.privoxy ]; then
 else
   # Install executable otherwise - irrelevant unless user starts in rc.local
   chmod 0755 etc/rc.d/rc.privoxy.new
+fi
+
+# If there's no existing log file, move this one over; 
+# otherwise, kill the new one
+if [ ! -e var/log/privoxy/logfile ]; then
+  mv var/log/privoxy/logfile.new var/log/privoxy/logfile
+else
+  rm -f var/log/privoxy/logfile.new
 fi
 
 config etc/rc.d/rc.privoxy.new
@@ -57,9 +64,9 @@ config etc/privoxy/templates/edit-actions-for-url-filter.new
 config etc/privoxy/templates/show-status.new
 config etc/privoxy/templates/show-url-info.new
 config etc/privoxy/default.action.new
-config etc/privoxy/standard.action.new
 config etc/privoxy/user.action.new
 config etc/privoxy/user.filter.new
 config etc/privoxy/config.new
 config etc/privoxy/trust.new
 config etc/privoxy/default.filter.new
+config etc/privoxy/match-all.action.new
