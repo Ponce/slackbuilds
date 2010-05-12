@@ -1,0 +1,122 @@
+#!/bin/sh
+
+# Slackware build script for koules
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# This game used to be distributed on disk Y1 of Slackware 3.3.
+# This script doesn't share any code with whatever build script
+# existed back then (partly because I couldn't find a copy)
+
+PRGNAM=koules
+VERSION=${VERSION:-1.4}
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# Use MIT shared memory?
+
+# On some systems, MITSHM speeds things up. On others, it slows them
+# down or (on 64-bit systems) causes the game to crash on startup.
+# If you set MITSHM=yes and have problems, try running koules with
+# the -M flag. If the problems go away, rebuild with MITSHM=no to avoid
+# having to give the -M flag all the time...
+# I'm defaulting this to no, because modern systems should be fast enough
+# to play this simple game without it.
+
+MITSHM=${MITSHM:-no}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM$VERSION
+tar xvf $CWD/$PRGNAM$VERSION-src.tar.gz
+cd $PRGNAM$VERSION
+chown -R root:root .
+chmod -R a-s,u+w,go+r-w .
+
+# sound server in /usr/libexec, game data in /usr/share/koules
+# also, enable sound and joystick support.
+patch -p1 < $CWD/patches/slackware.diff
+
+# Grrr. Need this to compile with MITSHM disabled.
+patch -p1 < $CWD/patches/compile_fix.diff
+
+# Modern gcc seems to hate the inline assembly. Anyway I bet gcc's code
+# with -O2 is the same or faster...
+patch -p1 < $CWD/patches/no_inline_asm.diff
+
+# The author forgot to mention the -E option in the help and man page
+patch -p1 < $CWD/patches/document_E_option.diff
+
+# Some people might like the launcher...
+patch -p1 < $CWD/patches/tcl_launcher_paths.diff
+
+# I hate Imake even worse than autoconf...
+if [ "$MITSHM" = "no" ]; then
+	sed -i -e '/#define MITSHM/d' Iconfig
+fi
+
+xmkmf -a
+
+# Did I mention I hate Imake?
+find . -name Makefile | \
+		  xargs sed -i -e "s/-O2.*/$SLKCFLAGS/"
+touch xkoules.man
+
+make
+
+# Don't trust 'make install', it doesn't fully support DESTDIR, and
+# installs things with weird permissions. Again, Imake sucks.
+# Also, we want to call the binary and manpage "koules", not "xkoules",
+# so there'd be some manual stuff going on anyway.
+
+mkdir -p $PKG/usr/games
+strip x$PRGNAM
+install -m0755 x$PRGNAM -o root -g root $PKG/usr/games/$PRGNAM
+install -m0755 $PRGNAM.tcl -o root -g root $PKG/usr/games/$PRGNAM-launcher
+
+mkdir -p $PKG/usr/libexec
+strip $PRGNAM.sndsrv.linux
+install -m0755 $PRGNAM.sndsrv.linux -o root -g root $PKG/usr/libexec/
+install -m0755 $CWD/koules.kde -o root -g root $PKG/usr/libexec/
+
+mkdir -p $PKG/usr/share/$PRGNAM
+cp sounds/*.raw $PKG/usr/share/$PRGNAM
+
+mkdir -p $PKG/usr/man/man6
+gzip -9c x$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp README TODO ANNOUNCE BUGS COPYING Card Koules.FAQ \
+	$PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.SBo
+
+mkdir -p $PKG/usr/share/pixmaps
+cp Koules.xpm $PKG/usr/share/pixmaps/$PRGNAM.xpm
+
+mkdir -p $PKG/usr/share/applications
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
