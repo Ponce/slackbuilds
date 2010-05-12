@@ -1,0 +1,117 @@
+#!/bin/sh
+
+# Slackware build script for grace
+# Written by B. Jogai <jogaib {at} comcast [dot] net>
+# Substantially modified by Robby Workman <rworkman@slackware.com>
+
+PRGNAM=grace
+VERSION=5.1.22
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-"_SBo"}
+
+CWD=$(pwd)
+TMP=${TMP:-"/tmp/SBo"}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-"/tmp"}
+
+if [ "$ARCH" = "i486" ]; then
+    SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+    LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+    SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+    LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+    SLKCFLAGS="-O2 -fPIC"
+    LIBDIRSUFFIX="64"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+# Apply some miscellaneous fixup patches
+patch -p0 < $CWD/patches/xmgrace-null.patch
+patch -p0 < $CWD/patches/xmgrace-help.patch
+patch -p0 < $CWD/patches/xmgrace-strip.patch
+
+# The invocation of nc_inq_libvers() has changed with the newer netcdf
+patch -p1 < $CWD/patches/xmgrace-netcdf.patch
+
+# The header and library files of package fftw2 have been split
+# up into single and double.  grace uses double.
+patch -p1 < $CWD/patches/xmgrace-fftw.patch
+
+# Fix paths to docs in src/xmgrace.c
+sed -i "s%/usr/share/doc/packages/%/usr/lib${LIBDIRSUFFIX}/%g" src/xmgrace.c
+
+CFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --bindir=/usr/bin \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --mandir=/usr/man \
+  --enable-grace-home=/usr/lib${LIBDIRSUFFIX}/xmgrace \
+  --with-x \
+  --with-netcdf \
+  --with-printcmd="lpr" \
+  --with-helpviewer="firefox %s" \
+  --build=$ARCH-slackware-linux
+
+make
+make DESTDIR=$PKG install
+# Set up the links for /usr/bin, /usr/include, and /usr/lib
+make DESTDIR=$PKG install links
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | \
+    cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | \
+    cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+)
+
+# Fix hardcoding of /usr/lib in the "links" target
+if [ "$ARCH" = "x86_64" ]; then
+   mv $PKG/usr/lib/*.a $PKG/usr/lib${LIBDIRSUFFIX}
+   rmdir $PKG/usr/lib 2>/dev/null || true
+fi
+
+# Add desktop menu entries
+mkdir -p $PKG/usr/share/{applications,pixmaps}
+cat $CWD/xmgrace.png > $PKG/usr/share/pixmaps/xmgrace.png
+cat $CWD/xmgrace.desktop > $PKG/usr/share/applications/xmgrace.desktop
+
+mkdir -p $PKG/usr/doc
+mv $PKG/usr/lib${LIBDIRSUFFIX}/xmgrace/doc $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CHANGES ChangeLog README DEVELOPERS LICENSE \
+    $PKG/usr/doc/$PRGNAM-$VERSION
+find $PKG/usr/doc/$PRGNAM-$VERSION -type f -exec chmod 644 {} \;
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+( cd $PKG/usr/lib${LIBDIRSUFFIX}/xmgrace  # now make the compat symlink
+  ln -s ../../doc/$PRGNAM-$VERSION doc 
+)
+
+# We're going to leave the man pages where they are, since grace (might|does)
+# look for them in its docs dir, but we also want users to be able to find
+# them.  Since grace might still use them directly, we're going to leave
+# them uncompressed.  Don't fuss - disk space is cheap  :-)
+mkdir -p $PKG/usr/man/man1
+( cd $PKG/usr/man/man1
+  for i in convcal grace grconvert ; do
+    ln -s ../../lib${LIBDIRSUFFIX}/xmgrace/doc/${i}.1 . ;
+  done
+)
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
