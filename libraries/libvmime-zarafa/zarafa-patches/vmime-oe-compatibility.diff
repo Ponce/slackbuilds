@@ -1,0 +1,163 @@
+--- libvmime-0.7.1/src/defaultParameter.cpp	2007-01-26 14:44:10.243562750 +0100
++++ libvmime-0.7.1.patched/src/defaultParameter.cpp	2007-04-24 13:43:36.579203500 +0200
+@@ -186,18 +186,18 @@
+ {
+ 	const string& name = getName();
+ 	const string& value = m_value.getBuffer();
++	string tmpbuf;
++	utility::outputStreamStringAdapter tmpos(tmpbuf);
+ 
+ 	// For compatibility with implementations that do not understand RFC-2231,
+ 	// also generate a normal "7bit/us-ascii" parameter
+ 	string::size_type pos = curLinePos;
+ 
+-	if (pos + name.length() + 10 + value.length() > maxLineLength)
+-	{
+-		os << NEW_LINE_SEQUENCE;
++		tmpos << NEW_LINE_SEQUENCE;
+ 		pos = NEW_LINE_SEQUENCE_LENGTH;
+-	}
+ 
+ 	bool needQuoting = false;
++	bool needQuotedPrintable = false;
+ 	string::size_type valueLength = 0;
+ 
+ 	// Use worst-case length name.length()+2 for 'name=' part of line
+@@ -228,35 +228,50 @@
+ 			needQuoting = true;
+ 			break;
+ 		}
++		if (!parserHelpers::isAscii(value[i]))
++		{
++			needQuotedPrintable = true;
++			needQuoting = true;
++		}
+ 	}
+ 
+ 	const bool cutValue = (valueLength != value.length());  // has the value been cut?
+ 
+ 	if (needQuoting)
+ 	{
+-		os << name << "=\"";
++		tmpos << name << "=\"";
+ 		pos += name.length() + 2;
+ 	}
+ 	else
+ 	{
+-		os << name << "=";
++		tmpos << name << "=";
+ 		pos += name.length() + 1;
+ 	}
+ 
+ 	bool extended = false;
+-
+-	for (string::size_type i = 0 ; (i < value.length()) && (pos < maxLineLength - 4) ; ++i)
++	if (needQuotedPrintable)
++	{
++		// send the name in quoted-printable, so outlook express et.al. will understand the real filename
++		size_t oldlen = tmpbuf.length();
++		m_value.generate(tmpos);
++		pos += tmpbuf.length() - oldlen;
++		extended = true;		// also send with RFC-2231 encoding
++	}
++	else
++	{
++	// do not chop off this value, but just add the complete name as one header line.
++	for (string::size_type i = 0 ; (i < value.length()) /*&& (pos < maxLineLength - 4) */ ; ++i)
+ 	{
+ 		const char_t c = value[i];
+ 
+ 		if (/* needQuoting && */ (c == '"' || c == '\\'))  // 'needQuoting' is implicit
+ 		{
+-			os << '\\' << value[i];  // escape 'x' with '\x'
++			tmpos << '\\' << value[i];  // escape 'x' with '\x'
+ 			pos += 2;
+ 		}
+ 		else if (parserHelpers::isAscii(c))
+ 		{
+-			os << value[i];
++			tmpos << value[i];
+ 			++pos;
+ 		}
+ 		else
+@@ -264,10 +279,11 @@
+ 			extended = true;
+ 		}
+ 	}
++	}
+ 
+ 	if (needQuoting)
+ 	{
+-		os << '"';
++		tmpos << '"';
+ 		++pos;
+ 	}
+ 
+@@ -275,7 +291,7 @@
+ 	// or is too long for a single line
+ 	if (extended || cutValue)
+ 	{
+-		os << ';';
++		tmpos << ';';
+ 		++pos;
+ 
+ 		/* RFC-2231
+@@ -301,11 +317,8 @@
+ 			  name.length() + 4 /* *0*= */ + 2 /* '' */
+ 			+ m_value.getCharset().getName().length();
+ 
+-		if (pos + firstSectionLength + 5 >= maxLineLength)
+-		{
+-			os << NEW_LINE_SEQUENCE;
++			tmpos << NEW_LINE_SEQUENCE;
+ 			pos = NEW_LINE_SEQUENCE_LENGTH;
+-		}
+ 
+ 		// Split text into multiple sections that fit on one line
+ 		int sectionCount = 0;
+@@ -384,33 +397,36 @@
+ 		// Output sections
+ 		for (int sectionNumber = 0 ; sectionNumber < sectionCount ; ++sectionNumber)
+ 		{
+-			os << name;
++			tmpos << name;
+ 
+ 			if (sectionCount != 1) // no section specifier when only a single one
+ 			{
+-				os << '*';
+-				os << sectionNumber;
++				tmpos << '*';
++				tmpos << sectionNumber;
+ 			}
+ 
+-			os << "*=";
++			tmpos << "*=";
+ 
+ 			if (sectionNumber == 0)
+ 			{
+-				os << m_value.getCharset().getName();
+-				os << '\'' << /* No language */ '\'';
++				tmpos << m_value.getCharset().getName();
++				tmpos << '\'' << /* No language */ '\'';
+ 			}
+ 
+-			os << sectionText[sectionNumber];
++			tmpos << sectionText[sectionNumber];
+ 
+ 			if (sectionNumber + 1 < sectionCount)
+ 			{
+-				os << ';';
+-				os << NEW_LINE_SEQUENCE;
++				tmpos << ';';
++				tmpos << NEW_LINE_SEQUENCE;
+ 				pos = NEW_LINE_SEQUENCE_LENGTH;
+ 			}
+ 		}
+ 	}
+ 
++	// write the complete header
++	os << tmpbuf;
++
+ 	if (newLinePos)
+ 		*newLinePos = pos;
+ }

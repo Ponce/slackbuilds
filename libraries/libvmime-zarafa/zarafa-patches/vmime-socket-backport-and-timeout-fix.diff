@@ -1,0 +1,170 @@
+diff -urb libvmime-0.7.1/src/platforms/posix/posixSocket.cpp libvmime-0.7.1.patched/src/platforms/posix/posixSocket.cpp
+--- libvmime-0.7.1/src/platforms/posix/posixSocket.cpp	2007-10-18 11:19:47.000000000 +0200
++++ libvmime-0.7.1.patched/src/platforms/posix/posixSocket.cpp	2007-10-18 11:02:54.000000000 +0200
+@@ -26,6 +26,7 @@
+ #include <netinet/in.h>
+ #include <netdb.h>
+ #include <fcntl.h>
++#include <errno.h>
+ 
+ #include "vmime/exception.hpp"
+ 
+@@ -43,7 +44,7 @@
+ //
+ 
+ posixSocket::posixSocket()
+-	: m_desc(-1)
++	: m_desc(-1), m_timeouts(0)
+ {
+ }
+ 
+@@ -101,6 +102,8 @@
+ 		// Error
+ 		throw vmime::exceptions::connection_error("Error while connecting socket.");
+ 	}
++
++	m_timeouts = 0;
+ }
+ 
+ 
+@@ -121,38 +124,62 @@
+ 	}
+ }
+ 
+-
+ void posixSocket::receive(vmime::string& buffer)
+ {
+-	::ssize_t ret = ::recv(m_desc, m_buffer, sizeof(m_buffer), 0);
+-
+-	if (ret == -1)
+-	{
+-		// Error or no data
+-		return;
+-	}
+-	else if (ret > 0)
+-	{
+-		buffer = vmime::string(m_buffer, ret);
+-	}
++	const int size = receiveRaw(m_buffer, sizeof(m_buffer));
++	buffer = vmime::string(m_buffer, size);
+ }
+ 
+ 
+ const int posixSocket::receiveRaw(char* buffer, const int count)
+ {
+-	::ssize_t ret = ::recv(m_desc, buffer, count, 0);
++	fd_set fds;
++	struct timeval tv;
++	int ret;
++
++	FD_ZERO(&fds);
++	FD_SET(m_desc, &fds);
++
++	tv.tv_sec = 10;
++	tv.tv_usec = 0;
++
++	ret = ::select(m_desc+1, &fds, NULL, NULL, &tv);
++	if (ret < 0)
++	{
++		if (errno != EAGAIN)
++			throwSocketError(errno);
++
++		m_timeouts++;
++		if (m_timeouts > (5*60))
++			throwSocketError(errno); // SMTP server did not react within 5 minutes
++
++		// No data available at this time
++		return 0;
++	}
+ 
+-	if (ret == -1)
++	ret = ::recv(m_desc, buffer, count, 0);
++
++	if (ret < 0)
+ 	{
+-		// Error or no data
+-		return (0);
++		if (errno != EAGAIN)
++			throwSocketError(errno);
++
++		m_timeouts++;
++		if (m_timeouts > (5*60))
++			throwSocketError(errno); // SMTP server did not react within 5 minutes
++
++		// No data available at this time
++		return 0;
+ 	}
+-	else
++	else if (ret == 0)
+ 	{
+-		return (ret);
++		// Host shutdown
++		throwSocketError(ENOTCONN);
+ 	}
+-}
+ 
++	m_timeouts = 0;
++	return ret;
++}
+ 
+ void posixSocket::send(const vmime::string& buffer)
+ {
+@@ -166,6 +193,41 @@
+ }
+ 
+ 
++void posixSocket::throwSocketError(const int err)
++{
++	string msg;
++
++	switch (err)
++	{
++	case EACCES:          msg = "EACCES: permission denied"; break;
++	case EAFNOSUPPORT:    msg = "EAFNOSUPPORT: address family not supported"; break;
++	case EMFILE:          msg = "EMFILE: process file table overflow"; break;
++	case ENFILE:          msg = "ENFILE: system limit reached"; break;
++	case EPROTONOSUPPORT: msg = "EPROTONOSUPPORT: protocol not supported"; break;
++	case EAGAIN:          msg = "EAGAIN: blocking operation"; break;
++	case EBADF:           msg = "EBADF: invalid descriptor"; break;
++	case ECONNRESET:      msg = "ECONNRESET: connection reset by peer"; break;
++	case EFAULT:          msg = "EFAULT: bad user space address"; break;
++	case EINTR:           msg = "EINTR: signal occured before transmission"; break;
++	case EINVAL:          msg = "EINVAL: invalid argument"; break;
++	case EMSGSIZE:        msg = "EMSGSIZE: message cannot be sent atomically"; break;
++	case ENOBUFS:         msg = "ENOBUFS: output queue is full"; break;
++	case ENOMEM:          msg = "ENOMEM: out of memory"; break;
++	case EPIPE:
++	case ENOTCONN:        msg = "ENOTCONN: not connected"; break;
++	case ECONNREFUSED:    msg = "ECONNREFUSED: connection refused"; break;
++	default:
++
++		std::ostringstream oss;
++		oss << ::strerror(err);
++
++		msg = oss.str();
++		break;
++	}
++
++	throw vmime::exceptions::connection_error(msg);
++}
++
+ 
+ 
+ //
+diff -urb libvmime-0.7.1/vmime/platforms/posix/posixSocket.hpp libvmime-0.7.1.patched/vmime/platforms/posix/posixSocket.hpp
+--- libvmime-0.7.1/vmime/platforms/posix/posixSocket.hpp	2007-10-18 11:19:47.000000000 +0200
++++ libvmime-0.7.1.patched/vmime/platforms/posix/posixSocket.hpp	2007-10-18 10:34:46.000000000 +0200
+@@ -49,10 +49,13 @@
+ 	void send(const vmime::string& buffer);
+ 	void sendRaw(const char* buffer, const int count);
+ 
++	void throwSocketError(const int err);
++
+ private:
+ 
+ 	char m_buffer[65536];
+ 	int m_desc;
++	int m_timeouts;
+ };
+ 
+ 
