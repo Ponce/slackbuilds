@@ -1,4 +1,3 @@
-
 config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
@@ -12,5 +11,14 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-for i in $(find etc/ -name "*.new" | xargs) ; do config $i ; done
+config etc/mono/config.new
+config etc/mono/mconfig/config.xml.new
+config etc/mono/1.0/machine.config.new
+config etc/mono/1.0/DefaultWsdlHelpGenerator.aspx.new
+config etc/mono/browscap.ini.new
+config etc/mono/2.0/settings.map.new
+config etc/mono/2.0/machine.config.new
+config etc/mono/2.0/Browsers/Compat.browser.new
+config etc/mono/2.0/web.config.new
+config etc/mono/2.0/DefaultWsdlHelpGenerator.aspx.new
 
