@@ -1,0 +1,133 @@
+#!/bin/sh
+
+# Slackware build script for xrdp
+# Written by Phillip Warner <pc_warner@yahoo.com>
+
+PRGNAM=xrdp
+VERSION=0.4.1
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# If you have PAM installed and wish to install /etc/pam.d/sesman,
+# then run this script as: "USE_PAM=YES ./xrdp.SlackBuild"
+USE_PAM=${USE_PAM:-NO}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+chmod -R a-s,u+rw,go-w .
+
+if [ ! "$USE_PAM" = "NO" ]; then
+  patch < $CWD/patches/Makefile.PAM.diff
+  make
+else
+  patch < $CWD/patches/Makefile.NOPAM.diff
+  make nopam
+fi
+
+# Fix path in what will become the init script
+sed -i "s/XRDP_DIR=\/usr\/local\/xrdp\//XRDP_DIR=\/usr\/lib${LIBDIRSUFFIX}\/xrdp\//" instfiles/xrdp_control.sh
+
+# Set LogFile at /var/log/sesman.log
+# Change LogLevel to INFO instead of DEBUG
+# Disable Root logins by default
+# Set user-specific RDP session script to ~/.xrdp-xinitrc
+patch -d sesman/ < $CWD/patches/sesman.ini.diff
+
+make install \
+  PKGDIR=$PKG \
+  DESTDIR=$PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM \
+  CFGDIR=$PKG/etc/$PRGNAM \
+  PIDDIR=$PKG/var/run \
+  MANDIR=$PKG/usr/man \
+  DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION
+
+# Install routines for man pages missing from Makefile
+mkdir -p $PKG/usr/man/man5 $PKG/usr/man/man8
+cp -a docs/man/*.5 $PKG/usr/man/man5
+cp -a docs/man/*.8 $PKG/usr/man/man8
+
+# Make sure log directory is there
+mkdir -p $PKG/var/log
+
+# Fix permissions from install
+chmod a-x $PKG/etc/$PRGNAM/*
+if [ -e $PKG/etc/pam.d/ ]; then
+  chmod a-x $PKG/etc/pam.d/sesman
+fi
+chmod a-x $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/{Tahoma-10.fv1,*.bmp,*.cur}
+
+# Let's make the xrdp_control.sh script the init script
+mkdir -p $PKG/etc/rc.d
+mv $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/xrdp_control.sh $PKG/etc/rc.d/rc.$PRGNAM.new
+
+# Move startwm.sh to a more sane location with a name that makes more sense
+mv $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/startwm.sh $PKG/etc/$PRGNAM/xrdp-xinitrc.new
+
+# Unfortunately, sesman.ini seems to ignore absolute paths for 
+# startwm.sh, so we need to leave a link where it expects to find 
+# the file under the program directory.
+( cd $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM
+  ln -s /etc/$PRGNAM/xrdp-xinitrc startwm.sh
+)
+
+# Let's not clobber existing configs
+( cd $PKG/etc/$PRGNAM
+  mv rsakeys.ini rsakeys.ini.new
+  mv sesman.ini sesman.ini.new
+  mv xrdp.ini xrdp.ini.new
+)
+
+# Install the xrdp-xwmconfig utility
+install -D -m 0755 $CWD/xrdp-xwmconfig \
+  $PKG/usr/bin/xrdp-xwmconfig
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null
+)
+
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+)
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a COPYING design.txt install.txt readme.txt $PKG/usr/doc/$PRGNAM-$VERSION
+
+# Keep a backup copy of startwm.sh in the docs
+cat sesman/startwm.sh > $PKG/usr/doc/$PRGNAM-$VERSION/startwm.sh-example
+
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
