@@ -12,11 +12,11 @@ config() {
 }
 
 # Keep same perms on rc.heimdal:
-if [ -e etc/rc.d/rc.clamsmtpd]; then
-  cp -a etc/rc.d/rc.clamsmtpdetc/rc.d/rc.clamsmtpd.new.incoming
+if [ -e etc/rc.d/rc.clamsmtpd ]; then
+  cp -a etc/rc.d/rc.clamsmtpd etc/rc.d/rc.clamsmtpd.new.incoming
   cat etc/rc.d/rc.clamsmtpd.new > etc/rc.d/rc.clamsmtpd.new.incoming
   mv etc/rc.d/rc.clamsmtpd.new.incoming etc/rc.d/rc.clamsmtpd.new
 fi
 
-config etc/rc.d/rc.clamsmtpd.new 
+config etc/rc.d/rc.clamsmtpd.new
 config etc/clamsmtpd.conf.new
