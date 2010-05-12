@@ -1,26 +1,26 @@
 #!/bin/sh
 
-# ***************************************************************************
-# *   Copyright (C) 2007-2008 by Heinz Wiesinger                            *
-# *   pprkut@liwjatan.at                                                    *
-# *   http://www.liwjatan.at                                                *
-# *                                                                         *
-# *   This program is free software; you can redistribute it and/or modify  *
-# *   it under the terms of the GNU General Public License as published by  *
-# *   the Free Software Foundation; either version 3 of the License, or     *
-# *   (at your option) any later version.                                   *
-# *                                                                         *
-# *   This program is distributed in the hope that it will be useful,       *
-# *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
-# *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
-# *   GNU General Public License for more details.                          *
-# *                                                                         *
-# *   You should have received a copy of the GNU General Public License     *
-# *   along with this program; if not, write to the                         *
-# *   Free Software Foundation, Inc.,                                       *
-# *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
-# ***************************************************************************/
-# nvidia-switch utility 0.7.0
+# Copyright 2007-2009 Heinz Wiesinger, Amsterdam, The Netherlands
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# nvidia-switch utility 0.8.1
 #
 # A tool to switch between nvidia-binary-driver and stock xorg-driver
 # if both are installed in parallel.
@@ -29,9 +29,10 @@ set -e
 
 ROOT="/"
 CWD=$(pwd)
+LIBSUFFIX="LIBDIRSUFFIX" # This will be replaced in the build script
 INC="${ROOT}usr/include/GL"
-LIB="${ROOT}usr/lib"
-XMOD="${ROOT}usr/lib/xorg/modules"
+LIB="${ROOT}usr/lib${LIBSUFFIX}"
+XMOD="${LIB}/xorg/modules"
 XLIB="$XMOD/extensions"
 NV_VERSION='PKGVERSION' # This will be replaced in the build script
 GL_VERSION="1.2"
@@ -97,7 +98,7 @@ cd "$CWD"
 }
 
 libs(){
-for i in libGLcore.so libGLcore.la libglx.la; do
+for i in libglx.la; do
   if [ "$1" = "nvidia" ]; then
     #If this library exists, move it to *-xorg
     move_existing "$XLIB/$i" "$XLIB/$i-xorg"
@@ -257,9 +258,183 @@ if [ "$2" = "xorg" ]; then
 fi
 }
 
+check(){
+  echo -n "checking $2...."
+  if [ -e "$1/$2" ]; then
+    if [ "$3" = "exist" ]; then
+      echo "ERROR: $1/$2 does exist!!!!!"
+    else
+      echo -n "exists"
+      if [ -h "$1/$2" ]; then
+        echo "(link)"
+        echo -n " points to:"
+        ls -o "$1/$2" | cut -d ">" -f 2
+      else
+        if [ "$3" = "link" ]; then
+          echo " (!)"
+        else
+          echo ""
+        fi
+      fi
+    fi
+  else
+    if [ "$3" = "exist" ]; then
+      echo "does not exist"
+    else
+      echo "ERROR: $1/$2 does not exist!!!!!"
+    fi
+  fi
+}
+
+check_includes(){
+  if [ "$1" = "cleanup" ]; then
+    cleanup=""
+    cleanup2="exist"
+  else
+    cleanup="link"
+    cleanup2=""
+  fi
+
+  for i in glext.h glxext.h gl.h glx.h; do
+    check $INC $i $cleanup
+    check $INC $i-nvidia
+    check $INC $i-xorg $cleanup2
+    echo ""
+  done
+}
+
+check_glcore(){
+  if [ "$1" = "nvidia" ]; then
+    CHECK="link"
+  else
+    CHECK="exist"
+  fi
+
+  for i in libGLcore.so.1 libGLcore.so.$NV_VERSION libGLcore.so.$NV_VERSION-nvidia; do
+    if [ "$i" = "libGLcore.so.1" ]; then
+      check $LIB $i $CHECK
+    elif [ "$i" = "libGLcore.so.$NV_VERSION" ]; then
+      check $LIB $i $CHECK
+    else
+      check $LIB $i
+    fi
+  done
+
+  echo ""
+}
+
+check_glx(){
+  if [ "$1" = "xorg" ]; then
+    xorg="exist"
+    cleanup="link"
+    cleanup2=""
+    EXT="-xorg"
+  elif [ "$1" = "cleanup" ]; then
+    xorg="exist"
+    cleanup=""
+    cleanup2="exist"
+    EXT="-xorg"
+  else
+    xorg="link"
+    cleanup="link"
+    cleanup2=""
+    EXT=""
+  fi
+
+  for i in libglx.la libglx.so libglx.so.$NV_VERSION libglx.so.$NV_VERSION-nvidia \
+    libglx.so-xorg libglx.la-xorg; do
+    if [ "$i" = "libglx.so" ]; then
+      check $XLIB $i $cleanup
+    elif [ "$i" = "libglx.so-xorg" ]; then
+      check $XLIB $i $cleanup2
+    elif [ "$i" = "libglx.so.$NV_VERSION" ]; then
+      check $XLIB $i $xorg
+    elif [ "$i" = "libglx.la$EXT" ]; then
+      check $XLIB $i "exist"
+    else
+      check $XLIB $i
+    fi
+  done
+
+  echo ""
+}
+
+check_wfb(){
+  for i in libwfb.so libwfb.la libnvidia-wfb.so.1 libnvidia-wfb.so.$NV_VERSION; do
+    if [ "$i" = "libnvidia-wfb.so.1" ]; then
+      check $XMOD $i "link"
+    else
+      check $XMOD $i
+    fi
+  done
+}
+
+check_gl(){
+  if [ "$1" = "nvidia" ]; then
+    nvidia="link"
+    EXT=""
+  else
+    nvidia="exist"
+    EXT="-xorg"
+  fi
+
+  for i in libGL.la libGL.so libGL.so.1 libGL.so.$NV_VERSION libGL.so.$NV_VERSION-nvidia \
+    libGL.so.$GL_VERSION libGL.so.$GL_VERSION-xorg; do
+    if [ "$i" = "libGL.so" ]; then
+      check $LIB $i "link"
+    elif [ "$i" = "libGL.so.1" ]; then
+      check $LIB $i "link"
+    elif [ "$i" = "libGL.so.$NV_VERSION" ]; then
+      check $LIB $i $nvidia
+    elif [ "$i" = "libGL.so.${GL_VERSION}${EXT}" ]; then
+      check $LIB $i "exist"
+    else
+      check $LIB $i
+    fi
+  done
+
+  echo ""
+}
+
+nvidia_check(){
+  check_includes
+
+  check_gl "nvidia"
+
+  check_glcore "nvidia"
+
+  check_glx
+
+  check_wfb
+}
+
+xorg_check(){
+  check_includes
+
+  check_gl
+
+  check_glcore
+
+  check_glx "xorg"
+
+  check_wfb
+}
+
+cleanup_check(){
+  check_includes "cleanup"
+
+  check_gl
+
+  check_glcore
+
+  check_glx "cleanup"
+
+  check_wfb
+}
+
 nvidia(){
   echo $'Switching to nvidia-driver files!\n'
-  echo "You have to ENABLE the nvidia driver in /etc/X11/xorg.conf."
+  echo "Make sure the nvidia driver is ENABLED in /etc/X11/xorg.conf."
   echo "Otherwise, this may lead to improperly working drivers."
 
   incs "xorg" "nvidia"
@@ -270,7 +445,7 @@ nvidia(){
   libglx_nvidia
   libwfb_nvidia
 
-  LD_NVIDIA="/usr/lib/libGL.so.$NV_VERSION-nvidia"
+  LD_NVIDIA="${LIB}/libGL.so.$NV_VERSION-nvidia"
   nvidia_ldconfig $LD_NVIDIA
 }
 
@@ -279,7 +454,7 @@ xorg(){
   if [ "$1" = "cleanup" ]; then
     echo $'Cleaning up symlinks.\n'
   fi
-  echo "You have to DISABLE the nvidia driver in /etc/X11/xorg.conf."
+  echo "Make sure the nvidia driver is DISABLED in /etc/X11/xorg.conf."
   echo "Otherwise, this may lead to improperly working drivers."
 
   if [ "$1" = "cleanup" ]; then
@@ -298,19 +473,22 @@ xorg(){
    fi
    remove_link "$XMOD/libwfb.so"
 
-   LD_NVIDIA="/usr/lib/libGL.so.1.2"
+   LD_NVIDIA="${LIB}/libGL.so.1.2"
    nvidia_ldconfig $LD_NVIDIA "xorg"
 }
 
 usage(){
   echo "Usage:"
-  echo " --nvidia	Switch to nvidia driver files"
-  echo " --xorg		Switch to stock xorg files"
-  echo " --cleanup	Switch to stock xorg files and remove all created symlinks"
-  echo " --install	Switch to nvidia driver files"
-  echo "		  This is used on installation to handle installroot correctly"
-  echo "		  Please use --nvidia for after-install switches instead"
-  echo " --help		Show this help message"
+  echo " --nvidia		Switch to nvidia driver files"
+  echo " --xorg			Switch to stock xorg files"
+  echo " --cleanup		Switch to stock xorg files and remove all created symlinks"
+  echo " --install		Switch to nvidia driver files"
+  echo "			  This is used on installation to handle installroot correctly"
+  echo "			  Please use --nvidia for after-install switches instead"
+  echo " --check-nvidia		Check if everything is setup correctly for nvidia's driver"
+  echo " --check-xorg		Check if everything is setup correctly for xorg's driver"
+  echo " --check-cleanup	Check if everything has been cleaned up correctly"
+  echo " --help			Show this help message"
 }
 
 if [ "$1" = '--nvidia' ]; then
@@ -318,13 +496,24 @@ if [ "$1" = '--nvidia' ]; then
 elif [ "$1" = '--install' ]; then
   ROOT=""
   CWD=$(pwd)
+  if [ -e "${ROOT}usr/lib64" ]; then
+    LIBSUFFIX="64"
+  else
+    LIBSUFFIX=""
+  fi
   INC="${ROOT}usr/include/GL"
-  LIB="${ROOT}usr/lib"
-  XMOD="${ROOT}usr/lib/xorg/modules"
+  LIB="${ROOT}usr/lib${LIBSUFFIX}"
+  XMOD="${LIB}/xorg/modules"
   XLIB="$XMOD/extensions"
   nvidia
 elif [ "$1" = '--xorg' ]; then
   xorg ""
+elif [ "$1" = '--check-nvidia' ]; then
+  nvidia_check
+elif [ "$1" = '--check-xorg' ]; then
+  xorg_check
+elif [ "$1" = '--check-cleanup' ]; then
+  cleanup_check
 elif [ "$1" = '--cleanup' ]; then
   xorg "cleanup"
 elif [ "$1" = '--help' ]; then
