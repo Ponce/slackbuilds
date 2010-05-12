@@ -18,10 +18,6 @@ if [ -e etc/rc.d/rc.fail2ban ]; then
   mv etc/rc.d/rc.fail2ban.new.incoming etc/rc.d/rc.fail2ban.new
 fi
 
-# make directory for socket and pid file
-if [ ! -d var/run/fail2ban ]; then
-	mkdir -p var/run/fail2ban
-fi
-
 config etc/rc.d/rc.fail2ban.new
 config etc/logrotate.d/fail2ban.new
+
