@@ -1,5 +1,3 @@
-#!/bin/sh
-
 config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
@@ -14,7 +12,7 @@ config() {
 }
 
 # Prepare the new configuration files
-for file in etc/rc.d/rc.vboxadd.new etc/rc.d/rc.vboxvfs.new etc/rc.d/rc.vboxadd-timesync.new; do
+for file in etc/rc.d/rc.vboxadd.new etc/rc.d/rc.vboxadd-timesync.new; do
   if [ -e $(dirname $file)/$(basename $file .new) -a -x $(dirname $file)/$(basename $file .new) ]; then
     chmod 0755 $file
   else
