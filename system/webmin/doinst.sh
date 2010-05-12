@@ -1,5 +1,3 @@
-#!/bin/sh
-
 config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
@@ -22,3 +20,4 @@ fi
 
 # Signal the startup script to do some post install configuration  
 touch etc/webmin/FIRSTRUN
+
