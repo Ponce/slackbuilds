@@ -18,44 +18,56 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
 fi
+
+set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP || exit 1
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz || exit 1
+# Note: You must use the patched source at
+# http://slackbuilds.org/sources/12.2/lua-5.1.4_autotools.tar.bz2
+# or this build will fail.
+tar xvf $CWD/$PRGNAM-${VERSION}_autotools.tar.bz2|| exit 1
 cd $PRGNAM-$VERSION || exit 1
 chown -R root:root .
 chmod -R a-s,u+rw,go-w+r .
+chmod u+x autogen.sh config.guess \
+          config.sub configure depcomp \
+          install-sh missing
 
-# Apply patch to make it compile the lib into a shared object
-cat $CWD/$PRGNAM-$VERSION-shared.diff | patch -p1 || exit 1
+CFLAGS="$SLKCFLAGS" \
+./configure \
+  --with-readline \
+  --prefix=/usr \
+  --libdir=/usr/lib$LIBDIRSUFFIX || exit 1
 
-# Let's use our custom CFLAGS from above
-sed -i "s/-DLUA_USE_LINUX/\"-DLUA_USE_LINUX $SLKCFLAGS\"/g" src/Makefile || exit 1
+sed -i 's|^hardcode_libdir_flag_spec=.*|hardcode_libdir_flag_spec=""|g' libtool
+sed -i 's|^runpath_var=LD_RUN_PATH|runpath_var=DIE_RPATH_DIE|g' libtool
 
-make linux
-make install INSTALL_TOP=$PKG/usr || exit 1
-
-# Install the pkg-config file so other apps can find LUA
-# Also, fix the prefix path in lua.pc
-mkdir -p $PKG/usr/lib/pkgconfig
-sed 's|prefix= /usr/local|prefix= /usr|' etc/lua.pc > \
-  $PKG/usr/lib/pkgconfig/lua.pc
+make 
+make install DESTDIR=/$PKG
 
 # Let's make sure all of the library symlinks correctly exist
-( cd $PKG/usr/lib
+( cd $PKG/usr/lib$LIBDIRSUFFIX
   ln -sf liblua.so.${VERSION} liblua.so.5
   ln -sf liblua.so.${VERSION} liblua.so
   chmod 0755 liblua.so.${VERSION}
 )
 
 ( cd $PKG
-  find . -type f | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
-  find . -type f | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+  find . -type f | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null
+  find . -type f | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null
   strip -g usr/lib/*.a
 )
 
