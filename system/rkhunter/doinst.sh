@@ -12,3 +12,4 @@ config() {
 }
 
 config etc/rkhunter.conf.new
+
