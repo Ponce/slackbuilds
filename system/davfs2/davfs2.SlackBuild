@@ -1,0 +1,115 @@
+#!/bin/sh
+
+# Slackware build script for davfs2
+
+# Copyright (c) 2008, Justin H Haynes <justin@justinhaynes.com> 
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+# Modified by Robby Workman <rworkman@slackbuilds.org>
+
+PRGNAM=davfs2
+VERSION=${VERSION:-1.4.5}
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+DAVFS2_USER=${DAVFS2_USER:-davfs2}
+DAVFS2_GROUP=${DAVFS2_GROUP:-davfs2}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# davfs2 user & group *MUST* exist before package creation
+# See http://slackbuilds.org/uid_gid.txt for current recomendations.
+
+if ! grep ^$DAVFS2_GROUP: /etc/group > /dev/null 2>&1; then
+        echo "$0: Error: DAVFS2 group ($DAVFS2_GROUP) doesn't exist."
+        echo "$0: Try creating one with: \
+	# groupadd -g 230 $DAVFS2_GROUP"
+        exit 1
+fi
+
+if ! grep ^$DAVFS2_USER: /etc/passwd > /dev/null 2>&1; then
+        echo "$0: Error: DAVFS2 user ($DAVFS2_USER) doesn't exist."
+        echo "$0: Try creating one with: \
+	# useradd -u 230 -d /var/cache/davfs2 -g $DAVFS2_GROUP $DAVFS2_USER"
+        exit 1
+fi
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+dav_user=$DAVFS2_USER \
+dav_group=$DAVFS2_GROUP \
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --build=$ARCH-slackware-linux
+
+make
+make install DESTDIR=$PKG
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+  xargs strip --strip-unneeded 2> /dev/null || true
+)
+
+# Manpages go to the wrong place regardless of configure, so we'll move them:
+mv $PKG/usr/share/man $PKG/usr
+
+# Let's not clobber config files
+mv $PKG/etc/davfs2/davfs2.conf $PKG/etc/davfs2/davfs2.conf.new
+mv $PKG/etc/davfs2/secrets $PKG/etc/davfs2/secrets.new
+
+# --docdir is respected, but we'll add the build script
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
