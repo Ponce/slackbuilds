@@ -9,7 +9,7 @@ config() {
     rm $NEW
   fi
   # Otherwise, we leave the .new copy for the admin to consider...
-}    
+}
 
 # Keep same permissions on rc.knockd.new as an existing rc.knockd:
 if [ -e etc/rc.d/rc.knockd ]; then
