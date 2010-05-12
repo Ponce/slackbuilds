@@ -2,7 +2,7 @@
 
 # Slackware build script for tp_smapi
 
-# Copyright (c) 2008, Antonio Hern·ndez Blas <hba.nihilismus@gmail.com>
+# Copyright (c) 2008-2009, Antonio Hern√°ndez Blas <hba.nihilismus@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -24,7 +24,7 @@
 PRGNAM=tp_smapi
 VERSION=0.40
 ARCH=${ARCH:-i486}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
 
 KERNEL_VERS=${KERNEL_VERS:-"$(uname -r)"}
@@ -34,11 +34,15 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
 fi
 
 set -e
@@ -59,8 +63,11 @@ find . \
 
 make HDAPS=1 KVER=$KERNEL_VERS
 
-mkdir -p $PKG/lib/modules/${KERNEL_VERS}/kernel/drivers/{hwmon,firmware}
-install -m 0664 hdaps.ko $PKG/lib/modules/${KERNEL_VERS}/kernel/drivers/hwmon/
+mkdir -p $PKG/lib/modules/${KERNEL_VERS}/extra
+install -m 0664 hdaps.ko \
+  $PKG/lib/modules/${KERNEL_VERS}/extra/
+
+mkdir -p $PKG/lib/modules/${KERNEL_VERS}/kernel/drivers/firmware
 install -m 0664 thinkpad_ec.ko tp_smapi.ko \
   $PKG/lib/modules/${KERNEL_VERS}/kernel/drivers/firmware
 
@@ -69,22 +76,27 @@ install -m 0664 thinkpad_ec.ko tp_smapi.ko \
 # We're not going to install these with a .new extension, because we don't
 # want them to be present if the package is removed.
 mkdir -p $PKG/etc/modprobe.d
-cat $CWD/modprobe.tp_smapi > $PKG/etc/modprobe.d/tp_smapi
-cat $CWD/modprobe.thinkpad_ec > $PKG/etc/modprobe.d/thinkpad_ec
+cat $CWD/modprobe.tp_smapi.conf > $PKG/etc/modprobe.d/tp_smapi.conf
+cat $CWD/modprobe.thinkpad_ec.conf > $PKG/etc/modprobe.d/thinkpad_ec.conf
+
+# Make hdaps kernel module from this package be prefered over hdaps in kernel-module package.
+mkdir -p $PKG/etc/depmod.d
+echo "override hdaps ${KERNEL_VERS} extra" > $PKG/etc/depmod.d/hdaps.conf
 
 ( cd $PKG
-  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
-  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null
 )
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a CHANGES README TODO $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-cat $CWD/doinst.sh > $PKG/install/doinst.sh
+sed "s%@KERNEL@%$KERNEL_VERS%" $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION\_$(echo ${KERNEL_VERS} | tr '-' '_')-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
