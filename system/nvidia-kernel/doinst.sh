@@ -1,3 +1,3 @@
 
-chroot . /sbin/depmod -a
+chroot . /sbin/depmod -a @KERNEL@ 2>/dev/null
 
