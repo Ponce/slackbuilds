@@ -11,7 +11,7 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-# Keep same perms on rc.heimdal:
+# Keep same perms:
 if [ -e etc/httpd/extra/httpd-awstats.conf.new ]; then
   cp -a etc/httpd/extra/httpd-awstats.conf.new etc/httpd/extra/httpd-awstats.conf.new.incoming
   cat etc/httpd/extra/httpd-awstats.conf.new > etc/httpd/extra/httpd-awstats.conf.new.incoming
