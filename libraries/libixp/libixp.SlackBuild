@@ -34,10 +34,13 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
 fi
 
 set -e
@@ -46,7 +49,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar -xzvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find . \
@@ -55,29 +58,32 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-# Fix prefixes and cflags values
-sed -i \
-  -e 's:^PREFIX = /usr/local:PREFIX = /usr:' \
-  -e 's:^MAN = ${PREFIX}/share/man:MAN = /usr/man:' \
-  -e 's:^ETC = ${PREFIX}/etc:ETC = /etc:' \
-  -e 's:^CFLAGS =:CFLAGS += :' \
-  config.mk
-CFLAGS="$SLKCFLAGS" make
+# Fix cflags value
+sed -i 's:^CFLAGS =:CFLAGS += :' config.mk
 
-# This is *needed* to install correctly under $PKG
-sed -i \
-  -e 's:^PREFIX = /usr:PREFIX = '${PKG}'/usr:' \
-  -e 's:^MAN = /usr/man:MAN = '${PKG}'/usr/man:' \
-  -e 's:^ETC = /etc:ETC = '${PKG}'/etc:' \
-  config.mk
-make install
+CFLAGS="$SLKCFLAGS" make \
+  PREFIX=/usr \
+  LIBDIR=/usr/lib${LIBDIRSUFFIX} \
+  MAN=/usr/man \
+  ETC=/etc
+
+# Fix hardcoded /usr/lib
+sed "s%@baselibdir@%lib$LIBDIRSUFFIX%g" $CWD/libixp-0.4-libdir.diff | patch -p1
+
+make install \
+  PREFIX=$PKG/usr \
+  LIBDIR=$PKG/usr/lib${LIBDIRSUFFIX} \
+  MAN=$PKG/usr/man \
+  ETC=$PKG/etc
 
 # Erase "/etc", it's empty
 rmdir $PKG/etc
 
-(
-  find $PKG | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-  find $PKG | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null
 )
 
 ( cd $PKG/usr/man
@@ -86,12 +92,11 @@ rmdir $PKG/etc
 )
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cd libixp
-cp -a LICENSE LICENSE.p9p README $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a libixp/LICENSE* libixp/README $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
