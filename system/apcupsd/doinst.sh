@@ -1,5 +1,3 @@
-#!/bin/sh
-
 config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
@@ -31,4 +29,5 @@ config etc/apcupsd/hosts.conf.new
 config etc/apcupsd/multimon.conf.new
 config etc/apcupsd/offbattery.new
 config etc/apcupsd/onbattery.new
+config etc/logrotate.d/apcupsd.new
 
