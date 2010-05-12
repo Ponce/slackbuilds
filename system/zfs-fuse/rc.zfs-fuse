@@ -1,0 +1,152 @@
+#! /bin/sh
+
+# chkconfig: 12345 13 87
+# description: Starts and stops the ZFS file systems
+# author: Manuel Amador (Rudd-O)
+
+PIDFILE=/var/run/zfs-fuse.pid
+LOCKFILE=/var/lock/zfs/zfs_lock
+
+# Source function library.
+. /etc/init.d/functions
+
+# Source cmdline opts
+OPTIONS=
+[ -f /etc/sysconfig/zfs-fuse ] && . /etc/sysconfig/zfs-fuse
+
+export PATH=/usr/local/sbin:/sbin:/bin:/usr/sbin:/usr/bin
+unset LANG
+ulimit -v unlimited
+ulimit -c unlimited
+ulimit -l unlimited
+
+do_start() {
+	PID=$(cat "$PIDFILE" 2> /dev/null)
+	if [ "$PID" != "" ]
+	then
+		if kill -0 $PID 2> /dev/null
+		then
+			echo -n "ZFS-FUSE is already running"
+			failure
+			exit 3
+		else
+			# pid file is stale, we clean up shit
+			action "Cleaning up stale ZFS-FUSE PID files" rm -f "$PIDFILE"
+		fi
+	fi
+
+	export DAEMON_COREFILE_LIMIT=unlimited
+	action "Starting ZFS-FUSE process" daemon --pidfile $PIDFILE zfs-fuse -p "$PIDFILE" $OPTIONS
+	ES_TO_REPORT=$?
+	if [ 0 != $ES_TO_REPORT ] ; then
+		exit $ES_TO_REPORT
+	fi
+
+	for a in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+	do
+		PID=$(cat "$PIDFILE" 2> /dev/null)
+		 [ "$PID" != "" ] && break
+		sleep 1
+	done
+
+	if [ "$PID" = "" ]
+	then
+		echo -n "ZFS-FUSE did not start or create $PIDFILE"
+		failure
+		exit 3
+	fi
+
+	action "Immunizing ZFS-FUSE against OOM kills and sendsigs signals" true
+	echo -17 > "/proc/$PID/oom_adj"
+	ES_TO_REPORT=$?
+	if [ 0 != $ES_TO_REPORT ] ; then
+		exit $ES_TO_REPORT
+	fi
+	
+	sleep 1
+	action "Mounting ZFS filesystems" zfs mount -a
+	ES_TO_REPORT=$?
+	if [ 0 != $ES_TO_REPORT ] ; then
+		exit $ES_TO_REPORT
+	fi
+
+}
+
+do_stop () {
+	PID=$(cat "$PIDFILE" 2> /dev/null)
+	if [ "$PID" = "" ] ; then
+		# no pid file, we exit
+		exit 0
+	elif kill -0 $PID 2> /dev/null; then
+		# pid file and killable, we continue
+		true
+	else
+		# pid file is stale, we clean up shit
+		action "Cleaning up stale ZFS-FUSE PID files" rm -f "$PIDFILE"
+		exit 0
+	fi
+
+	action "Syncing disks" sync
+
+	action "Unmounting ZFS filesystems" zfs unmount -a
+	ES_TO_REPORT=$?
+	if [ 0 != $ES_TO_REPORT ] ; then
+		exit $ES_TO_REPORT
+	fi
+	
+	action "Terminating ZFS-FUSE process gracefully" kill -TERM $PID
+
+	for a in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+	do
+		kill -0 $PID 2> /dev/null
+		[ "$?" != "0" ] && break
+		sleep 1
+	done
+
+	if kill -0 $PID 2> /dev/null
+	then
+		echo -n "ZFS-FUSE refused to die after 15 seconds"
+		failure
+		exit 3
+	else
+		rm -f "$PIDFILE"
+	fi
+
+	action "Syncing disks again" sync
+}
+
+case "$1" in
+  start)
+	do_start
+	;;
+  stop)
+	do_stop
+	;;
+  status)
+	PID=$(cat "$PIDFILE" 2> /dev/null)
+	if [ "$PID" = "" ] ; then
+		echo "ZFS-FUSE is not running"
+		exit 3
+	else
+		if kill -0 $PID
+		then
+			echo "ZFS-FUSE is running, pid $PID"
+			zpool status
+			exit 0
+		else
+			echo "ZFS-FUSE died, PID files stale"
+			exit 3
+		fi
+	fi
+	;;
+  restart|reload|force-reload)
+	echo "Error: argument '$1' not supported" >&2
+	exit 3
+	;;
+  *)
+	echo "Usage: $0 start|stop|status" >&2
+	exit 3
+	;;
+esac
+
+:
