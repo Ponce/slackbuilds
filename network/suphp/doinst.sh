@@ -11,5 +11,6 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
+config etc/httpd/mod_suphp.conf.new
 config etc/httpd/suphp.conf.new
 
