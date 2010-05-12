@@ -22,37 +22,47 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# Copyright 2009 (ntop version >= 3.3.10) Niels Horn <niels.horn@gmail.com>
+
 PRGNAM=ntop
-VERSION=3.3.8
+VERSION=3.3.10
 ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+
+NTOPUSER=${NTOPUSER:-ntop}
+NTOPGROUP=${NTOPGROUP:-ntop}
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-set -e
-
 # Bail out if user or group isn't valid on your system
 # For slackbuilds.org, assigned ntop uid/gid are 212/212
 # See http://slackbuilds.org/uid_gid.txt
-if ! grep ^ntop: /etc/group 2>&1 > /dev/null; then
-    echo "  You must have a \"ntop\" group to run this script."
-    echo "    # groupadd -g 212 ntop"
+if ! grep ^$NTOPGROUP: /etc/group 2>&1 > /dev/null; then
+    echo "  You must have a \"$NTOPGROUP\" group to run this script."
+    echo "    # groupadd -g 212 $NTOPGROUP"
     exit 1
-elif ! grep ^ntop: /etc/passwd 2>&1 > /dev/null; then
-    echo "  You must have a \"ntop\" user to run this script."
-    echo "    # useradd -u 212 -g ntop -d /var/lib/ntop -s /bin/false ntop"
+elif ! grep ^$NTOPUSER: /etc/passwd 2>&1 > /dev/null; then
+    echo "  You must have a \"$NTOPUSER\" user to run this script."
+    echo "    # useradd -u 212 -g $NTOPGROUP -d /var/lib/ntop -s /bin/false $NTOPUSER"
     exit 1
 fi
 
 if [ "$ARCH" = "i486" ]; then
     SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+    LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
     SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+    LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+    SLKCFLAGS="-O2 -fPIC"
+    LIBDIRSUFFIX="64"
 fi
+
+set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -60,12 +70,17 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
-#chown -R root:root .
+chown -R root:root .
 find . \
  \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
  -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
+
+# The ntop configure / make routine automatically downloads & installs
+# lua and GeoIP (even when already present on your machine), so we'll
+# patch this to just warn & exit if the packages are not found.
+patch -p1 < $CWD/no_downloads.patch
 
 # Since ntop calls their ./configure from autogen.sh anything passed onto 
 # autogen.sh (ie $@) is passed off as command line arguments to configure.
@@ -77,19 +92,20 @@ CXXFLAGS="$SLKCFLAGS" \
   --localstatedir=/var/lib \
   --mandir=/usr/man \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
   --with-tcpwrap \
-  --enable-sslv3 \
   --enable-sslwatchdog \
   --enable-snmp \
   --enable-i18n \
   --build=$ARCH-slackware-linux
-
 make
 make install DESTDIR=$PKG
 
 ( cd $PKG
-  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
-  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
 )
 
 ( cd $PKG/usr/man
@@ -97,11 +113,20 @@ make install DESTDIR=$PKG
   for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
 )
 
-# Bug in ntop source:: http://tinyurl.com/2wf7ou . This should at somepoint
+# Bug in ntop source:: http://tinyurl.com/2wf7ou . This should at some point
 # be dealt with upstream. For now fix this in $PKG :)
-if [ -d $PKG/usr/lib/plugins ]; then
-    rmdir -v $PKG/usr/lib/plugins
+if [ -d $PKG/usr/lib${LIBDIRSUFFIX}/plugins ]; then
+    rmdir -v $PKG/usr/lib${LIBDIRSUFFIX}/plugins
 fi
+
+mkdir -p $PKG/etc/logrotate.d $PKG/etc/rc.d 
+install -m 0644 $CWD/$PRGNAM.logrotate $PKG/etc/logrotate.d/$PRGNAM.new
+sed -e "s%@NTOPUSER@%$NTOPUSER%" -e "s%@NTOPGROUP@%$NTOPGROUP%" \
+  $CWD/rc.ntop > $PKG/etc/rc.d/rc.ntop.new
+chmod 0755 $PKG/etc/rc.d/rc.ntop.new
+
+# Change the permissions on ntops homedir so we can write logs 
+chown -R $NTOPUSER:$NTOPGROUP $PKG/var/lib/$PRGNAM
 
 # Copy *all* documentation over (docs/ is not included in make install for 
 # some arkane reason. Rename some docs to prevent them copying over each other.
@@ -111,17 +136,11 @@ cp -a AUTHORS CONTENTS COPYING ChangeLog INSTALL MANIFESTO NEWS PORTING \
   README SUPPORT_NTOP.txt THANKS ntop.html ntop.txt docs/* NetFlow www \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-
-mkdir -p $PKG/etc/logrotate.d $PKG/etc/rc.d 
-install -m 0644 $CWD/$PRGNAM.logrotate $PKG/etc/logrotate.d/$PRGNAM.new
-install -m 0755 $CWD/rc.$PRGNAM $PKG/etc/rc.d/rc.$PRGNAM.new
-
-# Change the permissions on ntops homedir so we can write logs 
-chown -R ntop:ntop $PKG/var/lib/$PRGNAM
+cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE 
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
