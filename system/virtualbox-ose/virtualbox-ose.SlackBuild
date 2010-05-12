@@ -2,7 +2,7 @@
 
 # Slackware build script for virtualbox-ose
 
-# Copyright 2008 Heinz Wiesinger <pprkut@liwjatan.at>
+# Copyright 2008-2009 Heinz Wiesinger <pprkut@liwjatan.at>
 # Copyright 2008 Mauro Giachero <mauro.giachero@gmail.com>
 # All rights reserved.
 #
@@ -25,9 +25,9 @@
 
 PRGNAM=virtualbox-ose
 SRCNAM=VirtualBox
-VERSION=2.0.6
+VERSION=2.1.4
 ARCH=${ARCH:-i486}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 CWD=$(pwd)
@@ -55,14 +55,13 @@ VBOXUSERS=${VBOXUSERS:-yes}
 if [ "$VBOXUSERS" = "yes" ]; then
   # Check for vboxusers group here
   if ! grep ^vboxusers: /etc/group 2>&1 > /dev/null; then
-    echo "  Must have a vboxusers group to run this script."
+    echo "  You must have a vboxusers group to run this script."
     echo "    # groupadd -g 215 vboxusers"
-    echo "  Or something similar."
     exit 1
   fi
 fi
 
-# Enable Hardeing - Defaulting to yes as requested by upstream
+# Enable Hardening - Defaulting to yes as requested by upstream
 if [ "${HARDENING:-yes}" = "yes" ]; then
   harden="--enable-hardening"
   VBOXUSERS="yes"
@@ -83,12 +82,13 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $SRCNAM-$VERSION
-tar xvf $CWD/$SRCNAM-${VERSION}-OSE.tar.bz2
-cd $SRCNAM-$VERSION
-patch -d src/VBox/Installer/linux -i $CWD/VBox.diff
+rm -rf $SRCNAM-${VERSION}_OSE
+tar xvf $CWD/$SRCNAM-${VERSION}-3-OSE.tar.bz2
+cd $SRCNAM-${VERSION}_OSE
 chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
+
+patch -d src/VBox/Installer/linux -i $CWD/VBox.diff
 
 # The Innotek init script tries to set the device nodes' permissions.
 # This is problematic with VBOXUSERS=no, but you probably still want
@@ -96,50 +96,46 @@ chmod -R u+w,go+r-w,a-s .
 if [ "$VBOXUSERS" = "yes" ]; then
   GROUP="vboxusers"
   MODE="750"
-  mkdir -p $PKG/etc/udev/rules.d
+  mkdir -p $PKG/lib/udev/rules.d
   echo 'KERNEL=="vboxdrv", NAME="vboxdrv", OWNER="root", GROUP="vboxusers", MODE="0660"' \
-    > $PKG/etc/udev/rules.d/60-vboxdrv.rules
+    > $PKG/lib/udev/rules.d/60-vboxdrv.rules
 else
   patch -d src/VBox/Installer/linux -i $CWD/vboxdrv.sh.in.diff
   GROUP="root"
   MODE="755"
-  mkdir -p $PKG/etc/udev/rules.d
+  mkdir -p $PKG/lib/udev/rules.d
   echo 'KERNEL=="vboxdrv", NAME="vboxdrv", MODE="0666"' \
-    > $PKG/etc/udev/rules.d/60-vboxdrv.rules
+    > $PKG/lib/udev/rules.d/60-vboxdrv.rules
 fi
 
 # Support for the qt3-frontend
-if [ "${QT3:-yes}" = "yes" ]; then
+if [ "${QT3:-no}" = "no" ]; then
+  qtgui+=" --disable-qt3"
+else
   qtgui+=" --with-qt-dir=/usr/lib/qt"
   GUI+=" VirtualBox3"
   mkdir -p $PKG/usr/share/applications
   cp -f $CWD/VirtualBox3.desktop $PKG/usr/share/applications/
   sed -i "s|\$VBOX_DOC_PATH|/usr/share/virtualbox|" \
     $PKG/usr/share/applications/VirtualBox3.desktop
-else
-  qtgui+=" --disable-qt3"
 fi
 
 # Support for the qt4-frontend
-if [ "${QT4:-no}" = "no" ]; then
-  qtgui+=" --disable-qt4"
-else
+if [ "${QT4:-yes}" = "yes" ]; then
   GUI+=" VirtualBox"
   mkdir -p $PKG/usr/share/applications
   cp -f src/VBox/Installer/linux/VirtualBox.desktop $PKG/usr/share/applications/
   sed -i "s|\$VBOX_DOC_PATH|/usr/share/virtualbox|" \
     $PKG/usr/share/applications/VirtualBox.desktop
+else
+  qtgui+=" --disable-qt4"
 fi
-
-cd src/VBox/Frontends/VirtualBox
-  sed -i "s/VirtualBox3_QT_TRANSLATIONS/VirtualBox_QT_TRANSLATIONS/" \
-    Makefile.kmk
-cd -
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --ose \
+  --disable-kmods \
   $harden \
   $qtgui \
   $do_pulse
@@ -153,15 +149,13 @@ mkdir -p $PKG/usr/{lib,share}/virtualbox \
   $PKG/usr/share/pixmaps \
   $PKG/etc/{rc.d,vbox}
 
-cp -f src/VBox/Installer/linux/vboxnet.sh.in $PKG/etc/rc.d/rc.vboxnet.new
 cp -f src/VBox/Installer/linux/vboxdrv.sh.in $PKG/etc/rc.d/rc.vboxdrv.new
 cp -f $CWD/vbox.cfg $PKG/etc/vbox/vbox.cfg.new
-install -m $MODE -g $GROUP src/VBox/Installer/linux/VBoxAddIF.sh $PKG/usr/lib/virtualbox/VBoxTap
 
 cd out/linux.x86/release/bin/
-  rm -f vboxdrv.ko
+  rm -f vboxdrv.ko VirtualBox.desktop
   mv VBox.png $PKG/usr/share/pixmaps/
-  mv src $PKG/usr/src/vboxdrv-$VERSION
+  mv src $PKG/usr/src/virtualbox-kernel-$VERSION
   mv sdk nls* *.tar.gz $PKG/usr/share/virtualbox/
   install -m $MODE -g $GROUP VBoxSysInfo.sh $PKG/usr/share/virtualbox/
   install -m $MODE -g $GROUP VBoxTunctl $PKG/usr/bin/
@@ -175,12 +169,6 @@ cd -
 for i in $GUI VBoxManage VBoxSDL VBoxHeadless VBoxVRDP; do
   ln -s /usr/lib/virtualbox/VBox $PKG/usr/bin/$i ;
 done
-
-for i in VBoxAddIF VBoxDeleteIF; do
-  ln -s /usr/lib/virtualbox/VBoxTap $PKG/usr/bin/$i
-done
-
-ln -s /usr/lib/virtualbox/vditool $PKG/usr/bin/vditool
 
 if [ "$harden" = "--enable-hardening" ]; then
   for i in $GUI VBoxSDL VBoxHeadless; do
