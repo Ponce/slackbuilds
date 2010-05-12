@@ -1,0 +1,98 @@
+#!/bin/sh
+
+# Slackware build script for pcp
+
+# Roman Revyakin <rrevyakin@aconex.com> 
+# ver 1.1 2009-10-06 
+# Much modification by Robby Workman <rworkman@slackbuilds.org>
+
+PRGNAM=pcp
+VERSION=2.9.2
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+SRC_VERSION=${VERSION}-1
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$SRC_VERSION.src.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+chmod -R a-s,u+w,go+r-w .
+
+autoconf
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --datadir=/usr/share/$PRGNAM \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --includedir=/usr/include/$PRGNAM \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --localstatedir=/var/lib/pcp \
+  --sysconfdir=/etc \
+  --mandir=/usr/man \
+  --build=$ARCH-slackware-linux
+
+# This should make the docs and init scripts go to the correct place
+sed -i "s%=/usr/doc%=/usr/doc/$PRGNAM-$VERSION%g" src/include/pcp.conf
+sed -i "s%=/etc/rc.d/init.d%=/etc/rc.d%g" src/include/pcp.conf
+
+make
+make install DIST_ROOT=$PKG
+
+# Don't clobber the config file and init scripts on upgrades
+# We'll leave them without the "rc." naming prefix since lots of docs and
+# other support files depend on them named without it
+mv $PKG/etc/pcp.conf $PKG/etc/pcp.conf.new
+mv $PKG/etc/rc.d/pcp $PKG/etc/rc.d/pcp.new
+mv $PKG/etc/rc.d/pmie $PKG/etc/rc.d/pmie.new
+mv $PKG/etc/rc.d/pmproxy $PKG/etc/rc.d/pmproxy.new
+
+# Install the init scripts non-executable by default
+chmod 0644 $PKG/etc/rc.d/*
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null
+)
+
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+)
+
+# Add the build script and postinstall setup doc to the package docs
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
