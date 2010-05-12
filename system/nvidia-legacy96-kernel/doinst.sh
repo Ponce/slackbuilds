@@ -1,3 +1,2 @@
-
-chroot . /sbin/depmod -a
+chroot . /sbin/depmod -ae @KERNEL@
 
