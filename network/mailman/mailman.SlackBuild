@@ -1,0 +1,112 @@
+#!/bin/sh
+
+# Slackware build script for mailman
+# Written by Eugene Suter (easuter@gmail.com)
+
+PRGNAM=mailman
+VERSION=${VERSION:-2.1.12}
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+MAIL_UID=${MAIL_UID:-204}
+MAIL_GID=${MAIL_GID:-204}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# Bail if user or group isn't valid on your system
+if ! grep -q ^mailman: /etc/passwd 2>/dev/null; then
+  printf "\n\tYou must have a \"mailman\" user and group to run this script:\n"
+  printf "\t# groupadd -g $MAIL_GID mailman\n"
+  printf "\t# useradd -u $MAIL_UID -d /dev/null -s /bin/false -g mailman mailman\n\n"
+  exit 1
+fi
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+fi
+
+# By default mailman will be installed to /opt, but
+# the lists archives and databases directory can be 
+# changed to /var/mailman:
+PREFIX=/opt/mailman
+VAR_PREFIX=${VAR_PREFIX:-/opt/mailman/var/mailman}
+
+# Make directories with permissions that the configure script demands,
+# but make them in $PKG instead of /
+mkdir -p $PKG
+install -d $PKG/$PREFIX -g mailman -o root -m 2775
+install -d $PKG/$VAR_PREFIX -g mailman -o root -m 2775
+
+# Slackware's group name for apache. For some reason other distros
+# will use www or www-data (and mailman assumes this by default)
+CGI_GID=${CGI_GID:-apache}
+
+set -e # Exit on most errors
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tgz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/opt/mailman \
+  --exec-prefix=/opt/mailman \
+  --with-var-prefix=$VAR_PREFIX \
+  --localstatedir=/var \
+  --build=$ARCH-slackware-linux \
+  --with-mail-gid=$MAIL_GID \
+  --with-cgi-gid=$CGI_GID \
+  --without-permcheck # Don't bomb out if dirs are missing in /
+
+make
+make install DESTDIR=$PKG
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+)
+
+mkdir -p $PKG/etc/profile.d
+cat $CWD/profile.d/mailman.sh > $PKG/etc/profile.d/mailman.sh
+cat $CWD/profile.d/mailman.csh > $PKG/etc/profile.d/mailman.csh
+chmod 0755 $PKG/etc/profile.d/*
+
+mkdir $PKG/etc/rc.d
+cat $CWD/rc.mailman > $PKG/etc/rc.d/rc.mailman.new
+chmod 0755 $PKG/etc/rc.d/rc.mailman.new
+
+mkdir -p $PKG/$PREFIX/doc/$PRGNAM-$VERSION
+cp -a ACKNOWLEDGMENTS BUGS FAQ NEWS README* STYLEGUIDE.txt TODO \
+  $PKG/$PREFIX/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/$PREFIX/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+( cd $PKG/usr/doc ; ln -s $PREFIX/doc/$PRGNAM-$VERSION )
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
