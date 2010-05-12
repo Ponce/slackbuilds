@@ -1,0 +1,123 @@
+#!/bin/sh
+
+# Slackware build script for calibre
+
+# Copyright 2009 Larry Hajali <larryhaja[at]gmail[dot]com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=calibre
+VERSION=${VERSION:-0.5.8}
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+# pyqtdistutils.py points to qmake rather then qmake-qt4.
+sed -i 's|qmake|qmake-qt4|g' pyqtdistutils.py
+# Correct the location of the libraries.
+patch -p1 < $CWD/patches/fix-libraries.diff
+# Remove desktop integration and post-install step.  We'll do that later.
+patch -p1 < $CWD/patches/fix-postinstall.diff
+# Fix the man pages.
+patch -p1 < $CWD/patches/fix-manpages.diff
+
+python setup.py install --root=$PKG
+
+# This shouldn't be necessary but calibre has a post install desktop integration
+# step that leaves unwanted files on the system if calibre is later removed.
+# So we'll provide the necessary paths for calibre to use in order to package it.
+cd build
+  ln -s lib\.* lib
+cd -
+
+DESTDIR="${PKG}" \
+PYTHONPATH="${TMP}/${PRGNAM}-${VERSION}/build/lib" \
+python "${TMP}/${PRGNAM}-${VERSION}"/src/${PRGNAM}/linux.py \
+  --use-destdir \
+  --do-not-reload-udev-hal \
+  --group-file=/etc/group \
+  --dont-check-root
+
+convert icons/library.ico $PRGNAM-gui.png
+convert icons/viewer.ico $PRGNAM-viewer.png
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null
+)
+
+# Fix the man pages
+for i in $PKG/usr/man/man1/*.bz2 ; do bzip2 -d $i ; done
+gzip -9 $PKG/usr/man/man?/*.?
+
+PYTHON_VERSION=$(python -c 'import sys; print sys.version[:3]')
+sed -i 's|self.view.setProperty|#self.view.setProperty|' \
+  $PKG/usr/lib/python${PYTHON_VERSION}/site-packages/calibre/gui2/viewer/main_ui.py
+
+# Install the necessary desktop items.
+install -D -m 0644 $CWD/desktop/$PRGNAM-gui.desktop \
+	$PKG/usr/share/applications/$PRGNAM-gui.desktop
+install -D -m 0644 $PRGNAM-gui.png \
+	$PKG/usr/share/pixmaps/$PRGNAM-gui.png
+install -D -m 0644 $CWD/desktop/$PRGNAM-lrfviewer.desktop \
+	$PKG/usr/share/applications/$PRGNAM-lrfviewer.desktop
+install -D -m 0644 $PRGNAM-viewer.png \
+	$PKG/usr/share/pixmaps/$PRGNAM-viewer.png
+install -D -m 0644 $CWD/desktop/$PRGNAM-mimetypes \
+	$PKG/usr/share/mime/packages/$PRGNAM-mimetypes
+
+# Put the udev rules file in the right place
+mkdir -p $PKG/lib
+mv $PKG/etc/udev $PKG/lib
+
+# Rename the bash-completion file to be more consistent with others
+mv $PKG/etc/bash_completion.d/calibre $PKG/etc/bash_completion.d/calibre.sh
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE todo $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
