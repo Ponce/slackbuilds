@@ -21,3 +21,4 @@ fi
 config etc/rc.d/rc.openctd.new
 config etc/openct.conf.new
 config etc/reader.conf.d/reader-openct.conf.new
+

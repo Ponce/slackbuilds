@@ -2,7 +2,7 @@
 
 # Slackware build script for openct
 
-# Copyright 2008-2009  LukenShiro <lukenshiro@ngi.it>
+# Copyright 2008-2010  LukenShiro <lukenshiro@ngi.it>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,7 +23,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=openct
-VERSION=${VERSION:-0.6.16}
+VERSION=${VERSION:-0.6.19}
 ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
@@ -35,7 +35,7 @@ OUTPUT=${OUTPUT:-/tmp}
 
 APIDOC=${APIDOC:-0}	# api documentation not built by default
 NONPRIV=${NONPRIV:-0}	# disable not-privileged mode (it will be used by root)
-HALD=${HALD:-0}		# hal detection is disabled by default, we use udev instead
+
 DOCFILES="NEWS TODO LGPL-2.1"
 
 if [ "$ARCH" = "i486" ]; then
@@ -81,13 +81,6 @@ case "$NONPRIV" in
 	;;
 esac
 
-case "$HALD" in
-    0)	UDEV_FLAGS="--with-udev=/lib${LIBDIRSUFFIX}/udev"
-	;;
-    *)	UDEV_FLAGS=""		# do nothing
-	;;
-esac
-
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -105,10 +98,10 @@ CXXFLAGS="$SLKCFLAGS" \
   --${APIDOC_FLAG}able-api-doc \
   --with-ifddir=/usr/lib${LIBDIRSUFFIX}/ifd \
   --disable-static \
-  --build=$ARCH-slackware-linux \
+  --with-udev=/lib/udev \
   --with-daemon-user=root \
   $NONPRIV_FLAGS \
-  $UDEV_FLAGS
+  --build=$ARCH-slackware-linux
 
 make
 make install DESTDIR=$PKG
@@ -139,35 +132,21 @@ sed -i "s|^DEVICENAME|#DEVICENAME|g" $PKG/etc/reader.conf.d/reader-openct.conf.n
 sed -i "s|^LIBPATH|#LIBPATH|g" $PKG/etc/reader.conf.d/reader-openct.conf.new
 sed -i "s|^CHANNELID|#CHANNELID|g" $PKG/etc/reader.conf.d/reader-openct.conf.new
 
-# Hal and udev detection are alternative, and their rules should not be
-# installed at the same time, according to upstream.
-case "$HALD" in
-    0)	# Install udev scripts for openct
-	mkdir -p $PKG/lib${LIBDIRSUFFIX}/udev
-	install -m755 etc/openct_usb $PKG/lib${LIBDIRSUFFIX}/udev/openct_usb
-	install -m755 etc/openct_pcmcia $PKG/lib${LIBDIRSUFFIX}/udev/openct_pcmcia
-	install -m755 etc/openct_serial $PKG/lib${LIBDIRSUFFIX}/udev/openct_serial
+# Hal detection is now deprecated by upstream, so we use udev detection.
+# Install udev scripts for openct
+mkdir -p $PKG/lib/udev
+install -m755 etc/openct_usb $PKG/lib/udev/openct_usb
+install -m755 etc/openct_pcmcia $PKG/lib/udev/openct_pcmcia
+install -m755 etc/openct_serial $PKG/lib/udev/openct_serial
 
-	# Install udev rules for openct
-	mkdir -p $PKG/lib${LIBDIRSUFFIX}/udev/rules.d
-	cp -a etc/openct.udev $PKG/lib${LIBDIRSUFFIX}/udev/rules.d/95-openct.rules
-	# Update attributes according to recent udev rules' naming convention
-	sed -i "s|SYSFS{|ATTR{|g" $PKG/lib${LIBDIRSUFFIX}/udev/rules.d/95-openct.rules
-	# WAIT_FOR_SYSFS is replaced by WAIT_FOR in udev>=123:
-	sed -i "s|WAIT_FOR_SYSFS=|WAIT_FOR=|g" $PKG/lib${LIBDIRSUFFIX}/udev/rules.d/95-openct.rules
-	# modification taken to prevent bug (as happened in other distributions:
-	# i.e. https://bugzilla.redhat.com/287871):
-	# it seems 'sleep' program would otherwise be applied to every usb add
-	# event, not only to this one
-	sed -i "s|^PROGRAM=|#PROGRAM=|g" $PKG/lib${LIBDIRSUFFIX}/udev/rules.d/95-openct.rules
-	;;
-    *)	# Install openct rules/script for hal
-	mkdir -p $PKG/usr/share/hal/fdi/information/10freedesktop/
-	cp -a etc/openct.fdi $PKG/usr/share/hal/fdi/information/10freedesktop/10-usb-openct.fdi
-	mkdir -p $PKG/usr/libexec
-	install -m755 etc/openct.hald $PKG/usr/libexec/hald-addon-openct
-	;;
-esac
+# Install udev rules for openct
+mkdir -p $PKG/lib/udev/rules.d
+cp -a etc/openct.udev $PKG/lib/udev/rules.d/95-openct.rules
+# modification taken to prevent bug (as happened in other distributions:
+# i.e. https://bugzilla.redhat.com/287871):
+# it seems 'sleep' program would otherwise be applied to every usb add
+# event, not only to this one
+sed -i "s|^PROGRAM=|#PROGRAM=|g" $PKG/lib/udev/rules.d/95-openct.rules
 
 # Directory for status, socket and lock files
 mkdir -p $PKG/var/run/openct
@@ -183,8 +162,10 @@ chown $USR_GRP $PKG/var/run/openct
 mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/ifd
 
 ( cd $PKG
-  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null
 )
 
 ( cd $PKG/usr/man
@@ -203,4 +184,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
