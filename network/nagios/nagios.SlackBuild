@@ -1,0 +1,130 @@
+#!/bin/sh
+
+# Slackware build script for nagios:
+# IT infrastructure monitoring system
+
+# Written by Niels Horn - niels.horn@gmail.com
+# revision date 2009/11/15
+
+PRGNAM=nagios
+VERSION=3.2.0
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+DOCROOT=${DOCROOT:-/var/www/htdocs}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+fi
+
+set -e
+
+# Check if the 'nagios' user & group exist:
+if [ "$(grep ^nagios /etc/passwd)" = "" -o "$(grep ^nagios /etc/group)" = "" ] ; then
+        printf "\nYou must have a nagios user and group.\n\nExample:\n"
+        printf "\t# groupadd -g 213 nagios\n"
+        printf "\t# useradd -d /dev/null -s /bin/false -u 213 -g nagios nagios\n\n"
+        exit 1
+fi
+
+rm -rf $TMP/$PRGNAM-$VERSION $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+CFLAGS="$SLKCFLAGS" \
+  ./configure \
+  --prefix=/usr \
+  --sbindir=/usr/sbin/$PRGNAM \
+  --datadir=$DOCROOT/$PRGNAM \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --libexecdir=/usr/libexec/nagios \
+  --sysconfdir=/etc/nagios \
+  --localstatedir=/var/$PRGNAM \
+  --mandir=/usr/man \
+  --build=$ARCH-slackware-linux \
+  --with-httpd-conf=/etc/httpd/extra \
+  --with-checkresult-dir=/var/spool/$PRGNAM \
+  --with-init-dir=/etc/rc.d \
+  --with-lockfile=/var/run/nagios/nagios.lock
+
+make all
+
+export DESTDIR=$PKG
+make install
+make install-init
+make install-commandmode
+make install-config
+# Need to create the $PKG/etc/httpd/extra directory (this is a bug in Makefile.in)
+mkdir -p $PKG/etc/httpd/extra
+make install-webconf
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+)
+
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+)
+
+# Change configuration files to .new
+find $PKG/etc/$PRGNAM/ -name *.cfg | while read cfg ; do mv $cfg $cfg.new ; done
+mv $PKG/etc/httpd/extra/nagios.conf $PKG/etc/httpd/extra/nagios.conf.new
+
+# Create directory for lock-file
+mkdir -p $PKG/var/run/nagios
+
+# Change init script and leave it -x
+mv $PKG/etc/rc.d/$PRGNAM $PKG/etc/rc.d/rc.$PRGNAM.new
+chmod -x $PKG/etc/rc.d/rc.$PRGNAM.new
+
+# Move documentation to right location
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  Changelog INSTALLING LEGAL LICENSE README THANKS UPGRADING contrib \
+    $PKG/usr/doc/$PRGNAM-$VERSION
+mv $PKG/$DOCROOT/$PRGNAM/docs $PKG/usr/doc/$PRGNAM-$VERSION/html
+( cd $PKG/$DOCROOT/$PRGNAM ; ln -s /usr/doc/$PRGNAM-$VERSION/html docs )
+find $PKG/usr/doc/$PRGNAM-$VERSION -type f -exec chmod 644 {} \;
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README.Slackware > $PKG/usr/doc/$PRGNAM-$VERSION/README.Slackware
+
+# Fixup some ownership and permission issues
+chown -R root:root $PKG/usr/doc/nagios-3.2.0/html
+chmod 0755 $PKG/usr/doc/nagios-3.2.0/html{,/images}
+chown root:root $PKG/usr/sbin
+chown -R root:nagios $PKG/usr/sbin/nagios
+chmod -R 0754 $PKG/usr/sbin/nagios
+chown root:root $PKG/usr/bin
+chmod 0755 $PKG/usr/bin
+chown root:nagios $PKG/usr/bin/*
+chmod 0754 $PKG/usr/bin/*
+chown nagios:nagios $PKG/var/run/nagios
+chmod 0775 $PKG/var/run/nagios
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
