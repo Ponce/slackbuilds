@@ -1,4 +1,3 @@
-#!/bin/sh
 config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
@@ -21,10 +20,10 @@ else
   # Install executable otherwise - irrelevant unless user starts in rc.local
   chmod 0755 etc/rc.d/rc.iscsi-target.new
 fi
-
 config etc/rc.d/rc.iscsi-target.new
+config etc/initiators.deny.new
+config etc/initiators.allow.new
+config etc/ietd.conf.new
 
-if [ -x /sbin/depmod ]; then
-echo -e "Updating modules..."
-depmod -a
-fi
+chroot . depmod -a 2>/dev/null 1>/dev/null
+
