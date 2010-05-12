@@ -1,0 +1,101 @@
+#!/bin/sh
+
+# Slackware build script for zarafa:
+# an MS Exchange substitute
+
+# Written by Niels Horn - niels.horn@gmail.com
+# revision date 2009/12/12
+
+PRGNAM=zarafa
+VERSION=6.30.5
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+fi
+
+set -e
+
+rm -rf $TMP/$PRGNAM-$VERSION $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+# Apply patches to avoid compiling error
+# (note: this is my personal solution / hack, I did not find any answer on
+#  the official zarafa forum, although other users reported the same issue.)
+patch -p1 < $CWD/ical2mapi.patch
+
+# Apply patch to use "vmime-zarafa" instead of "vmime"
+patch -p1 < $CWD/vmime-zarafa.patch
+
+SLKCFLAGS="$SLKCFLAGS -I/usr/include/vmime-zarafa"
+
+CFLAGS=$SLKCFLAGS \
+CXXFLAGS=$SLKCFLAGS \
+CPPFLAGS=$SLKCFLAGS \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --disable-static \
+  --with-userscript-prefix=/etc/zarafa/userscripts \
+  --with-quotatemplate-prefix=/etc/zarafa/quotamails \
+  --with-vmime-prefix=/usr/include/vmime-zarafa \
+  --build=$ARCH-slackware-linux
+
+make
+make install DESTDIR=$PKG
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+)
+
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+)
+
+# Sample configuration files
+mkdir -p $PKG/etc/$PRGNAM
+( cd $PKG/usr/doc/$PRGNAM-$VERSION
+  for cnf in *.cfg; do
+    mv $cnf $PKG/etc/$PRGNAM/$cnf.new
+  done
+)
+
+# Directory for log file
+mkdir -p $PKG/var/log/$PRGNAM
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README.Slackware > $PKG/usr/doc/$PRGNAM-$VERSION/README.Slackware
+
+mkdir -p $PKG/install
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
