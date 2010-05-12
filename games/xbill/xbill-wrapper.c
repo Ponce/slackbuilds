@@ -1,4 +1,4 @@
-/* Written by Menno E. Duursma for use with xbill */
+/* Written by Menno Duursma for use with xbill */
 
 /*
  * This program is free software. It comes without any warranty.
@@ -62,7 +62,7 @@ int main(int argc, char *argv[], char *envp[])
 			getuid(),
 			strerror(errno));
 		exit(EXIT_FAILURE);
-		}
+	}
 
         /* tell the viewers wat is going to happen */
         fprintf(stderr, "Starting %s with uid = %d, gid = %d\n",

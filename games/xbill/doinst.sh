@@ -18,7 +18,3 @@ config var/games/xbill/scores.new
 chgrp -R games var/games/xbill
 chmod -R g+w,o-w var/games/xbill
 
-# Change privs on our little wrapper
-chgrp video usr/bin/xbill
-chmod 4750 usr/bin/xbill
-
