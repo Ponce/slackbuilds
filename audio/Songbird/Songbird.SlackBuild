@@ -1,6 +1,7 @@
 #!/bin/sh
 
 # Slackware build script for songbird
+
 # Copyright 2007-2008  Michiel van Wessem, Manchester, United Kingdom
 # All rights reserved.
 #
@@ -24,7 +25,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=Songbird
-VERSION=0.7.0
+VERSION=1.1.2_1042
 ARCH=i686  # Leave this Alone. Precompiled binary
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
@@ -34,32 +35,61 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
+SRC_VERSION=$(echo $VERSION | tr _ -)
+PLUGINS=${PLUGINS:-YES}
+GCONF=${GCONF:-NO}
+
 set -e  # Exit on most errors
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
-cd $TMP
-# set up the target enviroment and extract Songbird in there
+cd $PKG
+# Set up the target enviroment and extract Songbird in there
 mkdir -p $PKG/usr/{bin,lib}
-tar xzf $CWD/${PRGNAM}_${VERSION}_linux-${ARCH}.tar.gz -C $PKG/usr/lib
+tar -xvf $CWD/${PRGNAM}_${SRC_VERSION}_linux-$ARCH.tar.gz -C $PKG/usr/lib
 chown -R root:root .
+# Added "-o -perm 700" to this to take care of the borked directory permissions 
 find . \
- \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 700 -o -perm 555 -o -perm 511 \) \
   -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
-    -exec chmod 644 {} \;   
+    -exec chmod 644 {} \;
 
-( cd $PKG/usr/bin/ ; ln -sf /usr/lib/$PRGNAM/songbird . )
+# Since with version 1.0.0 the symlink solution seems to break Songbird,
+# we're installing a small wrapper script.
+install -m 0755 $CWD/wrapper.songbird $PKG/usr/bin/songbird
+
+# For some reason Songbird doesn't want to the see the plugins in 
+# /usr/lib/mozilla/plugins. This is reported to upstream under
+# bug http://bugzilla.songbirdnest.com/show_bug.cgi?id=13984
+if [ $PLUGINS = "YES" ]; then
+    mkdir -p $PKG/usr/lib/mozilla/plugins
+    ( cd $PKG/usr/lib/$PRGNAM/
+      rmdir plugins
+      ln -sf ../mozilla/plugins
+    )
+fi
+
+# This fixes a problem related to a lack of gconf. Thanks to Joshua Wood
+# for findg a solution for this.
+if [ $GCONF = "NO" ]; then
+    ( cd $PKG/usr/lib/Songbird/chrome/
+     /usr/bin/unzip songbird.jar
+     patch -p3 content/songbird/scripts/appInit.js < $CWD/no.gconf.patch
+     /usr/bin/zip -uv songbird.jar content/songbird/scripts/appInit.js
+     rm -rf content skin
+    )
+fi
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-( cd $PKG/usr/lib/$PRGNAM
-  mv LICENSE.html README.txt TRADEMARK.txt  $PKG/usr/doc/$PRGNAM-$VERSION
-)
+cd $PKG/usr/lib/$PRGNAM
+mv LICENSE.html README.txt TRADEMARK.txt  $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/usr/share/{applications,pixmaps}
 cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
-cp $PKG/usr/lib/$PRGNAM/chrome/icons/default/default.xpm $PKG/usr/share/pixmaps/$PRGNAM.xpm
+cp $PKG/usr/lib/$PRGNAM/chrome/icons/default/default.xpm \
+  $PKG/usr/share/pixmaps/$PRGNAM.xpm
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
