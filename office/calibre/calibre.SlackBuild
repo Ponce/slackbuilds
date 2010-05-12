@@ -23,7 +23,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=calibre
-VERSION=${VERSION:-0.5.8}
+VERSION=${VERSION:-0.5.14}
 ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
@@ -32,6 +32,14 @@ CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  LIBDIRSUFFIX="64"
+fi
 
 set -e
 
@@ -48,14 +56,12 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-# pyqtdistutils.py points to qmake rather then qmake-qt4.
-sed -i 's|qmake|qmake-qt4|g' pyqtdistutils.py
-# Correct the location of the libraries.
-patch -p1 < $CWD/patches/fix-libraries.diff
-# Remove desktop integration and post-install step.  We'll do that later.
-patch -p1 < $CWD/patches/fix-postinstall.diff
-# Fix the man pages.
+# Fix man pages.
 patch -p1 < $CWD/patches/fix-manpages.diff
+# Remove desktop integration and post isntall step.  We'll do that later.
+patch -p1 < $CWD/patches/post-install-removal.patch
+# Fix a validation error in django-tagging python module.
+patch -p1 < $CWD/patches/tagging-form.patch
 
 python setup.py install --root=$PKG
 
@@ -66,9 +72,9 @@ cd build
   ln -s lib\.* lib
 cd -
 
-DESTDIR="${PKG}" \
-PYTHONPATH="${TMP}/${PRGNAM}-${VERSION}/build/lib" \
-python "${TMP}/${PRGNAM}-${VERSION}"/src/${PRGNAM}/linux.py \
+DESTDIR=$PKG \
+PYTHONPATH="$TMP/$PRGNAM-$VERSION/build/lib" \
+python $TMP/$PRGNAM-$VERSION/src/$PRGNAM/linux.py \
   --use-destdir \
   --do-not-reload-udev-hal \
   --group-file=/etc/group \
@@ -84,35 +90,38 @@ convert icons/viewer.ico $PRGNAM-viewer.png
     xargs strip --strip-unneeded 2> /dev/null
 )
 
-# Fix the man pages
+# Fix the man pages.
 for i in $PKG/usr/man/man1/*.bz2 ; do bzip2 -d $i ; done
 gzip -9 $PKG/usr/man/man?/*.?
-
-PYTHON_VERSION=$(python -c 'import sys; print sys.version[:3]')
-sed -i 's|self.view.setProperty|#self.view.setProperty|' \
-  $PKG/usr/lib/python${PYTHON_VERSION}/site-packages/calibre/gui2/viewer/main_ui.py
-
-# Install the necessary desktop items.
-install -D -m 0644 $CWD/desktop/$PRGNAM-gui.desktop \
-	$PKG/usr/share/applications/$PRGNAM-gui.desktop
-install -D -m 0644 $PRGNAM-gui.png \
-	$PKG/usr/share/pixmaps/$PRGNAM-gui.png
-install -D -m 0644 $CWD/desktop/$PRGNAM-lrfviewer.desktop \
-	$PKG/usr/share/applications/$PRGNAM-lrfviewer.desktop
-install -D -m 0644 $PRGNAM-viewer.png \
-	$PKG/usr/share/pixmaps/$PRGNAM-viewer.png
-install -D -m 0644 $CWD/desktop/$PRGNAM-mimetypes \
-	$PKG/usr/share/mime/packages/$PRGNAM-mimetypes
 
 # Put the udev rules file in the right place
 mkdir -p $PKG/lib
 mv $PKG/etc/udev $PKG/lib
 
-# Rename the bash-completion file to be more consistent with others
+# Make the bash completion into a more standard form.
 mv $PKG/etc/bash_completion.d/calibre $PKG/etc/bash_completion.d/calibre.sh
 
+# Fix a bug in the ebook-viewer for Qt 4.5.x incompatibility.
+PYVER=$(python -c 'import sys; print sys.version[:3]')
+sed -i 's|self.view.setProperty|#self.view.setProperty|' \
+  $PKG/usr/lib${LIBDIRSUFFIX}/python${PYVER}/site-packages/calibre/gui2/viewer/main_ui.py
+
+# Install the necessary desktop items
+install -D -m 644 $CWD/desktop/$PRGNAM-gui.desktop \
+  $PKG/usr/share/applications/$PRGNAM-gui.desktop
+install -D -m 644 $CWD/desktop/$PRGNAM-lrfviewer.desktop \
+  $PKG/usr/share/applications/$PRGNAM-lrfviewer.desktop
+install -D -m 644 $PRGNAM-gui.png \
+  $PKG/usr/share/icons/hicolor/128x128/apps/$PRGNAM-gui.png
+install -D -m 644 $PRGNAM-viewer.png \
+  $PKG/usr/share/icons/hicolor/128x128/apps/$PRGNAM-viewer.png
+install -D -m 644 $CWD/desktop/$PRGNAM-mimetypes \
+  $PKG/usr/share/mime/packages/$PRGNAM-mimetypes
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a LICENSE todo $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  LICENSE todo \
+  $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
@@ -120,4 +129,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
