@@ -9,18 +9,17 @@
 set -e
 
 PRGNAM=virtualbox-kernel
-VBOX_VERSION=$(VBoxManage -v | grep -e ^[0-9].*_OSE)
-VERSION=${VBOX_VERSION:0:5}
+VERSION=$(VBoxManage -v | grep -e ^[0-9].*_OSE | cut -d "_" -f 1)
 
 MODULE_SRC=$(grep "MODULE_SRC=" /etc/vbox/vbox.cfg | cut -d "=" -f 2 | cut -d "\"" -f 2)
 
-echo "--> Copying sourcecode from $INSTALL_DIR/src"
+echo "--> Copying sourcecode from $MODULE_SRC/$PRGNAM-$VERSION"
 cp -rf $MODULE_SRC/$PRGNAM-$VERSION $PRGNAM-$VERSION
 
-echo "--> Making the sourcecode tarball: $PRGNAM-$VERSION.tar.bz2 "
-tar -c $PRGNAM-$VERSION/ | bzip2 > $PRGNAM-$VERSION.tar.bz2
+echo "--> Making the sourcecode tarball: ./$PRGNAM-$VERSION.tar.xz"
+tar -cJf $PRGNAM-$VERSION.tar.xz $PRGNAM-$VERSION
 
-echo "--> Erasing the sourcecode directory: $SRCNAM/"
+echo "--> Erasing the sourcecode directory: ./$PRGNAM-$VERSION/"
 rm -rf $PRGNAM-$VERSION/
 
-echo "--> Sourcecode tarball for $PRGNAM: $PRGNAM-$VERSION.tar.bz2"
+echo "--> Sourcecode tarball for $PRGNAM: $(pwd)/$PRGNAM-$VERSION.tar.xz"
