@@ -2,7 +2,7 @@
 
 # Slackware build script for OpenOffice.org
 
-# Copyright 2006-2008  Robby Workman, Northport, Alabama, ASA
+# Copyright 2006-2009  Robby Workman, Northport, Alabama, ASA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -24,13 +24,16 @@
 
 # Thanks to Sandman1, Larhzu, and MacIver for early assistance.
 # Thanks to Fred Emmott (http://slamd64.com) for some better code in a few
-#  places and ideas to include the Optimization Solver and disable javaldx.
+#   places and ideas to include the Optimization Solver and disable javaldx.
 # Thanks to hba for the idea to include support for other languages.
+# Thanks to Nille Akerstrom for the diff to support w/JRE tarballs
+# Thanks to ivo@linvo.org for hints on installing extensions
+# Thsnks to necropresto for better x86_64 support
 
 PRGNAM=openoffice.org
-VERSION=3.0.0
-ARCH=i586	# The binaries are built for i586 - leave this alone
-BUILD=${BUILD:-3}
+VERSION=3.1.0
+ARCH=${ARCH:-i586}
+BUILD=${BUILD:-4}
 TAG=${TAG:-_SBo}
 
 CWD=$(pwd)
@@ -47,31 +50,55 @@ OUTPUT=${OUTPUT:-/tmp}
 # Thanks to Niki Kovacs for finding this :-)
 OOLANG=${OOLANG:-en-US}
 PKG_LANG=$(echo $OOLANG | sed s/-/_/)	# Leave this alone
+# Some localized versions only ship with a bundled JRE, and we'd like this
+# script to work on those as well...
+WJRE=${WJRE:-no}
+
 
 # If you want to disable java support by removing executable permissions
 # form OOo's java loader (this will not affect other apps), set this
 # variable to "YES"   Default is "NO"
-# According to Fred Emmott, this is *highly* desirable on 64 bit systems
 DISABLE_JAVA=${DISABLE_JAVA:-NO}
 
-# Yes, I know there is a Slackware integration file in the desktop-integration
-# directory, but it's worthless to us.  I mailed the maintainer of this
-# module with suggestions on how to make it more compliant with standard 
-# Slackware packaging, but I received no response.  Anyway, to sum up, we're 
-# not using that file...
+# Change source package name
+if [ "$ARCH" = "i586" ]; then
+  PKGARCH="Intel"
+elif [ "$ARCH" = "x86_64" ]; then
+  PKGARCH="X86-64"
+  WJRE=no  #Overwrite WJRE option since they don't ship a x86_64 with JRE.
+fi
 
-set -e
+# Yes, I know there is a Slackware integration file in the desktop-integration
+# directory, but it's worthless to us.  I'd prefer to do things correctly.
 
 # Ignore this - it's just to get the toplevel directory name of the 
 # extracted tarball archive
-SOURCEDIR=$(tar tzf $CWD/OOo_${VERSION}_LinuxIntel_install_${OOLANG}.tar.gz | head -1 | tr -d \/)
+if [ $WJRE != no ]; then
+  SOURCEDIR=$(tar tzf $CWD/OOo_${VERSION}_Linux${PKGARCH}_install_wJRE_${OOLANG}.tar.gz | head -1 | tr -d \/)
+else
+  SOURCEDIR=$(tar tzf $CWD/OOo_${VERSION}_Linux${PKGARCH}_install_${OOLANG}.tar.gz | head -1 | tr -d \/)
+fi
+# If the above operation failed for some reason, unset SOURCEDIR so that
+# the "set -eu" below will cause us to bail out with an error
+[ -z $SOURCEDIR ] && unset SOURCEDIR
+  
+set -eu
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 rm -rf $TMP/$SOURCEDIR
-tar xvf $CWD/OOo_${VERSION}_LinuxIntel_install_${OOLANG}.tar.gz -C $TMP
+
+# Handle the tarballs that include a bundled JRE
+if [ $WJRE != no ]; then
+  tar xvf $CWD/OOo_${VERSION}_Linux${PKGARCH}_install_wJRE_${OOLANG}.tar.gz -C $TMP
+  rm -rf $TMP/$SOURCEDIR/{JavaSetup.jar,installdata,setup}
+  rm -rf $TMP/$SOURCEDIR/RPMS/{userland,jre-*-linux-i586.rpm}
+else
+  tar xvf $CWD/OOo_${VERSION}_Linux${PKGARCH}_install_${OOLANG}.tar.gz -C $TMP
+fi
+
 cd $TMP/$SOURCEDIR/RPMS/
-mv desktop-integration/openoffice.org3.0-freedesktop-menus-3.0-9354.noarch.rpm .
+mv desktop-integration/openoffice.org3.1-freedesktop-menus-3.1-9393.noarch.rpm .
 rm *onlineupdate*.rpm # We don't want this
 for FILE in *.rpm ; do rpm2cpio < $FILE | cpio -imdv ; done
 rm -rf desktop-integration *.rpm
@@ -83,20 +110,27 @@ cd $PKG/usr/bin
   for FILE in \
     sbase scalc sdraw simpress smath soffice spadmin swriter unopkg ; do 
       rm -f $FILE
-      ln -sf /opt/openoffice.org3/program/$FILE . ;
+      ln -sf ../../opt/openoffice.org3/program/$FILE $FILE ;
   done 
 cd -
 
+# Remove DejaVu and Liberation fonts - these are included in other packages
+rm -f opt/openoffice.org/basis3.1/share/fonts/truetype/[DL]*.ttf
+
 # Fix Exec commands in the desktop files
 # See http://bugzilla.xfce.org/show_bug.cgi?id=2430 
-patch -p1 < $CWD/desktop-file-fix-3.0.0.diff
+cd $PKG//opt/openoffice.org3/share/xdg/
+  for APP in base calc draw impress math writer; do
+    sed -i 's%Exec=openoffice.org3 -%Exec=s%' $APP.desktop ;
+  done
+cd -
 
-# Install dictionary extensions for spellchecking
+# Install extensions
 UNOPKG_BIN=$PKG/opt/openoffice.org3/program/unopkg
 DICT_DIR=$PKG/opt/openoffice.org3/share/extension/install
 if [ -x "$UNOPKG_BIN" ]; then
   UNOPKG_TMP=$TMP/$$$$$$
-  find $DICT_DIR -type f -name "dict-*.oxt" \
+  find $DICT_DIR -type f -name "*.oxt" \
     -exec $UNOPKG_BIN add --shared {} \
     "-env:UserInstallation=file:///$UNOPKG_TMP" \;
   rm -rf $UNOPKG_TMP 	# Clean up after ourselves
