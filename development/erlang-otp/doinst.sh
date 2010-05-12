@@ -1,3 +1,2 @@
-
-chroot . sh /usr/lib/erlang/Install -minimal /usr/lib/erlang
+chroot . sh @LIBDIR@/erlang/Install -minimal @LIBDIR@/erlang 1>/dev/null 2>/dev/null
 
