@@ -23,9 +23,12 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 # Now maintained by Robby Workman <rworkman@slackbuilds.org>
+# Thanks to Tim Goya for all of the hard work in making the 2.8.x releases
+# work correctly on Slackware - the patches are all from him
 
 PRGNAM=abiword
-VERSION=2.6.6
+VERSION=2.8.2
+DOCSVER=$VERSION	# version of abiword-docs
 ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
@@ -37,20 +40,29 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "s390" ]; then
   SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
 fi
+
+# If libgsf is built with gio enabled, then use it (for later in -current)
+# Otherwise, 13.0 does not have gio-enabled libgsf
+[ ! -f "/usr/include/libgsf-1/gsf/gsf-input-gio.h" ] && USE_GIO="no"
 
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
+rm -rf $PRGNAM-$VERSION 
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
+rm -rf abiword-docs-$DOCSVER
+tar xvf $CWD/abiword-docs-$DOCSVER.tar.gz
 chown -R root:root .
 find . \
  \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
@@ -58,6 +70,13 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
+# This should make the build use Slackware's Boost Asio
+patch -p1 < $CWD/patches/boost_asio.patch 
+
+# This should make the help stuff work properly
+patch -p1 < $CWD/patches/url_show.patch 
+
+CPPFLAGS="-I$TMP/$PRGNAM-$VERSION" \
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -65,14 +84,35 @@ CXXFLAGS="$SLKCFLAGS" \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --mandir=/usr/man \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --disable-gnome \
-  --enable-threads \
-  --enable-static=no \
+  --disable-static \
+  --enable-shared \
+  --enable-clipart \
+  --enable-templates \
+  --enable-plugins \
+  --with-gio=${USE_GIO:-no} \
   --build=$ARCH-slackware-linux
 
 make
 make install DESTDIR=$PKG
+
+# Now install the separate abiword-docs
+cd abiword-docs-$DOCSVER
+  PATH="$PKG/usr/bin:$PATH" \
+  PKG_CONFIG_PATH="$PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig:$PKG_CONFIG_PATH" \
+  ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --docdir=/usr/doc/$PRGNAM-$VERSION \
+    --build=$ARCH-slackware-linux
+  LD_LIBRARY_PATH="$PKG/usr/lib${LIBDIRSUFFIX}:$LD_LIBRARY_PATH" \
+    PATH="$PKG/usr/bin:$PATH" \
+    make
+  make install DESTDIR=$PKG
+cd ..
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -82,8 +122,8 @@ mv $PKG/usr/share/icons $PKG/usr/share/pixmaps
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  BUILD.TXT BiDiReadme.txt COPYING COPYRIGHT.TXT CREDITS.TXT README.TXT \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+  *.txt *.TXT AUTHORS COPYING ChangeLog INSTALL NEWS README \
+    $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
@@ -91,4 +131,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
