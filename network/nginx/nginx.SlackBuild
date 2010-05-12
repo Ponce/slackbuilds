@@ -2,7 +2,7 @@
 #
 # Slackware build script for nginx
 #
-# Copyright 2008 Cherife Li <cherife@dotimes.com>
+# Copyright 2008 Cherife Li <cherife-#-dotimes.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -24,10 +24,9 @@
 #
 # Notes:
 # + This SlackBuild is for v0.7.0 and newer.
-# + You may want to customize the configure options.
 
 PRGNAM=nginx
-VERSION=0.7.5
+VERSION=${VERSION:-0.7.27}
 ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
@@ -39,6 +38,7 @@ OUTPUT=${OUTPUT:-/tmp}
 
 NGINXUSER=${NGINXUSER:-nobody}
 NGINXGROUP=${NGINXGROUP:-nobody}
+PERL=$( eval "`perl -V:version`"; echo $version )
 
 if [ "$ARCH" = "i486" ]; then
    SLKCFLAGS="-O2 -march=i486 -mtune=i686"
@@ -53,15 +53,12 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
+
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz || exit 1
+chown -R root:root $PRGNAM-$VERSION
+chmod -R u+w,go+r-w,a-s $PRGNAM-$VERSION
 cd $PRGNAM-$VERSION
-chown -R root:root .
-find . \
- \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -74,35 +71,51 @@ CXXFLAGS="$SLKCFLAGS" \
   --lock-path=/var/lock/nginx \
   --user=${NGINXUSER} \
   --group=${NGINXGROUP} \
+  --with-rtsig_module \
+  --with-select_module \
+  --with-poll_module \
   --with-http_ssl_module \
   --with-http_realip_module \
   --with-http_addition_module \
+  --with-http_xslt_module \
   --with-http_sub_module \
   --with-http_dav_module \
   --with-http_flv_module \
   --with-http_gzip_static_module \
+  --with-http_random_index_module \
+  --with-http_secure_link_module \
   --with-http_stub_status_module \
+  --with-http_perl_module \
   --http-log-path=/var/log/nginx_access.log \
-  --http-client-body-temp-path=/var/spool/nginx_client_body_temp \
-  --http-proxy-temp-path=/var/spool/nginx_proxy_temp \
+  --http-client-body-temp-path=/var/tmp/nginx_client_body_temp \
+  --http-proxy-temp-path=/var/tmp/nginx_proxy_temp \
   --http-fastcgi-temp-path=/dev/shm \
   --without-mail_pop3_module \
   --without-mail_imap_module \
   --without-mail_smtp_module \
   --with-debug
 
-make || exit 1
+make 
+sed -r -i 's|/usr/share/man|/usr/man|g' objs/src/http/modules/perl/Makefile
 make install DESTDIR=$PKG || exit 1
 
 mkdir -p $PKG/{etc/rc.d,usr/doc/nginx-$VERSION}
 cp -a CHANGES CHANGES.ru LICENSE README $PKG/usr/doc/nginx-$VERSION
 cat $CWD/nginx.SlackBuild > $PKG/usr/doc/nginx-$VERSION/nginx.SlackBuild
 cat $CWD/rc.nginx > $PKG/etc/rc.d/rc.nginx.new
-mv $PKG/usr/html $PKG/usr/doc/nginx-$VERSION
+rm -rf $PKG/{var,usr/{html,lib/perl5/${PERL}}}
 
 ( cd $PKG
   find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+  find . -name perllocal.pod -o -name ".packlist" -o -name "*.bs" | xargs rm -f 2> /dev/null
+  find . -perm 444 -exec chmod 0644 {} \;
+  find . -perm 555 -exec chmod 0755 {} \;
+)
+
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 )
 
 mkdir -p $PKG/install
