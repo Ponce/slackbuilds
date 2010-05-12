@@ -18,6 +18,10 @@ if [ -e etc/rc.d/rc.preload ]; then
   mv etc/rc.d/rc.preload.new.incoming etc/rc.d/rc.preload.new
 fi
 
+# Create log file and state file if they are not already there
+[ ! -e var/log/preload.log ] && touch var/log/preload.log
+[ ! -e var/lib/preload/preload.state ] && touch var/lib/preload/preload.state
+
 config etc/rc.d/rc.preload.new
 config etc/preload.conf.new
 config etc/logrotate.d/preload.new
