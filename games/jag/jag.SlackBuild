@@ -1,0 +1,101 @@
+#!/bin/sh
+
+# Slackware build script for jag
+
+# Written by Larry Hajali <larryhaja[at]gmail[dot]com>
+
+PRGNAM=jag
+VERSION=${VERSION:-0.3.1}
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION-src
+unzip $CWD/$PRGNAM-$VERSION-src.zip
+cd $PRGNAM-$VERSION-src
+# Check to see if there are any themes in the source directory.
+for i in kde_crystal african animals chinese kde_nuvola creatures futurama toys
+do
+  [ -f $CWD/${PRGNAM}_${i}.zip ] && unzip $CWD/${PRGNAM}_${i}.zip -d data/schemes
+done
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+# Fix directory locations and library call.
+sed -i \
+  -e 's|/usr/local/bin|/usr/bin|g' \
+  -e 's|/usr/local/games|/usr/share|g' \
+  -e 's|-lSDLmain|-lSDL|' \
+  Game.pro main.cpp editor/editor.pro
+
+qmake -unix -o Makefile Game.pro
+make \
+  CFLAGS="-pipe $SLKCFLAGS -Wall -W -D_REENTRANT \$(DEFINES)" \
+  CXXFLAGS="-pipe $SLKCFLAGS -Wall -W -D_REENTRANT \$(DEFINES)"
+make install INSTALL_ROOT=$PKG
+
+# Install the optional level editor.
+if [ "${JAG_EDITOR:-no}" == "yes" ]; then
+  cd editor
+    qmake -unix -o Makefile editor.pro
+    make \
+      CFLAGS="-pipe $SLKCFLAGS -Wall -W -D_REENTRANT \$(DEFINES)" \
+      CXXFLAGS="-pipe $SLKCFLAGS -Wall -W -D_REENTRANT \$(DEFINES)"
+    make install INSTALL_ROOT=$PKG
+  cd ..
+fi
+
+( cd $PKG
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+    xargs strip --strip-unneeded 2> /dev/null || true
+)
+
+mkdir -p $PKG/usr/share/{applications,pixmaps}
+install -m 0644 $CWD/$PRGNAM.desktop $PKG/usr/share/applications
+# Convert *.ico icons to png for desktop items.
+convert icon.ico $PRGNAM.png
+install -m 0644 $PRGNAM-0.png $PKG/usr/share/pixmaps/$PRGNAM.png
+if [ "$JAG_EDITOR" == "yes" ]; then
+  install -m 0644 $CWD/$PRGNAM-editor.desktop $PKG/usr/share/applications
+  convert editor/editoricon.ico $PRGNAM-editor.png
+  install -m 0644 $PRGNAM-editor-0.png $PKG/usr/share/pixmaps/$PRGNAM-editor.png
+fi
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/COPYRIGHT > $PKG/usr/doc/$PRGNAM-$VERSION/COPYRIGHT
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
