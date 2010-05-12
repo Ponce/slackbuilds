@@ -3,15 +3,15 @@
 # Slackware Package Build Script for gpac
 # Home Page http://gpac.sourceforge.net/
 
-# Copyright (c) 2007, Nishant Limbachia (nishant@mnspace.net)
+# Copyright (c) 2007-2009, Nishant Limbachia, Hoffman Est, IL, USA (nishant@mnspace.net)
 # All rights reserved.
-#
-# Redistribution and use of this script, with or without modification, is 
+
+# Redistribution and use of this script, with or without modification, is
 # permitted provided that the following conditions are met:
-#
-# 1. Redistributions of script must retain the above copyright notice, 
+
+# 1. Redistributions of script must retain the above copyright notice,
 #    this list of conditions and the following disclaimer.
-#
+
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 # "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 # LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -35,21 +35,33 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 CWD=$(pwd)
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-fi
-
 set -e
 
-rm -rf $PKG $TMP/$PRGNAM
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+fi
+
+### wxwidgets support
+if [ "${WX_SUPPORT:-no}" = "no" ]; then
+  wx_option="--disable-wx"
+else
+  wx_option="--enable-wx"
+fi
+
+rm -rf $PKG $TMP/$PRGNAM-$VERSION
 mkdir -p $TMP $PKG $OUTPUT
+
 cd $TMP
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM
+tar xvf $CWD/$PRGNAM-$VERSION.tar.?z*
+mv $TMP/$PRGNAM $TMP/$PRGNAM-$VERSION
+cd $TMP/$PRGNAM-$VERSION
 chown -R root.root .
 find . \
  \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
@@ -57,39 +69,47 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-chmod 0755 configure	# That's weird :)
+### fix configure script perms
+chmod u+x configure
 
-CFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
+./configure --prefix=/usr \
   --mandir=/usr/man \
-  --cpu=${ARCH}
+  --disable-opt \
+  --cpu=${ARCH} \
+  --extra-cflags="$SLKCFLAGS" \
+  --disable-ipv6 \
+  $wx_option
 
-make
+make -j1 # Parallel build seems to fail
 make install DESTDIR=$PKG
 
-# Remove $PKG/usr/share/gpac directory - it only contains 
-# a gpac.mp4 file which doesn't seem to play with mplayer
-# We'll remove the parent /usr/share, since it should be empty, but
-# use a hushed rmdir just in case...
-rm -fr $PKG/usr/share/gpac ; rmdir $PKG/usr/share 2>/dev/null || true
+### remove $PKG/usr/share/gpac directory
+### only contains gpac.mp4 file which
+### doesn't seem to play with mplayer
+rm -fr $PKG/usr/share
 
+### copying essential doc files
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS COPYING BUGS Changelog INSTALLME README TODO \
-  doc/configuration.html  $PKG/usr/doc/$PRGNAM-$VERSION
 
+cp -a AUTHORS COPYING BUGS Changelog INSTALLME \
+README TODO doc/configuration.html $PKG/usr/doc/$PRGNAM-$VERSION
+
+### strip binaries
 ( cd $PKG
   find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
   find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
 )
 
-( cd $PKG/usr/man || exit 1
+# find and compress man pages
+( cd $PKG/usr/man
   find . -type f -exec gzip -9 {} \;
   for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 )
 
+### putting slack-desc and doinst.sh in place
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
+### building package
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
