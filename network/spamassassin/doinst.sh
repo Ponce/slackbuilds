@@ -27,6 +27,6 @@ config etc/mail/spamassassin/local.cf.new
 config etc/mail/spamassassin/v310.pre.new
 config etc/mail/spamassassin/v312.pre.new
 config etc/mail/spamassassin/v320.pre.new
+config etc/mail/spamassassin/v330.pre.new
 config etc/rc.d/rc.spamd.new
 config etc/spamassassin.conf.new
-
