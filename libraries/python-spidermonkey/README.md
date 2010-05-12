@@ -1,9 +1,33 @@
-
 Execute arbitrary JavaScript code from Python. Allows you to reference
 arbitrary Python objects and functions in the JavaScript VM
 
+Having issues?
+==============
+
+The project support site can be found at [lighthouseapp.com][lh].
+
 Requirements
 ============
+
+Pkg-Config
+----------
+
+Mac OS X:
+
+This should be installed by default. If not there is a port package:
+
+    $ sudo port install pkgconfig
+
+Debian/Ubuntu:
+
+This is also generally installed by default, but I have reports of it being
+otherwise.
+
+    $ sudo apt-get install pkg-config
+
+Gentoo:
+
+    $ sudo emerge dev-util/pkgconfig
 
 Python Development Files
 ------------------------
@@ -21,6 +45,10 @@ Debian/Ubuntu:
 Where X.X is the version of Python you are using. I have not tested
 python-spidermonkey on Py3K so it may be horribly broken there.
 
+Gentoo:
+
+If you have python installed, then the headers should already be installed.
+
 Netscape Portable Runtime (nspr)
 --------------------------------
 
@@ -35,10 +63,39 @@ Mac OS X:
 Debian/Ubuntu:
 
     $ sudo apt-get install libnspr4-dev
+    
+Gentoo:
+
+    $ sudo emerge dev-libs/nspr
 
 Alternatively you can build from [source][nspr]. If you choose this route make
 sure that the nspr-config command is on your $PATH when running the install
 commands below.
+
+If you choose this route make
+sure that the pkg-config command is on your `$PATH` when running the install
+commands below. Additionally, make sure that `$PKG_CONFIG_PATH` is properly
+set.
+
+XULRunner (optional)
+--------------------
+You can optionally build the extension linked to your system's spidermonkey
+library, which is installed with XULRunner. You should be able to grab it from
+your package manager of choice with something like the following:
+
+Mac OS X:
+
+    $ sudo port install xulrunner
+
+Debian/Ubuntu:
+
+    $ sudo apt-get install xulrunner-1.9-dev
+
+Gentoo:
+
+    $ sudo emerge net-libs/xulrunner
+
+As with [nspr][nspr], you can also build [xulrunner][xulrunner] from source. And as with [nspr][nspr] you need to make sure hat `$PATH` and `$PKG_CONFIG_PATH` are properly set when building the module.
 
 Installation
 ============
@@ -54,11 +111,10 @@ Installation
     
     $ sudo python setup.py develop
 
-Having Issues?
-==============
+If you want to build with the system spidermonkey library, replace the build
+command with the following:
 
-Add issues to the Lighthouse project [here][lh].
-
+    $ python setup.py --system-library build
 
 Examples
 ========
@@ -78,7 +134,8 @@ Basics
     >>> fruit = Orange()
     >>> cx.add_global("apple", fruit)
     >>> cx.execute('"Show me the " + apple.is_ripe("raisin");')
-    Show me the ripe raisin
+    u'Show me the ripe raisin'
+
 
 Playing with Classes
 --------------------
@@ -92,12 +149,13 @@ Playing with Classes
     ...
     >>> rt = spidermonkey.Runtime()
     >>> cx = rt.new_context()
-    >>> cx.add_global(Monkey)
+    >>> cx.add_global("Monkey", Monkey)
     >>> monkey = cx.execute('var x = new Monkey(); x.baz = "schmammo"; x;')
     >>> monkey.baz
-    'schmammo'
+    u'schmammo'
     >>> monkey.__class__.__name__
     'Monkey'
+
 
 JavaScript Functions
 --------------------
@@ -107,7 +165,29 @@ JavaScript Functions
     >>> cx = rt.new_context()
     >>> func = cx.execute('function(val) {return "whoosh: " + val;}')
     >>> func("zipper!");
-    'whoosh: zipper!'
+    u'whoosh: zipper!'
+
+
+Filtering access to Python
+--------------------------
+
+    >>> import spidermonkey
+    >>> rt = spidermonkey.Runtime()
+    >>> def checker(obj, name):
+    ...     return not name.startswith("_")
+    ...
+    >>> cx = rt.new_context(access=checker)
+    >>> # Alternatively:
+    >>> cx.set_access()                                     #doctest: +ELLIPSIS
+    <function checker at ...>
+    >>> cx.set_access(checker)                              #doctest: +ELLIPSIS
+    <function checker at ...>
+    >>> cx.add_global("fish", {"gold": "gone", "_old_lady": "huzza"})
+    >>> cx.execute('fish["_old_lady"];')
+    Traceback (most recent call last):
+            ...
+    JSError: Error executing JavaScript.
+
 
 Previous Authors
 ================
@@ -117,3 +197,4 @@ Previous Authors
 
 [lh]: http://davisp.lighthouseapp.com/projects/26898-python-spidermonkey/overview
 [nspr]: ftp://ftp.mozilla.org/pub/mozilla.org/nspr/releases
+[xulrunner]: ftp://ftp.mozilla.org/pub/mozilla.org/xulrunner/releases
