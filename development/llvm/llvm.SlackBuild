@@ -2,7 +2,7 @@
 
 # Slackware build script for llvm
 
-# Copyright 2008 Heinz Wiesinger <pprkut@liwjatan.at>
+# Copyright 2008-2010 Heinz Wiesinger <pprkut@liwjatan.at>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,7 +23,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=llvm
-VERSION=2.3
+VERSION=2.6
 ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
@@ -35,10 +35,13 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
 fi
 
 set -e
@@ -52,27 +55,42 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
 
-# --enable-shared/--disable-static are not working and they're not
-# recommended anyway, so we build with shared libs enabled.
-# --mandir is available, but doesn't do anything (at least here)
+# use destdir correctly
+patch -p0 -i $CWD/llvm-2.6-destdir.patch
 
+# --mandir doesn't work currently
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
+  --libdir=/usr/lib$LIBDIRSUFFIX \
   --sysconfdir=/etc \
   --localstatedir=/var \
+  --mandir=/usr/man \
   --enable-optimizations \
   --enable-assertions \
+  --enable-pic \
   --build=$ARCH-slackware-linux \
   --host=$ARCH-slackware-linux
 
-make
-make install MAKEFLAGS="-j1" DESTDIR=$PKG
+# Correct libdir setting
+sed -i "s|\$(PROJ_prefix)/lib|\$(PROJ_prefix)/lib$LIBDIRSUFFIX|" \
+  Makefile.config
 
-# cleanup
-rm -f $PKG/usr/bin/.dir
-rm -f $PKG/usr/lib/.dir
+make
+
+# make install doesn't support more than one concurrent job
+make \
+  MAKEFLAGS="-j1"\
+  DESTDIR=$PKG \
+  install
+
+# Remove example libraries
+rm -f $PKG/usr/lib$LIBDIRSUFFIX/LLVMHello*
+
+# Fix wrong libdir
+sed -i -e "s|ABS_RUN_DIR/lib\"|ABS_RUN_DIR/lib$LIBDIRSUFFIX\"|" \
+  $PKG/usr/bin/llvm-config
 
 mv $PKG/usr/share/* $PKG/usr/
 rmdir $PKG/usr/share
@@ -96,4 +114,4 @@ mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
