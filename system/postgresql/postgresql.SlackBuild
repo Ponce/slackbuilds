@@ -10,10 +10,13 @@
 # Modified by the SlackBuilds.org Project
 
 PRGNAM=postgresql
-VERSION=8.3.5
+VERSION=8.3.7
 ARCH=${ARCH:-i486}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+
+PG_UID=${PG_UID:-209}
+PG_GID=${PG_GID:-209}
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
@@ -22,26 +25,27 @@ OUTPUT=${OUTPUT:-/tmp}
 
 # Bail out if user or group isn't valid on your system
 # For slackbuilds.org, assigned postgres uid/gid are 209/209
-# see http://slackbuilds.org/uid_gid.txt
+# See http://slackbuilds.org/uid_gid.txt
 # Other popular choice is 26/26
 if ! grep ^postgres: /etc/group 2>&1 > /dev/null; then
-  echo "  Must have a postgres group to run this script."
-  echo "    # groupadd -g 209 postgres"
-  echo "  Or something similar."
+  echo "  You must have a postgres group to run this script."
+  echo "    # groupadd -g $PG_GID postgres"
   exit 1
 elif ! grep ^postgres: /etc/passwd 2>&1 > /dev/null; then
-  echo "  Must have a postgres user to run this script."
-  echo "    # useradd -u 209 -g postgres -d /var/lib/pgsql postgres"
-  echo "  Or something similar."
+  echo "  You must have a postgres user to run this script."
+  echo "    # useradd -u $PG_UID -g $PG_GID -d /var/lib/pgsql postgres"
   exit 1
 fi
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
 fi
 
 set -e # Exit on any and all errors
@@ -57,6 +61,7 @@ chmod -R a-s,u+w,go+r-w .
 CFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
   --with-openssl \
   --with-tcl \
   --with-perl \
@@ -87,13 +92,16 @@ if [ "$TSEARCH2_COMPAT" != "no" ]; then
   cd $TMP/$PRGNAM-$VERSION
 fi
 
-# some business oriented applications use this extension
+# Some business oriented applications use this extension
 cd contrib/pgcrypto
   make
   make install-strip DESTDIR=$PKG
 cd $TMP/$PRGNAM-$VERSION
 
-gzip -9 $PKG/usr/man/man?/*
+( cd $PKG/usr/man || exit 1
+  find . -type f -exec gzip -9 {} \;
+  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+)
 
 mv $PKG/usr/doc/$PRGNAM $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a COPYRIGHT HISTORY README doc/* $PKG/usr/doc/$PRGNAM-$VERSION/
@@ -119,7 +127,8 @@ mkdir -p $PKG/etc/logrotate.d
 cat $CWD/postgresql.logrotate > $PKG/etc/logrotate.d/postgresql.new
 
 mkdir -p $PKG/var/log/setup
-cat $CWD/setup.$PRGNAM > $PKG/var/log/setup/setup.$PRGNAM
+sed -e "s%@UID@%$PG_UID%" -e "s%@GID@%$PG_GID%" $CWD/setup.$PRGNAM \
+  > $PKG/var/log/setup/setup.$PRGNAM
 chmod 755 $PKG/var/log/setup/setup.$PRGNAM
 
 mkdir -p $PKG/install
