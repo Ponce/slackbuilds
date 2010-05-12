@@ -11,4 +11,11 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
+# Keep same perms on rc.haproxy.new:
+if [ -e etc/rc.d/rc.haproxy ]; then
+  cp -a etc/rc.d/rc.haproxy etc/rc.d/rc.haproxy.new.incoming
+  cat etc/rc.d/rc.haproxy.new > etc/rc.d/rc.haproxy.new.incoming
+  mv etc/rc.d/rc.haproxy.new.incoming etc/rc.d/rc.haproxy.new
+fi
+
 config etc/rc.d/rc.haproxy.new
