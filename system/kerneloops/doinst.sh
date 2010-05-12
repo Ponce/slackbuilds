@@ -15,6 +15,5 @@ if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
 fi
 
-config etc/dbus-1/system.d/kerneloops.dbus.new
 config etc/kerneloops.conf.new
 
