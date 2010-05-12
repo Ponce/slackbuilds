@@ -2,7 +2,7 @@
 
 # Slackware build script for pcsc-lite
 
-# Copyright 2007-8  LukenShiro <lukenshiro@ngi.it>
+# Copyright 2007-2009  LukenShiro <lukenshiro@ngi.it>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,7 +23,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=pcsc-lite
-VERSION=${VERSION:-1.4.102}
+VERSION=${VERSION:-1.5.3}
 ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
@@ -36,14 +36,20 @@ OUTPUT=${OUTPUT:-/tmp}
 DEBUGATR=${DEBUGATR:-0}	# Debug is off by default
 APIDOC=${APIDOC:-0}	# API documentation building is off by default
 TEXTOPDFBIN="/usr/share/texmf/bin/pdflatex"	# program to convert .tex files into .pdf (for APIDOC)
-
+# using upstream preferred behaviour by default (libhal)
+HALD=${HALD:-0}		# 0 for conservative detection behaviour, 1 for libhal
 # README and README.DAEMON are not useful and partly outdated. ChangeLog.svn is empty.
 DOCFILES="DRIVERS SECURITY ChangeLog COPYING HELP NEWS TODO AUTHORS INSTALL"
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
 fi
 
 set -e 	# Exit on most errors
@@ -69,24 +75,31 @@ case "$DEBUGATR" in
 	;;
 esac
 
-# libusb and libhal support are mutually exclusive: using conservative behaviour (libusb)
+# libusb and libhal support are mutually exclusive for reader detection:
+case "$HALD" in
+    0)	LIBHAL_FLAG="--enable-libusb --disable-libhal"
+	;;
+    *)	LIBHAL_FLAG="--enable-libhal --disable-libusb"
+	;;
+esac	
+
 # --enable-runpid=/var/run/pcscd.pid is not supported anymore;
+# --enable-muscledropdir="<libdir>/pcsc/services" is not supported anymore;
 # pid directory changed to /var/run/pcscd for consistency
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
   --sysconfdir=/etc \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
   --enable-confdir=/etc \
   --localstatedir=/var \
   --enable-ipcdir=/var/run/pcscd \
   --mandir=/usr/man \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --enable-libusb \
-  --disable-libhal \
-  --enable-usbdropdir="/usr/lib/pcsc/drivers" \
-  --enable-muscledropdir="/usr/lib/pcsc/services" \
-  --${DEBUGATR_FLAG}able-debugatr
+  --enable-usbdropdir="/usr/lib${LIBDIRSUFFIX}/pcsc/drivers" \
+  --${DEBUGATR_FLAG}able-debugatr \
+  $LIBHAL_FLAG
 
 make
 make install DESTDIR=$PKG
@@ -103,7 +116,7 @@ install -m 0755 $CWD/rc.pcscd $PKG/etc/rc.d/rc.pcscd.new
 mv $PKG/etc/reader.conf.d/reader.conf $PKG/etc/reader.conf.d/reader.conf.new
 
 # Create the directory for drivers and such (not included with this package)
-mkdir -p $PKG/usr/lib/pcsc/{drivers,services}
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/pcsc/{drivers,services}
 
 ( cd $PKG
   find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -119,6 +132,7 @@ mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/
 cp -a $DOCFILES $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.SBo
+
 # remove README.DAEMON, automatically installed by doc/Makefile.
 rm -f $PKG/usr/doc/$PRGNAM-$VERSION/README.DAEMON
 
@@ -127,8 +141,8 @@ rm -f $PKG/usr/doc/$PRGNAM-$VERSION/README.DAEMON
 ( cd $PKG/usr/doc/$PRGNAM-$VERSION/
 case "$APIDOC" in
     1)	if [ -x $TEXTOPDFBIN ]; then
-	  $TEXTOPDFBIN ifdhandler-3.tex 
-	  $TEXTOPDFBIN pcsc-lite.tex
+	  $TEXTOPDFBIN ifdhandler-3.tex 1>&2 >/dev/null
+	  $TEXTOPDFBIN pcsc-lite.tex 1>&2 >/dev/null
 	else
 	    echo "API .pdf documentation NOT built."
 	fi
@@ -136,6 +150,7 @@ case "$APIDOC" in
     *) echo "API .pdf documentation NOT built."
 	;;
 esac
+
 for oldfiles in *.aux *.tex *.toc *.log *.bib *.out ; 
     do rm -f $oldfiles ; 
 done
