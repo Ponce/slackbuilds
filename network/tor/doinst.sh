@@ -21,3 +21,4 @@ fi
 
 config etc/rc.d/rc.tor.new
 config etc/tor/tor-tsocks.conf.new
+config etc/tor/torrc.new

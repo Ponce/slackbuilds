@@ -3,13 +3,17 @@
 # Slackware build script for tor
 # Written by Erik Hanson  erik@slackbuilds.org
 
-set -eu
-
 PRGNAM=tor
-VERSION=0.2.0.32
+VERSION=0.2.0.35
 ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+
+# Select tor's default user/group
+TOR_USER=${TOR_USER:-tor}
+TOR_UID=${TOR_UID:-220}
+TOR_GROUP=${TOR_GROUP:-tor}
+TOR_GID=${TOR_GID:-220}
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
@@ -18,11 +22,33 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
 fi
+
+bailout() {
+  echo "  You must have a $TOR_USER user and $TOR_GROUP group to run this script. "
+  echo "  Something like this should suffice for most systems: "
+  echo "    # groupadd -g $TOR_GID $TOR_GROUP "
+  echo "    # useradd -u $TOR_UID -g $TOR_GID -c \"The Onion Router\" -d /dev/null -s /bin/false $TOR_USER "
+  exit 1
+}
+
+# Bail if user and/or group isn't valid on your system
+# uid=220 is suggested to avoid conflicts with other SBo packages,
+# but it's your call: http://slackbuilds.org/uid_gid.txt
+if ! grep -q "^$TOR_USER:" /etc/passwd; then
+  bailout
+elif ! grep -q "^$TOR_GROUP:" /etc/group; then
+  bailout
+fi
+
+set -eu
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -38,12 +64,27 @@ CFLAGS="$SLKCFLAGS" \
   --prefix=/usr \
   --sysconfdir=/etc \
   --localstatedir=/var \
-  --mandir=/usr/man
+  --mandir=/usr/man \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --with-tor-user=$TOR_USER \
+  --with-tor-group=$TOR_GROUP
 
 make
 make install-strip DESTDIR=$PKG
 
-gzip -9 $PKG/usr/man/man?/*.?
+# Create/install stuff that makes tor work (better)
+mkdir -p $PKG/var/{run,log,lib}/tor
+chown $TOR_USER:$TOR_GROUP $PKG/var/{run,log,lib}/tor
+chmod 0700 $PKG/var/lib/tor
+install -D -m 0755 $CWD/rc.tor $PKG/etc/rc.d/rc.tor.new
+install -D -m 0755 contrib/torctl $PKG/usr/bin/torctl
+mv $PKG/etc/tor/torrc.sample $PKG/etc/tor/torrc.new
+mv $PKG/etc/tor/tor-tsocks.conf $PKG/etc/tor/tor-tsocks.conf.new
+
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+)
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/spec
 cp -a AUTHORS ChangeLog INSTALL LICENSE README ReleaseNotes \
@@ -55,8 +96,6 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 mkdir -p $PKG/install $PKG/etc/rc.d
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
-cat $CWD/rc.tor > $PKG/etc/rc.d/rc.tor.new
-mv $PKG/etc/tor/tor-tsocks.conf $PKG/etc/tor/tor-tsocks.conf.new
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
