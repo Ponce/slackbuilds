@@ -1,0 +1,178 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          atari800_binfmt_misc
+# Required-Start:    
+# Required-Stop:     
+# Default-Start:     2 3 4 5
+# Default-Stop:
+# Short-Description: Register Atari 8-bit file formats with binfmt_misc
+### END INIT INFO
+
+# atari800_binfmt_misc: register Atari 8-bit file formats with binfmt_misc.
+# Allows direct execution of Atari executables, disk images, boot cassette
+# images, BASIC programs, and cartridge images, via the atari800 emulator.
+
+PROCDIR=/proc/sys/fs/binfmt_misc
+EMUDIRS="/usr/local/bin /usr/bin /bin"
+
+### Functions. This script doesn't depend on any external function library.
+
+die() {
+	echo $1 1>&2
+	exit 1
+}
+
+usage() {
+	cat <<EOF
+Usage: $0 stop | start | restart
+
+This service registers Atari 8-bit file types with the kernel's binfmt_misc
+driver, to allow users to directly execute Atari software (disk images,
+executables, BASIC programs, boot cassette images, and cartridge images)
+as though they were native Linux executables.
+
+To run Atari software, the atari800 emulator is required. Normally, atari800
+requires X to be running (it may be possible to compile it for console use).
+Get atari800 from: http://atari800.sourceforge.net
+
+If you get a "Can't find atari800 emulator" error, either install atari800
+in one of these directories: $EMUDIRS
+
+...or set ATARI800_BIN in the environment to the full path of the emulator
+binary: export ATARI800_BIN=/opt/atari800/bin/atari800
+EOF
+
+	exit 1
+}
+
+find_atari800() {
+	if [ -z "$ATARI800_BIN" ]; then
+		ATARI800_BIN=none
+
+		for path in $EMUDIRS; do
+			if [ -x $path/atari800 ]; then
+				ATARI800_BIN=$path/atari800
+			fi
+		done
+
+		if [ "$ATARI800_BIN" = "none" ]; then
+			die "Can't find atari800 emulator in $EMUDIRS"
+		fi
+	fi
+}
+
+init_binfmt_misc() {
+	# Load/init binfmt_misc, if needed.
+	/sbin/modprobe binfmt_misc 2>/dev/null
+	mount -t binfmt_misc none $PROCDIR 2>/dev/null
+}
+
+check_binfmt_misc() {
+	# sanity check
+	cd $PROCDIR && [ -f status ]
+	if [ "$?" != "0" ]; then
+		die "binfmt_misc not available in kernel"
+	fi
+}
+
+unregister_filetypes() {
+	local type
+	cd $PROCDIR || die "$PROCDIR does not exist"
+
+	# Unregister filetypes, if already registered
+	# (not an error if already unregistered)
+	for type in \
+		atari8_xex atari8_basic atari8_atr \
+		atari8_xfd atari8_Xfd atari8_XFD \
+		atari8_cas atari8_cart
+	do
+		[ -f $type ] && echo -1 > $type
+	done
+}
+
+register_filetypes() {
+	cd $PROCDIR || die "$PROCDIR does not exist"
+
+	# Register filetypes
+	# :name:type:offset:magic:mask:interpreter:flags
+	# see /usr/src/linux/Documentation/binfmt_misc.txt or
+	# http://www.tat.physik.uni-tuebingen.de/~rguenth/linux/binfmt_misc.html
+	# for explanation of this.
+	echo ':atari8_xex:M::\xff\xff::'$ATARI800_BIN':' > register
+	echo ':atari8_basic:M::\x00\x00::'$ATARI800_BIN':' > register
+	echo ':atari8_atr:M::\x96\x02::'$ATARI800_BIN':' > register
+	echo ':atari8_xfd:E::xfd::'$ATARI800_BIN':' > register
+	echo ':atari8_Xfd:E::Xfd::'$ATARI800_BIN':' > register
+	echo ':atari8_XFD:E::XFD::'$ATARI800_BIN':' > register
+	echo ':atari8_cas:M::FUJI::'$ATARI800_BIN':' > register
+	echo ':atari8_cart:M::CART::'$ATARI800_BIN':' > register
+
+	# This is disabled because (a) lots of emulators use .rom files, and
+	# (b) current version of atari800 needs the -cart parameter for raw
+	# ROM dumps, which we can't provide via binfmt_misc.
+	#echo ':atari8_rom:E::rom::'$ATARI800_BIN':' > register
+
+	# see if it worked:
+	if [ ! -f atari8_xex ]; then
+		die "Failed to register filetypes, are you root?"
+	fi
+}
+
+### main()
+case "$1" in
+	stop)
+		unregister_filetypes
+		;;
+
+	start)
+		init_binfmt_misc
+		check_binfmt_misc
+		find_atari800
+		register_filetypes
+		;;
+
+	restart)
+		init_binfmt_misc
+		check_binfmt_misc
+		unregister_filetypes
+		find_atari800
+		register_filetypes
+		;;
+
+	*)
+		usage
+		;;
+
+esac
+
+exit 0
+
+# notes:
+
+# NO parameters allowed when calling the emulator, use a wrapper
+# script if you need to always pass e.g. -windowed or -ntscemu, or
+# just put on the command line when you run an Atari program.
+
+# there's no "magic" for recognizing XFD images. Instead, they're
+# recognized by filename extension... which is case-sensitive, hence
+# the xfd/Xfd/XFD combination. Feel free to add xFD or xFd, etc, if
+# you have a bunch of files named like that (better solution would be
+# to rename them!)
+
+# There's no way to determine whether a given disk or tape image
+# requires BASIC. The wrapper scripts assume that a boot disk, XEX
+# file, or boot tape, does not require BASIC... and that a BASIC
+# program (obviously) does. Unfortunately there's no easy way to
+# have the emulator run CLOAD, for a non-bootable BASIC tape, so
+# CAS support can only work with boot tapes.
+
+# Likewise, there's no way to tell whether a given tape or disk
+# image is in fact bootable (well, not really true, the wrappers
+# *could* examine boot records, etc, but they don't).
+
+# If you have a XEX, ATR/XFD image, or boot CAS image that requires
+# BASIC, you can enable it, by adding the -basic parameter to the
+# command line (e.g. "myimage.atr -basic"). More generally, you
+# can pass arbitrary atari800 options just by putting them on the
+# image command line (see atari800 -help for full list).
+
