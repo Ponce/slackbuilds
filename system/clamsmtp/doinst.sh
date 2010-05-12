@@ -20,3 +20,4 @@ fi
 
 config etc/rc.d/rc.clamsmtpd.new
 config etc/clamsmtpd.conf.new
+
