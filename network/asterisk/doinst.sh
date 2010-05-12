@@ -1,5 +1,3 @@
-#!/bin/sh
-
 config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
@@ -29,5 +27,4 @@ config etc/asterisk/indications.conf.new
 config etc/asterisk/modules.conf.new
 config etc/asterisk/musiconhold.conf.new
 config etc/asterisk/sip.conf.new
-config etc/asterisk/zapata.conf.new
 
