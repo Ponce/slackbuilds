@@ -23,7 +23,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=GMT
-VERSION=4.4.0
+VERSION=4.5.1
 ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
@@ -32,6 +32,43 @@ CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
+
+COASTNAME=GSHHS
+COASTVER=2.0.1
+
+# Shewchuk's triangulation routine used in some parts of GMT is not 
+# distributed under the GNU Public Licence. If you work for a for-profit
+# organisation, you should read Shewchuk's copyright statement (in 
+# $PKG/src/README.TRIANGLE) first. 
+# This script enables the (much faster) Shewchuk triangulation routine 
+# by default; should you need to change this behaviour, set SHEWCHUK to 
+# "no" below:
+SHEWCHUK=${SHEWCHUK:-yes}
+if [ $SHEWCHUK == "yes" ]; then
+   SHEWCHUK_STATUS="--enable-triangle"
+else
+   SHEWCHUK_STATUS=""
+fi
+
+# There are a number of different resolution coastline files available
+# for GMT, and their size on disk varies from <2MB (low) to ~62MB 
+# (full). They come in 3 separate archives (GSHHS2.0_coast, 
+# GSHHS2.0_high and GSHHS2.0_full). The first contains the low, intermediate
+# and coarse resolutions, the second the high resolution, and the third
+# the full resolution. I prefer to have them all installed (disk space
+# is cheap), but you may not. By default, all three sets will be installed, 
+# unless you choose otherwise below.
+# e.g. ${COASTS:-"coast"} would install only the low, intermediate and
+# coarse resolutions. At least one resolution is required.
+COASTS=${COASTS:-"coast high full"}
+
+# Set the 64bit flag prefix, which may change depending on $ARCH
+SIXTYFOURBIT=${SIXTYFOURBIT:-dis}
+if [ "$ARCH" = "x86_64" ]; then
+  SIXTYFOURBIT="--enable-64 "
+else
+  SIXTYFOURBIT="--disable-64 "
+fi
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
@@ -42,33 +79,6 @@ elif [ "$ARCH" = "i686" ]; then
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
-fi
-
-# Shewchuk's triangulation routine used in some parts of GMT is not 
-# distributed under the GNU Public Licence. If you work for a for-profit
-# organisation, you should read Shewchuk's copyright statement (in 
-# $PKG/src/README.TRIANGLE) first. 
-# This script enables the (much faster) Shewchuk triangulation routine 
-# by default; should you need to change this behaviour, set SHEWCHUK to 
-# "no" below:
-SHEWCHUK=${SHEWCHUK:-yes}
-
-# There are a number of different resolution coastline files available
-# for GMT, and their size on disk varies from <2MB (low) to 61.7MB 
-# (full). They come in 3 separate archives (GSHHS1.10_coast, 
-# GSHHS1.10_high and GSHHS1.10_full). The first contains the low, intermediate
-# and coarse resolutions, the second the high resolution, and the third
-# the full resolution. I prefer to have them all installed (disk space
-# is cheap), but you may not. By default, all three sets will be installed, 
-# unless you choose otherwise below.
-# e.g. ${COASTS:-"coast"} would install only the low, intermediate and
-# coarse resolutions. At least one resolution is required.
-COASTS=${COASTS:-"coast high full"}
-
-if [ $SHEWCHUK == "yes" ]; then
-   SHEWCHUK_STATUS="--enable-triangle"
-else
-   SHEWCHUK_STATUS=""
 fi
 
 set -e
@@ -84,7 +94,7 @@ if [ $SHEWCHUK == "yes" ]; then
    tar xvf $CWD/${PRGNAM}${VERSION}_triangle.tar.bz2
 fi
 for RES in $COASTS; do
-   tar xvf $CWD/GSHHS1.10_${RES}.tar.bz2 -C ${PRGNAM}${VERSION}
+   tar xvf $CWD/${COASTNAME}${COASTVER}_${RES}.tar.bz2 -C ${PRGNAM}${VERSION}
 done
 cd ${PRGNAM}${VERSION}
 chown -R root:root .
@@ -99,10 +109,14 @@ CXXFLAGS="$SLKCFLAGS" \
    --mandir=/usr/man \
    --libdir=/usr/lib${LIBDIRSUFFIX} \
    --docdir=/usr/doc/${PRGNAM}-${VERSION} \
+   --pdfdir=/usr/doc/${PRGNAM}-${VERSION}/pdf \
+   --htmldir=/usr/doc/${PRGNAM}-${VERSION}/html \
+   --datarootdir=/usr/share/${PRGNAM} \
    --enable-netcdf=/usr \
    --disable-mex \
-   --build=$ARCH-slackware-linux \
-   $SHEWCHUK_STATUS
+   $SIXTYFOURBIT \
+   $SHEWCHUK_STATUS \
+   --build=$ARCH-slackware-linux
 
 make all
 make install-all DESTDIR=$PKG
@@ -110,19 +124,16 @@ make install-all DESTDIR=$PKG
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
    | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-( cd $PKG/usr/man || exit 1
-   find . -type f -exec gzip -9 {} +
-   for i in $(find . -type l); do
-      ln -s $(readlink $i).gz $i.gz
-      rm $i
-   done
+( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 )
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 if [ $SHEWCHUK == "yes" ]; then
    cp -a src/README.TRIANGLE $PKG/usr/doc/$PRGNAM-$VERSION
 fi
-cp -a COPYING ChangeLog README README.gshhs $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a ChangeLog LICENSE.TXT README README.TXT $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README$TAG
 
@@ -132,4 +143,4 @@ mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
