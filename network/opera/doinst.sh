@@ -11,8 +11,8 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/opera6rc.new
-config etc/opera6rc.fixed.new
+config etc/operaprefs_default.ini.new
+config etc/operaprefs_fixed.ini.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database usr/share/applications >/dev/null 2>&1

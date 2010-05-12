@@ -24,8 +24,8 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=opera
-VERSION=9.64
-ARCH=i386	# Leave this alone 
+VERSION=10.10
+ARCH=${ARCH:-i386}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -34,40 +34,39 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-# If you want Chinese in Opera to not be fugly, set this to "YES",
-# otherwise leave it be.
-# This can be specified on the command line when calling the build script:
-#   CHINESE_FIX=YES ./opera.SlackBuild
-# Note that this makes Opera use wqy-zenhei as the default font
-# for Chinese AND Japanese
-CHINESE_FIX=${CHINESE_FIX:-NO}
+set -eu
+
+if [ "$ARCH" = "x86_64" ]; then
+  LIBDIRSUFFIX="64"
+else
+  ARCH=i386
+  LIBDIRSUFFIX=""
+fi
 
 # Don't bother this - it's for easier manipulation and sed'ing later
-TOPDIR=$(tar tf $CWD/$PRGNAM-${VERSION}.gcc4-shared-qt3.${ARCH}.tar.bz2 |head -1)
-
-set -e
+TOPDIR=$(tar tf $CWD/$PRGNAM-${VERSION}.gcc4-qt4.${ARCH}.tar.bz2 |head -1)
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP 
 rm -rf $TOPDIR
-tar xvf $CWD/$PRGNAM-${VERSION}.gcc4-shared-qt3.${ARCH}.tar.bz2
+tar xvf $CWD/$PRGNAM-${VERSION}.gcc4-qt4.${ARCH}.tar.bz2
 cd $TOPDIR
 chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
 
 # No, the --DESTDIR isn't documented.  In fact, the presence of OPERADESTDIR
 # at the top of install.sh is damn misleading.  I shouldn't have to actually
-# read the install script to figure out DESTDIR - the --help should show it.
+# read the install script to figure out DESTDIR: the --help should show it.
 # --rworkman
 ./install.sh \
   --prefix=/usr \
-  --exec_prefix=/usr/lib/opera-$VERSION \
+  --exec_prefix=/usr/lib${LIBDIRSUFFIX}/opera \
   --sharedir=/usr/share/opera \
   --wrapperdir=/usr/bin \
   --mandir=/usr/man \
   --docdir=/usr/doc/opera-$VERSION \
-  --plugindir=/usr/lib/mozilla/plugins \
+  --plugindir=/usr/lib${LIBDIRSUFFIX}/mozilla/plugins \
   --DESTDIR=$PKG
 
 # Fix a potential security issue (minor, but still) with a hardcoded path to
@@ -76,17 +75,23 @@ chmod -R u+w,go+r-w,a-s .
 # recreates the directory and does some unknown havoc.  It may very well be
 # completely safe and unexploitable and I'm just being Chicken Little here,
 # but it's easy enough to fix and I'd rather be safe than sorry.  --rworkman
-sed -i "s|$TMP/$TOPDIR|/usr/bin/|g" $PKG/usr/bin/opera
+sed -i "s%$TMP/$TOPDIR\$0%\$PWD/\${0#./}%g" $PKG/usr/bin/opera
+
+#  /usr/bin/opera doesn't look in the right places for 64bit java. Fix it.
+if [ "$ARCH" = "x86_64" ]; then
+sed -i -e "/PREFIXES=\"/,/\/opt\"/ s:/usr/lib:/usr/lib64:" \
+       -e "s:i386:amd64:" $PKG/usr/bin/opera
+fi
 
 # Include config files
 mv etc $PKG
-mv $PKG/etc/opera6rc $PKG/etc/opera6rc.new
-mv $PKG/etc/opera6rc.fixed $PKG/etc/opera6rc.fixed.new
+mv $PKG/etc/operaprefs_default.ini $PKG/etc/operaprefs_default.ini.new
+mv $PKG/etc/operaprefs_fixed.ini $PKG/etc/operaprefs_fixed.ini.new
 
 # Add an opera.desktop file and link the icon to /usr/share/pixmaps
 mv usr/share/icons usr/share/pixmaps $PKG/usr/share
 mkdir -p $PKG/usr/share/applications
-install -m 0644 $CWD/opera.desktop $PKG/usr/share/applications
+cat $CWD/opera.desktop > $PKG/usr/share/applications/opera.desktop
 
 # Add a copy of the build script to the docs
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
@@ -103,10 +108,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-
-# Patch for Chinese font handling
-if [ "$CHINESE_FIX" = "YES" ]; then
-  patch -p0 < $CWD/opera_chinese_font_fix.diff
-fi
-
-/sbin/makepkg -p -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz
+/sbin/makepkg -p -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
