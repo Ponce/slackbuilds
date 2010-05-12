@@ -63,6 +63,7 @@ config etc/privoxy/templates/cgi-error-file-read-only.new
 config etc/privoxy/templates/edit-actions-for-url-filter.new
 config etc/privoxy/templates/show-status.new
 config etc/privoxy/templates/show-url-info.new
+config etc/privoxy/templates/url-info-osd.xml.new
 config etc/privoxy/default.action.new
 config etc/privoxy/user.action.new
 config etc/privoxy/user.filter.new
