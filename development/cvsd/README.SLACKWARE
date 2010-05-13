@@ -1,0 +1,169 @@
+To have cvsd start at boot-time, you'll need to add the following lines
+to /etc/rc.d/rc.local:
+
+        # Start cvsd
+        if [ -x /etc/rc.d/rc.cvsd ]; then
+          /etc/rc.d/rc.cvsd start
+        fi
+
+You'll then need to add the following lines to /etc/rc.d/rc.local_shutdown:
+
+        # Stop cvsd
+        if [ -x /etc/rc.d/rc.cvsd ]; then
+          /etc/rc.d/rc.cvsd stop
+        fi
+
+
+The following is the configuration section from cvsd's own README
+(located in /usr/doc/cvsd-<version>), just modified a little for Slackware.
+
+You will need this for actually setting up a jail and repositories etc.
+
+
+CONFIGURING CVSD
+================
+
+cvsd is controlled through a configuration file in /etc/cvsd/cvsd.confi
+The default configuration file is fully commented and has a manual page
+(cvsd.conf(5)) which documents use of the configuration file.
+
+very quick setup guide
+----------------------
+
+The is just a series of commands to set up cvsd in a typical read-only setup.
+If you don't understand these steps or are looking for commands that work on
+your system you should look below for further details.
+
+  # cvsd-buildroot /srv/cvsd
+  # cvs -d /srv/cvsd/myrepos init
+  # cvsd-passwd /srv/cvsd/myrepos +anonymous
+  # touch /srv/cvsd/myrepos/CVSROOT/writers
+  edit /srv/cvsd/myrepos/CVSROOT/config
+    add "SystemAuth=no"
+    add "PamAuth=no"
+    add "LockDir=/tmp/myrepos"
+  # mkdir /srv/cvsd/tmp/myrepos
+  # chown cvsd:cvsd /srv/cvsd/tmp/myrepos
+  edit /etc/cvsd/cvsd.conf
+    set "Repos /myrepos"
+
+You should now be able to continue with the section "checking the
+configuration" below.
+
+
+setting up a chroot jail
+------------------------
+
+You can populate a chrooted file system with cvsd-buildroot. You should rerun
+this script if your cvs binary changes or the libraries that it depends upon.
+The place where you create the chroot file system should be specified in the
+configuration file as the 'RootJail'. It is possible (but not advisable) to
+run cvsd without a chrooted file system.
+
+If you plan to run stuff like the scripts from the contrib/ subdirectory in
+cvs, then you have to have all necessary binaries, libraries etc. etc. in the
+chrooted file system. You can just put the needed binaries in the 'bin'
+directory of the chroot jail and 'cvsd-buildroot' will install the needed
+libraries. Please note that this may require manual reconfiguring.
+
+Some systems may require extra libraries to be present in the chrooted file
+system than can not be automatically detected (using ldd). See the FAQ for
+details.
+
+disabling inetd pserver
+-----------------------
+
+If inetd is configured to start cvs /etc/inetd.conf should contain a line
+like this:
+  cvspserver   stream   tcp  nowait  root /usr/bin/cvs --allow-root /home/cvs
+You should remove or comment out this line or tell cvsd to listen on a
+different port (use Listen option in cvsd.conf). If you change inetd.conf you
+should tell inetd to reload it's configuration by:
+  # kill -s HUP <pidofinetd>
+
+setting up a repository
+-----------------------
+
+If you have configured the chroot jail and the user and group id bits you can
+start adding repositories to the chroot jail. There are a couple of ways you
+could do that.
+
+The first is creating an empty repository with something like:
+  # cvs -d /srv/cvsd/myrepos init
+(where /srv/cvsd is the location of the chroot jail and myrepos is the
+name of the new repository)
+
+Another way is copying an already existing repository to the chroot jail. It
+is also possible to do something smart with a tool like 'rsync'. Put this in
+a cronjob for extra effect.
+
+Symbolic linking a repository to the chroot jail is not possible since
+symbolic links will be evaluated within the chroot jail. Hard linking directories
+should be avoided (hard linking in general in my opinion). With Linux 2.4 (and
+probably other systems) it is possible to remount an existing directory
+within another directory. You can use mount:
+  # mount --bind /home/user/develrepos /srv/cvsd/userrepos
+or add something like this to /etc/fstab:
+  /home/user/develrepos /srv/cvsd/userrepos none bind 0 0
+(don't forget to create the /srv/cvsd/userrepos directory)
+
+After you have created or copied a repository into the chroot jail you should
+add it to the cvsd.conf configuration file so cvs can access it. Use the
+'Repos' option for this and remember to specify it relative to the chroot
+jail. So if your repository is /srv/cvsd/myrepos you should add 'Repos
+/myrepos' to the configuration file.
+
+The last step for making your repository accessible is to add a passwd file
+to the 'CVSROOT' directory of the repository. The cvsd-passwd tool will do
+this for you.
+  cvsd-passwd /srv/cvsd/myrepos anonymous
+This will add user 'anonymous' to the list of users that can access the
+repository. You will be prompted for a password which can optionally be
+blank.
+
+Note that the cvsd user needs to have the correct permissions to the
+repository. The cvsd user probably should have read access to the repository
+but probably no write permission. You can add all users in the repository
+passwd file to a file named 'readers' in the 'CVSROOT' directory or create an
+empty 'writers' file. Without any of these files all users have write access!
+
+If you set up your repository so that the cvsd user only has read access to
+the files and directories in the repository (through unix file permissions)
+you need to take some extra provisions since cvs creates lockfiles when
+checking out files from the repository. The best way to do this is to create
+a directory for the cvsd user to write the lockfiles to (e.g.
+/srv/cvsd/tmp/myrepos) and add "LockDir=/tmp/myrepos" to the
+/srv/cvsd/myrepos/CVSROOT/config file. Be sure to create the directory
+and make it writable for the cvsd user. If your cvsd user has write access to
+the repository this should be no problem.
+
+It is also a good idea to put "SystemAuth=no" and maybe "PamAuth=no" in your
+CVSROOT/config file. This way password lookups will only be done to
+CVSROOT/config and not to /etc/passwd inside the chroot jail (that passwd
+file shouldn't contain any passwords) or PAM.
+
+See the "Password authentication server" section in the cvs texinfo document
+for more information about running a pserver and setting up repositories.
+
+
+CHECKING THE CONFIGURATION
+==========================
+
+If you have started cvsd with the provided init script:
+  # /etc/rc.d/rc.cvsd start
+and configured a repository (say myrepos) you should be able to access the
+server with something like:
+  % cvs -d :pserver:anonymous@localhost:/myrepos login
+  % cvs -d :pserver:anonymous@localhost:/myrepos checkout .
+For troubleshooting information see the FAQ on debugging.
+
+
+REPORTING BUGS
+==============
+
+If you find any bugs or missing features please send email to
+  arthur@arthurdejong.org
+Please include as much information as needed (platform, output of configure
+if compilation fails, output of the failure, etc). Most of the configuration
+information can be provided by running cvsd-buginfo. Patches are more than
+welcome.
