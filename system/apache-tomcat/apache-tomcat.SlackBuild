@@ -1,0 +1,147 @@
+#!/bin/sh
+
+# Slackware build script for apache-tomcat
+
+# Copyright 2008-2010 Heinz Wiesinger, Amsterdam, The Netherlands
+# Copyright 2010  Vincent Batts, vbatts@hashbangbash.com, http://hashbangbash.com/
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=apache-tomcat
+VERSION=6.0.26
+ARCH=noarch
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+TOMCAT_HOME=/var/lib/tomcat
+
+if ! grep ^tomcat: /etc/group 2>&1 > /dev/null; then
+  echo "  Must have a tomcat group to run this script."
+  echo "    # groupadd -g 232 tomcat"
+  echo "  Or something similar."
+  exit 1
+elif ! grep ^tomcat: /etc/passwd 2>&1 > /dev/null; then
+  echo "  Must have a tomcat user to run this script."
+  echo "    # useradd -u 232 -g tomcat -d /var/lib/tomcat tomcat"
+  echo "  Or something similar."
+  exit 1
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+unzip $CWD/$PRGNAM-$VERSION.zip
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+mkdir -p $PKG/etc/tomcat $PKG/usr/share/{tomcat,java} \
+  $PKG/var/{run,lib,log,tmp,spool}/tomcat
+
+rm -f bin/*.exe bin/*.bat bin/*.tar.gz bin/commons-daemon.jar
+cp -rf bin lib $PKG/usr/share/tomcat/
+
+cp -f conf/* $PKG/etc/tomcat/
+cp -f $CWD/tomcat-java.conf $PKG/etc/tomcat/tomcat-java.conf
+
+cp -rf webapps ${PKG}${TOMCAT_HOME}/webapps
+
+ln -s /var/log/tomcat ${PKG}${TOMCAT_HOME}/logs
+ln -s /var/tmp/tomcat ${PKG}${TOMCAT_HOME}/temp
+ln -s /var/run/tomcat ${PKG}${TOMCAT_HOME}/work
+ln -s /etc/tomcat ${PKG}${TOMCAT_HOME}/conf
+
+for i in tmp run spool; do
+    chown -R tomcat:tomcat ${PKG}/var/${i}/tomcat
+    chmod -R 755 ${PKG}/var/${i}/tomcat
+done
+
+chown -R tomcat:root ${PKG}/var/log/tomcat
+chmod -R 755 ${PKG}/var/log/tomcat
+
+chown -R tomcat:tomcat ${PKG}${TOMCAT_HOME}
+chmod -R 755 ${PKG}${TOMCAT_HOME}
+chmod -R 775 ${PKG}${TOMCAT_HOME}/webapps
+
+chown root:tomcat $PKG/etc/tomcat
+chown tomcat:tomcat $PKG/etc/tomcat/tomcat-users.xml
+chmod 775 $PKG/etc/tomcat
+
+chown tomcat:tomcat $PKG/usr/share/tomcat/bin/*.sh
+chmod 744 $PKG/usr/share/tomcat/bin/*.sh
+
+cd $PKG/usr/share/java
+  for jar in ../../../usr/share/tomcat/lib/*.jar ; do
+    ln -s $jar
+  done
+cd -
+
+mkdir -p $PKG/etc/{profile.d,rc.d}
+cp $CWD/rc.tomcat $PKG/etc/rc.d/rc.tomcat.new
+
+cat << EOF > $PKG/etc/profile.d/$PRGNAM.csh
+#!/bin/csh
+setenv CATALINA_HOME /usr/share/tomcat
+setenv CATALINA_BASE $TOMCAT_HOME
+setenv CATALINA_TMPDIR /var/tmp/tomcat
+setenv CATALINA_LIBDIR /usr/share/tomcat/lib
+EOF
+
+cat << EOF > $PKG/etc/profile.d/$PRGNAM.sh
+#!/bin/sh
+export CATALINA_HOME=/usr/share/tomcat
+export CATALINA_BASE=$TOMCAT_HOME
+export CATALINA_TMPDIR=/var/tmp/tomcat
+export CATALINA_LIBDIR=/usr/share/tomcat/lib
+EOF
+
+chmod 0755 $PKG/etc/profile.d/*
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE NOTICE RELEASE-NOTES RUNNING.txt \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+#Let's not clobber config files
+cd $PKG/etc/tomcat
+  for i in $(find . -type f); do
+    file=${i/.\//}
+    mv $file $file.new
+    echo "config etc/tomcat/$file.new" >> $PKG/install/doinst.sh
+  done
+cd -
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
