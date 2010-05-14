@@ -1,0 +1,144 @@
+#!/bin/sh
+
+# Slackware Package Build Script for policyd2 (a.k.a cluebringer)
+# Home Page http://www.policyd.org/
+
+# Copyright (c) 2008-2010, Nishant Limbachia, Hoffman Estates, IL, USA 
+# <nishant _AT_ mnspace _DOT_ net>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is 
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of script must retain the above copyright notice, 
+#    this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+# CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+# PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+# LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+# NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=policyd2
+VERSION=2.0.10
+ARCH=${ARCH:-i486}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+SRCNAM=cluebringer
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+fi
+
+# Create system user and group for policyd2
+if ! grep -q ^policyd: /etc/group ; then
+  echo "  Please add a dedicated group to run policyd2."
+  echo "    # groupadd -g 223 policyd"
+  echo "  Or something similar."
+  exit 1
+fi
+
+if ! grep -q ^policyd: /etc/passwd ; then
+  echo "  Please add a dedicated user to run policyd2."
+  echo "    # useradd -d /dev/null -s /bin/false -u 223 -g 223 policyd"
+  echo "  Or something similar."
+  exit 1
+fi
+
+### default database is mysql, but postgresql (pgsql) and SQlite (sqlite) are supported as well
+### please use exact words, mysql, pgsql or sqlite
+DATABASE=${DATABASE:-mysql}
+
+### web user and group
+WEBUSER=${WEBUSER:-root}
+WEBGROUP=${WEBGROUP:-apache}
+
+### system user and group
+USER=${USER:-policyd}
+GROUP=${GROUP:-policyd}
+
+### define docroot to copy web admin files
+DOCROOT=${DOCROOT:-/var/www/htdocs}
+
+DOCS="AUTHORS CHANGELOG INSTALL TODO LICENSE WISHLIST"
+
+set -e
+
+rm -fr $TMP/$PRGNAM-$VERSION $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+tar xvf $CWD/$SRCNAM-$VERSION.tar.bz2
+cd $TMP/$SRCNAM-$VERSION
+chown -R root.root .
+
+find . \
+  \( -perm 1755 -o -perm 2755 -o -perm 777 -o -perm 555 -o -perm 711 -o -perm  511 \) \
+  -exec chmod 755 {} \;
+find . \
+  \( -perm 666 -o -perm 664 -o -perm 644 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+  -exec chmod 644 {} \;
+
+### patch cbpolicyd and cbpadmin to correct library paths and defaults
+patch -p0 < $CWD/patches/cbpolicyd.patch
+patch -p0 < $CWD/patches/cbpadmin.patch
+
+mkdir -p $PKG/$DOCROOT
+mkdir -p $PKG/usr/{bin,sbin,lib${LIBDIRSUFFIX}/policyd-2.0,doc/$PRGNAM-$VERSION}
+cp -a cbp $PKG/usr/lib${LIBDIRSUFFIX}/policyd-2.0
+install -m 0755 -D cbpadmin $PKG/usr/bin/cbpadmin
+install -m 0755 -D cbpolicyd $PKG/usr/sbin/cbpolicyd
+install -m 0644 $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a webui $PKG/$DOCROOT/policyd2-webui
+
+### move config.php to new file
+mv $PKG/$DOCROOT/policyd2-webui/includes/config.php $PKG/$DOCROOT/policyd2-webui/includes/config.php.new
+
+### change perms on webui files
+chown -R $WEBUSER:$WEBGROUP $PKG/$DOCROOT/policyd2-webui
+
+### install and patch httpd include file
+install -m 0640 -D contrib/httpd/$SRCNAM-httpd.conf $PKG/etc/httpd/extra/httpd-$PRGNAM.conf.new
+( cd $PKG/etc/httpd/extra; patch -p0 < $CWD/patches/httpd_policyd2_conf.patch; sed -i s:@DOCROOT@:$DOCROOT: $PKG/etc/httpd/extra/httpd-$PRGNAM.conf.new )
+
+### install rc script
+install -m 0755 -D $CWD/rc.policyd2 $PKG/etc/rc.d/rc.policyd2.new
+
+### install and patch config file
+install -m 0640 -D $SRCNAM.conf $PKG/etc/$PRGNAM.conf.new
+( cd $PKG/etc; patch -p0 < $CWD/patches/policyd2_config.patch )
+
+### install logrotate script
+install -m 0644 -D $CWD/logrotate.policyd2 $PKG/etc/logrotate.d/policyd2.new
+
+### create database template
+( cd database
+    for i in core.tsql access_control.tsql quotas.tsql amavis.tsql checkhelo.tsql checkspf.tsql greylisting.tsql; do
+          ./convert-tsql $DATABASE $i
+    done > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.$DATABASE || true
+)
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+sed s:@DOCROOT@:$(echo $DOCROOT | sed s:/::): $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
