@@ -4,7 +4,7 @@
 # ===========================
 # By:        Thales A. Tsailas <ttsailas@enforcingit.com>
 # For:       iSCSI target
-# Descr:     Provides an open source professional iSCSI target solution for Linux
+# Descr:     Provides an iSCSI target solution for Linux
 # URL:       http://iscsitarget.sourceforge.net/
 #
 # All rights reserved.
@@ -27,7 +27,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=iscsitarget
-VERSION=0.4.17
+VERSION=1.4.19
 ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
@@ -41,13 +41,13 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
-  SRCARCH=x86	# Needed for the kernel module building
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  SRCARCH=x86	# Needed for the kernel module building
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  SRCARCH=x86	# Needed for the kernel module building
+  LIBDIRSUFFIX="64"
 fi
 
 set -e
@@ -61,29 +61,25 @@ cd $TMP/$PRGNAM-$VERSION
 chown -R root:root .
 chmod -R a-s,u+w,go+r-w .
 
-# Patch the source to fix compiling issue with 2.6.29 kernels 
-patch -p0 < $CWD/iscsitarget-0.4.17-2.6.29.patch
-
+# Set right ARCH on SLKCFLAGS patch 
 # Allow use of our SLKCFLAGS for the non-kernel parts
-patch -p1 < $CWD/iscsitarget-0.4.17-add_OPTS_cflags.patch
+sed "s/@ARCH@/$SLKCFLAGS/" $CWD/iscsi-target-1.4.19-add-CFLAGS.patch | patch -p1 || exit 1
 
 make \
-  OPTS="$SLKCFLAGS" \
   MANDIR=/usr/man \
   DOCDIR=/usr/doc/$PRGNAM-$VERSION \
-  KSRC=/lib/modules/$KERNEL/build \
-  SRCARCH=$SRCARCH
+  KSRC=/lib/modules/$KERNEL/build
 make install \
   MANDIR=/usr/man \
   DOCDIR=/usr/doc/$PRGNAM-$VERSION \
   KSRC=/lib/modules/$KERNEL/build \
   DISTDIR=$PKG
 
-# Rename init script and don't clobber existing config files on upgrade
-mv $PKG/etc/rc.d/iscsi-target $PKG/etc/rc.d/rc.iscsi-target.new
-mv $PKG/etc/initiators.deny $PKG/etc/initiators.deny.new
-mv $PKG/etc/initiators.allow $PKG/etc/initiators.allow.new
-mv $PKG/etc/ietd.conf $PKG/etc/ietd.conf.new
+# Scrap original init file and don't clobber existing config files on upgrade
+cat $CWD/rc.iscsi-target.new > $PKG/etc/rc.d/rc.iscsi-target.new
+mv $PKG/etc/iet/ietd.conf $PKG/etc/iet/ietd.conf.new
+mv $PKG/etc/iet/initiators.allow $PKG/etc/iet/initiators.allow.new
+mv $PKG/etc/iet/targets.allow $PKG/etc/iet/targets.allow.new
 
 # Add the build script to the docs
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
@@ -91,12 +87,8 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 # Remove some cruft that shouldn't be in the package 
 rm -f $PKG/lib/modules/$KERNEL/modules*
 
-( cd $PKG
-  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
-    xargs strip --strip-unneeded 2> /dev/null || true
-  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
-    xargs strip --strip-unneeded 2> /dev/null
-)
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 ( cd $PKG/usr/man || exit 1
   find . -type f -exec gzip -9 {} \;
@@ -105,7 +97,7 @@ rm -f $PKG/lib/modules/$KERNEL/modules*
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-sed "s%@KERNEL@%$KERNEL%" $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
