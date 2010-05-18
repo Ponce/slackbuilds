@@ -14,10 +14,19 @@
 # Modified by Robby Workman <rworkman@slackbuilds.org>
 
 PRGNAM=barry
-VERSION=0.14
-ARCH=${ARCH:-i486}
-BUILD=${BUILD:-2}
+VERSION=0.16
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+
+# Automatically determine the architecture we're building on:
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) export ARCH=i486 ;;
+    arm*) export ARCH=arm ;;
+    # Unless $ARCH is already set, use uname -m for all other archs:
+       *) export ARCH=$( uname -m ) ;;
+  esac
+fi
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
@@ -50,7 +59,12 @@ elif [ "$ARCH" = "s390" ]; then
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
 fi
+
+set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -68,43 +82,69 @@ CXXFLAGS="$SLKCFLAGS" \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --mandir=/usr/man \
   --disable-static \
+  --enable-boost \
+  --enable-gui \
   --${opensync_opt}able-opensync-plugin \
   --build=$ARCH-slackware-linux
 
-make || exit 1
-make install DESTDIR=$PKG || exit 1
+make
+make install DESTDIR=$PKG
 
-( cd $PKG
-  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
-    xargs strip --strip-unneeded 2> /dev/null
-  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
-    xargs strip --strip-unneeded 2> /dev/null
-)
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-( cd $PKG/usr/man
-  find . -type f -exec gzip -9 {} \;
-  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
-)
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+# Install desktop file and icon for gui
+mkdir -p $PKG/usr/share/{applications,pixmaps}
+cat logo/barry_logo_icon.png > $PKG/usr/share/pixmaps/barry.png
+cat $CWD/barrybackup.desktop > $PKG/usr/share/applications/barrybackup.desktop
+
+# Install ppp scripts and such
+mkdir -p $PKG/etc/ppp/peers
+for i in \
+  rogers verizon sprint o2ireland tmobileus att_cingular chinamobile kpn ; \
+do \
+    sed "s%/etc/chatscripts/%/etc/ppp/peers/%g" ppp/barry-$i > \
+        $PKG/etc/ppp/peers/barry-$i ;
+    cat ppp/barry-$i.chat > $PKG/etc/ppp/peers/barry-$i.chat ;
+done
+
+# berry-charge conflicts with barry
+mkdir -p $PKG/etc/modprobe.d
+printf "blacklist berry-charge\n" > $PKG/etc/modprobe.d/barry.conf.new
+
+# Install udev rules
+mkdir -p $PKG/lib/udev/rules.d/
+cat udev/10-blackberry.rules > $PKG/lib/udev/rules.d/10-blackberry.rules
+cat udev/99-blackberry-perms.rules > $PKG/lib/udev/rules.d/99-blackberry-perms.rules
+if [ "$BARRY_GROUP" != "plugdev" ]; then
+  sed -i "s/GROUP=\"plugdev\""/GROUP=\"$BARRY_GROUP\"/ \
+    $PKG/lib/udev/rules.d/99-blackberry-perms.rules
+fi
+
+# Install hal stuff
+mkdir -p $PKG/usr/share/hal/fdi/information/10freedesktop
+cat hal/fdi/information/10freedesktop/10-blackberry.fdi > \
+    $PKG/usr/share/hal/fdi/information/10freedesktop/10-blackberry.fdi
+mkdir -p $PKG/usr/share/hal/fdi/policy/10osvendor
+cat hal/fdi/policy/10osvendor/19-blackberry-acl.fdi > \
+    $PKG/usr/share/hal/fdi/policy/10osvendor/19-blackberry-acl.fdi
+cp -a hal/hal-blackberry $PKG/usr/bin
+
+# Install bash completion scripts
+mkdir -p $PKG/etc/bash_completion.d
+cat bash/bjavaloader > $PKG/etc/bash_completion.d/bjavaloader
+cat bash/btool > $PKG/etc/bash_completion.d/btool
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a README TODO COPYING AUTHORS NEWS ChangeLog \
   $PKG/usr/doc/$PRGNAM-$VERSION
 
-mkdir -p $PKG/lib/udev/rules.d/
-sed s/SYSFS/ATTR/g udev/10-blackberry.rules > \
-  $PKG/lib/udev/rules.d/10-blackberry.rules
-sed -e s/SYSFS/ATTR/g udev/99-barry-perms > \
-  $PKG/lib/udev/rules.d/99-barry-permissions.rules
-if [ "$BARRY_GROUP" != "barry" ]; then
-  sed -i "s/GROUP=\"barry\""/GROUP=\"$BARRY_GROUP\"/ \
-    $PKG/lib/udev/rules.d/99-barry-permissions.rules
-fi
-
-mkdir -p $PKG/etc/modprobe.d
-echo "blacklist berry-charge" > $PKG/etc/modprobe.d/barry
-
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
