@@ -24,12 +24,21 @@
 
 PRGNAM=lirc
 VERSION=${VERSION:-0.8.6}
-ARCH=${ARCH:-i486}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 KERNEL=${KERNEL:-$(uname -r)}
 PKG_VERS=${VERSION}_$(echo $KERNEL| tr - _)
+
+# Automatically determine the architecture we're building on:
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) export ARCH=i486 ;;
+    arm*) export ARCH=arm ;;
+    # Unless $ARCH is already set, use uname -m for all other archs:
+       *) export ARCH=$( uname -m ) ;;
+  esac
+fi
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
@@ -39,15 +48,15 @@ OUTPUT=${OUTPUT:-/tmp}
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
   LIBDIRSUFFIX=""
-  SRCARCH=x86
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
-  SRCARCH=x86
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
-  SRCARCH=x86
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
 fi
 
 set -e
@@ -67,6 +76,13 @@ find . \
 
 # Disabling lirc_gpio driver as it does no longer work with kernel 2.6.22+
 sed -i -e "s:lirc_gpio\.o::" drivers/lirc_gpio/Makefile.am || exit 1
+
+# Fix building lirc_i2c - thanks to the Gentoo guys
+patch -p1 < $CWD/patches/lirc_i2c.patch
+
+# Fix building on 2.6.33.x kernels - thanks to the Gentoo guys
+patch -p1 < $CWD/patches/2.6.33.patch
+patch -p1 < $CWD/patches/autoconf.patch
 
 autoreconf
 libtoolize
@@ -89,7 +105,7 @@ CXXFLAGS="$SLKCFLAGS" \
 sed -i -e "s:lirc_parallel::" -e "s:lirc_bt829::" \
      Makefile drivers/Makefile drivers/*/Makefile tools/Makefile
 
-make SRCARCH=$SRCARCH
+make
 make install DESTDIR=$PKG
 
 mkdir -p $PKG/usr/share/$PRGNAM
@@ -107,10 +123,7 @@ cat $CWD/lirc.logrotate > $PKG/etc/logrotate.d/lirc.new
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-( cd $PKG/usr/man
-  find . -type f -exec gzip -9 {} \;
-  for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-)
+find $PKG/usr/man -type f -exec gzip -9 {} \;
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a ANNOUNCE AUTHORS COPYING ChangeLog INSTALL NEWS README TODO \
