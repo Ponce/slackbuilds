@@ -12,4 +12,5 @@ config() {
 }
 
 config etc/slim.conf.new
+config etc/logrotate.d/slim.new
 
