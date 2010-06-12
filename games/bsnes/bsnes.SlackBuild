@@ -5,18 +5,16 @@
 # Written by Larry Hajali <larryhaja[at]gmail[dot]com>
 
 PRGNAM=bsnes
-VERSION=${VERSION:-0.058}
+VERSION=${VERSION:-0.064}
 SRCVER=${VERSION:2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-# Automatically determine the architecture we're building on:
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
-    arm*) ARCH=arm ;;
-    # Unless $ARCH is already set, use uname -m for all other archs:
-       *) ARCH=$( uname -m ) ;;
+    i?86) export ARCH=i486 ;;
+    arm*) export ARCH=arm ;;
+       *) export ARCH=$( uname -m ) ;;
   esac
 fi
 
@@ -25,19 +23,18 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-# Determine if we use pulseaudio with build. Default is no.
-# Also backport bsnes for Slackware <= 13.0.
-USE_PULSE=${USE_PULSE:-no}
-OLD_SLACK=${OLD_SLACK:-no}
-
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
 fi
 
 set -e
@@ -49,7 +46,6 @@ rm -rf $PRGNAM-$VERSION
 mkdir $PRGNAM-$VERSION
 cd $PRGNAM-$VERSION
 tar xvf $CWD/${PRGNAM}_v${SRCVER}.tar.bz2
-cd src
 chown -R root:root .
 find . \
  \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
@@ -57,37 +53,46 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-# Use custom SLKCFLAGS.
-sed -i "s|-O3|${SLKCFLAGS}|" Makefile
+cd src
 
-# For older Slackware versions that have *-qt4 extension.
-if [ "$OLD_SLACK" == "yes" ]; then
-  patch -p1 < $CWD/Makefile-qt.patch
-fi
+# Patch makefile so SLKCFLAGS and LIBDIRSUFFIX are recognized.
+cat $CWD/bsnes-0.064-makefile.patch | \
+  sed -e "/^\+/s|/lib/|/lib${LIBDIRSUFFIX}/|g" | \
+  patch -p1
 
-# Determine if we get rid of pulseaudio support.
-if [ "$USE_PULSE" == "no" ]; then
-  sed -i \
-    -e 's|audio\.pulseaudio ||' \
-    -e '/pulse/d' Makefile
-fi
+# Remove pulseaudio as there is no package for it at SBo.
+# Comment out or delete the following 4 lines to enable pulseaudio.
+sed -i \
+  -e 's|audio.pulseaudio ||' \
+  -e 's|audio.pulseaudiosimple ||' \
+  -e '/pulse/d' ui_qt/Makefile
 
+CXXFLAGS="$SLKCFLAGS" \
 make \
   platform=x \
   compiler=gcc \
-  enable_gzip=true \
-  enable_jma=true \
   prefix=/usr
 
 make install DESTDIR=$PKG prefix=/usr
+
+# Install plugins.
+for i in snesfilter snesreader supergameboy; do
+  cd ../${i}
+  CXXFLAGS="$SLKCFLAGS" \
+  make \
+    platform=x \
+    compiler=gcc \
+    prefix=/usr
+
+  make install DESTDIR=$PKG prefix=/usr
+  cd -
+done
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  data/*.html \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a data/*.html $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 find $PKG/usr/doc -type f -exec chmod 0644 {} \;
 
