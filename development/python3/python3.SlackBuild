@@ -5,7 +5,7 @@
 # Based on Patrick Volkerding's official build script for python
 
 PRGNAM=python3
-VERSION=${VERSION:-3.1.1}
+VERSION=${VERSION:-3.1.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -33,7 +33,6 @@ elif [ "$ARCH" = "i686" ]; then
 elif [ "$ARCH" = "x86_64" ]; then
   LIBDIRSUFFIX="64"
 else
-  SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
 
@@ -50,6 +49,16 @@ cd $TMP
 rm -rf Python-$VERSION
 tar xvf $CWD/Python-$VERSION.tar.bz2
 cd Python-$VERSION
+
+patch -p1 < $CWD/patches/python3.readline.set_pre_input_hook.diff
+
+if [ "$ARCH" = "x86_64" ]; then
+  # Install to lib64 instead of lib:
+  patch -p1< $CWD/patches/python3.x86_64.diff
+  # Python must report /usr/lib64/python3.1/site-packages as python_lib_dir:
+  patch -p1 < $CWD/patches/python3.pure64.diff
+fi
+
 chown -R root:root .
 chmod -R u+w,go+r-w,a-s+X .
 
@@ -65,16 +74,8 @@ chmod -R u+w,go+r-w,a-s+X .
   --with-computed-gotos \
   --build=$ARCH-slackware-linux
 
-# --libdir seems to be ignored - Makefile.pre.in has it hardcoded as
-# LIBDIR = $(exec_prefix)/lib and besides, there's also a SCRIPTDIR
-# that should probably be /usr/lib64 as well
-make \
-  LIBDIR=/usr/lib${LIBDIRSUFFIX} \
-  SCRIPTDIR=/usr/lib${LIBDIRSUFFIX}
-make altinstall \
-  LIBDIR=/usr/lib${LIBDIRSUFFIX} \
-  SCRIPTDIR=/usr/lib${LIBDIRSUFFIX} \
-  DESTDIR=$PKG
+make
+make altinstall DESTDIR=$PKG
 
 # Install some python-demo files:
 mkdir -p $PKG/usr/doc/python3-$VERSION
@@ -86,9 +87,7 @@ cp -a Tools/* $SITEPK
 
 mkdir -p $PKG/usr/doc/python3-$VERSION
 mv $SITEPK/README $PKG/usr/doc/python3-$VERSION/README.python-tools
-( cd $PKG/usr/doc/python3-$VERSION
-  ln -sf $TOOLSDIR Tools
-)
+( cd $PKG/usr/doc/python3-$VERSION ; ln -sf $TOOLSDIR Tools )
 
 # Install docs:
 mkdir -p $PKG/usr/doc/python3-$VERSION
@@ -99,13 +98,14 @@ cp -a Doc $PKG/usr/doc/python3-$VERSION
 # Python 2.6 already has this script.
 rm -f $PKG/usr/bin/2to3
 
+# Create a symlink for convenience.
+( cd $PKG/usr/bin ; ln -sf python3.1 python3 )
+
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-( cd $PKG/usr/man
-  find . -type f -exec gzip -9 {} \;
-  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
-)
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
