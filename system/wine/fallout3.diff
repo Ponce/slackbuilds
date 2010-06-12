@@ -1,0 +1,76 @@
+diff -Naur wine-1.1.44-orig/dlls/wined3d/device.c wine-1.1.44/dlls/wined3d/device.c
+--- wine-1.1.44-orig/dlls/wined3d/device.c	2010-05-07 19:20:29.000000000 +0100
++++ wine-1.1.44/dlls/wined3d/device.c	2010-06-11 03:36:48.000000000 +0100
+@@ -188,6 +188,8 @@
+     stream_info->position_transformed = declaration->position_transformed;
+     if (declaration->position_transformed) use_vshader = FALSE;
+ 
++    This->patch_fallout3_mask_of_states &= 0xff ^ PATCH_FALLOUT3_FLAG_ALPHA_TEST_CAN_BE_USED;
++
+     /* Translate the declaration into strided data. */
+     for (i = 0; i < declaration->element_count; ++i)
+     {
+@@ -301,6 +303,14 @@
+             {
+                 stream_info->swizzle_map |= 1 << idx;
+             }
++
++            if( ( (IWineD3DVertexShaderImpl*)(This->stateBlock->vertexShader) )->attributes[idx].usage 
++               == WINED3DDECLUSAGE_TEXCOORD 
++              )
++            {
++                This->patch_fallout3_mask_of_states |= PATCH_FALLOUT3_FLAG_ALPHA_TEST_CAN_BE_USED;
++            }
++
+             stream_info->use_map |= 1 << idx;
+         }
+     }
+diff -Naur wine-1.1.44-orig/dlls/wined3d/drawprim.c wine-1.1.44/dlls/wined3d/drawprim.c
+--- wine-1.1.44-orig/dlls/wined3d/drawprim.c	2010-05-07 19:20:29.000000000 +0100
++++ wine-1.1.44/dlls/wined3d/drawprim.c	2010-06-11 03:36:48.000000000 +0100
+@@ -37,6 +37,15 @@
+ static void drawStridedFast(IWineD3DDevice *iface, GLenum primitive_type,
+         UINT count, UINT idx_size, const void *idx_data, UINT start_idx)
+ {
++    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
++    GLboolean gl_alpha_test = glIsEnabled( GL_ALPHA_TEST );
++
++    if( ( 0 == ( This->patch_fallout3_mask_of_states & PATCH_FALLOUT3_FLAG_ALPHA_TEST_CAN_BE_USED ) )
++     && ( gl_alpha_test ) ) 
++    {
++        glDisable( GL_ALPHA_TEST );
++    }
++ 
+     if (idx_size)
+     {
+         TRACE("(%p) : glElements(%x, %d, ...)\n", iface, primitive_type, count);
+@@ -53,6 +62,13 @@
+         glDrawArrays(primitive_type, start_idx, count);
+         checkGLcall("glDrawArrays");
+     }
++
++    if( ( 0 == ( This->patch_fallout3_mask_of_states & PATCH_FALLOUT3_FLAG_ALPHA_TEST_CAN_BE_USED ) )
++     && ( gl_alpha_test ) ) 
++    {
++        glEnable( GL_ALPHA_TEST );
++    }
++
+ }
+ 
+ /*
+diff -Naur wine-1.1.44-orig/dlls/wined3d/wined3d_private.h wine-1.1.44/dlls/wined3d/wined3d_private.h
+--- wine-1.1.44-orig/dlls/wined3d/wined3d_private.h	2010-05-07 19:20:29.000000000 +0100
++++ wine-1.1.44/dlls/wined3d/wined3d_private.h	2010-06-11 03:40:07.000000000 +0100
+@@ -1711,8 +1711,12 @@
+ #define PATCHMAP_HASHFUNC(x) ((x) % PATCHMAP_SIZE) /* Primitive and simple function */
+     struct list             patches[PATCHMAP_SIZE];
+     struct WineD3DRectPatch *currentPatch;
++    UINT8 patch_fallout3_mask_of_states;
+ };
+ 
++#define PATCH_FALLOUT3_FLAG_ALPHA_TEST_CAN_BE_USED 0x01
++
++
+ BOOL device_context_add(IWineD3DDeviceImpl *device, struct wined3d_context *context) DECLSPEC_HIDDEN;
+ void device_context_remove(IWineD3DDeviceImpl *device, struct wined3d_context *context) DECLSPEC_HIDDEN;
+ void device_get_draw_rect(IWineD3DDeviceImpl *device, RECT *rect) DECLSPEC_HIDDEN;
