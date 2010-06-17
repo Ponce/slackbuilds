@@ -4,7 +4,7 @@ config() {
   # If there's no config file by that name, mv it over:
   if [ ! -r $OLD ]; then
     mv $NEW $OLD
-  elif [ "$(cat $OLD|md5sum)" = "$(cat $NEW|md5sum)" ]; then
+  elif [ "$(cat $OLD | md5sum)" = "$(cat $NEW | md5sum)" ]; then
     # toss the redundant copy
     rm $NEW
   fi
