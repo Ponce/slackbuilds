@@ -27,7 +27,7 @@ preserve_perms etc/profile.d/ibus.csh.new
 
 GCONF_CONFIG_SOURCE="xml::etc/gconf/gconf.xml.defaults" \
 chroot . gconftool-2 --makefile-install-rule \
-    /etc/gconf/schemas/ibus.schemas 1>/dev/null
+  /etc/gconf/schemas/ibus.schemas 1>/dev/null
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
