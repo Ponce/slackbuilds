@@ -1,0 +1,110 @@
+#!/bin/sh
+
+# Slackware build script for kismet
+# Written by Audrius Kažukauskas <audrius@neutrino.lt>
+# Modified by Robby Workman <rworkman@slackbuilds.org>
+# Modified by Antonio Hernández Blas <hba.nihilismus@gmail.com>
+
+PRGNAM=kismet
+VERSION=${VERSION:-2010_01_R1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+SRCVERSION=$(echo $VERSION | tr _ -)
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+# Bail if group isn't valid on your system.
+# gid=234 is suggested to avoid conflicts with other SBo packages,
+# but it's your call: http://slackbuilds.org/uid_gid.txt
+if ! grep -q "^kismet:" /etc/group; then
+  printf "\n\tYou must have a kismet group to run this script.\n"
+  printf "\tSomething like this should suffice for most systems:\n"
+  printf "\t# groupadd -g 234 kismet\n\n"
+  exit 1
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+
+tar xvf $CWD/$PRGNAM-$SRCVERSION.tar.gz
+mv $PRGNAM-$SRCVERSION $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+sed -i "s|/lib/kismet|/lib$LIBDIRSUFFIX/kismet|" plugin-*/Makefile
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc/kismet \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --build=$ARCH-slackware-linux
+
+make
+make plugins
+make suidinstall MANGRP=root DESTDIR=$PKG
+make plugins-install MANGRP=root DESTDIR=$PKG
+
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CHANGELOG* GPL README* *.txt docs/ patches/ $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+# Add .new extension to all configuration files.
+for file in $(find $PKG/etc -type f)
+do
+  mv $file $file.new
+done
+
+# Add *.new files into doinst.sh
+for file in $(find $PKG/etc -type f -name "*.new")
+do
+  echo config $(echo $file | sed "s:$PKG/::") >> $PKG/install/doinst.sh
+done
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
