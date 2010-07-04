@@ -1,4 +1,3 @@
-#!/bin/sh
 config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
@@ -14,3 +13,4 @@ config() {
 
 config etc/clamav-unofficial-sigs.conf.new
 config etc/logrotate.d/clamav-unofficial-sigs.new
+
