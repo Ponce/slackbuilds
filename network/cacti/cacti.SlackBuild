@@ -3,18 +3,35 @@
 # Slackware build script for cacti:
 # a network graphing solution using rrdtool
 
-# Written by Niels Horn - niels.horn@gmail.com
-# revision date 2009/10/17
+# Written by Niels Horn <niels.horn@gmail.com>
+# revision date 2010/07/05
 
 PRGNAM=cacti
-VERSION=0.8.7e
+VERSION=${VERSION:-0.8.7e_p6}
 ARCH=noarch
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
+SRCVERSION=$(echo $VERSION | cut -f1 -d_)
+
 DOCROOT=${DOCROOT:-/var/www/htdocs}
 PHPUSER=${PHPUSER:-root}
 PHPGROUP=${PHPGROUP:-apache}
+
+# To create valid symlinks, we need a relative path from DOCROOT
+RELPATH=""
+for i in $(echo $DOCROOT | tr "/" " "); do
+  RELPATH="${RELPATH}../"
+done
+
+PATCHES="\
+cli_add_graph.patch \
+snmp_invalid_response.patch \
+template_duplication.patch \
+fix_icmp_on_windows_iis_servers.patch \
+cross_site_fix.patch \
+sql_injection_template_export.patch \
+"
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
@@ -23,13 +40,18 @@ OUTPUT=${OUTPUT:-/tmp}
 
 set -e
 
-rm -rf $TMP/$PRGNAM-$VERSION $PKG
+rm -rf $TMP/$PRGNAM-$SRCVERSION $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$SRCVERSION.tar.gz
+cd $PRGNAM-$SRCVERSION
 chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
+
+# Apply patches from upstream
+for patch in $PATCHES; do
+  patch -p1 < $CWD/$patch
+done
 
 # "Install" to $DOCROOT/cacti
 mkdir -p $PKG/$DOCROOT/$PRGNAM
@@ -41,12 +63,14 @@ chown -R $PHPUSER:$PHPGROUP $PKG/$DOCROOT/$PRGNAM
 
 # Move configuration & create symbolic link
 mkdir -p $PKG/etc/$PRGNAM
-mv $PKG/$DOCROOT/$PRGNAM/include/config.php $PKG/etc/$PRGNAM/config.php
-( cd $PKG/$DOCROOT/$PRGNAM/include/
-  ln -s $PKG/etc/$PRGNAM/config.php config.php
-  mv $PKG/etc/$PRGNAM/config.php $PKG/etc/$PRGNAM/config.php.new
-  chmod 600 $PKG/etc/$PRGNAM/config.php.new
-)
+cd $PKG/$DOCROOT/$PRGNAM/include/
+  mv config.php $PKG/etc/$PRGNAM/config.php
+  ln -sf ../../$RELPATH/etc/$PRGNAM/config.php config.php
+cd -
+
+# Rename config file and set permissions to hide passwords
+mv $PKG/etc/$PRGNAM/config.php $PKG/etc/$PRGNAM/config.php.new
+chmod 600 $PKG/etc/$PRGNAM/config.php.new
 
 # Copy docs & create symbolic link
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
@@ -55,9 +79,9 @@ cp -a \
     $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 mkdir -p $PKG/$DOCROOT/$PRGNAM/docs
-( cd $PKG/$DOCROOT/$PRGNAM/docs
-  ln -s $PKG/usr/doc/$PRGNAM-$VERSION/html html
-)
+cd $PKG/$DOCROOT/$PRGNAM/docs
+  ln -sf ../../$RELPATH/usr/doc/$PRGNAM-$VERSION/html html
+cd -
 
 # Copy post-installation scripts to /usr/share/cacti
 mkdir -p $PKG/usr/share/$PRGNAM
@@ -69,3 +93,4 @@ cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+
