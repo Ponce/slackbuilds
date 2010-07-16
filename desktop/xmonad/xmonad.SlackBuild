@@ -2,20 +2,20 @@
 
 # Slackware build script for xmonad
 
-# Written by Mikko Varri (vmj@linuxbox.fi)
+# Written by Mikko Värri (vmj@linuxbox.fi)
 # Public domain.
 
 PRGNAM=xmonad
 VERSION=${VERSION:-0.9.1}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
-# Automatically determine the architecture we're building on:
+GHC_VERSION=$(ghc --numeric-version)
+
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
     i?86) ARCH=i486 ;;
     arm*) ARCH=arm ;;
-    # Unless $ARCH is already set, use uname -m for all other archs:
        *) ARCH=$( uname -m ) ;;
   esac
 fi
@@ -54,6 +54,9 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
+# Enable -threaded -dynamic GHC options only for the binary, not for the libs
+patch -p0 <$CWD/xmonad_cabal.patch
+
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 runghc Setup.lhs configure \
@@ -61,12 +64,17 @@ runghc Setup.lhs configure \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
   --enable-shared \
-  --flags="-threaded -dynamic"
+  --flags="threaded dynamic"
 
 runghc Setup.lhs build
 runghc Setup.lhs haddock
 runghc Setup.lhs copy --destdir=$PKG
-runghc Setup.lhs register --gen-script
+runghc Setup.lhs register --gen-pkg-config
+
+PKGCONFD=/usr/lib${LIBDIRSUFFIX}/ghc-${GHC_VERSION}/package.conf.d
+PKGID=$( grep -E "^id: " $PRGNAM-$VERSION.conf | cut -d" " -f2 )
+mkdir -p $PKG/$PKGCONFD
+mv $PRGNAM-$VERSION.conf $PKG/$PKGCONFD/$PKGID.conf
 
 # Move the example config file
 mv $PKG/usr/share/$PRGNAM-$VERSION/man $PKG/usr/doc/$PRGNAM-$VERSION/man
@@ -87,10 +95,8 @@ chmod 0755 $PKG/etc/X11/xinit/xinitrc.xmonad
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-( cd $PKG/usr/man
-  find . -type f -exec gzip -9 {} \;
-  for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-)
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 cp -a CONFIG README $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
@@ -98,7 +104,6 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 mkdir -p $PKG/install
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 cat $CWD/slack-desc > $PKG/install/slack-desc
-mv register.sh $PKG/install/register.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
