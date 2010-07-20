@@ -11,15 +11,19 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-# Prepare the new configuration files
-for file in etc/rc.d/rc.vboxadd.new etc/rc.d/rc.vboxadd-service.new; do
-  if [ -e $(dirname $file)/$(basename $file .new) -a -x $(dirname $file)/$(basename $file .new) ]; then
-    chmod 0755 $file
-  else
-    chmod 0644 $file
+preserve_perms() {
+  NEW="$1"
+  OLD="$(dirname $NEW)/$(basename $NEW .new)"
+  if [ -e $OLD ]; then
+    cp -a $OLD ${NEW}.incoming
+    cat $NEW > ${NEW}.incoming
+    mv ${NEW}.incoming $NEW
   fi
-  config $file
-done
+  config $NEW
+}
+
+preserve_perms etc/rc.d/rc.vboxadd.new
+preserve_perms etc/rc.d/rc.vboxadd-service.new
 
 # remove existing fdi cache to recognize newly installed fdi files
 # and restart hal to regenerate the cache
