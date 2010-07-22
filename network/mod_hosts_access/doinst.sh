@@ -11,5 +11,4 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/mod_hosts_access.conf.new
-
+config etc/httpd/mod_hosts_access.conf.new
