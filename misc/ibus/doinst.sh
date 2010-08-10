@@ -25,9 +25,15 @@ preserve_perms() {
 preserve_perms etc/profile.d/ibus.sh.new
 preserve_perms etc/profile.d/ibus.csh.new
 
-GCONF_CONFIG_SOURCE="xml::etc/gconf/gconf.xml.defaults" \
-chroot . gconftool-2 --makefile-install-rule \
-  /etc/gconf/schemas/ibus.schemas 1>/dev/null
+schema_install() {
+  GCONF_CONFIG_SOURCE="xml::etc/gconf/gconf.xml.defaults" \
+  chroot . gconftool-2 --makefile-install-rule "$1" 1>/dev/null
+}
+
+SCHEMA_FILE="/etc/gconf/schemas/ibus.schemas"
+if [ -r "$SCHEMA_FILE" ]; then
+  schema_install "$SCHEMA_FILE"
+fi
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
