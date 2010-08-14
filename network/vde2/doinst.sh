@@ -19,5 +19,3 @@ if [ -e etc/rc.d/rc.vde2 ]; then
   mv etc/rc.d/rc.vde2.new.incoming etc/rc.d/rc.vde2.new
 fi
 
-config etc/rc.d/rc.vde2.new
-
