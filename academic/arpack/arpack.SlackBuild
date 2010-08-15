@@ -1,0 +1,101 @@
+#!/bin/sh
+
+# Slackware build script for arpack
+
+# Written by Pablo Santamaria (pablosantamaria@gmail.com)
+
+PRGNAM=arpack
+VERSION=${VERSION:-2.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+# Automatically determine the architecture we're building on:
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+    # Unless $ARCH is already set, use uname -m for all other archs:
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+MAJOR=$(echo $VERSION | cut -d. -f1)
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf ARPACK
+tar xvf $CWD/${PRGNAM}96.tar.gz
+tar xvf $CWD/patch.tar.gz
+
+patch -p0 < $CWD/arpack-2.1-redhat.patch
+patch -p0 < $CWD/arpack-etime.patch
+patch -p0 < $CWD/arpack-second-bug.patch
+
+cd ARPACK
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+mkdir static shared
+cd shared
+for dir in ../SRC ../UTIL; do
+  make -f $dir/Makefile VPATH=$dir srcdir=$dir \
+       FC=gfortran FFLAGS="-std=legacy $SLKCFLAGS -fPIC" \
+       single double complex complex16
+done
+gcc -shared -lblas -llapack -Wl,-soname,libarpack.so.$MAJOR -o libarpack.so.$VERSION *.o
+cd ..
+cd static
+for dir in ../SRC ../UTIL; do
+  make -f $dir/Makefile VPATH=$dir srcdir=$dir \
+       FC=gfortran FFLAGS="-std=legacy $SLKCFLAGS" \
+       single double complex complex16
+done
+ar rv libarpack.a *.o
+ranlib libarpack.a
+cd ..
+
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}
+install -p -m644 static/libarpack.a $PKG/usr/lib${LIBDIRSUFFIX}
+install -p -m755 shared/libarpack.so.$VERSION $PKG/usr/lib${LIBDIRSUFFIX}
+( cd $PKG/usr/lib${LIBDIRSUFFIX}
+  ln -s libarpack.so.$VERSION libarpack.so.$MAJOR
+  ln -s libarpack.so.$MAJOR libarpack.so )
+
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a DOCUMENTS/* $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
