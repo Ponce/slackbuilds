@@ -25,16 +25,14 @@
 # Thanks to Robby Workman for suggestions to improve this script.
 
 PRGNAM=nvidia-driver
-VERSION=195.36.15
+VERSION=256.44
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-# Automatically determine the architecture we're building on:
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
     i?86) ARCH=i486 ;;
     arm*) ARCH=arm ;;
-    # Unless $ARCH is already set, use uname -m for all other archs:
        *) ARCH=$( uname -m ) ;;
   esac
 fi
@@ -46,19 +44,23 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i486" ]; then
   TARGET="x86"
+  SRCSUFFIX=""
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   TARGET="x86"
+  SRCSUFFIX=""
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   TARGET="x86_64"
+  SRCSUFFIX="-no-compat32"
   LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
+  SRCSUFFIX=""
   LIBDIRSUFFIX=""
 fi
 
-SRCNAM=NVIDIA-Linux-$TARGET-$VERSION-pkg0
+SRCNAM=NVIDIA-Linux-$TARGET-${VERSION}${SRCSUFFIX}
 
 set -e
 
@@ -71,83 +73,71 @@ cd $SRCNAM
 chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
 
-mkdir -p $PKG/usr/{bin,share,lib$LIBDIRSUFFIX,sbin} $PKG/usr/include/GL \
-  $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/{drivers,extensions} $PKG/etc
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/{drivers,extensions} \
+  $PKG/usr/include/{CL,cuda,GL} $PKG/etc/OpenCL/vendors/ \
+  $PKG/usr/lib$LIBDIRSUFFIX/{tls,vdpau} $PKG/usr/{bin,man/man1,sbin} \
+  $PKG/usr/share/{applications,pixmaps}
 
-cd etc
-  cp -rf OpenCL $PKG/etc/
-cd -
+install -m 755 nvidia_drv.so $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/drivers/
+install -m 755 libglx.so.$VERSION \
+  $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/extensions/libglx.so.$VERSION-nvidia
+install -m 755 libnvidia-wfb.so.$VERSION $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/
+install -m 755 libGL.so.$VERSION $PKG/usr/lib$LIBDIRSUFFIX/libGL.so.$VERSION-nvidia
+install -m 755 libGL.la $PKG/usr/lib$LIBDIRSUFFIX/
+install -m 755 libnvidia-glcore.so.$VERSION $PKG/usr/lib$LIBDIRSUFFIX/
+install -m 444 libXvMCNVIDIA.a $PKG/usr/lib$LIBDIRSUFFIX/
+install -m 755 libXvMCNVIDIA.so.$VERSION $PKG/usr/lib$LIBDIRSUFFIX/
+install -m 755 libvdpau_nvidia.so.$VERSION $PKG/usr/lib$LIBDIRSUFFIX/vdpau/
+install -m 755 libcuda.so.$VERSION $PKG/usr/lib$LIBDIRSUFFIX/
+install -m 755 tls/libnvidia-tls.so.$VERSION $PKG/usr/lib$LIBDIRSUFFIX/tls/
+install -m 755 libOpenCL.so.1.0.0 $PKG/usr/lib$LIBDIRSUFFIX/
+install -m 755 libnvidia-cfg.so.$VERSION $PKG/usr/lib$LIBDIRSUFFIX/
+install -m 755 libnvidia-compiler.so.$VERSION $PKG/usr/lib$LIBDIRSUFFIX/
 
-# Start with the libraries
-cd usr/lib
-  #Do not copy libvdpau and libvdpau_trace, those are now a separate script
-  rm libvdpau.so.$VERSION vdpau/libvdpau_trace.so.$VERSION
-  #remove duplicate libnvidia-tls
-  rm libnvidia-tls.so.$VERSION
-  cp -a * $PKG/usr/lib$LIBDIRSUFFIX
-  #Rename those files which would overwrite xorg's original files
-  for i in libGL.so.$VERSION libGLcore.so.$VERSION; do
-    mv $PKG/usr/lib$LIBDIRSUFFIX/$i $PKG/usr/lib$LIBDIRSUFFIX/$i-nvidia ;
-  done
-cd -
+for i in glxext.h glext.h gl.h glx.h; do
+  install -m 644 $i $PKG/usr/include/GL/$i-nvidia
+done
 
-# This is the driver itself
-cd usr/X11R6/lib
-  cp -a * $PKG/usr/lib$LIBDIRSUFFIX/xorg/
-  for i in libXvMCNVIDIA.a libXvMCNVIDIA.so.$VERSION; do
-    mv $PKG/usr/lib$LIBDIRSUFFIX/xorg/$i $PKG/usr/lib$LIBDIRSUFFIX/ ;
-  done
+for i in cuda.h cudaGL.h cudaVDPAU.h; do
+  install -m 644 $i $PKG/usr/include/cuda/$i
+done
 
-  # Rename those files which would overwrite xorg's original files
-  mv $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/extensions/libglx.so.$VERSION \
-    $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/extensions/libglx.so.$VERSION-nvidia
-cd -
+for i in cl.h cl_gl.h cl_platform.h; do
+  install -m 644 $i $PKG/usr/include/CL/$i
+done
 
-# These are the includes
-cd usr/include/GL
-  for i in glxext.h glext.h gl.h glx.h; do
-    cp -a $i $PKG/usr/include/GL/$i-nvidia
-  done
-cd -
+install -m 644 nvidia.icd $PKG/etc/OpenCL/vendors/
 
-cp -a usr/include/cuda $PKG/usr/include/cuda
-cp -a usr/include/CL $PKG/usr/include/CL
+# # Next come the apps
+for i in nvidia-installer nvidia-xconfig nvidia-settings \
+    nvidia-smi nvidia-bug-report.sh; do
+  install -m 755 $i $PKG/usr/bin/
+done
 
-# Next come the apps
-cp -a nvidia-installer $PKG/usr/bin/
-cd usr/bin
-  for i in nvidia*; do
-    cp -a $i $PKG/usr/bin/
-  done
-cd -
+install -m 644 nvidia-settings.desktop $PKG/usr/share/applications/
+install -m 644 nvidia-settings.png $PKG/usr/share/pixmaps/
 
-# XDG stuff
-cd usr/share
-  for i in applications pixmaps; do
-    cp -a $i $PKG/usr/share/
-  done
-  cp -a man* $PKG/usr/
-cd -
+for i in *.1.gz; do
+  install -m 644 $i $PKG/usr/man/man1/$i
+done
 
 # symlinks
 cd $PKG/usr/lib$LIBDIRSUFFIX
-  for i in libnvidia-cfg libcuda; do
+  for i in libcuda libnvidia-cfg; do
     ln -s $i.so.$VERSION $i.so.1
     ln -s $i.so.1 $i.so
   done
-  ln -sf tls/libnvidia-tls.so.$VERSION libnvidia-tls.so.1
-  ln -sf vdpau/libvdpau_nvidia.so.$VERSION libvdpau_nvidia.so
   ln -sf libXvMCNVIDIA.so.$VERSION libXvMCNVIDIA_dynamic.so.1
-  ln -sf libOpenCL.so.1.0.0 libOpenCL.so.1
+  ln -sf libXvMCNVIDIA.so.$VERSION libXvMCNVIDIA_dynamic.so
+  ln -sf libOpenCL.so.1.0.0 libOpenCL.so.1.0
+  ln -sf libOpenCL.so.1.0 libOpenCL.so.1
   ln -sf libOpenCL.so.1 libOpenCL.so
-cd -
-
-cd $PKG/usr/lib$LIBDIRSUFFIX/tls
-  ln -sf libnvidia-tls.so.$VERSION libnvidia-tls.so.1
+  ln -sf tls/libnvidia-tls.so.$VERSION libnvidia-tls.so.$VERSION
 cd -
 
 cd $PKG/usr/lib$LIBDIRSUFFIX/vdpau
   ln -sf libvdpau_nvidia.so.$VERSION libvdpau_nvidia.so
+  ln -sf libvdpau_nvidia.so.$VERSION libvdpau_nvidia.so.1
 cd -
 
 cd $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules
@@ -169,9 +159,8 @@ sed -i "s|__UTILS_PATH__|/usr/bin|" \
 sed -i "s|__PIXMAP_PATH__|/usr/share/pixmaps|" \
   $PKG/usr/share/applications/nvidia-settings.desktop
 
-cd $TMP/$SRCNAM
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a LICENSE pkg-history.txt ./usr/share/doc* $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE NVIDIA_Changelog README.txt html $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.Slackware
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
