@@ -22,14 +22,18 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-SRCNAM=Widelands
-SRCVER=Build14
-
-PRGNAM=$(echo $SRCNAM | tr [:upper:] [:lower:])
-VERSION=$(echo $SRCVER | tr [:upper:] [:lower:])
-ARCH=${ARCH:-i486}
+PRGNAM=widelands
+VERSION=build15
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
@@ -43,9 +47,10 @@ elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
-  # we need to deviate from the standard cflags here, as -O2 results
-  # in a segfault
-  SLKCFLAGS="-O0 -fPIC"
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX=""
+else
+  SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
 
@@ -54,37 +59,42 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM
-7z x $CWD/$SRCNAM-$SRCVER-src.7z
-cd $PRGNAM
+rm -rf $PRGNAM-$VERSION-src
+tar xvf $CWD/$PRGNAM-$VERSION-src.tar.bz2
+cd $PRGNAM-$VERSION-src
 chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
 
-scons \
-  install_prefix="/usr" \
-  bindir="bin" \
-  datadir="share/games/widelands" \
-  localedir="share/locale" \
-  enable_ggz=${GGZ:-no} \
-  extra_compile_flags="$(echo $SLKCFLAGS)"
+# make locale install dir configurable
+localedir="WLBUILD_INSTALL_LOCALEDIR"
+old="$localedir \"\${CMAKE_INSTALL_PREFIX}/\${WL_INSTALL_DATADIR}/locale\""
+new="$localedir \${WL_INSTALL_LOCALEDIR}"
+sed -i "s|$old|$new|" CMakeLists.txt
 
-scons \
-  install_prefix="$PKG/usr" \
-  bindir="bin" \
-  datadir="share/games/widelands" \
-  localedir="share/locale" \
-  enable_ggz=${GGZ:-no} \
-  extra_compile_flags="$(echo $SLKCFLAGS)" \
-  install
+mkdir -p build1
+cd build1
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DWL_INSTALL_LOCALEDIR="/usr/share/locale" \
+    -DWL_INSTALL_BINDIR="bin" \
+    ..
+  make
+  make install DESTDIR=$PKG
+cd ..
 
 mkdir -p $PKG/usr/share/applications
-install -m 0644 $CWD/widelands.desktop $PKG/usr/share/applications/widelands.desktop
+install -m 0644 $CWD/widelands.desktop \
+  $PKG/usr/share/applications/widelands.desktop
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-mkdir -p $PKG/usr/doc
-mv $PKG/usr/share/games/widelands/doc $PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a ChangeLog COPYING CREDITS WL_RELEASE $PKG/usr/doc/$PRGNAM-$VERSION/
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
