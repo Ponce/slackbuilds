@@ -1,4 +1,4 @@
 #!/bin/sh
 export PLAN9=/opt/plan9
-export MANPATH="$MANPATH:/opt/plan9/man"
-export PATH="$PATH:/opt/plan9/bin"
+export MANPATH="$MANPATH:$PLAN9/man"
+export PATH="$PATH:$PLAN9/bin"
