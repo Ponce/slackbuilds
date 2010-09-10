@@ -11,6 +11,22 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
+preserve_perms() {
+  NEW="$1"
+  OLD="$(dirname $NEW)/$(basename $NEW .new)"
+  if [ -e $OLD ]; then
+    cp -a $OLD ${NEW}.incoming
+    cat $NEW > ${NEW}.incoming
+    mv ${NEW}.incoming $NEW
+  fi
+  config $NEW
+}
+
 for cnf in etc/zarafa/*.cfg.new; do
   config $cnf
 done
+
+for rc in etc/rc.d/rc.zarafa-*.new; do
+  preserve_perms $rc
+done
+

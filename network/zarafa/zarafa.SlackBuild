@@ -4,19 +4,17 @@
 # an MS Exchange substitute
 
 # Written by Niels Horn <niels.horn@gmail.com>
-# revision date 2010/05/28
+# revision date 2010/09/07
 
 PRGNAM=zarafa
-VERSION=${VERSION:-6.30.14}
+VERSION=${VERSION:-6.40.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-# Automatically determine the architecture we're building on:
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
     i?86) ARCH=i486 ;;
     arm*) ARCH=arm ;;
-    # Unless $ARCH is already set, use uname -m for all other archs:
        *) ARCH=$( uname -m ) ;;
   esac
 fi
@@ -50,13 +48,12 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
 
-# Apply patches to avoid compiling error
-# (note: this is my personal solution / hack, I did not find any answer on
-#  the official zarafa forum, although other users reported the same issue.)
-patch -p1 < $CWD/ical2mapi.patch
-
 # Apply patch to use "vmime-zarafa" instead of "vmime"
 patch -p1 < $CWD/vmime-zarafa.patch
+
+# Apply patch to solve some problems with the ECTestTools in 6.40.2
+#  it seems upstream forgot to adapt them to the new version...
+patch -p1 < $CWD/testtools.patch
 
 SLKCFLAGS="$SLKCFLAGS -I/usr/include/vmime-zarafa"
 
@@ -69,10 +66,12 @@ CPPFLAGS=$SLKCFLAGS \
   --localstatedir=/var \
   --mandir=/usr/man \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --sysconfdir=/etc \
   --disable-static \
   --with-userscript-prefix=/etc/zarafa/userscripts \
   --with-quotatemplate-prefix=/etc/zarafa/quotamails \
   --with-vmime-prefix=/usr/include/vmime-zarafa \
+  --with-clucene-lib-prefix=/usr/lib${LIBDIRSUFFIX} \
   --build=$ARCH-slackware-linux
 
 make
@@ -84,13 +83,27 @@ find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-# Sample configuration files
-mkdir -p $PKG/etc/$PRGNAM
-( cd $PKG/usr/doc/$PRGNAM-$VERSION
-  for cnf in *.cfg; do
-    mv $cnf $PKG/etc/$PRGNAM/$cnf.new
-  done
-)
+# Rename cfg files to .new
+for cfg in $PKG/etc/$PRGNAM/*.cfg; do
+  mv $cfg $cfg.new
+done
+
+# The sample config of zarafa-indexer ends up in the wrong directory somehow...
+mv $PKG/usr/share/doc/zarafa-indexer/example-config/* $PKG/usr/doc/$PRGNAM-$VERSION/example-config/
+rm -rf $PKG/usr/share/doc
+
+# Remove sysconfig files. We don't use them and they only set the collation,
+# which is taken care of in the rc.* scripts as well
+rm -rf $PKG/etc/sysconfig
+
+# Move /etc/init.d scripts to /etc/rc.d with the correct naming
+mkdir -p $PKG/etc/rc.d
+for script in $PKG/etc/init.d/*; do
+  rc=$(basename $script)
+  mv $script $PKG/etc/rc.d/rc.$rc.new
+  chmod -x $PKG/etc/rc.d/rc.$rc.new
+done
+rm -rf $PKG/etc/init.d
 
 # Directory for log file
 mkdir -p $PKG/var/log/$PRGNAM
