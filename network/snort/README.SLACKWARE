@@ -1,0 +1,165 @@
+README.SLACKWARE
+================
+
+
+Documentation
+-------------
+
+Please read the snort_manual.pdf file that should be included with this 
+distribution for full documentation on the program as well as a guide to 
+getting started.
+
+This package builds a very basic snort implementation useful for monitoring
+traffic as an IDS or packet logger and as a sort of improved tcpdump.
+MySQL support is included, so you should have little trouble hooking snort up
+to a database or ACID. For more information on these, check out snort's
+homepage at:
+
+  http://www.snort.org/
+  http://www.snort.org/docs/
+
+
+Source tarball and newer releases
+---------------------------------
+
+snort.org has no direct links to the source tarball, that's why it is also
+hosted on http://www.nielshorn.net/
+This is needed for sbopkg to work.
+
+If you want a newer version than the one available there, check:
+
+  https://www.snort.org/snort-downloads
+
+
+Starting snort
+--------------
+
+An rc.snort file has been included for your convenience, but it needs to be
+added to your init script of choice to run on boot. You should modify the
+variables in /etc/rc.d/rc.snort to reflect the interface you want to monitor,
+or start it as:
+
+  IFACE=xxxx /etc/rc.d/rc.snort start|stop|restart
+
+As an example, you can put this in your /etc/rc.d/rc.local script:
+
+  if [ -x /etc/rc.d/rc.snort ]; then
+    IFACE=eth1 /etc/rc.d/rc.snort start
+  fi
+
+And this in your /etc/rc.d/rc.local_shutdown:
+
+  if [ -x /etc/rc.d/rc.snort ]; then
+    /etc/rc.d/rc.snort stop
+  fi
+
+
+Installing / Updating Rules etc.
+--------------------------------
+
+In order for Snort to function properly, you need to provide rule files.
+You can either get a paid subscription (newest rules) at:
+
+  https://www.snort.org/vrt/buy-a-subscription
+
+or register for free (only rules >30 days old) at:
+
+  https://www.snort.org/signup
+
+Then download your rules from:
+
+  https://www.snort.org/snort-rules
+
+The downloaded file contains the rules, signatures and updated configuration
+files. Be careful when updating these, as you will probably have customized
+a few settings in your snort.conf
+At the end of this file is a sample script that you can use as a base to
+automate unpacking of the tarball. It updates the rules, signatures and some
+configurations, but copies the new snort.conf as snort.conf.new, so that you
+can examine it later.
+This script is included only as an example and without any guarantee.
+** Use at your own risk! **
+
+Basically, you need to
+1) put the new rules/*		into /etc/snort/rules/
+2) put the new preproc_rules/*	into /etc/snort/preproc_rules/
+3) put the new doc/signatures/*	into /usr/doc/snort-*/signatures/
+4) put the new etc/*		into /etc/snort/ (except for snort.conf)
+
+After updating your files, restart snort with:
+
+  # /etc/rc.d/rc.snort restart
+
+=============================================================================
+Sample script to update rules, signatures and configurations
+*** USE AT YOUR OWN RISK *** NO GUARANTEES ***
+=============================================================================
+#!/bin/bash
+
+# snortrules_update
+#
+# Written by Niels Horn <niels.horn@gmail.com>
+# Nothing guaranteed, use at your own risk!
+#
+# v1.00-2010/09/18	- first attempt
+#
+
+CWD=$(pwd)
+CONFDIR=/etc/snort
+
+# Exit on most errors
+set -e
+
+if [ "x$1" = "x" ]; then
+  echo "Specify snortrules-snapshot file:"
+  echo
+  echo "  $0 <snortrules-snapshot>"
+  echo
+  exit 1
+fi
+
+# Configuration files
+echo "*** Updating configuration files..."
+for cf in $( tar tf $1 | grep "etc/" ); do
+  if [ ! "$cf" = "etc/" ]; then
+    file=$(basename $cf)
+    tar -xf $1 $cf -O > $CONFDIR/$file.new
+    # check if it is "snort.conf"
+    if [ ! "$file" = "snort.conf" ]; then
+      # OK, it is something else, we can handle this
+      if [ -r $CONFDIR/$file ]; then
+        # we have a previous version
+        if [ "$(cat $CONFDIR/$file | md5sum)" = "$(cat $CONFDIR/$file.new | md5sum)" ]; then
+          # nothing new, dump previous version
+          rm $CONFDIR/$file
+        else
+          # keep previous version
+          mv -f $CONFDIR/$file $CONFDIR/$file.old
+        fi
+      fi
+      # move new file over
+      mv -f $CONFDIR/$file.new $CONFDIR/$file
+    fi
+  fi
+done
+
+# rules
+echo "*** Updating rules..."
+cd /etc/snort/rules
+  tar --strip-components=1 --wildcards -xf $CWD/$1 rules/*
+cd - > /dev/null
+
+# preproc-rules
+echo "*** Updating preproc_rules..."
+cd /etc/snort/preproc_rules
+  tar --strip-components=1 --wildcards -xf $CWD/$1 preproc_rules/*
+cd - > /dev/null
+
+# signatures
+echo "*** Updating signatures..."
+cd /usr/doc/snort-*/signatures
+  tar --strip-components=2 --wildcards -xf $CWD/$1 doc/signatures/*
+cd - > /dev/null
+
+echo "All done."
+
