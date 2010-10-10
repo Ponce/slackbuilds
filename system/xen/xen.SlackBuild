@@ -1,0 +1,119 @@
+#!/bin/sh
+
+# Slackware build script for xen
+
+# Written by:
+#   mario (mario@slackverse.org)
+#   Chris Abela (chris.abela@maltats.com)
+
+PRGNAM=xen
+VERSION=${VERSION:-4.0.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+make -C xen \
+  docdir=/usr/doc/$PRGNAM-$VERSION \
+  DOCDIR=/usr/doc/$PRGNAM-$VERSION \
+  mandir=/usr/man \
+  MANDIR=/usr/man
+make -C tools \
+  docdir=/usr/doc/$PRGNAM-$VERSION \
+  DOCDIR=/usr/doc/$PRGNAM-$VERSION \
+  mandir=/usr/man \
+  MANDIR=/usr/man
+make -C docs \
+  docdir=/usr/doc/$PRGNAM-$VERSION \
+  DOCDIR=/usr/doc/$PRGNAM-$VERSION \
+  mandir=/usr/man \
+  MANDIR=/usr/man
+
+make install-xen \
+  docdir=/usr/doc/$PRGNAM-$VERSION \
+  DOCDIR=/usr/doc/$PRGNAM-$VERSION \
+  mandir=/usr/man \
+  MANDIR=/usr/man \
+  DESTDIR=$PKG
+make install-tools \
+  docdir=/usr/doc/$PRGNAM-$VERSION \
+  DOCDIR=/usr/doc/$PRGNAM-$VERSION \
+  mandir=/usr/man \
+  MANDIR=/usr/man \
+  DESTDIR=$PKG
+make install-docs \
+  docdir=/usr/doc/$PRGNAM-$VERSION \
+  DOCDIR=/usr/doc/$PRGNAM-$VERSION \
+  mandir=/usr/man \
+  MANDIR=/usr/man \
+  DESTDIR=$PKG
+
+# Move from SYSV to BSD init scripts
+mkdir -p $PKG/etc/rc.d/
+mv $PKG/etc/init.d/xend $PKG/etc/rc.d/rc.xend.new
+mv $PKG/etc/init.d/xendomains $PKG/etc/rc.d/rc.xendomains.new
+mv $PKG/etc/sysconfig/xendomains $PKG/etc/xen/xendomains.config
+sed -i 's:\/etc\/sysconfig\/xendomains:\/etc\/xen/xendomains.config:
+  s:\/etc\/init.d\/xendomains:\/etc\/rc.d\/rc.xendomains:' \
+  $PKG/etc/rc.d/rc.xendomains.new
+# Fully qualified paths are needed for /etc/rc.d/rc.local_shutdown
+sed -i 's:\(^[[:space:]]*\)xend :\1/usr/sbin/xend : ' $PKG/etc/rc.d/rc.xend.new
+sed -i 's:\([^_/]\)xm :\1/usr/sbin/xm :' $PKG/etc/rc.d/rc.xendomains.new
+
+# Put udev rules files in the right place
+mkdir -p $PKG/lib/udev/rules.d
+mv $PKG/etc/udev/xen*.rules $PKG/lib/udev/rules.d/
+rm -rf $PKG/etc/udev
+
+# Remove useless symlinks in boot/
+find $PKG/boot/ -type l -a -name "xen-*" -exec rm -f {} \;
+
+# Remove empty directories
+rm -rf $PKG/etc/{init.d,sysconfig}
+
+# Append .new to config files
+for i in $PKG/etc/xen/{*.sxp,*.config,*.xml} ; do mv $i $i.new ; done
+
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+cp -a COPYING README $CWD/{dom0,domU} $PKG/usr/doc/$PRGNAM-$VERSION
+chown -R root:root $PKG/usr/doc/$PRGNAM-$VERSION/{dom0,domU}
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
