@@ -11,7 +11,6 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-# Keep same perms on rc.pcscd.new:
 if [ -e etc/rc.d/rc.pcscd ]; then
   cp -a etc/rc.d/rc.pcscd etc/rc.d/rc.pcscd.new.incoming
   cat etc/rc.d/rc.pcscd.new > etc/rc.d/rc.pcscd.new.incoming
@@ -19,5 +18,4 @@ if [ -e etc/rc.d/rc.pcscd ]; then
 fi
 
 config etc/rc.d/rc.pcscd.new
-config etc/reader.conf.d/reader.conf.new
 

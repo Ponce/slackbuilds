@@ -2,7 +2,7 @@
 
 # Slackware build script for pcsc-lite
 
-# Copyright 2007-2009  LukenShiro <lukenshiro@ngi.it>
+# Copyright 2007-2010  LukenShiro <lukenshiro@ngi.it>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,16 +23,14 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=pcsc-lite
-VERSION=${VERSION:-1.5.5}
+VERSION=${VERSION:-1.6.4}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-# Automatically determine the architecture we're building on:
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
     i?86) ARCH=i486 ;;
     arm*) ARCH=arm ;;
-    # Unless $ARCH is already set, use uname -m for all other archs:
        *) ARCH=$( uname -m ) ;;
   esac
 fi
@@ -44,19 +42,17 @@ OUTPUT=${OUTPUT:-/tmp}
 
 # Debug is off by default
 DEBUGATR=${DEBUGATR:-0}
-
 # API documentation building is off by default
 APIDOC=${APIDOC:-0}
 
 # Program to convert .tex files into .pdf (for APIDOC)
 TEXTOPDFBIN="/usr/share/texmf/bin/pdflatex"
 
-# using upstream preferred behaviour by default (libhal)
-# 0 for conservative detection behaviour, 1 for libhal
-HALD=${HALD:-0}		
+# 0 for conservative detection behaviour (libusb), 1 for libhal
+HALD=${HALD:-1}  # using libhal behaviour by default
 
-# README and README.DAEMON are not useful and partly outdated. ChangeLog.svn is empty.
-DOCFILES="DRIVERS SECURITY ChangeLog COPYING HELP NEWS TODO AUTHORS INSTALL"
+# README and README.DAEMON are not useful and partly outdated.
+DOCFILES="DRIVERS SECURITY ChangeLog* COPYING HELP NEWS TODO AUTHORS INSTALL"
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
@@ -72,7 +68,7 @@ else
   LIBDIRSUFFIX=""
 fi
 
-set -e 	# Exit on most errors
+set -e  # Exit on most errors
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -81,7 +77,11 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
 cd $PRGNAM-$VERSION
 chown -R root:root .
-chmod -R u+w,go+r-w,a-s .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
 
 # Fix the DRIVERS file to reflect the correct drivers directory as built
 # with this script
@@ -89,22 +89,18 @@ patch -p0 < $CWD/docs-DRIVERS.diff || exit 1
 
 # ATR (answer to reset) debug parsing output 
 case "$DEBUGATR" in
-    0)	DEBUGATR_FLAG="dis"
-	;;
-    *)	DEBUGATR_FLAG="en"
-	;;
+    0)  DEBUGATR_FLAG="dis" ;;
+    *)  DEBUGATR_FLAG="en" ;;
 esac
 
 # libusb and libhal support are mutually exclusive for reader detection:
 case "$HALD" in
-    0)	LIBHAL_FLAG="--enable-libusb --disable-libhal"
-	;;
-    *)	LIBHAL_FLAG="--enable-libhal --disable-libusb"
-	;;
-esac	
+    0)  LIBHAL_FLAG="--enable-libusb --disable-libhal" ;;
+    *)  LIBHAL_FLAG="--enable-libhal --disable-libusb" ;;
+esac
 
-# --enable-runpid=/var/run/pcscd.pid is not supported anymore;
-# --enable-muscledropdir="<libdir>/pcsc/services" is not supported anymore;
+# --enable-runpid=/var/run/pcscd.pid, and
+# --enable-muscledropdir="<libdir>/pcsc/services" are not supported anymore;
 # pid directory changed to /var/run/pcscd for consistency
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -112,14 +108,14 @@ CXXFLAGS="$SLKCFLAGS" \
   --prefix=/usr \
   --sysconfdir=/etc \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --enable-confdir=/etc \
   --localstatedir=/var \
   --enable-ipcdir=/var/run/pcscd \
   --mandir=/usr/man \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
   --enable-usbdropdir="/usr/lib${LIBDIRSUFFIX}/pcsc/drivers" \
   --${DEBUGATR_FLAG}able-debugatr \
-  $LIBHAL_FLAG
+  $LIBHAL_FLAG \
+  --build=$ARCH-slackware-linux
 
 make
 make install DESTDIR=$PKG
@@ -132,8 +128,10 @@ install -m 0644 doc/formaticc.1 $PKG/usr/man/man1/
 mkdir -p $PKG/etc/rc.d
 install -m 0755 $CWD/rc.pcscd $PKG/etc/rc.d/rc.pcscd.new
 
-# Don't clobber the config file
-mv $PKG/etc/reader.conf.d/reader.conf $PKG/etc/reader.conf.d/reader.conf.new
+# Correct manpages in reader.conf.5 and pcscd.8
+sed -i "s|@confdir@|/etc/reader.conf.d|g" $PKG/usr/man/man5/reader.conf.5
+sed -i "s|@sysconfdir_exp@/init.d/pcscd|/etc/rc.d/rc.pcscd|g" $PKG/usr/man/man8/pcscd.8
+sed -i "s|@sysconfdir_exp@|/etc/reader.conf.d|g" $PKG/usr/man/man8/pcscd.8
 
 # Create the directory for drivers and such (not included with this package)
 mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/pcsc/{drivers,services}
@@ -141,26 +139,25 @@ mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/pcsc/{drivers,services}
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-( cd $PKG/usr/man
-  find . -type f -exec gzip -9 {} \;
-  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
-)
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/
 cp -a $DOCFILES $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.SBo
+cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
 
 # remove README.DAEMON, automatically installed by doc/Makefile.
 rm -f $PKG/usr/doc/$PRGNAM-$VERSION/README.DAEMON
 
-## .pdf api documentation files seem not to be built from .tex sources during make
-## Most people don't need/want api docs anyway. Nonetheless tex sources are removed.
+# .pdf api documentation files seem not to be built from .tex sources during
+# make. Most people don't need/want api docs anyway. Nonetheless tex sources
+# are removed.
 ( cd $PKG/usr/doc/$PRGNAM-$VERSION/
 case "$APIDOC" in
     1)	if [ -x $TEXTOPDFBIN ]; then
+	  echo "Building API .pdf documentation ..."
 	  $TEXTOPDFBIN ifdhandler-3.tex 1>&2 >/dev/null
-	  $TEXTOPDFBIN pcsc-lite.tex 1>&2 >/dev/null
 	else
 	    echo "API .pdf documentation NOT built."
 	fi
