@@ -1,0 +1,150 @@
+#!/bin/sh
+
+# Slackware build script for cyrus-imapd
+
+# Copyright 2010, mario <mario@slackverse.org>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=cyrus-imapd
+VERSION=${VERSION:-2.3.16}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+# Automatically determine the architecture we're building on:
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+    # Unless $ARCH is already set, use uname -m for all other archs:
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+# Bail if user isn't valid on your system
+if ! grep -q ^cyrus: /etc/passwd ; then
+  echo "  You must have a cyrus user to run this script."
+  echo "    # groupadd -g 238 cyrus"
+  echo "    # useradd -d /var/imap -s /bin/sh -u 238 -g 238 cyrus"
+  echo "  Or something similar."
+  exit 1
+fi
+
+# Build with mysql database by default, sqlite/mysql/postgresql are supported
+DATABASE=${DATABASE:-mysql}
+case "$DATABASE" in
+       pgsql) DATABASE="--with-pgsql --with-mysql-incdir=/usr/include/pgsql" ;;
+       mysql) DATABASE="--with-mysql --with-mysql-incdir=/usr/include/mysql" ;;
+      sqlite) DATABASE="--with-sqlite" ;;
+           *) DATABASE="" ;;
+esac
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --with-service-path=/usr/libexec/cyrus \
+  --with-sasl \
+  --with-libwrap \
+  --with-openssl \
+  --with-perl \
+  --with-bdb-incdir=/usr/include/db4 \
+  --with-cyrus-user=cyrus \
+  --with-cyrus-group=cyrus \
+  $DATABASE \
+  --build=$ARCH-slackware-linux
+
+make PERL_MM_OPT='INSTALLDIRS=vendor'
+make install DESTDIR=$PKG
+
+# Move incorrectly installed man pages
+mv $PKG/usr/share/man $PKG/usr/ && rmdir $PKG/usr/share || true
+
+# Copy init script
+install -D -m0755 -oroot -groot $CWD/rc.cyrus-imapd $PKG/etc/rc.d/rc.cyrus-imapd.new
+
+# Install sample configuration
+install -D -m0640 -ocyrus -gcyrus master/conf/normal.conf $PKG/etc/cyrus.conf.new
+install -D -m0640 -ocyrus -gcyrus $CWD/imapd.conf $PKG/etc/imapd.conf.new
+
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+find $PKG -name perllocal.pod \
+  -o -name ".packlist" \
+  -o -name "*.bs" \
+  | xargs rm -f
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a COPYRIGHT README README.andrew doc/ master/conf tools/ $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
+
+# Clean up the obsolete /usr/lib  on 64bit systems.
+if [ "$ARCH" = "x86_64" ]; then
+    rmdir $PKG/usr/lib
+fi
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
