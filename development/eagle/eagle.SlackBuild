@@ -1,0 +1,94 @@
+#!/bin/sh
+
+# Slackware build script for eagle (binary repackaging)
+# Originally written by Kyle Guinn <elyk03@gmail.com>
+
+# As of version 5.10.0 maintained by Niels Horn <niels.horn@gmail.com>
+
+PRGNAM="eagle"
+VERSION=${VERSION:-"5.10.0"}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM-$VERSION
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ ! "$ARCH" = "i486" ]; then
+  echo "Sorry, only i486 supported"
+  exit 1
+fi
+
+# Documentation is distributed for both English and German.  Due to the size
+# of the documentation, only include one language.
+LANG=${LANG:-"en"}
+if [ "$LANG" = "de" ]; then
+  DOCS="README_de UPDATE_de library_de.txt license_de.txt manual_de.pdf tutorial_de.pdf elektro-tutorial.pdf"
+elif [ "$LANG" = "zh" ]; then
+  DOCS="README_en UPDATE_en library_en.txt license_en.txt manual_zh.pdf tutorial_zh.pdf"
+else
+  DOCS="README_en UPDATE_en library_en.txt license_en.txt manual_en.pdf tutorial_en.pdf"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+sh $CWD/$PRGNAM-lin-$VERSION.run $PKG/opt
+chown -R root:root $PKG
+
+# Create the license key file.  EAGLE will write to this the first time it is
+# run.  After that, you can change the permissions to 0644 if you wish.
+touch $PKG/opt/$PRGNAM-$VERSION/bin/$PRGNAM.key
+chmod 0666 $PKG/opt/$PRGNAM-$VERSION/bin/$PRGNAM.key
+
+# Some versions of EAGLE have a graphics bug that results in corruption of the
+# displayed window, particularly affecting the display of trees and lists.
+# This is due to a conflict with compositing.  The quickest fix is to set an
+# environment variable (XLIB_SKIP_ARGB_VISUALS) before running EAGLE.  The fix
+# may not apply to the latest version of EAGLE, but it doesn't hurt to leave
+# it in.  See http://www.cadsoft.de/faq.htm#07041701 for details.
+mkdir -p $PKG/usr/bin
+cat > $PKG/usr/bin/$PRGNAM << EOF
+#!/bin/sh
+XLIB_SKIP_ARGB_VISUALS=1
+export XLIB_SKIP_ARGB_VISUALS
+exec /opt/$PRGNAM-$VERSION/bin/$PRGNAM "\$@"
+EOF
+chmod +x $PKG/usr/bin/$PRGNAM
+
+# Move any man pages to the proper location
+mkdir -p $PKG/usr/man/man1
+mv $PKG/opt/$PRGNAM-$VERSION/doc/*.1 $PKG/usr/man/man1
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/usr/share/{applications,pixmaps}
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# Move the documentation to the proper location
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cd $PKG/opt/$PRGNAM-$VERSION
+for d in $DOCS; do mv doc/$d $PKG/usr/doc/$PRGNAM-$VERSION/; done
+  rm -rf doc
+  ln -s /usr/doc/$PRGNAM-$VERSION doc
+cd -
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
