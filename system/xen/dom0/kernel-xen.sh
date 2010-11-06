@@ -8,10 +8,10 @@
 # 20100904
 
 KERNEL=${KERNEL:-huge}
-VERSION=${VERSION:-2.6.34.4}
+VERSION=${VERSION:-2.6.34.7}
 
 # Rebased patches version
-SVERSION=${SVERSION:-2.6.34-4}
+SVERSION=${SVERSION:-2.6.34-6}
 
 # Xen version
 XVERSION=${XVERSION:-4.0.1}
