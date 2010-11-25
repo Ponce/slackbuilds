@@ -25,10 +25,17 @@
 
 PRGNAM=virtualbox-ose
 SRCNAM=VirtualBox
-VERSION=3.2.6
-ARCH=${ARCH:-i486}
+VERSION=3.2.10
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
@@ -55,12 +62,17 @@ else
   harden="--disable-hardening"
 fi
 
-if [ "${WEBSERVICE:-no}" = "yes" ]; then
-    web_service="--enable-webservice"
-    vboxwebsrv="vboxwebsrv"
-else
+if [ "${WEBSERVICE:-no}" = "no" ]; then
     web_service=""
     vboxwebsrv=""
+else
+    web_service="--enable-webservice"
+    vboxwebsrv="vboxwebsrv"
+    if ! grep ^vboxweb: /etc/passwd 2>&1 > /dev/null; then
+      echo "  You must have a vboxweb user to run this script."
+      echo "    # useradd -u 240 -g 215 -d /var/lib/vboxweb vboxweb"
+      exit 1
+    fi
 fi
 
 if [ "$ARCH" = "i486" ]; then
@@ -109,9 +121,6 @@ else
   qtgui+=" --disable-qt4"
   guiapp=""
 fi
-
-# Fix issues with newer acpica versions
-patch -p0 -i $CWD/patch-src-VBox-Devices-PC-vbox.dsl
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -166,6 +175,16 @@ for i in VBoxManage VBoxSDL VBoxHeadless VBoxVRDP $guiapp $vboxwebsrv; do
   ln -s /usr/lib$LIBDIRSUFFIX/virtualbox/VBox $PKG/usr/bin/$i ;
 done
 
+if [ "$vboxwebsrv" = "vboxwebsrv" ]; then
+  mkdir -p $PKG/var/{lib,log}/vboxweb
+  chown vboxweb:vboxusers $PKG/var/{lib,log}/vboxweb
+  cp -f src/VBox/Installer/linux/vboxweb-service.sh.in $PKG/etc/rc.d/rc.vboxweb-service.new
+  sed -i "s/%PACKAGE%/virtualbox/g" $PKG/etc/rc.d/rc.vboxweb-service.new
+  sed -i "s/%NOLSB%/yes/" $PKG/etc/rc.d/rc.vboxweb-service.new
+  sed -i "s/%DEBIAN%/no/" $PKG/etc/rc.d/rc.vboxweb-service.new
+  sed -i "s/\[ -z \"\$DEBIAN\"/#\[ -z \"\$DEBIAN\"/" $PKG/etc/rc.d/rc.vboxweb-service.new
+fi
+
 if [ "$harden" = "--enable-hardening" ]; then
   for i in VBoxSDL VBoxHeadless $guiapp; do
     chmod 4${MODE} $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/$i
@@ -181,6 +200,9 @@ cp -f $CWD/VBoxGuestAdditions_$VERSION.iso \
 
 cp -f $CWD/UserManual.pdf \
   $PKG/usr/share/virtualbox/UserManual.pdf
+
+cp -f $CWD/SDKRef.pdf \
+  $PKG/usr/share/virtualbox/SDKRef.pdf
 
 # install profile.d scripts for 3rd party apps
 mkdir -p $PKG/etc/profile.d/
@@ -204,6 +226,10 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+if [ "$vboxwebsrv" = "vboxwebsrv" ]; then
+  echo "preserve_perms etc/rc.d/rc.vboxweb-service.new" >> $PKG/install/doinst.sh
+fi
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
