@@ -1,6 +1,4 @@
-#!/bin/sh
 # vim: et ts=2 sw=2 
-
 config() {
   NEW="$1"
   OLD="${NEW%*.new}"
