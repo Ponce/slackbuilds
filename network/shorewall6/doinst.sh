@@ -1,6 +1,4 @@
-#!/bin/sh
 # vim: et ts=2 sw=2
-
 config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
@@ -26,3 +24,4 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.shorewall6.new
+
