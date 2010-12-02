@@ -24,9 +24,9 @@ preserve_perms() {
 
 if [ -e etc/HOSTNAME ]; then
   sed -i "s,yourhostname,$(cat etc/HOSTNAME | cut -f1 -d .)," \
-    etc/NetworkManager/nm-system-settings.conf.new
+    etc/NetworkManager/NetworkManager.conf.new
 fi
 
 preserve_perms etc/rc.d/rc.networkmanager.new
-config etc/NetworkManager/nm-system-settings.conf.new
+config etc/NetworkManager/NetworkManager.conf.new
 
