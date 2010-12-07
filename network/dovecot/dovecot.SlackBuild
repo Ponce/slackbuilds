@@ -20,42 +20,36 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-PRGNAM="dovecot"
-VERSION="2.0.0"
+PRGNAM=dovecot
+VERSION=2.0.8
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-# Automatically determine the architecture we're building on:
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
     i?86) ARCH=i486 ;;
     arm*) ARCH=arm ;;
-    # Unless $ARCH is already set, use uname -m for all other archs:
        *) ARCH=$( uname -m ) ;;
   esac
 fi
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
-PKG="$TMP/package-$PRGNAM"
+PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-# Build with mysql database by default, sqlite/mysql/postgresql are supported
-DATABASE=${DATABASE:-mysql}
-case "$DATABASE" in
-       pgsql) DATABASE="--with-pgsql" ;;
-       mysql) DATABASE="--with-mysql" ;;
-      sqlite) DATABASE="--with-sqlite" ;;
-           *) DATABASE="" ;;
-esac
-
-# Bail if user isn't valid on your system
-if ! grep -q ^dovecot: /etc/passwd ; then
-  echo "  You must have a dovecot user to run this script."
+bailout() {
+  echo "  You must have a dovecot user and group to build and/or use dovecot:"
   echo "    # groupadd -g 202 dovecot"
   echo "    # useradd -d /dev/null -s /bin/false -u 202 -g 202 dovecot"
-  echo "  Or something similar."
   exit 1
+}
+
+# Bail if user isn't valid on your system
+if ! getent group dovecot 1>/dev/null 2>/dev/null ; then
+  bailout
+elif ! getent passwd dovecot 1>/dev/null 2>/dev/null ; then
+  bailout
 fi
 
 set -e
@@ -83,44 +77,38 @@ cd $PRGNAM-$VERSION
 chmod -R a-s,u+w,go+r-w .
 chown -R root:root .
 
+# Add -ldl to LDFLAGS for sqlite
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
+LDFLAGS="-ldl" \
 ./configure \
   --prefix=/usr \
   --sysconfdir=/etc \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --localstatedir=/var \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --enable-header-install \
+  --mandir=/usr/man \
   --with-notify=inotify \
   --without-pam \
-  --with-pop3d \
+  --with-mysql \
+  --with-sqlite \
+  --with-libcap \
   --disable-static \
-  --build=$ARCH-slackware-linux \
-  $DATABASE
+  --build=$ARCH-slackware-linux
 
 make
 make install-strip DESTDIR=$PKG
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS COPYING COPYING.LGPL COPYING.MIT ChangeLog INSTALL NEWS \
-   README TODO doc/* $PKG/usr/doc/$PRGNAM-$VERSION/
-cat $CWD/dovecot.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/dovecot.SlackBuild
-rm -rf $PKG/usr/share/doc
-find $PKG/usr/doc -type f \( -name "Makefile*" -o -name "*.in" \) -delete
-
-# Place a default conf file in /etc
-cat $PKG/usr/doc/dovecot-2.0.0/example-config/dovecot.conf > \
-    $PKG/etc/dovecot/dovecot.conf
-
-# Handle man pages
-mv $PKG/usr/share/man $PKG/usr/man
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-
-# Add an init script
 mkdir -p $PKG/etc/rc.d
-install -m 0755 $CWD/rc.dovecot $PKG/etc/rc.d/rc.dovecot.new
+cat $CWD/rc.dovecot > $PKG/etc/rc.d/rc.dovecot.new
+chmod 0755 $PKG/etc/rc.d/rc.dovecot.new
+
+gzip -9 $PKG/usr/man/man?/*.?
+
+cp -a \
+  AUTHORS COPYING* ChangeLog NEWS README TODO \
+  $PKG/usr/doc/$PRGNAM-$VERSION/
+cat $CWD/dovecot.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/dovecot.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
