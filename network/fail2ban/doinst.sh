@@ -22,6 +22,7 @@ config etc/rc.d/rc.fail2ban.new
 config etc/logrotate.d/fail2ban.new
 config etc/fail2ban/fail2ban.conf.new
 config etc/fail2ban/jail.conf.new
+
 for conf_file in etc/fail2ban/action.d/*.new; do
   config $conf_file
 done
