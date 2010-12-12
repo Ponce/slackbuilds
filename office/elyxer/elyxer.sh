@@ -1,2 +1,2 @@
 #!/bin/sh
-python -m elyxer $@
+python -m elyxer "$@"
