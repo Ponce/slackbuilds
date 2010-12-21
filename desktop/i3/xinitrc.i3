@@ -12,7 +12,7 @@ sysmodmap=/etc/X11/xinit/.Xmodmap
 [ -f $usermodmap ] && /usr/bin/xmodmap $usermodmap
 
 # Start i3
-if [ -z $DESKTOP_SESSION ]; then
+if [ -z "$DESKTOP_SESSION" -a -x /usr/bin/ck-launch-session ]; then
     exec ck-launch-session i3
 else
     exec i3
