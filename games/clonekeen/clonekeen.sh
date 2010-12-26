@@ -6,8 +6,11 @@ GAME=clonekeen
 HOMEDIR=~/.$GAME
 mkdir -p $HOMEDIR
 cd $HOMEDIR
-if [ -e defaultargs ]; then
-  ARGS="`cat defaultargs`"
-fi
+
 ln -s /usr/share/games/$GAME/* . &>/dev/null || true
+
+if [ ! -e keen.conf ]; then
+  cat keen.conf.default > keen.conf
+fi
+
 exec $GAME-bin "$@" $ARGS
