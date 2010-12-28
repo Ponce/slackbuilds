@@ -10,5 +10,5 @@ config() {
   fi
   # Otherwise, we leave the .new copy for the admin to consider...
 }
-
 config etc/conky/conky.conf.new
+config etc/conky/conky_no_x11.conf.new
