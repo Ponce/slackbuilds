@@ -1,0 +1,238 @@
+Index: src/apachetop.cc
+===================================================================
+--- src/apachetop.cc	(revision 873)
++++ src/apachetop.cc	(revision 874)
+@@ -85,6 +85,7 @@
+ 	cf.debug = true;
+ 	cf.current_display_size = 0;
+ 	cf.input_count = 0;
++	cf.output_file = "";
+ 	cf.circle_size = DEFAULT_CIRCLE_SIZE;
+ 	cf.circle_mode = DEFAULT_CIRCLE_MODE;
+ 	cf.sort = DEFAULT_SORT;
+@@ -136,7 +137,7 @@
+ #endif
+ 
+ 	/* process commandline {{{ */
+-	while ((ch = getopt(argc, argv, "f:H:T:hqlrs:pd:")) != -1)
++	while ((ch = getopt(argc, argv, "f:o:H:T:hqlrs:pd:")) != -1)
+ 	{
+ 		switch(ch)
+ 		{
+@@ -150,6 +151,9 @@
+ 				else
+ 					cf.input_count++;
+ 				break;
++			case 'o':
++				cf.output_file = optarg;
++				break;
+ 			case 'T':
+ 				x = atoi(optarg);
+ 				seen_t = true;
+@@ -1043,24 +1047,25 @@
+ 	fprintf(stderr, 
+ 	    "ApacheTop v%s - Usage:\n"
+ 	    "File options:\n"
+-	    "  -f logfile  open logfile (assumed common/combined) [%s]\n"
+-	    "              (repeat option for more than one source)\n"
++	    "  -f logfile   open logfile (assumed common/combined) [%s]\n"
++	    "               (repeat option for more than one source)\n"
++            "  -o outfile  output logfile\n"
+ 	    "\n"
+ 	    "URL/host/referrer munging options:\n"
+-	    "  -q          keep query strings [%s]\n"
+-	    "  -l          lowercase all URLs [%s]\n"
+-	    "  -s num      keep num path segments of URL [all]\n"
+-	    "  -p          preserve protocol at front of referrers [%s]\n"
+-	    "  -r          resolve hostnames/IPs into each other [%s]\n"
++	    "  -q           keep query strings [%s]\n"
++	    "  -l           lowercase all URLs [%s]\n"
++	    "  -s num       keep num path segments of URL [all]\n"
++	    "  -p           preserve protocol at front of referrers [%s]\n"
++	    "  -r           resolve hostnames/IPs into each other [%s]\n"
+ 	    "\n"
+ 	    "Stats options:\n"
+ 	    "  Supply up to one of the following two. default: [-%c %d]\n"
+-	    "  -H hits     remember stats for this many hits\n"
+-	    "  -T secs     remember stats for this many seconds\n"
++	    "  -H hits      remember stats for this many hits\n"
++	    "  -T secs      remember stats for this many seconds\n"
+ 	    "\n"
+-	    "  -d secs     refresh delay in seconds [%d]\n"
++	    "  -d secs      refresh delay in seconds [%d]\n"
+ 	    "\n"
+-	    "  -h          this help\n"
++	    "  -h           this help\n"
+ 	    "\n"
+ 	    "Compile Options: %cHAVE_KQUEUE %cHAVE_FAM %cENABLE_PCRE\n"
+ 	    "Polling Method: %s\n"
+Index: src/display.cc
+===================================================================
+--- src/display.cc	(revision 873)
++++ src/display.cc	(revision 874)
+@@ -22,6 +22,7 @@
+ extern itemlist *items;
+ extern map *last_display_map;
+ 
++FILE *outputFile;
+ 
+ bool display(time_t last_display) /* {{{ */
+ {
+@@ -174,11 +175,21 @@
+ 	move(0, 0);
+ 	clrtoeol();
+ 
++	if (cf.output_file != "") {
++        // Open the file.
++        outputFile = fopen (cf.output_file, "wt");
++	}
++
+ 	/* last hit */
+ 	secs_offset = gstats.alltime.last % 86400;
+ 	mvprintw(0, 0, "last hit: %02d:%02d:%02d",
+ 	  secs_offset / 3600, (secs_offset / 60) % 60, secs_offset % 60);
+ 	
++	if (cf.output_file != "") {
++        fprintf(outputFile, "last hit: %02d:%02d:%02d\n",
++          secs_offset / 3600, (secs_offset / 60) % 60, secs_offset % 60);
++	}
++
+ 	/* uptime */
+ 	diff = (unsigned int)difftime(now, gstats.start);
+ 	if (diff > 86399) diff -= ((d = diff / 86400)*86400);
+@@ -186,6 +197,9 @@
+ 	if (diff > 59) diff -= ((m = diff / 60)*60);
+ 	s = diff;
+ 	mvprintw(0, 27, "atop runtime: %2d days, %02d:%02d:%02d", d, h, m, s);
++	if (cf.output_file != "") {
++        fprintf(outputFile, "atop runtime: %2d days, %02d:%02d:%02d\n", d, h, m, s);
++	}
+ 
+ 	/* are we paused? */
+ 	if (cf.display_paused)
+@@ -197,6 +211,10 @@
+ 	secs_offset = now % 86400;
+ 	mvprintw(0, 71, "%02d:%02d:%02d",
+ 	  secs_offset /3600, (secs_offset/ 60) % 60, secs_offset % 60);
++	if (cf.output_file != "") {
++        fprintf(outputFile, "current time: %02d:%02d:%02d\n",
++          secs_offset /3600, (secs_offset/ 60) % 60, secs_offset % 60);
++	}
+ 
+ 
+ 	//All: 1,140,532 requests (39.45/sec),  999,540,593 bytes (857,235/sec) 
+@@ -215,6 +233,15 @@
+ 	  bps, bps_suffix,
+ 	  per_req, per_req_suffix);
+ 	attroff(A_BOLD);
++	if (cf.output_file != "") {
++        fprintf(outputFile,
++          "All: %12.0f reqs (%6.1f/sec)  %11.1f%c (%7.1f%c/sec)   %7.1f%c/req\n",
++          gstats.alltime.reqcount,
++          gstats.alltime.reqcount/ftmp,
++          bytes, bytes_suffix,
++          bps, bps_suffix,
++          per_req, per_req_suffix);
++	}
+ 
+ 
+ 	// 2xx 1,604,104 (95%) 3xx 1,000,000 ( 3%) 4xx 1,000,000 ( 1%) 
+@@ -244,6 +271,29 @@
+ 	 
+ 	);
+ 
++	if (cf.output_file != "") {
++        fprintf(outputFile,
++         "2xx: %7.0f (%4.*f%%) 3xx: %7.0f (%4.*f%%) "
++         "4xx: %5.0f (%4.*f%%) 5xx: %5.0f (%4.*f%%)\n",
++
++         gstats.r_codes[2].reqcount,
++         (gstats.r_codes[2].reqcount/ftmp) == 1 ? 0 : 1,
++         (gstats.r_codes[2].reqcount/ftmp)*100,
++
++         gstats.r_codes[3].reqcount,
++         (gstats.r_codes[3].reqcount/ftmp) == 1 ? 0 : 1,
++         (gstats.r_codes[3].reqcount/ftmp)*100,
++
++         gstats.r_codes[4].reqcount,
++         (gstats.r_codes[4].reqcount/ftmp) == 1 ? 0 : 1,
++         (gstats.r_codes[4].reqcount/ftmp)*100,
++
++         gstats.r_codes[5].reqcount,
++         (gstats.r_codes[5].reqcount/ftmp) == 1 ? 0 : 1,
++         (gstats.r_codes[5].reqcount/ftmp)*100
++        );
++	}
++
+ 	/* housecleaning on the circle, if its required in this class */
+ 	c->updatestats();
+ 	/* fetch the time of the first "recent" request */
+@@ -263,6 +313,16 @@
+ 	  per_req, per_req_suffix
+ 	);
+ 	attroff(A_BOLD);
++	if (cf.output_file != "") {
++        fprintf(outputFile,
++          "R (%3ds): %7.0f reqs (%6.1f/sec)  %11.1f%c (%7.1f%c/sec)   %7.1f%c/req\n",
++          itmp, c->getreqcount(),
++          ((float)c->getreqcount()/itmp),
++          bytes, bytes_suffix,
++          bps, bps_suffix,
++          per_req, per_req_suffix
++        );
++	}
+ 
+ 	ftmp = c->getsummary(2) + c->getsummary(3) +
+ 	       c->getsummary(4) + c->getsummary(5);
+@@ -286,6 +346,27 @@
+ 	 (c->getsummary(5)/ftmp) == 1 ? 0 : 1,
+ 	 (c->getsummary(5)/ftmp)*100
+ 	);
++	if (cf.output_file != "") {
++        fprintf(outputFile,
++          "R2xx: %6.0f (%4.*f%%) R3xx: %6.0f (%4.*f%%) "
++          "R4xx: %4.0f (%4.*f%%) R5xx: %4.0f (%4.*f%%)\n",
++         c->getsummary(2),
++         (c->getsummary(2)/ftmp) == 1 ? 0 : 1,
++         (c->getsummary(2)/ftmp)*100,
++
++         c->getsummary(3),
++         (c->getsummary(3)/ftmp) == 1 ? 0 : 1,
++         (c->getsummary(3)/ftmp)*100,
++
++         c->getsummary(4),
++         (c->getsummary(4)/ftmp) == 1 ? 0 : 1,
++         (c->getsummary(4)/ftmp)*100,
++
++         c->getsummary(5),
++         (c->getsummary(5)/ftmp) == 1 ? 0 : 1,
++         (c->getsummary(5)/ftmp)*100
++        );
++	}
+ 
+ //	mvprintw(5, 0,
+ //	    "Unique Objects:         Size Footprint:");
+@@ -315,6 +396,11 @@
+ 
+ 	}
+ 
++	if (cf.output_file != "") {
++        // Close the file.
++        fclose (outputFile);
++	}
++
+ } /* }}} */
+ 
+ void display_list() /* {{{ */
+Index: src/apachetop.h
+===================================================================
+--- src/apachetop.h	(revision 873)
++++ src/apachetop.h	(revision 874)
+@@ -138,6 +138,7 @@
+ 	short current_display_size; /* how many lines we're displaying */
+ 
+ 	short input_count;
++        char *output_file;
+ 
+ 	#define TIMED_CIRCLE 'T'
+ 	#define HITS_CIRCLE  'H'
