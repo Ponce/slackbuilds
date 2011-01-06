@@ -2,7 +2,7 @@
 
 # Slackware build script for XBMC
 
-# Copyright 2009-2010 Larry Hajali <larryhaja[at]gmail[dot]com>
+# Copyright 2009-2011 Larry Hajali <larryhaja[at]gmail[dot]com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,8 +23,8 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=xbmc
-VERSION=9.11
-BUILD=${BUILD:-2}
+VERSION=10.0
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -70,107 +70,85 @@ find . \
  -exec chmod 644 {} \;
 
 # Let's get rid of the lsb_release dependency.
-sed -i 's|/usr/bin/lsb_release -d|/bin/cat /etc/slackware-version|' \
+sed -i 's|lsb_release -d|cat /etc/slackware-version|' \
   xbmc/utils/SystemInfo.cpp
 
-# Fix a hardcoded python2.5 install path in the EventClients Makefile.
-PYVER=$(python -c 'import sys; print sys.version[:3]')
-sed -i "s|lib/python2.5|lib${LIBDIRSUFFIX}/python${PYVER}|g" \
-  tools/EventClients/Makefile
-
-# Patch to use XBMC's jpegint.h because of a missing header file in Slackware.
-# Fix lib64 compatibility.
-patch -p1 < $CWD/patches/jpegint_h.patch
-patch -p1 < $CWD/patches/xbmc-lib64.patch
-# Fixes from upstream not included in stable release.
-patch -p0 < $CWD/patches/fix-wrapper_c.patch
-patch -p0 < $CWD/patches/xbmc-9.11-wavpack.patch
-patch -p1 < $CWD/patches/xbmc-9.11-libpng14.patch
-patch -p1 < $CWD/patches/xbmc-9.11-use-cdio-system-headers-on-non-win32.patch
+# Fix for non-sse2 cpu's.
+if ! grep 'sse2' /proc/cpuinfo 2>&1 > /dev/null; then
+  patch -p1 < $CWD/patches/non-sse2-cpu.patch
+fi
 
 # Create configure scripts.
 [ ! -x bootstrap ] && chmod +x bootstrap
 ./bootstrap
 
-# XBMC doesn't use a consistent --libdir so we need to provide
-# some missing includes.
-EXTRA_INCLUDES="\
-  -I/usr/lib${LIBDIRSUFFIX}/dbus-1.0/include \
-  -I/usr/lib${LIBDIRSUFFIX}/glib-2.0/include \
-  -I/usr/include/SDL"
-
-# Here are some additional flags that can be manually added to configure
+# Here are some additional flags that can turned on in the script
 # so XBMC will use system libraries instead of shipped libraries.
 # --enable-external-ffmpeg	* to use system ffmpeg
 # --enable-external-liba52	* to use system liba52 library
 #				  comes with a52dec
 # --enable-external-libdts	* to use system DTS Coherent Acoustics decoder
-#				  also known as libdca
-# --enable-external-libmpeg2	* to use system mpeg-2 and mpeg-1 decoder
-# --enable-external-libass	* to use system subtitle renderer
-# --enable-external-python	* to use system python
+# --enable-external-python	* to use system python (On by default)
 # --enable-external-libraries	* to enable all optional system libraries
-ENABLE_OPTS="\
-  --enable-external-libogg \
-  --enable-external-libwavpack"
-[ "${EXT_FFMPEG:-no}" == "yes" ] && ENABLE_OPTS="$ENABLE_OPTS --enable-external-ffmpeg" \
-  SLKCFLAGS="$SLKCFLAGS -D__STDC_CONSTANT_MACROS" # Workaround for ffmpeg 0.6+
-[ "${EXT_A52DEC:-no}" == "yes" ] && ENABLE_OPTS="$ENABLE_OPTS --enable-external-liba52"
-[ "${EXT_DTS:-no}" == "yes" ] && ENABLE_OPTS="$ENABLE_OPTS --enable-external-libdts"
-[ "${EXT_MPEG2:-no}" == "yes" ] && ENABLE_OPTS="$ENABLE_OPTS --enable-external-libmpeg2"
-[ "${EXT_ASS:-no}" == "yes" ] && ENABLE_OPTS="$ENABLE_OPTS --enable-external-libass"
-[ "${EXT_PYTHON:-no}" == "yes" ] && ENABLE_OPTS="$ENABLE_OPTS --enable-external-python"
-[ "${EXT_ALL:-no}" == "yes" ] && ENABLE_OPTS="--enable-external-libraries" \
-  SLKCFLAGS="$SLKCFLAGS -D__STDC_CONSTANT_MACROS" # Workaround for ffmpeg 0.6+
+OPT_DEPS="--enable-external-python"
+[ "${EXT_FFMPEG:-no}" == "yes" ] && OPT_DEPS="$OPT_DEPS --enable-external-ffmpeg"
+[ "${EXT_A52DEC:-no}" == "yes" ] && OPT_DEPS="$OPT_DEPS --enable-external-liba52"
+[ "${EXT_DTS:-no}" == "yes" ] && OPT_DEPS="$OPT_DEPS --enable-external-libdts"
+[ "${EXT_ALL:-no}" == "yes" ] && OPT_DEPS="--enable-external-libraries"
 
-CFLAGS="$SLKCFLAGS $EXTRA_INCLUDES" \
-CXXFLAGS="$SLKCFLAGS $EXTRA_INCLUDES" \
+# Build webserver. Requires libmicrohttpd.
+if [ "${WEBSERVER:-no}" == "yes" ]; then
+  OPT_SERVER="--enable-webserver"
+else
+  OPT_SERVER="--disable-webserver"
+fi
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
-  --enable-vdpau \
-  --enable-xrandr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
   --enable-ccache \
   --disable-debug \
   --enable-gl \
-  --enable-faac \
   --enable-dvdcss \
   --enable-mid \
-  --enable-avahi \
-  --enable-joystick \
   --enable-goom \
-  $ENABLE_OPTS \
-  --build=$ARCH-slackware-linux
+  --enable-ffmpeg-libvorbis \
+  --disable-asap-codec \
+  $OPT_SERVER \
+  $OPT_DEPS \
+  --build=$ARCH-slackware-linux \
 
 make
 
 # Wii controller usage. Default is no.
 if ! [ "${USE_WII:-no}" = "no" ]; then
-  make eventclients prefix=$PKG/usr installdir=/usr WII_EXTRA_OPTS="-DCWIID_OLD"
+  make eventclients DESTDIR=$PKG WII_EXTRA_OPTS="-DCWIID_OLD"
 fi
 
-make install install-livedatas prefix=$PKG/usr
-
-# Fix executable permissions.
-chmod 0755 $PKG/usr/bin/*
+make install install-livedatas DESTDIR=$PKG
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 # Install manpages.
 mkdir -p $PKG/usr/man/man1
-install -m 0644 \
-  docs/manpages/{diskmounter,runXBMC,xbmc.bin,xbmc,xbmc-standalone,xbmc-send,setAlsaVolumes,installXBMC}.1 \
-  $PKG/usr/man/man1
+for i in diskmounter.1 runXBMC.1 xbmc.bin.1 xbmc.1 xbmc-standalone.1 xbmc-send.1 \
+  setAlsaVolumes.1 installXBMC.1
+do
+  install -D -m 0644 docs/manpages/$i $PKG/usr/man/man1/$i
+done
+
 if ! [ "${USE_WII:-no}" = "no" ]; then
-  install -m 0644 docs/manpages/{xbmc-j2meremote,xbmc-ps3remote,xbmc-wiiremote}.1 \
-    $PKG/usr/man/man1
+  for i in xbmc-j2meremote.1 xbmc-ps3remote.1 xbmc-wiiremote.1; do
+    install -D -m 0644 docs/manpages/$i $PKG/usr/man/man1/$i
+  done
 fi
 gzip -9 $PKG/usr/man/man?/*.?
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  copying.txt keymapping.txt LICENSE.GPL README.linux tools/EventClients/README.txt \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a tools/EventClients/README.txt $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 rm -f $PKG/usr/share/xbmc/{README.linux,LICENSE.GPL,*.txt}
 
