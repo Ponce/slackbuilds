@@ -2,7 +2,7 @@
 
 # Slackware build script for nvidia-legacy173-driver
 
-# Copyright 2007-2010 Heinz Wiesinger, Amsterdam, The Netherlands
+# Copyright 2007-2011 Heinz Wiesinger, Amsterdam, The Netherlands
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,7 +25,7 @@
 # Thanks to Robby Workman for suggestions to improve this script.
 
 PRGNAM=nvidia-legacy173-driver
-VERSION=173.14.27
+VERSION=173.14.28
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -43,12 +43,15 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
   TARGET="x86"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   TARGET="x86"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
   TARGET="x86_64"
   LIBDIRSUFFIX="64"
 else
@@ -63,6 +66,12 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
+rm -rf nvidia-installer-1.0.7
+tar xvf $CWD/nvidia-installer-$VERSION.tar.gz
+rm -rf nvidia-settings-1.0
+tar xvf $CWD/nvidia-settings-$VERSION.tar.gz
+rm -rf nvidia-xconfig-1.0
+tar xvf $CWD/nvidia-xconfig-$VERSION.tar.gz
 rm -rf $SRCNAM
 sh $CWD/$SRCNAM.run --extract-only
 cd $SRCNAM
@@ -70,7 +79,8 @@ chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
 
 mkdir -p $PKG/usr/{bin,share,lib$LIBDIRSUFFIX,sbin} $PKG/usr/include/GL \
-  $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/{drivers,extensions}
+  $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/{drivers,extensions} \
+  $PKG/usr/man/man1
 
 # Start with the libraries
 cd usr/lib
@@ -103,19 +113,13 @@ cd usr/include/GL
 cd -
 
 # Next come the apps
-cp -a nvidia-installer $PKG/usr/bin/
-cd usr/bin
-  for i in nvidia*; do
-    cp -a $i $PKG/usr/bin/
-  done
-cd -
+cp -a usr/bin/nvidia-bug-report.sh $PKG/usr/bin/
 
 # XDG stuff
 cd usr/share
   for i in applications pixmaps; do
     cp -a $i $PKG/usr/share/
   done
-  cp -a man* $PKG/usr/
 cd -
 
 # symlinks
@@ -136,12 +140,67 @@ cd $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules
   ln -sf libnvidia-wfb.so.$VERSION libnvidia-wfb.so.1
 cd -
 
+# Compiling nvidia-installer from source
+cd $TMP/nvidia-installer-1.0.7
+  chown -R root:root .
+  chmod -R u+w,go+r-w,a-s .
+
+  CFLAGS="$SLKCFLAGS" \
+  LDFLAGS="-lz" \
+  make
+
+  install -m 755 nvidia-installer $PKG/usr/bin/
+  install -m 644 nvidia-installer.1 $PKG/usr/man/man1/
+cd -
+
+# Compiling nvidia-settings from source
+cd $TMP/nvidia-settings-1.0
+  chown -R root:root .
+  chmod -R u+w,go+r-w,a-s .
+
+  # Fix missing include necessary for newer version of libXxf86vm
+  patch -p1 -i $CWD/NvCtrlAttributesVidMode.diff
+
+  # Slackware doesn't ship a static libXxf86vm, so we link against the shared one
+  sed -i "s|-Wl,-Bstatic -lXxf86vm -Wl,-Bdynamic|-Wl,-Bdynamic -lXxf86vm|" \
+    Makefile
+
+  cd src/libXNVCtrl
+    make clean
+    CFLAGS="$SLKCFLAGS" \
+    make
+  cd ../../
+
+  CFLAGS="$SLKCFLAGS" \
+  NV_CFLAGS="$SLKCFLAGS" \
+  X11_LIB_DIRS="-L/usr/lib$LIBDIRSUFFIX" \
+  make
+
+  install -m 755 nvidia-settings $PKG/usr/bin/
+  install -m 644 doc/nvidia-settings.1 $PKG/usr/man/man1/
+cd ../
+
+# Compiling nvidia-xconfig from source
+cd $TMP/nvidia-xconfig-1.0
+  chown -R root:root .
+  chmod -R u+w,go+r-w,a-s .
+
+  NV_CFLAGS="$SLKCFLAGS" \
+  make
+
+  install -m 755 nvidia-xconfig $PKG/usr/bin/
+  install -m 644 nvidia-xconfig.1 $PKG/usr/man/man1/
+cd -
+
 # Self written bash script which I use to switch between nvidia and nv.
 # It is now also used by doinst.sh to switch to the nvidia-driver right
 # after installation.
 install -m 0755 $CWD/nvidia-switch $PKG/usr/sbin/
 sed -i s/PKGVERSION/$VERSION/g $PKG/usr/sbin/nvidia-switch
 sed -i s/LIBDIRSUFFIX/$LIBDIRSUFFIX/g $PKG/usr/sbin/nvidia-switch
+
+# Compress man-pages
+find $PKG/usr/man -type f -exec gzip -9 {} \;
 
 # These correct wrong paths
 sed -i "s|__LIBGL_PATH__|/usr/lib$LIBDIRSUFFIX/|" $PKG/usr/lib$LIBDIRSUFFIX/libGL.la
