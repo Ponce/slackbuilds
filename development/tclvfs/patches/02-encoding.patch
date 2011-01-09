@@ -1,0 +1,179 @@
+Patch by Sergei Golovan (initially by Victor Wagner taken from
+http://sourceforge.net/tracker/index.php?func=detail&aid=1011498&group_id=32692&atid=406308)
+fixes -encoding and -eofchar of files opened on VFS.
+
+Probably, the patch is incomplete for mk4fs with ::mk4vfs::zstreamed set to 1.
+
+--- tclvfs-1.3-20080503.orig/library/ftpvfs.tcl
++++ tclvfs-1.3-20080503/library/ftpvfs.tcl
+@@ -133,10 +133,13 @@
+ 	    ftp::Get $fd $name -variable tmp
+ 
+ 	    set filed [vfs::memchan]
++	    set encoding [fconfigure $filed -encoding]
++	    set eofchar [fconfigure $filed -eofchar]
++	    set translation [fconfigure $filed -translation]
+ 	    fconfigure $filed -translation binary
+ 	    puts -nonewline $filed $tmp
+ 
+-	    fconfigure $filed -translation auto
++	    fconfigure $filed -translation $translation -encoding $encoding -eofchar $eofchar
+ 	    seek $filed 0
+ 	    return [list $filed]
+ 	}
+--- tclvfs-1.3-20080503.orig/library/httpvfs.tcl
++++ tclvfs-1.3-20080503/library/httpvfs.tcl
+@@ -357,11 +357,14 @@
+ 	"r" {
+ 	    set token [geturl "$dirurl$urlname" -headers $headers]
+ 	    set filed [vfs::memchan]
++	    set encoding [fconfigure $filed -encoding]
++	    set eofchar [fconfigure $filed -eofchar]
++	    set translation [fconfigure $filed -translation]
+ 	    fconfigure $filed -translation binary
+ 	    puts -nonewline $filed [::http::data $token]
+ 	    http::cleanup $token
+ 
+-	    fconfigure $filed -translation auto
++	    fconfigure $filed -translation $translation -encoding $encoding -eofchar $eofchar
+ 	    seek $filed 0
+ 	    # XXX: the close command should free vfs::memchan somehow??
+ 	    return [list $filed]
+--- tclvfs-1.3-20080503.orig/library/tclprocvfs.tcl
++++ tclvfs-1.3-20080503/library/tclprocvfs.tcl
+@@ -84,9 +84,12 @@
+ 	"" -
+ 	"r" {
+ 	    set nfd [vfs::memchan]
++	    set encoding [fconfigure $nfd -encoding]
++	    set eofchar [fconfigure $nfd -eofchar]
++	    set translation [fconfigure $nfd -translation]
+ 	    fconfigure $nfd -translation binary
+ 	    puts -nonewline $nfd [_generate ::${ns}::${name}]
+-	    fconfigure $nfd -translation auto
++	    fconfigure $nfd -translation $translation -encoding $encoding -eofchar $eofchar
+ 	    seek $nfd 0
+ 	    return [list $nfd]
+ 	}
+--- tclvfs-1.3-20080503.orig/library/webdavvfs.tcl
++++ tclvfs-1.3-20080503/library/webdavvfs.tcl
+@@ -153,8 +153,12 @@
+ 	    upvar #0 $token state
+ 
+ 	    set filed [vfs::memchan]
++	    set encoding [fconfigure $filed -encoding]
++	    set eofchar [fconfigure $filed -eofchar]
++	    set translation [fconfigure $filed -translation]
+             fconfigure $filed -encoding binary -translation binary
+ 	    puts -nonewline $filed [::http::data $token]
++	    fconfigure $filed -translation $translation -encoding $encoding -eofchar $eofchar
+ 	    seek $filed 0
+ 	    ::http::cleanup $token
+ 	    return [list $filed]
+--- tclvfs-1.3-20080503.orig/library/tkvfs.tcl
++++ tclvfs-1.3-20080503/library/tkvfs.tcl
+@@ -72,9 +72,12 @@
+ 	"" -
+ 	"r" {
+ 	    set nfd [vfs::memchan]
++	    set encoding [fconfigure $nfd -encoding]
++	    set eofchar [fconfigure $nfd -eofchar]
++	    set translation [fconfigure $nfd -translation]
+ 	    fconfigure $nfd -translation binary
+ 	    puts -nonewline $nfd [_generate ${widg}.${name}]
+-	    fconfigure $nfd -translation auto
++	    fconfigure $nfd -translation $translation -encoding $encoding -eofchar $eofchar
+ 	    seek $nfd 0
+ 	    return [list $nfd]
+ 	}
+--- tclvfs-1.3-20080503.orig/library/tarvfs.tcl
++++ tclvfs-1.3-20080503/library/tarvfs.tcl
+@@ -107,6 +107,9 @@
+ 	    ::tar::stat $tarfd $name sb
+ 	    
+ 	    set nfd [vfs::memchan]
++	    set encoding [fconfigure $nfd -encoding]
++	    set eofchar [fconfigure $nfd -eofchar]
++	    set translation [fconfigure $nfd -translation]
+ 	    fconfigure $nfd -translation binary
+ 	    
+ 	    # get the starting point from structure
+@@ -115,7 +118,7 @@
+ 	    
+ 	    puts -nonewline $nfd $data
+ 	    
+-	    fconfigure $nfd -translation auto
++	    fconfigure $nfd -translation $translation -encoding $encoding -eofchar $eofchar
+ 	    seek $nfd 0
+ 	    return [list $nfd]
+ 	}
+--- tclvfs-1.3-20080503.orig/library/zipvfs.tcl
++++ tclvfs-1.3-20080503/library/zipvfs.tcl
+@@ -108,6 +108,9 @@
+ 	    ::zip::stat $zipfd $name sb
+ 
+ 	    set nfd [vfs::memchan]
++	    set encoding [fconfigure $nfd -encoding]
++	    set eofchar [fconfigure $nfd -eofchar]
++	    set translation [fconfigure $nfd -translation]
+ 	    fconfigure $nfd -translation binary
+ 
+ 	    seek $zipfd $sb(ino) start
+@@ -115,7 +118,7 @@
+ 
+ 	    puts -nonewline $nfd $data
+ 
+-	    fconfigure $nfd -translation auto
++	    fconfigure $nfd -translation $translation -encoding $encoding -eofchar $eofchar
+ 	    seek $nfd 0
+ 	    return [list $nfd]
+ 	}
+--- tclvfs-1.3-20080503.orig/library/mk4vfs.tcl
++++ tclvfs-1.3-20080503/library/mk4vfs.tcl
+@@ -183,19 +183,25 @@
+ 		      set fd [vfs::zstream decompress $fd $sb(csize) $sb(size)]
+ 		    } else {
+ 		      set fd [vfs::memchan]
++		      set encoding [fconfigure $fd -encoding]
++		      set eofchar [fconfigure $fd -eofchar]
++		      set translation [fconfigure $fd -translation]
+ 		      fconfigure $fd -translation binary
+ 		      set s [mk::get $sb(ino) contents]
+ 		      puts -nonewline $fd [vfs::zip -mode decompress $s]
+ 
+-		      fconfigure $fd -translation auto
++		      fconfigure $fd -translation $translation -encoding $encoding -eofchar $eofchar
+ 		      seek $fd 0
+ 		    }
+ 		} elseif { $::mk4vfs::direct } {
+ 		    set fd [vfs::memchan]
++		    set encoding [fconfigure $fd -encoding]
++		    set eofchar [fconfigure $fd -eofchar]
++		    set translation [fconfigure $fd -translation]
+ 		    fconfigure $fd -translation binary
+ 		    puts -nonewline $fd [mk::get $sb(ino) contents]
+ 
+-		    fconfigure $fd -translation auto
++		    fconfigure $fd -translation $translation -encoding $encoding -eofchar $eofchar
+ 		    seek $fd 0
+ 		} else {
+ 		    set fd [mk::channel $sb(ino) contents r]
+@@ -226,6 +232,9 @@
+ 		}
+ 
+ 		set fd [vfs::memchan]
++		set encoding [fconfigure $fd -encoding]
++		set eofchar [fconfigure $fd -eofchar]
++		set translation [fconfigure $fd -translation]
+ 		fconfigure $fd -translation binary
+ 		set s [mk::get $sb(ino) contents]
+ 
+@@ -237,7 +246,7 @@
+ 		    puts -nonewline $fd $s
+ 		    #set fd [mk::channel $sb(ino) contents a]
+ 		}
+-		fconfigure $fd -translation auto
++		fconfigure $fd -translation $translation -encoding $encoding -eofchar $eofchar
+ 		seek $fd 0 end
+ 		return [list $fd [list mk4vfs::do_close $db $fd $mode $sb(ino)]]
+ 	    }
