@@ -1,0 +1,158 @@
+Index: src/coolkey/coolkey.cpp
+===================================================================
+RCS file: /cvs/dirsec/coolkey/src/coolkey/coolkey.cpp,v
+retrieving revision 1.2
+diff -u -r1.2 coolkey.cpp
+--- src/coolkey/coolkey.cpp	14 Feb 2007 19:54:01 -0000	1.2
++++ src/coolkey/coolkey.cpp	18 Dec 2009 23:22:58 -0000
+@@ -42,7 +42,9 @@
+ 
+ static SlotList *slotList = NULL;
+ 
+-static OSLock finalizeLock(false);
++static OSLock *finalizeLock = NULL;
++#define FINALIZE_GETLOCK() if (finalizeLock) finalizeLock->getLock();
++#define FINALIZE_RELEASELOCK() if (finalizeLock) finalizeLock->releaseLock();
+ 
+ static CK_BBOOL initialized = FALSE;
+ static CK_BBOOL finalizing = FALSE;
+@@ -208,11 +210,13 @@
+     if( initialized ) {
+         return CKR_CRYPTOKI_ALREADY_INITIALIZED;
+     }
+-    if (!finalizeLock.isValid()) {
++    if (finalizeLock && !finalizeLock->isValid()) {
+ 	return CKR_CANT_LOCK;
+     }
+     CK_C_INITIALIZE_ARGS* initArgs = (CK_C_INITIALIZE_ARGS*) pInitArgs;
++    OSLock::setThreadSafe(0);
+     if( initArgs != NULL ) {
++	bool needThreads;
+ 	/* work around a bug in NSS where the library parameters are only
+ 	 * send if locking is requested */
+ 	if (initArgs->LibraryParameters) {
+@@ -220,7 +224,17 @@
+ 	} else {
+ 	    Params::ClearParams();
+ 	}
+-        if( (initArgs->flags & CKF_OS_LOCKING_OK) || initArgs->LockMutex ){
++  	needThreads = ((initArgs->flags & CKF_OS_LOCKING_OK) != 0);
++	OSLock::setThreadSafe(needThreads);
++	/* don't get a finalize lock unless someone initializes us asking
++	 * us to use threads */
++	if (needThreads && !finalizeLock) {
++	    finalizeLock = new OSLock(true);
++	    if (finalizeLock == NULL) return CKR_HOST_MEMORY;
++	}
++	/* only support OS LOCKING threads */
++        if( ((initArgs->flags & CKF_OS_LOCKING_OK) == 0) 
++						&& initArgs->LockMutex ){
+             throw PKCS11Exception(CKR_CANT_LOCK);
+         }
+     }
+@@ -259,9 +273,9 @@
+     // the finalizing call first, we know it will set waitEvent before
+     // we can get the lock, so we only need to protect setting finalizing
+     // to true.
+-    finalizeLock.getLock();
++    FINALIZE_GETLOCK();
+     finalizing = TRUE;
+-    finalizeLock.releaseLock();
++    FINALIZE_RELEASELOCK();
+     if (waitEvent) {
+ 	/* we're waiting on a slot event, shutdown first to allow
+ 	 * the wait function to complete before we pull the rug out.
+@@ -273,10 +287,10 @@
+     } 
+     delete slotList;
+     delete log;
+-    finalizeLock.getLock();
++    FINALIZE_GETLOCK();
+     finalizing = FALSE;
+     initialized = FALSE;
+-    finalizeLock.releaseLock();
++    FINALIZE_RELEASELOCK();
+     return CKR_OK;
+ }
+ 
+@@ -595,17 +609,17 @@
+ CK_RV
+ C_WaitForSlotEvent(CK_FLAGS flags, CK_SLOT_ID_PTR pSlot, CK_VOID_PTR pReserved)
+ {
+-    finalizeLock.getLock();
++    FINALIZE_GETLOCK();
+     if( ! initialized ) {
+-        finalizeLock.releaseLock();
++	FINALIZE_RELEASELOCK();
+         return CKR_CRYPTOKI_NOT_INITIALIZED;
+     }
+     if (finalizing) {
+-        finalizeLock.releaseLock();
++	FINALIZE_RELEASELOCK();
+         return CKR_CRYPTOKI_NOT_INITIALIZED;
+     }
+     waitEvent = TRUE;
+-    finalizeLock.releaseLock();
++    FINALIZE_RELEASELOCK();
+     try {
+         log->log("C_WaitForSlotEvent called\n");
+         slotList->waitForSlotEvent(flags, pSlot, pReserved);
+Index: src/coolkey/machdep.cpp
+===================================================================
+RCS file: /cvs/dirsec/coolkey/src/coolkey/machdep.cpp,v
+retrieving revision 1.7
+diff -u -r1.7 machdep.cpp
+--- src/coolkey/machdep.cpp	14 Feb 2008 23:48:19 -0000	1.7
++++ src/coolkey/machdep.cpp	18 Dec 2009 23:22:58 -0000
+@@ -37,6 +37,8 @@
+ #include <stdlib.h>
+ #endif
+ 
++bool OSLock::needThread = 0;
++
+ #ifdef _WIN32
+ //
+ // Windows functions to grab a named shared memory segment of a specific size,
+@@ -123,6 +125,10 @@
+ 
+ OSLock::OSLock(bool exceptionAllowed)
+ {
++    if (!needThread) {
++	lockData = NULL;
++	return;
++    }
+     lockData = new OSLockData;
+     if (lockData) {
+ 	InitializeCriticalSection(&lockData->mutex);
+@@ -360,6 +366,9 @@
+     int rc;
+ 
+     lockData = NULL;
++    if (!needThread) {
++	return;
++    }
+ #ifdef MAC
+     if (!OSLock_attr_init) {
+ 	rc = pthread_mutexattr_init(&OSLock_attr);
+Index: src/coolkey/machdep.h
+===================================================================
+RCS file: /cvs/dirsec/coolkey/src/coolkey/machdep.h,v
+retrieving revision 1.1
+diff -u -r1.1 machdep.h
+--- src/coolkey/machdep.h	9 Jun 2006 18:39:11 -0000	1.1
++++ src/coolkey/machdep.h	18 Dec 2009 23:22:58 -0000
+@@ -40,12 +40,14 @@
+ class OSLock {
+ private:
+    OSLockData *lockData;
++   static bool needThread;
+ public:
+    OSLock(bool exceptionAllowed = true);
+    ~OSLock();
+    bool isValid();
+    void getLock();
+    void releaseLock();
++   static void setThreadSafe(bool thread) { needThread = thread; }
+ };
+ 
+ typedef unsigned long OSTime;

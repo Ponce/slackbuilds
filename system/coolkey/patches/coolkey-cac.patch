@@ -1,0 +1,1013 @@
+diff -up ./src/coolkey/slot.cpp.cac ./src/coolkey/slot.cpp
+--- ./src/coolkey/slot.cpp.cac	2010-06-16 13:43:51.477181000 -0700
++++ ./src/coolkey/slot.cpp	2010-06-16 13:43:51.535179000 -0700
+@@ -372,7 +372,7 @@ Slot::Slot(const char *readerName_, Log 
+     : log(log_), readerName(NULL), personName(NULL), manufacturer(NULL),
+ 	slotInfoFound(false), context(context_), conn(NULL), state(UNKNOWN), 
+ 	isVersion1Key(false), needLogin(false), fullTokenName(false), 
+-	mCoolkey(false),
++	mCoolkey(false), mOldCAC(false),
+ #ifdef USE_SHMEM
+ 	shmem(readerName_),
+ #endif
+@@ -412,6 +412,9 @@ Slot::Slot(const char *readerName_, Log 
+     }
+     CKYBuffer_InitEmpty(&cardATR);
+     CKYBuffer_InitEmpty(&mCUID);
++    for (int i=0; i < MAX_CERT_SLOTS; i++) {
++	CKYBuffer_InitEmpty(&cardAID[i]);
++    }
+   } catch(PKCS11Exception &) {
+ 	if (conn) {
+ 	    CKYCardConnection_Destroy(conn);
+@@ -479,6 +482,9 @@ Slot::~Slot()
+     CKYBuffer_FreeData(&nonce);
+     CKYBuffer_FreeData(&cardATR);
+     CKYBuffer_FreeData(&mCUID);
++    for (int i=0; i < MAX_CERT_SLOTS; i++) {
++	CKYBuffer_FreeData(&cardAID[i]);
++    }
+ }
+ 
+ template <class C>
+@@ -671,15 +677,9 @@ Slot::connectToToken()
+     status = CKYApplet_SelectCoolKeyManager(conn, NULL);
+     if (status != CKYSUCCESS) {
+         log->log("CoolKey Select failed 0x%x\n", status);
+-	status = CACApplet_SelectPKI(conn, 0, NULL);
++	status = getCACAid();
+ 	if (status != CKYSUCCESS) {
+-            log->log("CAC Select failed 0x%x\n", status);
+-	    if (status == CKYSCARDERR) {
+-		log->log("CAC Card Failure 0x%x\n", 
+-			CKYCardConnection_GetLastError(conn));
+-		disconnect();
+-	    }
+-	    return;
++	    goto loser;
+ 	}
+ 	state |= CAC_CARD | APPLET_SELECTABLE | APPLET_PERSONALIZED;
+ 	/* skip the read of the cuid. We really don't need it and,
+@@ -690,6 +690,15 @@ Slot::connectToToken()
+ 	needLogin = 1;
+         mCoolkey = 0;
+ 	return;
++
++loser:
++        log->log("CAC Select failed 0x%x\n", status);
++	if (status == CKYSCARDERR) {
++	    log->log("CAC Card Failure 0x%x\n", 
++			CKYCardConnection_GetLastError(conn));
++	    disconnect();
++	}
++	return;
+     }
+     mCoolkey = 1;
+     log->log("time connect: Select Applet %d ms\n", OSTimeNow() - time);
+@@ -771,17 +780,111 @@ Slot::disconnect()
+     invalidateLogin(false);
+ }
+ 
++CKYStatus
++Slot::getCACAid()
++{
++    CKYBuffer tBuf;
++    CKYBuffer vBuf;
++    CKYSize tlen, vlen;
++    CKYOffset toffset, voffset;
++    int certSlot = 0;
++    int i,length = 0;
++    CKYStatus status;
++
++    CKYBuffer_InitEmpty(&tBuf);
++    CKYBuffer_InitEmpty(&vBuf);
++
++    /* clear out the card AID's */
++    for (i=0; i < MAX_CERT_SLOTS; i++) {
++	CKYBuffer_Resize(&cardAID[i],0);
++    }
++
++    status = CACApplet_SelectCCC(conn,NULL);
++    if (status != CKYSUCCESS) {
++	/* are we an old CAC */
++	status = CACApplet_SelectPKI(conn, &cardAID[0], 0, NULL);
++	if (status != CKYSUCCESS) {
++	   /* no, just fail */
++	   return status;
++	}
++	/* yes, fill in the old applets */
++	mOldCAC = true;
++	for (i=1; i< MAX_CERT_SLOTS; i++) {
++	    CACApplet_SelectPKI(conn, &cardAID[i], i, NULL);
++	}
++	return CKYSUCCESS;
++    }
++    /* definately not an old CAC */
++    mOldCAC = false;
++
++    /* read the TLV */
++    status = CACApplet_ReadFile(conn, CAC_TAG_FILE, &tBuf, NULL);
++    if (status != CKYSUCCESS) {
++	goto done;
++    }
++    status = CACApplet_ReadFile(conn, CAC_VALUE_FILE, &vBuf, NULL);
++    if (status != CKYSUCCESS) {
++	goto done;
++    }
++    tlen = CKYBuffer_Size(&tBuf);
++    vlen = CKYBuffer_Size(&vBuf);
++
++    for(toffset = 2, voffset=2; 
++	certSlot < MAX_CERT_SLOTS && toffset < tlen && voffset < vlen ; 
++		voffset += length) {
++
++	CKYByte tag = CKYBuffer_GetChar(&tBuf, toffset);
++	length = CKYBuffer_GetChar(&tBuf, toffset+1);
++	toffset += 2;
++	if (length == 0xff) {
++	    length = CKYBuffer_GetShortLE(&tBuf, toffset);
++	    toffset +=2;
++	}
++	if (tag != CAC_TAG_CARDURL) {
++	    continue;
++	}
++	/* CARDURL tags must be at least 10 bytes long */
++	if (length < 10) {
++	    continue;
++	}
++	/* check the app type, should be TLV_APP_PKI */
++	if (CKYBuffer_GetChar(&vBuf, voffset+5) != CAC_TLV_APP_PKI) {
++	    continue;
++	}
++	status = CKYBuffer_AppendBuffer(&cardAID[certSlot], &vBuf, voffset, 5);
++	if (status != CKYSUCCESS) {
++	    goto done;
++	}
++	status = CKYBuffer_AppendBuffer(&cardAID[certSlot], &vBuf, 
++								voffset+8, 2);
++	if (status != CKYSUCCESS) {
++	    goto done;
++	}
++	cardEF[certSlot] = CKYBuffer_GetShortLE(&vBuf, voffset+6);
++
++	certSlot++;
++    }
++    status = CKYSUCCESS;
++    if (certSlot == 0) {
++	status = CKYAPDUFAIL; /* probably neeed a beter error code */
++    }
++
++done:
++    CKYBuffer_FreeData(&tBuf);
++    CKYBuffer_FreeData(&vBuf);
++    return status;
++}
++
+ void
+ Slot::refreshTokenState()
+ {
+     if( cardStateMayHaveChanged() ) {
+-log->log("card changed\n");
++        log->log("card changed\n");
+ 	invalidateLogin(true);
+         closeAllSessions();
+ 	unloadObjects();
+         connectToToken();
+ 
+-
+         if( state & APPLET_PERSONALIZED ) {
+             try {
+                 loadObjects();
+@@ -1019,7 +1122,7 @@ Slot::makeModelString(char *model, int m
+ 
+ struct _manList {
+      unsigned short type;
+-     char *string;
++     const char *string;
+ };
+ 
+ static const struct _manList  manList[] = {
+@@ -1280,13 +1383,30 @@ void
+ Slot::selectCACApplet(CKYByte instance)
+ {
+     CKYStatus status;
+-    status = CACApplet_SelectPKI(conn, instance, NULL);
++    CKYBuffer *aid = &cardAID[instance];
++
++    if (CKYBuffer_Size(aid) == 0) {
++        disconnect();
++        throw PKCS11Exception(CKR_DEVICE_REMOVED);
++	return;
++    }
++    
++    status = CKYApplet_SelectFile(conn, aid, NULL);
+     if ( status == CKYSCARDERR ) handleConnectionError();
+     if ( status != CKYSUCCESS) {
+         // could not select applet: this just means it's not there
+         disconnect();
+         throw PKCS11Exception(CKR_DEVICE_REMOVED);
+     }
++    if (mOldCAC) {
++	return;
++    }
++    status = CACApplet_SelectFile(conn, cardEF[instance], NULL);
++    if ( status == CKYSCARDERR ) handleConnectionError();
++    if ( status != CKYSUCCESS) {
++        disconnect();
++        throw PKCS11Exception(CKR_DEVICE_REMOVED);
++    }
+ }
+ // assume we are already in a transaction
+ void
+@@ -2059,10 +2179,85 @@ Slot::fetchCombinedObjects(const CKYBuff
+     return objInfoList;
+ }
+ 
++CKYStatus
++Slot::readCACCertificateFirst(CKYBuffer *cert, CKYSize *nextSize, 
++			      bool throwException)
++{
++    CKYStatus status;
++    CKYISOStatus apduRC;
++
++    if (mOldCAC) {
++	/* get the first 100 bytes of the cert */
++	status = CACApplet_GetCertificateFirst(conn, cert, nextSize, &apduRC);
++	if (throwException && (status != CKYSUCCESS)) {
++	    handleConnectionError();
++	}
++	return status;
++    }
++
++    CKYBuffer tBuf;
++    CKYBuffer vBuf;
++    CKYSize tlen, vlen;
++    CKYOffset toffset, voffset;
++    int length = 0;
++
++    CKYBuffer_InitEmpty(&tBuf);
++    CKYBuffer_InitEmpty(&vBuf);
++    CKYBuffer_Resize(cert, 0);
++
++    /* handle the new CAC card read */
++    /* read the TLV */
++    status = CACApplet_ReadFile(conn, CAC_TAG_FILE, &tBuf, NULL);
++    if (status != CKYSUCCESS) {
++	goto done;
++    }
++    status = CACApplet_ReadFile(conn, CAC_VALUE_FILE, &vBuf, NULL);
++    if (status != CKYSUCCESS) {
++	goto done;
++    }
++    tlen = CKYBuffer_Size(&tBuf);
++    vlen = CKYBuffer_Size(&vBuf);
++
++    /* look for the Cert out of the TLV */
++    for(toffset = 2, voffset=2; toffset < tlen && voffset < vlen ; 
++		voffset += length) {
++
++	CKYByte tag = CKYBuffer_GetChar(&tBuf, toffset);
++	length = CKYBuffer_GetChar(&tBuf, toffset+1);
++	toffset += 2;
++	if (length == 0xff) {
++	    length = CKYBuffer_GetShortLE(&tBuf, toffset);
++	    toffset +=2;
++	}
++	if (tag != CAC_TAG_CERTIFICATE) {
++	    continue;
++	}
++	CKYBuffer_AppendBuffer(cert, &vBuf, voffset, length);
++	break;
++    }
++    status = CKYSUCCESS;
++
++done:
++    CKYBuffer_FreeData(&tBuf);
++    CKYBuffer_FreeData(&vBuf);
++    return status;
++}
++
++/*
++ * only necessary for old CAC cards. New CAC cards have to read the
++ * whole cert in anyway above....
++ */
++CKYStatus
++Slot::readCACCertificateAppend(CKYBuffer *cert, CKYSize nextSize)
++{
++    CKYISOStatus apduRC;
++    assert(mOldCAC);
++    return CACApplet_GetCertificateAppend(conn, cert, nextSize, &apduRC);
++}
++
+ void
+ Slot::loadCACCert(CKYByte instance)
+ {
+-    CKYISOStatus apduRC;
+     CKYStatus status = CKYSUCCESS;
+     CKYBuffer cert;
+     CKYBuffer rawCert;
+@@ -2097,12 +2292,7 @@ Slot::loadCACCert(CKYByte instance)
+ 						 instance, OSTimeNow() - time);
+ 
+     if (instance == 0) {
+-	/* get the first 100 bytes of the cert */
+-	status = CACApplet_GetCertificateFirst(conn, &rawCert, 
+-						&nextSize, &apduRC);
+-	if (status != CKYSUCCESS) {
+-	    handleConnectionError();
+-	}
++	readCACCertificateFirst(&rawCert, &nextSize, true);
+ 	log->log("CAC Cert %d: fetch CAC Cert:  %d ms\n", 
+ 						instance, OSTimeNow() - time);
+     }
+@@ -2143,8 +2333,7 @@ Slot::loadCACCert(CKYByte instance)
+ 	    shmem.setVersion(SHMEM_VERSION);
+ 	    shmem.setDataVersion(dataVersion);
+ 	} else {
+-	    status = CACApplet_GetCertificateFirst(conn, &rawCert, 
+-						&nextSize, &apduRC);
++	    status = readCACCertificateFirst(&rawCert, &nextSize, false);
+ 	
+ 	    if (status != CKYSUCCESS) {
+ 		/* CAC only requires the Certificate in pki '0' */
+@@ -2159,8 +2348,7 @@ Slot::loadCACCert(CKYByte instance)
+ 	}
+ 
+ 	if (nextSize) {
+-	    status = CACApplet_GetCertificateAppend(conn, &rawCert, 
+-						nextSize, &apduRC);
++	    status = readCACCertificateAppend(&rawCert, nextSize);
+ 	}
+ 	log->log("CAC Cert %d: Fetch rest :  %d ms\n", 
+ 						instance, OSTimeNow() - time);
+@@ -2176,9 +2364,10 @@ Slot::loadCACCert(CKYByte instance)
+ 
+     log->log("CAC Cert %d: Cert has been read:  %d ms\n",
+ 						instance, OSTimeNow() - time);
+-    if (CKYBuffer_GetChar(&rawCert,0) == 1) {
++    if (!mOldCAC || CKYBuffer_GetChar(&rawCert,0) == 1) {
+ 	CKYSize guessFinalSize = CKYBuffer_Size(&rawCert);
+ 	CKYSize certSize = 0;
++	CKYOffset offset = mOldCAC ? 1 : 0;
+ 	int zret = Z_MEM_ERROR;
+ 
+ 	do {
+@@ -2189,7 +2378,8 @@ Slot::loadCACCert(CKYByte instance)
+ 	    }
+ 	    certSize = guessFinalSize;
+ 	    zret = uncompress((Bytef *)CKYBuffer_Data(&cert),&certSize,
+-			CKYBuffer_Data(&rawCert)+1, CKYBuffer_Size(&rawCert)-1);
++			CKYBuffer_Data(&rawCert)+offset, 
++			CKYBuffer_Size(&rawCert)-offset);
+ 	} while (zret == Z_BUF_ERROR);
+ 
+ 	if (zret != Z_OK) {
+@@ -2526,7 +2716,7 @@ Slot::attemptCACLogin()
+     switch( result ) {
+       case CKYISO_SUCCESS:
+         break;
+-      case 6981:
++      case 0x6981:
+         throw PKCS11Exception(CKR_PIN_LOCKED);
+       default:
+ 	if ((result & 0xff00) == 0x6300) {
+diff -up ./src/coolkey/slot.h.cac ./src/coolkey/slot.h
+--- ./src/coolkey/slot.h.cac	2010-06-16 13:43:51.344185000 -0700
++++ ./src/coolkey/slot.h	2010-06-16 13:43:51.546179000 -0700
+@@ -294,6 +294,7 @@ class CryptParams {
+ 				 const CKYBuffer *paddedOutput) const = 0;
+ };
+ 
++#define MAX_CERT_SLOTS 3
+ class Slot {
+ 
+   public:
+@@ -328,6 +329,8 @@ class Slot {
+     CKYBuffer nonce;
+     CKYBuffer cardATR;
+     CKYBuffer mCUID;
++    CKYBuffer cardAID[MAX_CERT_SLOTS];
++    unsigned short cardEF[MAX_CERT_SLOTS];
+     bool isVersion1Key;
+     bool needLogin;
+     long publicFree;
+@@ -335,6 +338,7 @@ class Slot {
+     long privateFree;
+     bool fullTokenName;
+     bool mCoolkey;
++    bool mOldCAC;
+ 
+     //enum { RW_SESSION_HANDLE = 1, RO_SESSION_HANDLE = 2 };
+ 
+@@ -398,6 +402,11 @@ class Slot {
+     list<ListObjectInfo> fetchCombinedObjects(const CKYBuffer *header);
+     list<ListObjectInfo> fetchSeparateObjects();
+ 
++    CKYStatus getCACAid();
++    CKYStatus readCACCertificateFirst(CKYBuffer *cert, CKYSize *nextSize,
++                              bool throwException);
++    CKYStatus readCACCertificateAppend(CKYBuffer *cert, CKYSize nextSize);
++
+     void selectApplet();
+     void selectCACApplet(CKYByte instance);
+     void unloadObjects();
+diff -up ./src/libckyapplet/cky_applet.c.cac ./src/libckyapplet/cky_applet.c
+--- ./src/libckyapplet/cky_applet.c.cac	2010-06-16 13:43:51.357181000 -0700
++++ ./src/libckyapplet/cky_applet.c	2010-06-16 14:47:41.305529000 -0700
+@@ -41,7 +41,13 @@
+ CKYStatus
+ CKYAppletFactory_SelectFile(CKYAPDU *apdu, const void *param)
+ {
+-    return CKYAPDUFactory_SelectFile(apdu,(const CKYBuffer *)param);
++    return CKYAPDUFactory_SelectFile(apdu, 4, 0, (const CKYBuffer *)param);
++}
++
++CKYStatus
++CACAppletFactory_SelectFile(CKYAPDU *apdu, const void *param)
++{
++    return CKYAPDUFactory_SelectFile(apdu, 2, 12, (const CKYBuffer *)param);
+ }
+ 
+ CKYStatus
+@@ -225,10 +231,17 @@ CKYAppletFactory_GetBuiltinACL(CKYAPDU *
+ }
+ 
+ CKYStatus
+-CACAppletFactory_SignDecrypt(CKYAPDU *apdu, const void *param)
++CACAppletFactory_SignDecryptStep(CKYAPDU *apdu, const void *param)
++{
++    const CKYBuffer *buf=(CKYBuffer *)param;
++    return CACAPDUFactory_SignDecrypt(apdu, CAC_P1_STEP, buf);
++}
++
++CKYStatus
++CACAppletFactory_SignDecryptFinal(CKYAPDU *apdu, const void *param)
+ {
+     const CKYBuffer *buf=(CKYBuffer *)param;
+-    return CACAPDUFactory_SignDecrypt(apdu, buf);
++    return CACAPDUFactory_SignDecrypt(apdu, CAC_P1_FINAL, buf);
+ }
+ 
+ CKYStatus
+@@ -246,6 +259,13 @@ CACAppletFactory_GetCertificate(CKYAPDU 
+ }
+ 
+ CKYStatus
++CACAppletFactory_ReadFile(CKYAPDU *apdu, const void *param)
++{
++    const CACAppletArgReadFile *rfs = (const CACAppletArgReadFile *)param;
++    return CACAPDUFactory_ReadFile(apdu, rfs->offset, rfs->type, rfs->count);
++}
++
++CKYStatus
+ CACAppletFactory_GetProperties(CKYAPDU *apdu, const void *param)
+ {
+     return CACAPDUFactory_GetProperties(apdu);
+@@ -457,7 +477,7 @@ CKYApplet_SelectFile(CKYCardConnection *
+ 							 CKYISOStatus *apduRC)
+ {
+     return CKYApplet_HandleAPDU(conn, CKYAppletFactory_SelectFile, AID, NULL,
+-		0, CKYAppletFill_Null, NULL, apduRC);
++		CKY_SIZE_UNKNOWN, CKYAppletFill_Null, NULL, apduRC);
+ }
+ 
+ static CKYByte coolkeyid[] = {0x62, 0x76, 0x01, 0xff, 0x00, 0x00, 0x00 };
+@@ -477,22 +497,23 @@ CKYApplet_SelectCoolKeyManager(CKYCardCo
+     return ret;
+ }
+ 
+-static CKYByte CACPKIid[] = {0xa0, 0x00, 0x00, 0x00, 0x79, 0x01, 0x00 };
++static CKYByte CACPKIid[] = { 0xa0, 0x00, 0x00, 0x00, 0x79, 0x01 };
+ /*
+  * Select the CoolKey applet. Must happen after we start a transaction and 
+  * before we issue any applet specific command.
+  */
+ CKYStatus
+-CACApplet_SelectPKI(CKYCardConnection *conn, CKYByte instance, 
+-			       CKYISOStatus *apduRC)
++CACApplet_SelectPKI(CKYCardConnection *conn, CKYBuffer *cacAID, 
++				CKYByte instance, CKYISOStatus *apduRC)
+ {
+     CKYStatus ret;
+-    CKYBuffer CACPKIAID;
+-    CKYBuffer_InitFromData(&CACPKIAID, CACPKIid, sizeof(CACPKIid));
+-    CKYBuffer_SetChar(&CACPKIAID, 6, instance);
+-    ret = CKYApplet_HandleAPDU(conn, CKYAppletFactory_SelectFile, &CACPKIAID,
++    CKYBuffer_AppendData(cacAID, CACPKIid, sizeof(CACPKIid));
++    CKYBuffer_AppendChar(cacAID, instance);
++    ret = CKYApplet_HandleAPDU(conn, CKYAppletFactory_SelectFile, cacAID,
+ 		 NULL, CKY_SIZE_UNKNOWN, CKYAppletFill_Null, NULL, apduRC);
+-    CKYBuffer_FreeData(&CACPKIAID);
++    if (ret != CKYSUCCESS) {
++	CKYBuffer_Resize(cacAID, 0);
++    }
+     return ret;
+ }
+ 
+@@ -515,11 +536,38 @@ CACApplet_SelectCardManager(CKYCardConne
+     CKYBuffer CAC_CM_AID;
+     CKYBuffer_InitFromData(&CAC_CM_AID, cacmgrid, sizeof(cacmgrid));
+     ret = CKYApplet_HandleAPDU(conn, CKYAppletFactory_SelectFile, &CAC_CM_AID,
+-		 NULL, 0, CKYAppletFill_Null, NULL, apduRC);
++		 NULL, CKY_SIZE_UNKNOWN, CKYAppletFill_Null, NULL, apduRC);
+     CKYBuffer_FreeData(&CAC_CM_AID);
+     return ret;
+ }
+ 
++static CKYByte cacCCCid[] = {0xa0, 0x00, 0x00, 0x01, 0x16, 0xdb, 0x00 };
++CKYStatus
++CACApplet_SelectCCC(CKYCardConnection *conn, CKYISOStatus *apduRC)
++{
++    CKYStatus ret;
++    CKYBuffer CAC_CM_AID;
++    CKYBuffer_InitFromData(&CAC_CM_AID, cacCCCid, sizeof(cacCCCid));
++    ret = CKYApplet_HandleAPDU(conn, CKYAppletFactory_SelectFile, &CAC_CM_AID,
++		 NULL, CKY_SIZE_UNKNOWN, CKYAppletFill_Null, NULL, apduRC);
++    CKYBuffer_FreeData(&CAC_CM_AID);
++    return ret;
++}
++
++CKYStatus
++CACApplet_SelectFile(CKYCardConnection *conn, unsigned short ef,
++						 CKYISOStatus *apduRC)
++{
++    CKYStatus ret;
++    CKYBuffer efBuf;
++    CKYBuffer_InitEmpty(&efBuf);
++    CKYBuffer_AppendShortLE(&efBuf, ef);
++    ret = CKYApplet_HandleAPDU(conn, CACAppletFactory_SelectFile, &efBuf,
++		 NULL, CKY_SIZE_UNKNOWN, CKYAppletFill_Null, NULL, apduRC);
++    CKYBuffer_FreeData(&efBuf);
++    return ret;
++}
++
+ /*
+  * GetCPLC cluster -- must be called with CM selected
+  */
+@@ -673,8 +721,8 @@ CKYApplet_ComputeCryptProcess(CKYCardCon
+     ccd.keyNumber = keyNumber;
+     ccd.location = location;
+     ccd.data = data;
+-    return CKYApplet_HandleAPDU(conn, CKYAppletFactory_ComputeCryptProcess, &ccd,
+-	nonce, 0, CKYAppletFill_Null, NULL, apduRC);
++    return CKYApplet_HandleAPDU(conn, CKYAppletFactory_ComputeCryptProcess, 
++	&ccd, nonce, 0, CKYAppletFill_Null, NULL, apduRC);
+ }
+ 
+ /* computeCrypt returns data in the form :
+@@ -832,11 +880,39 @@ CACApplet_SignDecrypt(CKYCardConnection 
+ 	 	CKYBuffer *result, CKYISOStatus *apduRC)
+ {
+     CKYStatus ret;
+-
+-    ret = CKYApplet_HandleAPDU(conn, 
+-			    CACAppletFactory_SignDecrypt, data, NULL, 
+-			    CKYBuffer_Size(data), CKYAppletFill_ReplaceBuffer, 
++    CKYSize dataSize = CKYBuffer_Size(data);
++    CKYOffset offset = 0;
++    CKYBuffer tmp;
++
++    CKYBuffer_InitEmpty(&tmp);
++
++    CKYBuffer_Resize(result, 0);
++    for(offset = 0; (dataSize-offset) > CKY_MAX_WRITE_CHUNK_SIZE; 
++				offset += CKY_MAX_WRITE_CHUNK_SIZE) {
++	CKYBuffer_Resize(&tmp,0);
++	CKYBuffer_AppendBuffer(&tmp, data, offset, CKY_MAX_WRITE_CHUNK_SIZE);
++        ret = CKYApplet_HandleAPDU(conn, CACAppletFactory_SignDecryptStep, 
++			    &tmp, NULL, CKY_SIZE_UNKNOWN, 
++			    CKYAppletFill_AppendBuffer, 
+ 			    result, apduRC);
++	if (ret != CKYSUCCESS) {
++	    goto done;
++	}
++    }
++    CKYBuffer_Resize(&tmp,0);
++    CKYBuffer_AppendBuffer(&tmp, data, offset, dataSize - offset);
++    ret = CKYApplet_HandleAPDU(conn, CACAppletFactory_SignDecryptFinal, 
++			    &tmp, NULL, CKY_SIZE_UNKNOWN, 
++			    CKYAppletFill_AppendBuffer, 
++			    result, apduRC);
++
++    if ((ret == CKYSUCCESS) && (CKYBuffer_Size(result) != dataSize)) {
++	/* RSA returns the same data size as input, didn't happen, so
++	 * something is wrong. */
++    }
++
++done:
++    CKYBuffer_FreeData(&tmp);
+     return ret;
+ }
+ 
+@@ -895,6 +971,63 @@ CACApplet_GetCertificate(CKYCardConnecti
+     }
+     return ret;
+ }
++
++/*
++ * Read a CAC Tag/Value file 
++ */
++CKYStatus
++CACApplet_ReadFile(CKYCardConnection *conn, CKYByte type, CKYBuffer *buffer, 
++		    CKYISOStatus *apduRC)
++{
++    CKYStatus ret;
++    CKYISOStatus status;
++    CKYByte maxtransfer;
++    unsigned short offset = 0;
++    unsigned short size;
++    CACAppletArgReadFile rfs;
++
++    CKYBuffer_Resize(buffer,0);
++    if (apduRC == NULL) {
++	apduRC = &status;
++    }
++    rfs.offset = 0;
++    rfs.count = 2;
++    rfs.type = type;
++
++    /* APDU's are expensive, Grab a big chunk of the file first if possible */
++    ret = CKYApplet_HandleAPDU(conn, 
++			    CACAppletFactory_ReadFile, &rfs, NULL, 
++			    rfs.count, CKYAppletFill_AppendBuffer,
++			    buffer, apduRC);
++    /* file is probably smaller than 100 bytes, get the actual size first */
++    if (ret != CKYSUCCESS) {
++	return ret;
++    }
++    size = CKYBuffer_GetShortLE(buffer, 0) + 2 /* include the length itself */;
++    maxtransfer = CKY_MAX_READ_CHUNK_SIZE;
++    /* get the rest of the buffer if necessary */
++    for (offset = CKYBuffer_Size(buffer); size > offset; 
++				offset = CKYBuffer_Size(buffer)) {
++	rfs.offset = offset;
++	rfs.count = MIN(size - offset, maxtransfer);
++	ret = CKYApplet_HandleAPDU(conn, 
++			    CACAppletFactory_ReadFile, &rfs, NULL, 
++			    rfs.count, CKYAppletFill_AppendBuffer,
++			    buffer, apduRC);
++	if (ret != CKYSUCCESS) {
++	    if (*apduRC == CAC_INVALID_PARAMS) {
++		maxtransfer = maxtransfer/2;
++		if (maxtransfer == 0) {
++		    return ret;
++		}
++	    } else {
++		return ret;
++	    }
++ 	}
++    }
++    return ret;
++}
++
+ CKYStatus 
+ CACApplet_GetCertificateFirst(CKYCardConnection *conn, CKYBuffer *cert, 
+ 			CKYSize *nextSize, CKYISOStatus *apduRC)
+diff -up ./src/libckyapplet/cky_applet.h.cac ./src/libckyapplet/cky_applet.h
+--- ./src/libckyapplet/cky_applet.h.cac	2010-06-16 13:43:51.370181000 -0700
++++ ./src/libckyapplet/cky_applet.h	2010-06-16 13:43:51.572179000 -0700
+@@ -71,6 +71,15 @@ typedef unsigned short CKYISOStatus; /* 
+ #define CKYISO_INTERNAL_ERROR        0x9cff  /* Reserved for debugging, 
+ 					     * shouldn't happen */
+ 
++#define CAC_INVALID_PARAMS	    0x6a83
++#define CAC_TAG_FILE			1
++#define CAC_VALUE_FILE			2
++
++
++#define CAC_TAG_CARDURL			0xf3
++#define CAC_TAG_CERTIFICATE		0x70
++#define CAC_TLV_APP_PKI			0x04
++
+ /*
+  * Pin Constants as used by our applet
+  */
+@@ -209,6 +218,12 @@ typedef struct _CKYAppletArgComputeCrypt
+     const CKYBuffer *sig;
+ } CKYAppletArgComputeCrypt;
+ 
++typedef struct _CACAppletArgReadFile {
++    CKYByte   type;
++    CKYByte   count;
++    unsigned short offset;
++} CACAppletArgReadFile;
++
+ /* fills in an APDU from a structure -- form of all the generic factories*/
+ typedef CKYStatus (*CKYAppletFactory)(CKYAPDU *apdu, const void *param);
+ /* fills in an a structure from a response -- form of all the fill structures*/
+@@ -451,9 +466,17 @@ CKYStatus CKYApplet_DeleteObject(CKYCard
+ /* Select the CAC card manager.  Can happen with either applet selected */
+ CKYStatus CACApplet_SelectCardManager(CKYCardConnection *conn, 
+ 							CKYISOStatus *apduRC);
+-/* Can happen with either applet selected */
+-CKYStatus CACApplet_SelectPKI(CKYCardConnection *conn, CKYByte instance,
+-			      CKYISOStatus *apduRC);
++/* Select the CAC CC container. Can happen with either applet selected */
++CKYStatus CACApplet_SelectCCC(CKYCardConnection *conn, CKYISOStatus *apduRC);
++/* Select an old CAC applet and fill in the cardAID */
++CKYStatus CACApplet_SelectPKI(CKYCardConnection *conn, CKYBuffer *cardAid,
++			      CKYByte instance, CKYISOStatus *apduRC);
++/* read a TLV file */
++CKYStatus CACApplet_ReadFile(CKYCardConnection *conn, CKYByte type, 
++			     CKYBuffer *buffer, CKYISOStatus *apduRC);
++CKYStatus CACApplet_SelectFile(CKYCardConnection *conn, unsigned short ef,
++			     CKYISOStatus *apduRC);
++
+ /* must happen with PKI applet selected */
+ CKYStatus CACApplet_SignDecrypt(CKYCardConnection *conn, const CKYBuffer *data,
+ 		CKYBuffer *result, CKYISOStatus *apduRC);
+diff -up ./src/libckyapplet/cky_base.c.cac ./src/libckyapplet/cky_base.c
+--- ./src/libckyapplet/cky_base.c.cac	2006-06-09 11:44:17.000000000 -0700
++++ ./src/libckyapplet/cky_base.c	2010-06-16 13:43:51.583179000 -0700
+@@ -220,6 +220,22 @@ CKYBuffer_AppendShort(CKYBuffer *buf, un
+     return CKYSUCCESS;
+ }
+ 
++/* append a short in network order */
++CKYStatus
++CKYBuffer_AppendShortLE(CKYBuffer *buf, unsigned short val)
++{
++    CKYStatus ret;
++
++    ret = CKYBuffer_Reserve(buf, buf->len + 2);
++    if (ret != CKYSUCCESS) {
++	return ret;
++    }
++    buf->data[buf->len+1] = (CKYByte) ((val >> 8) & 0xff);
++    buf->data[buf->len+0] = (CKYByte) ((val >> 0) & 0xff);
++    buf->len += 2;
++    return CKYSUCCESS;
++}
++
+ /* append a long in applet order */
+ CKYStatus
+ CKYBuffer_AppendLong(CKYBuffer *buf, unsigned long val)
+@@ -238,6 +254,24 @@ CKYBuffer_AppendLong(CKYBuffer *buf, uns
+     return CKYSUCCESS;
+ }
+ 
++/* append a long in applet order */
++CKYStatus
++CKYBuffer_AppendLongLE(CKYBuffer *buf, unsigned long val)
++{
++    CKYStatus ret;
++
++    ret = CKYBuffer_Reserve(buf, buf->len + 4);
++    if (ret != CKYSUCCESS) {
++	return ret;
++    }
++    buf->data[buf->len+3] = (CKYByte) ((val >> 24) & 0xff);
++    buf->data[buf->len+2] = (CKYByte) ((val >> 16) & 0xff);
++    buf->data[buf->len+1] = (CKYByte) ((val >>  8) & 0xff);
++    buf->data[buf->len+0] = (CKYByte) ((val >>  0) & 0xff);
++    buf->len += 4;
++    return CKYSUCCESS;
++}
++
+ CKYStatus
+ CKYBuffer_Replace(CKYBuffer *buf, CKYOffset offset, const CKYByte *data, CKYSize len)
+ {
+@@ -351,6 +385,22 @@ CKYBuffer_SetShort(CKYBuffer *buf, CKYOf
+ }
+ 
+ CKYStatus
++CKYBuffer_SetShortLE(CKYBuffer *buf, CKYOffset offset, unsigned short val)
++{
++    CKYStatus ret;
++
++    if (buf->len < offset+2) {
++	ret = CKYBuffer_Resize(buf,offset+2);
++	if (ret != CKYSUCCESS) {
++	    return ret;
++	}
++    }
++    buf->data[offset+1] = (CKYByte) ((val >> 8) & 0xff);
++    buf->data[offset+0] = (CKYByte) ((val >> 0) & 0xff);
++    return CKYSUCCESS;
++}
++
++CKYStatus
+ CKYBuffer_SetLong(CKYBuffer *buf, CKYOffset offset, unsigned long val)
+ {
+     CKYStatus ret;
+@@ -368,6 +418,24 @@ CKYBuffer_SetLong(CKYBuffer *buf, CKYOff
+     return CKYSUCCESS;
+ }
+ 
++CKYStatus
++CKYBuffer_SetLongLE(CKYBuffer *buf, CKYOffset offset, unsigned long val)
++{
++    CKYStatus ret;
++
++    if (buf->len < offset+4) {
++	ret = CKYBuffer_Resize(buf,offset+4);
++	if (ret != CKYSUCCESS) {
++	    return ret;
++	}
++    }
++    buf->data[offset+3] = (CKYByte) ((val >> 24) & 0xff);
++    buf->data[offset+2] = (CKYByte) ((val >> 16) & 0xff);
++    buf->data[offset+1] = (CKYByte) ((val >>  8) & 0xff);
++    buf->data[offset+0] = (CKYByte) ((val >>  0) & 0xff);
++    return CKYSUCCESS;
++}
++
+ CKYByte
+ CKYBuffer_GetChar(const CKYBuffer *buf, CKYOffset offset)
+ {
+@@ -388,6 +456,18 @@ CKYBuffer_GetShort(const CKYBuffer *buf,
+     val |= ((unsigned short)buf->data[offset+1]) << 0;
+     return val;
+ }
++
++unsigned short
++CKYBuffer_GetShortLE(const CKYBuffer *buf, CKYOffset offset)
++{
++    unsigned short val;
++    if (buf->len < offset+2) {
++	return 0;
++    }
++    val  = ((unsigned short)buf->data[offset+1]) << 8;
++    val |= ((unsigned short)buf->data[offset+0]) << 0;
++    return val;
++}
+ 	
+ unsigned long
+ CKYBuffer_GetLong(const CKYBuffer *buf, CKYOffset offset)
+@@ -402,6 +482,20 @@ CKYBuffer_GetLong(const CKYBuffer *buf, 
+     val |= ((unsigned long)buf->data[offset+3]) << 0;
+     return val;
+ }
++
++unsigned long
++CKYBuffer_GetLongLE(const CKYBuffer *buf, CKYOffset offset)
++{
++    unsigned long val;
++    if (buf->len < offset+4) {
++	return 0;
++    }
++    val  = ((unsigned long)buf->data[offset+3]) << 24;
++    val |= ((unsigned long)buf->data[offset+2]) << 16;
++    val |= ((unsigned long)buf->data[offset+1]) << 8;
++    val |= ((unsigned long)buf->data[offset+0]) << 0;
++    return val;
++}
+ 	
+ CKYStatus
+ CKYBuffer_Resize(CKYBuffer *buf, CKYSize newLen)
+diff -up ./src/libckyapplet/cky_base.h.cac ./src/libckyapplet/cky_base.h
+--- ./src/libckyapplet/cky_base.h.cac	2006-06-09 11:44:17.000000000 -0700
++++ ./src/libckyapplet/cky_base.h	2010-06-16 13:43:51.592179000 -0700
+@@ -170,9 +170,15 @@ CKYStatus CKYBuffer_AppendChar(CKYBuffer
+ /* append a short in applet order */
+ CKYStatus CKYBuffer_AppendShort(CKYBuffer *buf, unsigned short val);
+ 
++/* append a short in little endian order */
++CKYStatus CKYBuffer_AppendShortLE(CKYBuffer *buf, unsigned short val);
++
+ /* append a long in applet order */
+ CKYStatus CKYBuffer_AppendLong(CKYBuffer *buf, unsigned long val);
+ 
++/* append a long in little endian order */
++CKYStatus CKYBuffer_AppendLongLE(CKYBuffer *buf, unsigned long val);
++
+ /* append data. the data starts at data and extends len bytes */
+ CKYStatus CKYBuffer_AppendData(CKYBuffer *buf, const CKYByte *data, CKYSize len);
+ 
+@@ -210,12 +216,18 @@ CKYStatus CKYBuffer_SetChars(CKYBuffer *
+ CKYStatus CKYBuffer_SetShort(CKYBuffer *buf, CKYOffset offset, unsigned short val);
+ CKYStatus CKYBuffer_SetLong(CKYBuffer *buf, CKYOffset offset, unsigned long val);
+ 
++/* These functions work in little endian order */
++CKYStatus CKYBuffer_SetShortLE(CKYBuffer *buf, CKYOffset offset, unsigned short val);
++CKYStatus CKYBuffer_SetLongLE(CKYBuffer *buf, CKYOffset offset, unsigned long val);
+ /* read a character from offset. If offset is beyond the end of the buffer,
+  * then the function returns '0' */
+ CKYByte CKYBuffer_GetChar(const CKYBuffer *buf, CKYOffset offset);
+ /* These functions work in applet order */
+ unsigned short CKYBuffer_GetShort(const CKYBuffer *buf, CKYOffset offset);
+ unsigned long CKYBuffer_GetLong(const CKYBuffer *buf, CKYOffset offset);
++/* These functions work in little endian order */
++unsigned short CKYBuffer_GetShortLE(const CKYBuffer *buf, CKYOffset offset);
++unsigned long CKYBuffer_GetLongLE(const CKYBuffer *buf, CKYOffset offset);
+ 
+ /* clear out all the data in a buffer */
+ void CKYBuffer_Zero(CKYBuffer *buf);
+diff -up ./src/libckyapplet/cky_factory.c.cac ./src/libckyapplet/cky_factory.c
+--- ./src/libckyapplet/cky_factory.c.cac	2010-06-16 13:43:51.393185000 -0700
++++ ./src/libckyapplet/cky_factory.c	2010-06-16 14:48:08.885473000 -0700
+@@ -25,12 +25,13 @@
+  * special commands can be issued at any time 
+  */
+ CKYStatus
+-CKYAPDUFactory_SelectFile(CKYAPDU *apdu, const CKYBuffer *AID)
++CKYAPDUFactory_SelectFile(CKYAPDU *apdu, CKYByte p1, CKYByte p2,
++			  const CKYBuffer *AID)
+ {
+     CKYAPDU_SetCLA(apdu, CKY_CLASS_ISO7816);
+     CKYAPDU_SetINS(apdu, CKY_INS_SELECT_FILE);
+-    CKYAPDU_SetP1(apdu, 0x04);
+-    CKYAPDU_SetP2(apdu, 0x00);
++    CKYAPDU_SetP1(apdu, p1);
++    CKYAPDU_SetP2(apdu, p2);
+     return CKYAPDU_SetSendDataBuffer(apdu, AID);
+ }
+ 
+@@ -131,6 +132,7 @@ fail:
+     return ret;
+ }
+ 
++
+ CKYStatus
+ CKYAPDUFactory_ComputeCryptFinal(CKYAPDU *apdu, CKYByte keyNumber, 
+ 		CKYByte location, const CKYBuffer *data, const CKYBuffer *sig)
+@@ -572,11 +574,11 @@ CKYAPDUFactory_GetBuiltinACL(CKYAPDU *ap
+ }
+ 
+ CKYStatus
+-CACAPDUFactory_SignDecrypt(CKYAPDU *apdu, const CKYBuffer *data)
++CACAPDUFactory_SignDecrypt(CKYAPDU *apdu, CKYByte type, const CKYBuffer *data)
+ {
+     CKYAPDU_SetCLA(apdu, CKY_CLASS_ISO7816);
+     CKYAPDU_SetINS(apdu, CAC_INS_SIGN_DECRYPT);
+-    CKYAPDU_SetP1(apdu, 0x00);
++    CKYAPDU_SetP1(apdu, type);
+     CKYAPDU_SetP2(apdu, 0x00);
+     return CKYAPDU_SetSendDataBuffer(apdu, data);
+ }
+@@ -592,6 +594,36 @@ CACAPDUFactory_GetCertificate(CKYAPDU *a
+ }
+ 
+ CKYStatus
++CACAPDUFactory_ReadFile(CKYAPDU *apdu, unsigned short offset, 	
++					CKYByte type, CKYByte count)
++{
++    CKYStatus ret;
++    CKYBuffer buf;
++
++    CKYBuffer_InitEmpty(&buf);
++    CKYAPDU_SetCLA(apdu, CKY_CLASS_GLOBAL_PLATFORM);
++    CKYAPDU_SetINS(apdu, CAC_INS_READ_FILE);
++    CKYAPDU_SetP1(apdu, (offset >> 8) & 0xff);
++    CKYAPDU_SetP2(apdu, offset & 0xff);
++    ret = CKYBuffer_Reserve(&buf, 2);
++    if (ret != CKYSUCCESS) {
++	    goto fail;
++    }
++    ret = CKYBuffer_AppendChar(&buf, type);
++    if (ret != CKYSUCCESS) {
++	    goto fail;
++    }
++    ret = CKYBuffer_AppendChar(&buf, count);
++    if (ret != CKYSUCCESS) {
++	    goto fail;
++    } 
++    ret = CKYAPDU_SetSendDataBuffer(apdu, &buf);
++fail:
++    CKYBuffer_FreeData(&buf);
++    return ret;
++}
++
++CKYStatus
+ CACAPDUFactory_GetProperties(CKYAPDU *apdu)
+ {
+     CKYAPDU_SetCLA(apdu, CKY_CLASS_ISO7816);
+diff -up ./src/libckyapplet/cky_factory.h.cac ./src/libckyapplet/cky_factory.h
+--- ./src/libckyapplet/cky_factory.h.cac	2010-06-16 13:43:51.402181000 -0700
++++ ./src/libckyapplet/cky_factory.h	2010-06-16 14:43:20.867049000 -0700
+@@ -86,7 +86,11 @@
+ #define CAC_INS_SIGN_DECRYPT	0x42
+ #define CAC_INS_VERIFY_PIN	0x20
+ #define CAC_INS_GET_PROPERTIES	0x56
++#define CAC_INS_READ_FILE	0x52
++
+ #define CAC_SIZE_GET_PROPERTIES	48
++#define CAC_P1_STEP		0x80
++#define CAC_P1_FINAL		0x00
+ 
+ /*
+  * Fixed return sized from various commands
+@@ -169,7 +173,8 @@
+ CKY_BEGIN_PROTOS
+ 
+ /* function based factorys */
+-CKYStatus CKYAPDUFactory_SelectFile(CKYAPDU *apdu, const CKYBuffer *AID);
++CKYStatus CKYAPDUFactory_SelectFile(CKYAPDU *apdu, CKYByte p1, CKYByte p2,
++				    const CKYBuffer *AID);
+ CKYStatus CKYAPDUFactory_SelectCardManager(CKYAPDU *apdu);
+ CKYStatus CKYAPDUFactory_GetCPLCData(CKYAPDU *apdu);
+ CKYStatus CKYAPDUFactory_ListKeys(CKYAPDU *apdu, CKYByte sequence);
+@@ -211,9 +216,12 @@ CKYStatus CKYAPDUFactory_SeedRandom(CKYA
+ CKYStatus CKYAPDUFactory_GetIssuerInfo(CKYAPDU *apdu);
+ CKYStatus CKYAPDUFactory_GetBuiltinACL(CKYAPDU *apdu);
+ 
+-CKYStatus CACAPDUFactory_SignDecrypt(CKYAPDU *apdu, const CKYBuffer *data);
++CKYStatus CACAPDUFactory_SignDecrypt(CKYAPDU *apdu, CKYByte type, 
++				     const CKYBuffer *data);
+ CKYStatus CACAPDUFactory_VerifyPIN(CKYAPDU *apdu, const char *pin);
+ CKYStatus CACAPDUFactory_GetCertificate(CKYAPDU *apdu, CKYSize size);
++CKYStatus CACAPDUFactory_ReadFile(CKYAPDU *apdu, unsigned short offset, 
++				  CKYByte type, CKYByte count);
+ CKYStatus CACAPDUFactory_GetProperties(CKYAPDU *apdu);
+ 
+ CKY_END_PROTOS

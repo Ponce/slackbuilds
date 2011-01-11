@@ -1,0 +1,685 @@
+diff -up ./src/coolkey/slot.cpp.coolkey-latest ./src/coolkey/slot.cpp
+--- ./src/coolkey/slot.cpp.coolkey-latest	2009-09-11 13:58:24.423487305 -0700
++++ ./src/coolkey/slot.cpp	2009-09-11 14:04:30.813488220 -0700
+@@ -203,6 +203,29 @@ SlotList::readerExists(const char *reade
+     return FALSE;
+ }
+ 
++bool
++SlotList::readerNameExistsInList(const char *readerName,CKYReaderNameList *readerNameList)
++{
++    if( !readerName || !readerNameList) {
++        return FALSE;
++    }
++
++    int i = 0;
++    int readerNameCnt = CKYReaderNameList_GetCount(*readerNameList);
++
++    const char *curReaderName = NULL;
++    for(i=0; i < readerNameCnt; i++) {
++        curReaderName = CKYReaderNameList_GetValue(*readerNameList,i);
++
++        if(!strcmp(curReaderName,readerName)) {
++            return TRUE;
++        }
++        
++    }
++    
++    return FALSE;
++}
++
+ /*
+  * you need to hold the ReaderList Lock before you can update the ReaderList
+  */
+@@ -256,6 +279,27 @@ SlotList::updateReaderList()
+      * don't recognize.
+      */
+ 
++    /* first though, let's check to see if any previously removed readers have 
++     * come back from the dead. If the ignored bit has been set, we do not need
++     * it any more.
++    */
++
++    const char *curReaderName = NULL;
++    unsigned long knownState = 0;
++    for(int ri = 0 ; ri < numReaders; ri ++)  {
++       
++        knownState = CKYReader_GetKnownState(&readerStates[ri]);
++        if( !(knownState & SCARD_STATE_IGNORE))  {
++            continue;
++        }
++ 
++        curReaderName =  CKYReader_GetReaderName(&readerStates[ri]); 
++        if(readerNameExistsInList(curReaderName,&readerNames)) {
++            CKYReader_SetKnownState(&readerStates[ri], knownState & ~SCARD_STATE_IGNORE); 
++                 
++        }
++    } 
++
+     const char *newReadersData[MAX_READER_DELTA];
+     const char **newReaders = &newReadersData[0];
+     unsigned int newReaderCount = 0;
+@@ -528,7 +572,7 @@ SlotList::getSlotList(CK_BBOOL tokenPres
+ void
+ Slot::connectToToken()
+ {
+-    CKYStatus status;
++    CKYStatus status = CKYSCARDERR;
+     OSTime time = OSTimeNow();
+ 
+     mCoolkey = 0;
+@@ -537,13 +581,31 @@ Slot::connectToToken()
+ 
+     // try to connect to the card
+     if( ! CKYCardConnection_IsConnected(conn) ) {
+-        status = CKYCardConnection_Connect(conn, readerName);
+-        if( status != CKYSUCCESS ) {
+-            log->log("Unable to connect to token\n");
++        int i = 0;
++    //for cranky readers try again a few more times
++        while( i++ < 5 && status != CKYSUCCESS )
++        {
++            status = CKYCardConnection_Connect(conn, readerName);
++            if( status != CKYSUCCESS && 
++                CKYCardConnection_GetLastError(conn) == SCARD_E_PROTO_MISMATCH ) 
++            {
++                log->log("Unable to connect to token status %d ConnGetGetLastError %x .\n",status,CKYCardConnection_GetLastError(conn));
++
++            }
++            else
++            {
++                break;
++            }
++            OSSleep(100000);
++        }
++
++        if( status != CKYSUCCESS)
++        {
+             state = UNKNOWN;
+             return;
+         }
+     }
++
+     log->log("time connect: Connect Time %d ms\n", OSTimeNow() - time);
+     if (!slotInfoFound) {
+ 	readSlotInfo();
+@@ -562,15 +624,10 @@ Slot::connectToToken()
+         state = CARD_PRESENT;
+     }
+ 
+-    if ( CKYBuffer_DataIsEqual(&cardATR, ATR, sizeof (ATR)) || 
+-		CKYBuffer_DataIsEqual(&cardATR, ATR1, sizeof(ATR1)) ||
+-		CKYBuffer_DataIsEqual(&cardATR, ATR2, sizeof(ATR2)) ) {
+-
+-        if (Params::hasParam("noAppletOK"))
+-        {      
+-            state |=  APPLET_SELECTABLE;
+-	    mCoolkey = 1;
+-        }
++    if (Params::hasParam("noAppletOK"))
++    {      
++        state |=  APPLET_SELECTABLE;
++	mCoolkey = 1;
+     }
+ 
+     /* support CAC card. identify the card based on applets, not the ATRS */
+@@ -631,7 +688,7 @@ Slot::connectToToken()
+          * unfriendly */
+ 	isVersion1Key = 0;
+ 	needLogin = 1;
+-
++        mCoolkey = 0;
+ 	return;
+     }
+     mCoolkey = 1;
+@@ -1077,6 +1134,7 @@ SlotList::waitForSlotEvent(CK_FLAGS flag
+ 	    }
+ 	    throw;
+ 	}
++
+ 	if (myNumReaders != numReaders) {
+ 	    if (myReaderStates) {
+ 		delete [] myReaderStates;
+@@ -1103,6 +1161,7 @@ SlotList::waitForSlotEvent(CK_FLAGS flag
+ 		}
+ 	    }
+ 	}
++
+         if (found || (flag == CKF_DONT_BLOCK) || shuttingDown) {
+             break;
+         }
+@@ -1272,6 +1331,19 @@ class ObjectHandleMatch {
+     }
+ };
+ 
++class KeyNumMatch {
++  private:
++    CKYByte keyNum;
++    const Slot &slot;
++  public:
++    KeyNumMatch(CKYByte keyNum_, const Slot &s) : keyNum(keyNum_), slot(s) { }
++    bool operator() (const PKCS11Object& obj) {
++        unsigned long objID = obj.getMuscleObjID();
++        return (slot.getObjectClass(objID) == 'k')
++               && (slot.getObjectIndex(objID) == keyNum);
++    }
++};
++
+ class ObjectCertCKAIDMatch {
+   private:
+     CKYByte cka_id;
+@@ -3007,8 +3079,9 @@ Slot::sign(SessionHandleSuffix suffix, C
+         CK_ULONG ulDataLen, CK_BYTE_PTR pSignature,
+         CK_ULONG_PTR pulSignatureLen)
+ {
++    RSASignatureParams params(CryptParams::DEFAULT_KEY_SIZE);
+     cryptRSA(suffix, pData, ulDataLen, pSignature, pulSignatureLen,
+-        RSASignatureParams(CryptParams::FIXED_KEY_SIZE));
++        params);
+ }
+ 
+ void
+@@ -3016,14 +3089,15 @@ Slot::decrypt(SessionHandleSuffix suffix
+         CK_ULONG ulDataLen, CK_BYTE_PTR pDecryptedData,
+         CK_ULONG_PTR pulDecryptedDataLen)
+ {
++    RSADecryptParams params(CryptParams::DEFAULT_KEY_SIZE);
+     cryptRSA(suffix, pData, ulDataLen, pDecryptedData, pulDecryptedDataLen,
+-        RSADecryptParams(CryptParams::FIXED_KEY_SIZE));
++        params);
+ }
+ 
+ void
+ Slot::cryptRSA(SessionHandleSuffix suffix, CK_BYTE_PTR pInput,
+         CK_ULONG ulInputLen, CK_BYTE_PTR pOutput,
+-        CK_ULONG_PTR pulOutputLen, const CryptParams& params)
++        CK_ULONG_PTR pulOutputLen, CryptParams& params)
+ {
+     refreshTokenState();
+     SessionIter session = findSession(suffix);
+@@ -3041,6 +3115,11 @@ Slot::cryptRSA(SessionHandleSuffix suffi
+     CKYBuffer *result = &opState.result;
+     CKYByte keyNum = opState.keyNum;
+ 
++    unsigned int keySize = getKeySize(keyNum);
++
++    if(keySize != CryptParams::DEFAULT_KEY_SIZE)
++        params.setKeySize(keySize);
++
+     if( CKYBuffer_Size(result) == 0 ) {
+         // we haven't already peformed the decryption, so do it now.
+         if( pInput == NULL || ulInputLen == 0) {
+@@ -3243,3 +3322,36 @@ Slot::generateRandom(SessionHandleSuffix
+ 	throw PKCS11Exception(CKR_DEVICE_ERROR);
+     }
+ }
++
++#define MAX_NUM_KEYS 8
++unsigned int
++Slot::getKeySize(CKYByte keyNum)
++{
++    unsigned int keySize = CryptParams::DEFAULT_KEY_SIZE;
++    int modSize = 0;
++
++    if(keyNum >= MAX_NUM_KEYS) {
++        return keySize;
++    }
++
++    ObjectConstIter iter;
++    iter = find_if(tokenObjects.begin(), tokenObjects.end(),
++        KeyNumMatch(keyNum,*this));
++
++    if( iter == tokenObjects.end() ) {
++        return keySize;
++    }
++
++    CKYBuffer const *modulus = iter->getAttribute(CKA_MODULUS);
++
++    if(modulus) {
++        modSize = CKYBuffer_Size(modulus);
++        if(CKYBuffer_GetChar(modulus,0) == 0x0) {
++            modSize--;
++        }
++        if(modSize > 0)
++            keySize = modSize * 8;
++    }
++
++    return keySize;
++}
+diff -up ./src/coolkey/slot.h.coolkey-latest ./src/coolkey/slot.h
+--- ./src/coolkey/slot.h.coolkey-latest	2006-06-09 11:39:11.000000000 -0700
++++ ./src/coolkey/slot.h	2009-09-11 13:58:24.462488099 -0700
+@@ -270,10 +270,9 @@ class CryptParams {
+   protected:
+     unsigned int getKeySize() const { return keySize; }
+   public:
+-    // !!!XXX hack. The right way to get the key size is to get all the
+-    // key information from the token with MSCListKeys, the same way
+-    // we get all the object information with MSCListObjects.
+-    enum { FIXED_KEY_SIZE = 1024 };
++    // set the actual key size obtained from the card
++    void setKeySize(unsigned int newKeySize) { keySize = newKeySize; }
++    enum { DEFAULT_KEY_SIZE = 1024 };
+ 
+ 
+     CryptParams(unsigned int keySize_) : keySize(keySize_) { }
+@@ -422,7 +421,7 @@ class Slot {
+ 
+     void cryptRSA(SessionHandleSuffix suffix, CK_BYTE_PTR pInput,
+         CK_ULONG ulInputLen, CK_BYTE_PTR pOutput,
+-        CK_ULONG_PTR pulOutputLen, const CryptParams& params);
++        CK_ULONG_PTR pulOutputLen, CryptParams& params);
+ 
+     void performRSAOp(CKYBuffer *out, const CKYBuffer *input, CKYByte keyNum, 
+ 							     CKYByte direction);
+@@ -460,6 +459,8 @@ class Slot {
+         return (char )((objectID >> 16) & 0xff) - '0';
+     }
+ 
++    // actually get the size of a key in bits from the card
++    unsigned int getKeySize(CKYByte keyNum);
+ 
+     SessionHandleSuffix openSession(Session::Type type);
+     void closeSession(SessionHandleSuffix handleSuffix);
+@@ -527,6 +528,8 @@ class SlotList {
+      * has called 'C_GetSlotList' with a NULL parameter */
+     void updateReaderList();
+ 
++     /* see if a reader name exists in a caller provided reader name list. */
++    bool readerNameExistsInList(const char *readerName,CKYReaderNameList *readerNameList );
+     bool readerExists(const char *readerName, unsigned int *hint = 0);
+   public:
+     SlotList(Log *log);
+diff -up ./src/libckyapplet/cky_applet.c.coolkey-latest ./src/libckyapplet/cky_applet.c
+--- ./src/libckyapplet/cky_applet.c.coolkey-latest	2006-06-09 11:44:17.000000000 -0700
++++ ./src/libckyapplet/cky_applet.c	2009-09-11 13:58:24.464487796 -0700
+@@ -134,6 +134,13 @@ CKYAppletFactory_Logout(CKYAPDU *apdu, c
+ /* Future add WriteObject */
+ 
+ CKYStatus
++CKYAppletFactory_WriteObject(CKYAPDU *apdu, const void *param)
++{
++    const CKYAppletArgWriteObject *wos = (const CKYAppletArgWriteObject *)param;
++    return CKYAPDUFactory_WriteObject(apdu,wos->objectID,wos->offset,wos->size,wos->data);
++}
++
++CKYStatus
+ CKYAppletFactory_CreateObject(CKYAPDU *apdu, const void *param)
+ {
+     const CKYAppletArgCreateObject *cos=(const CKYAppletArgCreateObject *)param;
+@@ -192,7 +199,6 @@ CKYAppletFactory_GetLifeCycleV2(CKYAPDU 
+ {
+     return CKYAPDUFactory_GetLifeCycleV2(apdu);
+ }
+-
+ CKYStatus
+ CKYAppletFactory_GetRandom(CKYAPDU *apdu, const void *param)
+ {
+@@ -725,24 +731,48 @@ CKYApplet_ComputeCrypt(CKYCardConnection
+     CKYAppletArgComputeCrypt ccd;
+     CKYBuffer    empty;
+     CKYISOStatus status;
++    short       dataSize = 0;
+     int         use2APDUs = 0;
++    int 	use_dl_object =  CKYBuffer_Size(data) > 200 ;
+ 
+     CKYBuffer_InitEmpty(&empty);
+     ccd.keyNumber = keyNumber;
+     ccd.mode      = mode;
+     ccd.direction = direction;
+-    ccd.location  = CKY_DL_APDU;
++    ccd.location  = use_dl_object ? CKY_DL_OBJECT : CKY_DL_APDU;
+ 
+     if (!apduRC)
+     	apduRC = &status;
+ 
++    if (use_dl_object) {
++	CKYBuffer  sizeBuf;
++ 
++	CKYBuffer_InitEmpty(&sizeBuf);
++	CKYBuffer_AppendShort(&sizeBuf, CKYBuffer_Size(data));
++
++        ret = CKYApplet_WriteObjectFull(conn, 0xffffffff,
++                  0, CKYBuffer_Size(&sizeBuf), nonce,
++                  &sizeBuf, apduRC);
++
++        CKYBuffer_FreeData(&sizeBuf);
++        if( ret != CKYSUCCESS)
++           goto fail;
++
++        ret = CKYApplet_WriteObjectFull(conn, 0xffffffff,
++                  2, CKYBuffer_Size(data), nonce,
++                  data, apduRC);
++
++        if(ret != CKYSUCCESS)
++           goto fail; 
++    }
++
+     if (mode == CKY_RSA_NO_PAD) {
+-	ccd.data = data;
++	ccd.data = use_dl_object ? &empty : data;
+ 	ccd.sig  = sig;
+ 	ret = CKYApplet_HandleAPDU(conn, 
+ 			    CKYAppletFactory_ComputeCryptOneStep, &ccd, nonce, 
+ 			    CKY_SIZE_UNKNOWN, ckyAppletFill_ComputeCryptFinal, 
+-			    result, apduRC);
++			    use_dl_object ? NULL : result, apduRC);
+     	if (ret == CKYAPDUFAIL && *apduRC == CKYISO_INCORRECT_P2) {
+ 	    use2APDUs = 1;  /* maybe it's an old applet */
+ 	}
+@@ -759,13 +789,38 @@ CKYApplet_ComputeCrypt(CKYCardConnection
+ 			    CKYAppletFactory_ComputeCryptInit, &ccd, nonce, 
+ 			    0, CKYAppletFill_Null, NULL, apduRC);
+ 	if (ret == CKYSUCCESS) {
+-	    ccd.data = data;
++	    ccd.data = use_dl_object ? &empty : data;
+ 	    ret = CKYApplet_HandleAPDU(conn, 
+ 			    CKYAppletFactory_ComputeCryptFinal, &ccd, nonce, 
+ 			    CKY_SIZE_UNKNOWN, ckyAppletFill_ComputeCryptFinal, 
+-			    result, apduRC);
++			    use_dl_object ? NULL : result, apduRC);
+ 	}
+     }
++
++    if (use_dl_object && ret == CKYSUCCESS) {
++        CKYBuffer  sizeOutBuf;
++        CKYBuffer_InitEmpty(&sizeOutBuf);
++
++        ret = CKYApplet_ReadObjectFull(conn,0xffffffff,
++                             0, 2,
++                             nonce,&sizeOutBuf,apduRC);
++
++        if(ret != CKYSUCCESS) {
++            CKYBuffer_FreeData(&sizeOutBuf);
++            goto fail;
++        }
++
++        dataSize = CKYBuffer_GetShort(&sizeOutBuf, 0);
++
++        CKYBuffer_FreeData(&sizeOutBuf);
++
++        ret = CKYApplet_ReadObjectFull(conn,0xffffffff, 
++                             2, dataSize,
++                             nonce,result,apduRC); 
++    }
++
++fail:
++
+     return ret;
+ }
+ 
+@@ -1036,6 +1091,44 @@ CKYApplet_ReadObjectFull(CKYCardConnecti
+ }
+ 
+ /*
++ * Write Object
++ * This makes multiple APDU calls to write the entire object.
++ *
++ */
++
++CKYStatus 
++CKYApplet_WriteObjectFull(CKYCardConnection *conn, unsigned long objectID,
++                  CKYOffset offset, CKYSize size, const CKYBuffer *nonce,
++                  const CKYBuffer *data, CKYISOStatus *apduRC)
++{
++
++    CKYBuffer chunk;
++    CKYOffset srcOffset = 0;
++    CKYAppletArgWriteObject wod;
++    CKYStatus ret = CKYSUCCESS;
++
++    wod.objectID = objectID;
++    wod.offset = offset;
++    do {
++        wod.size = (CKYByte) MIN(size, 220);
++        ret = CKYBuffer_InitFromBuffer(&chunk, data,
++                                       srcOffset, wod.size);
++        if(ret == CKYSUCCESS)  {
++            wod.data = &chunk;
++            ret = CKYApplet_HandleAPDU(conn, CKYAppletFactory_WriteObject, &wod,
++               nonce, 0, CKYAppletFill_Null, NULL, apduRC);
++            size -= wod.size;
++            wod.offset += wod.size;
++            srcOffset  += wod.size;
++            CKYBuffer_FreeData(&chunk);
++       }
++
++    } while ((size > 0) && (ret == CKYSUCCESS));
++
++    return ret;
++}
++
++/*
+  * List Object cluster
+  */
+ static CKYStatus
+diff -up ./src/libckyapplet/cky_applet.h.coolkey-latest ./src/libckyapplet/cky_applet.h
+--- ./src/libckyapplet/cky_applet.h.coolkey-latest	2006-06-09 11:44:17.000000000 -0700
++++ ./src/libckyapplet/cky_applet.h	2009-09-11 13:58:24.466487772 -0700
+@@ -192,6 +192,14 @@ typedef struct _CKYAppletArgReadObject {
+     CKYByte         size;
+ } CKYAppletArgReadObject;
+ 
++typedef struct _CKYAppletArgWriteObject {
++    unsigned long objectID;
++    CKYOffset     offset;
++    CKYByte       size;
++    CKYBuffer     *data;
++
++} CKYAppletArgWriteObject;
++
+ typedef struct _CKYAppletArgComputeCrypt {
+     CKYByte   keyNumber;
+     CKYByte   mode;
+@@ -250,6 +258,8 @@ CKYStatus CKYAppletFactory_ListPINs(CKYA
+ /* param == CKYByte * (pointer to pinNumber) */
+ CKYStatus CKYAppletFactory_Logout(CKYAPDU *apdu, const void *param);
+ /* Future add WriteObject */
++/* parm == CKYAppletArgWriteObject */
++CKYStatus CKYAppletFactory_WriteObject(CKYAPDU *apdu, const void *param);
+ /* param == CKYAppletArgCreateObject */
+ CKYStatus CKYAppletFactory_CreateObject(CKYAPDU *apdu, const void *param);
+ /* param == CKYAppletArgDeleteObject */
+@@ -482,6 +492,17 @@ CKYStatus CKYApplet_ReadObjectAppend(CKY
+ CKYStatus CKYApplet_ReadObjectFull(CKYCardConnection *conn, 
+ 		unsigned long objectID, CKYOffset offset, CKYSize size,
+ 		 const CKYBuffer *nonce, CKYBuffer *data, CKYISOStatus *apduRC);
++/*
++ * There is 1 write command:
++ * CKYApplet_WriteObjectFull can write an entire data object. It makes multiple
++ * apdu calls in order to write the full amount into the buffer. The buffer is
++ * overwritten.
++*/
++
++CKYStatus CKYApplet_WriteObjectFull(CKYCardConnection *conn,
++        unsigned long objectID, CKYOffset offset, CKYSize size,
++        const CKYBuffer *nonce, const CKYBuffer *data, CKYISOStatus *apduRC);
++
+ CKYStatus CKYApplet_ListObjects(CKYCardConnection *conn, CKYByte seq,
+ 		CKYAppletRespListObjects *lop, CKYISOStatus *apduRC);
+ CKYStatus CKYApplet_GetStatus(CKYCardConnection *conn, 
+diff -up ./src/libckyapplet/cky_card.c.coolkey-latest ./src/libckyapplet/cky_card.c
+--- ./src/libckyapplet/cky_card.c.coolkey-latest	2006-06-09 11:44:17.000000000 -0700
++++ ./src/libckyapplet/cky_card.c	2009-09-11 13:58:24.468487469 -0700
+@@ -129,6 +129,7 @@ typedef struct _SCard {
+     SCardGetStatusChangeFn SCardGetStatusChange;
+     SCardCancelFn SCardCancel;
+     SCARD_IO_REQUEST *SCARD_PCI_T0_;
++    SCARD_IO_REQUEST *SCARD_PCI_T1_;
+ } SCard;
+ 
+ #define GET_ADDRESS(library, scard, name) \
+@@ -195,6 +196,12 @@ ckySCard_Init(void)
+     if( status != CKYSUCCESS ) {
+         goto fail;
+     }
++
++    status = ckyShLibrary_getAddress( library,
++        (void**) &scard->SCARD_PCI_T1_, MAKE_DLL_SYMBOL(g_rgSCardT1Pci));
++    if( status != CKYSUCCESS ) {
++        goto fail;
++    }
+     return scard;
+ 
+ fail:
+@@ -884,6 +891,7 @@ struct _CKYCardConnection {
+     SCARDHANDLE      cardHandle;
+     unsigned long    lastError;
+     CKYBool           inTransaction;
++    unsigned long    protocol;
+ };
+ 
+ static void
+@@ -894,6 +902,7 @@ ckyCardConnection_init(CKYCardConnection
+     conn->cardHandle = 0;
+     conn->lastError = 0;
+     conn->inTransaction = 0;
++    conn->protocol = SCARD_PROTOCOL_T0;
+ }
+ 
+ CKYCardConnection *
+@@ -934,14 +943,13 @@ CKYCardConnection_Connect(CKYCardConnect
+ {
+     CKYStatus ret;
+     unsigned long rv;
+-    unsigned long protocol;
+ 
+     ret = CKYCardConnection_Disconnect(conn);
+     if (ret != CKYSUCCESS) {
+ 	return ret;
+     }
+     rv = conn->scard->SCardConnect( conn->ctx->context, readerName,
+-	SCARD_SHARE_SHARED, SCARD_PROTOCOL_T0, &conn->cardHandle, &protocol);
++	SCARD_SHARE_SHARED, SCARD_PROTOCOL_T0 | SCARD_PROTOCOL_T1, &conn->cardHandle, &conn->protocol);
+     if (rv != SCARD_S_SUCCESS) {
+ 	conn->lastError = rv;
+ 	return CKYSCARDERR;
+@@ -978,7 +986,7 @@ ckyCardConnection_reconnectRaw(CKYCardCo
+     unsigned long protocol;
+ 
+     rv = conn->scard->SCardReconnect(conn->cardHandle,
+-	SCARD_SHARE_SHARED, SCARD_PROTOCOL_T0, init, &protocol);
++	SCARD_SHARE_SHARED, SCARD_PROTOCOL_T0 | SCARD_PROTOCOL_T1 , init, &protocol);
+     if (rv != SCARD_S_SUCCESS) {
+ 	conn->lastError = rv;
+ 	return CKYSCARDERR;
+@@ -1039,10 +1047,17 @@ CKYCardConnection_TransmitAPDU(CKYCardCo
+ 	return ret;
+     }
+ 
+-    rv = conn->scard->SCardTransmit(conn->cardHandle, 
+-	conn->scard->SCARD_PCI_T0_,
+-	CKYBuffer_Data(&apdu->apduBuf), CKYBuffer_Size(&apdu->apduBuf), 
+-	NULL, response->data, &response->len);
++    if( conn->protocol == SCARD_PROTOCOL_T0 ) { 
++        rv = conn->scard->SCardTransmit(conn->cardHandle, 
++            conn->scard->SCARD_PCI_T0_,
++	    CKYBuffer_Data(&apdu->apduBuf), CKYBuffer_Size(&apdu->apduBuf), 
++	    NULL, response->data, &response->len);
++    }  else  {
++        rv = conn->scard->SCardTransmit(conn->cardHandle,
++            conn->scard->SCARD_PCI_T1_,
++            CKYBuffer_Data(&apdu->apduBuf), CKYBuffer_Size(&apdu->apduBuf),
++            NULL, response->data, &response->len);
++    } 
+ 
+     if (rv != SCARD_S_SUCCESS) {
+ 	conn->lastError =rv;
+diff -up ./src/libckyapplet/cky_factory.c.coolkey-latest ./src/libckyapplet/cky_factory.c
+--- ./src/libckyapplet/cky_factory.c.coolkey-latest	2006-06-09 11:44:17.000000000 -0700
++++ ./src/libckyapplet/cky_factory.c	2009-09-11 13:58:24.470495267 -0700
+@@ -190,8 +190,11 @@ CKYAPDUFactory_ComputeCryptOneStep(CKYAP
+     CKYSize   len;
+     CKYBuffer buf;
+ 
+-    if (!idata || !(len = CKYBuffer_Size(idata)) || location != CKY_DL_APDU)
+-    	return ret;
++    if (!idata)
++        return ret;
++
++    if (!(len = CKYBuffer_Size(idata)) && location != CKY_DL_OBJECT)
++        return ret;
+ 
+     CKYAPDU_SetCLA(apdu, CKY_CLASS_COOLKEY);
+     CKYAPDU_SetINS(apdu, CKY_INS_COMPUTE_CRYPT);
+@@ -314,8 +317,6 @@ CKYAPDUFactory_Logout(CKYAPDU *apdu, CKY
+     return CKYSUCCESS;
+ }
+ 
+-/* Future add WriteObject */
+-
+ CKYStatus
+ CKYAPDUFactory_CreateObject(CKYAPDU *apdu, unsigned long objectID, CKYSize size,
+     unsigned short readACL, unsigned short writeACL, unsigned short deleteACL)
+@@ -419,6 +420,58 @@ fail:
+ }
+ 
+ CKYStatus
++CKYAPDUFactory_WriteObject(CKYAPDU *apdu, unsigned long objectID,
++                                    CKYOffset offset,CKYSize size,CKYBuffer *data)
++{
++    CKYBuffer buf;
++    CKYStatus ret = CKYSUCCESS;
++    unsigned short dataSize = 0;
++
++    CKYAPDU_SetCLA(apdu, CKY_CLASS_COOLKEY);
++    CKYAPDU_SetINS(apdu, CKY_INS_WRITE_OBJ);
++    CKYAPDU_SetP1(apdu, 0x00);
++    CKYAPDU_SetP2(apdu, 0x00);
++    CKYBuffer_InitEmpty(&buf);
++
++    dataSize = (unsigned short) CKYBuffer_Size(data);
++
++    if(!dataSize) {
++        ret = CKYINVALIDARGS;
++        goto fail;
++    }
++
++    ret = CKYBuffer_AppendLong(&buf,objectID);
++    if (ret != CKYSUCCESS) {
++        goto fail;
++    }
++    ret = CKYBuffer_AppendLong(&buf,offset);
++    if (ret != CKYSUCCESS) {
++        goto fail;
++    }
++    ret = CKYBuffer_AppendChar(&buf, size);
++    if (ret != CKYSUCCESS) {
++        goto fail;
++    }
++
++    ret = CKYAPDU_SetSendDataBuffer(apdu,&buf);
++
++    if (ret != CKYSUCCESS) {
++        goto fail;
++    }
++
++    ret = CKYAPDU_AppendSendDataBuffer(apdu, data);
++
++    if (ret != CKYSUCCESS) {
++        goto fail;
++    }
++
++fail:
++    CKYBuffer_FreeData(&buf);
++    return ret;
++
++}
++
++CKYStatus
+ CKYAPDUFactory_ListObjects(CKYAPDU *apdu, CKYByte sequence)
+ {
+     CKYAPDU_SetCLA(apdu, CKY_CLASS_COOLKEY);
+diff -up ./src/libckyapplet/cky_factory.h.coolkey-latest ./src/libckyapplet/cky_factory.h
+--- ./src/libckyapplet/cky_factory.h.coolkey-latest	2006-06-09 11:44:17.000000000 -0700
++++ ./src/libckyapplet/cky_factory.h	2009-09-11 13:58:24.472487421 -0700
+@@ -190,7 +190,8 @@ CKYStatus CKYAPDUFactory_ChangePIN(CKYAP
+ 				const char *oldPin, const char *newPin);
+ CKYStatus CKYAPDUFactory_ListPINs(CKYAPDU *apdu);
+ CKYStatus CKYAPDUFactory_Logout(CKYAPDU *apdu, CKYByte pinNumber);
+-
++CKYStatus CKYAPDUFactory_WriteObject(CKYAPDU *apdu, unsigned long objectID,
++                CKYOffset offset,CKYSize size,CKYBuffer *data);
+ /* Future add WriteObject */
+ CKYStatus CKYAPDUFactory_CreateObject(CKYAPDU *apdu, unsigned long objectID,
+  CKYSize size, unsigned short readACL, unsigned short writeACL, 
