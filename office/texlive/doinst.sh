@@ -8,7 +8,7 @@ chroot . /usr/share/texmf/bin/mktexlsr 1>/dev/null 2>/dev/null
 
 # This is to generate /usr/share/texmf-var/ stuff
 chroot . /usr/share/texmf/bin/updmap-sys --nohash --syncwithtrees 1>/dev/null 2>/dev/null
-chroot . /usr/share/texmf/bin/mktexlsr /usr/share/texmf-var 1>/dev/null 2>/dev/null
+chroot . /usr/share/texmf/bin/mktexlsr 1>/dev/null 2>/dev/null
 chroot . /usr/share/texmf/bin/fmtutil-sys --all 1>/dev/null 2>/dev/null
 
 # Just in case...
