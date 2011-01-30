@@ -10,5 +10,5 @@ config() {
   fi
   # Otherwise, we leave the .new copy for the admin to consider...
 }
-config etc/omega.conf.new
+config etc/xapian-omega.conf.new
 
