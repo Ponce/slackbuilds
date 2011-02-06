@@ -11,6 +11,6 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/surfraw.conf.new
-config etc/surfraw_elvi.list.new
+config etc/xdg/surfraw/conf.new
+config etc/xdg/surfraw/bookmarks.new
 
