@@ -11,5 +11,5 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/mod_geoip.conf.new
+config etc/httpd/mod_geoip.conf.new
 
