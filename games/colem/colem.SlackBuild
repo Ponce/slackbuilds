@@ -1,0 +1,130 @@
+#!/bin/sh
+
+# Slackware build script for colem
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+PRGNAM=colem
+VERSION=${VERSION:-2.6}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# Since we have to set endianness at compile-time, included a few
+# extra ARCHes here (only i486 and x86_64 are actually tested, you're
+# on your own with the others)
+# alphaslack and armedslack are little-endian, caught by the default case.
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+elif [ "$ARCH" = "s390" ]; then
+  SLKCFLAGS="-O2"
+  BIGENDIAN=yes
+elif [ "$ARCH" = "sparc" ]; then
+  SLKCFLAGS="-O2"
+  BIGENDIAN=yes
+elif [ "$ARCH" = "powerpc" ]; then
+  SLKCFLAGS="-O2"
+  BIGENDIAN=yes
+else
+  SLKCFLAGS="-O2"
+fi
+
+set -e
+
+ZIPNAME="ColEm"
+ZIPVER=$( echo $VERSION | sed 's/\.//g' )
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+mkdir $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+unzip $CWD/$ZIPNAME$ZIPVER-Source.zip
+chown -R root:root .
+chmod -R a-s,u+w,go+r-w .
+
+sed -i 's/-O3/$(SLKCFLAGS)/' EMULib/Rules.gcc
+
+# Make the emulator look in /usr/share/colem and ~/.colem for the
+# system ROMs, as well as the current directory. Without this, it's
+# quite annoying to use colem from either the command line or KDE.
+patch -p1 < $CWD/rom_path.diff
+
+cd $ZIPNAME/Unix
+
+# Allow building for 8bpp or 16bpp X11 displays (the default is 32,
+# which works on either 24bpp or 32bpp, which 99% of everyone is
+# using now).
+if [ "${DISPLAY_BPP:-32}" != "32" ]; then
+  sed -i "/^DEFINES/s/-DBPP32/-DBPP$DISPLAY_BPP/" Makefile
+fi
+
+# Allow building on big-endian platforms (such as s390)
+if [ "${BIGENDIAN:-no}" != "no" ]; then
+  sed -i "/^DEFINES/s/-DLSB_FIRST/-DMSB_FIRST/" Makefile
+fi
+
+make SLKCFLAGS="$SLKCFLAGS"
+mkdir -p $PKG/usr/bin
+install -s -m0755 -oroot -groot $PRGNAM $PKG/usr/bin
+
+# Man page written by script author.
+mkdir -p $PKG/usr/man/man1
+gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README
+
+# HTML doc downloaded from http://fms.komkon.org/ColEm/ColEm.html
+cat $CWD/$ZIPNAME.html > $PKG/usr/doc/$PRGNAM-$VERSION/$ZIPNAME.html
+
+mkdir -p $PKG/usr/share/pixmaps
+cat ../Maemo/Package/colem-64x64.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# .desktop file and mime .xml file originally taken from ColEm-Maemo
+# sources and modified to get rid of the Maemo-specific stuff.
+mkdir -p $PKG/usr/share/applications
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+mkdir -p $PKG/usr/share/mime/packages
+cat $CWD/$PRGNAM.xml > $PKG/usr/share/mime/packages/$PRGNAM.xml
+
+# The ROM directory
+mkdir -p $PKG/usr/share/$PRGNAM
+
+# If there's a ROM image in $CWD, include it in the package
+if [ -e $CWD/coleco.zip ]; then
+	( cd $CWD ; unzip -o coleco.zip )
+elif [ -e $CWD/COLECO.ZIP ]; then
+	( cd $CWD ; unzip -o COLECO.ZIP )
+fi
+if [ -e $CWD/coleco.rom ]; then
+	cat $CWD/coleco.rom > $PKG/usr/share/$PRGNAM/coleco.rom
+elif [ -e $CWD/COLECO.ROM ]; then
+	cat $CWD/COLECO.ROM > $PKG/usr/share/$PRGNAM/coleco.rom
+fi
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
