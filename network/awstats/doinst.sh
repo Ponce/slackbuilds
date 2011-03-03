@@ -19,4 +19,5 @@ if [ -e etc/httpd/extra/httpd-awstats.conf.new ]; then
 fi
 
 config etc/httpd/extra/httpd-awstats.conf.new
+config etc/awstats/awstats.model.conf.new
 
