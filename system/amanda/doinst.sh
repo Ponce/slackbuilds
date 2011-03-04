@@ -14,12 +14,13 @@ config() {
 config etc/amanda/3hole.ps.new
 config etc/amanda/8.5x11.ps.new
 config etc/amanda/DIN-A4.ps.new
+config etc/amanda/DLT-A4.ps.new
 config etc/amanda/DLT.ps.new
 config etc/amanda/EXB-8500.ps.new
 config etc/amanda/HP-DAT.ps.new
+config etc/amanda/amanda-client-postgresql.conf.new
 config etc/amanda/amanda-client.conf.new
 config etc/amanda/amanda.conf.new
-config etc/amanda/chg-mcutil.conf.new
 config etc/amanda/chg-multi.conf.new
 config etc/amanda/chg-scsi.conf.new
 config etc/amanda/disklist.new
