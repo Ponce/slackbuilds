@@ -30,7 +30,7 @@ schema_install() {
   chroot . gconftool-2 --makefile-install-rule "$1" 1>/dev/null
 }
 
-SCHEMA_FILE="/etc/gconf/schemas/ibus.schemas"
+SCHEMA_FILE="etc/gconf/schemas/ibus.schemas"
 if [ -r "$SCHEMA_FILE" ]; then
   schema_install "$SCHEMA_FILE"
 fi
