@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 # freenx preinstall script
-# excerpted from alien bob's doinst.sh
-# mixed by ponce <matteo.bernardini@sns.it>
+# excerpted from alien bob's doinst.sh and
+# mixed by ponce <matteo.bernardini@gmail.com>
 
 set -e
 

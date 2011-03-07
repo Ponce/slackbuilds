@@ -109,3 +109,11 @@ chown nx:root \${NX_LOGFILE}
 
 EOCR
 
+usr/bin/nxsetup --install --setup-nomachine-key --uid 243 --gid 243 --auto
+
+WARNI="\n- - - - -\n\n\
+The package installs the default nomachine key to protect the connection.\n\
+run \"nxsetup --purge --uninstall ; sh preinstall.sh ; nxsetup --install\"\n\
+from the build folder to set some custom keys (for additional security).\n\
+\n- - - - -\n"
+printf "%b\n" "$WARNI"
