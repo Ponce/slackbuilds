@@ -33,8 +33,6 @@ fi
 config etc/rox/xdg/rox.sourceforge.net/MIME-types/application_postscript.new
 config etc/rox/xdg/rox.sourceforge.net/MIME-types/text.new
 config etc/rox/xdg/rox.sourceforge.net/MIME-types/text_html.new
-config etc/profile.d/rox-filer.sh.new
-config etc/profile.d/rox-filer.csh.new
 
 preserve_perms etc/profile.d/rox-filer.sh.new
 preserve_perms etc/profile.d/rox-filer.csh.new
