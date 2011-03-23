@@ -17,6 +17,6 @@ preserve_perms() {
   fi
   config $NEW
 }
-config etc/rc.d/rc.znc.new
+
 preserve_perms etc/rc.d/rc.znc.new 
 
