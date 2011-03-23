@@ -23,4 +23,4 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.gogoc.new
-config etc/gogoc.new
+config etc/gogoc.conf.new
