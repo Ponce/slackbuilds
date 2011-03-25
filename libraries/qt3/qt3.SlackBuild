@@ -1,0 +1,204 @@
+#!/bin/sh
+
+# Copyright 2006, 2007, 2008  Patrick J. Volkerding, Sebeka, MN, USA
+# All rights reserved.
+# Copyrught 2010, 2011 Niels Horn, Rio de Janeiro, RJ, Brazil
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# This is based on the original SlackBuild from /extra/kde-compat in
+# Slackware 13.1
+
+# Adapted for SlackBuilds.org by Niels Horn <niels.horn@gmail.com>
+# - moved building from /opt to $TMP
+# - included patch for new libpng (based on work by Stuart Winter)
+# Revision date 2011/03/12
+
+PRGNAM=qt3
+VERSION=${VERSION:-3.3.8b}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+SRCNAM=qt-x11-free
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+
+# Don't build a devel package (but put a devel SYSTEM on this machine...)
+NODEVEL=true
+
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/qt-x11-free-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+
+# Force CFLAGS in qmake.conf
+sed -i "/QMAKE_CFLAGS_RELEASE/s|-O2|$SLKCFLAGS|" mkspecs/linux-g++/qmake.conf
+
+# Use built-in gif reader
+sed -i "/#define QT_BUILTIN_GIF_READER/s|0|1|" src/kernel/qgif.h
+
+# Fix location of mysql.h
+sed -i "s|mysql\.h|mysql/mysql\.h|" src/sql/drivers/mysql/qsql_mysql.h
+
+# Build with libpng 1.4:
+patch -lp0 < $CWD/qt3-libpng14.diff
+
+# Make sure ownerships and permissions are sane:
+chown -R root:root .
+find . \
+  \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+  -exec chmod 755 {} \; -o \
+  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+  -exec chmod 644 {} \;
+
+# And here's what we are currently using.  The "yes" agrees to the GPL, so don't run this script if you
+# don't agree.  :-)
+echo "yes" | \
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  -prefix /opt/kde3/lib${LIBDIRSUFFIX}/$PRGNAM-$VERSION \
+  -release \
+  -system-zlib \
+  -system-libpng \
+  -qt-imgfmt-png \
+  -system-libmng \
+  -qt-imgfmt-mng \
+  -system-libjpeg \
+  -qt-imgfmt-jpeg \
+  -qt-gif \
+  -thread \
+  -stl \
+  -no-g++-exceptions \
+  -xft \
+  -plugin-sql-mysql \
+  -plugin-style-cde \
+  -plugin-style-compact \
+  -qt-style-motif \
+  -plugin-style-motifplus \
+  -plugin-style-platinum \
+  -plugin-style-sgi \
+  -plugin-style-windows \
+  -enable-opengl
+
+# We're using '-i' to work around a bug where the build tries to strip html files.
+# Build the important stuff:
+make -i
+
+# Now set QTDIR...
+QTDIR=$PKG/opt/kde3/lib${LIBDIRSUFFIX}/$PRGNAM-$VERSION
+
+# ... & point LD_LIBRARY_PATH to the new libs and "make + install" the rest...
+LD_LIBRARY_PATH=$QTDIR/lib make install INSTALL_ROOT=$PKG
+make -i symlinks sub-src sub-tools
+make install INSTALL_ROOT=$PKG
+
+# Link the shared libraries into /opt/kde3/lib
+cd $PKG/opt/kde3/lib${LIBDIRSUFFIX}
+  for file in $PRGNAM-$VERSION/lib/*.so* ; do
+    ln -sf $file .
+  done
+cd -
+
+# Leave these out so as not to interfere with Qt4:
+if [ -z "$NODEVEL" ]; then
+  # Add man pages:
+  mkdir -p $PKG/usr/man
+  cp -a doc/man/* $PKG/usr/man
+  find $PKG/usr/man -type f -exec gzip -9 "{}" \;
+fi
+
+# Put profile.d scripts in package w/ correct lib-path
+mkdir -p $PKG/etc/profile.d
+cat $CWD/profile.d/qt.sh  | sed -e "s#/lib#/lib${LIBDIRSUFFIX}#" \
+  > $PKG/etc/profile.d/qt.sh
+cat $CWD/profile.d/qt.csh | sed -e "s#/lib#/lib${LIBDIRSUFFIX}#" \
+  > $PKG/etc/profile.d/qt.csh
+chmod 755 $PKG/etc/profile.d/*
+
+# Strip binaries:
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+
+# Make links to the qt3 binaries
+mkdir -p $PKG/opt/kde3/bin
+cd $PKG/opt/kde3/bin
+  for file in assistant designer linguist lrelease lupdate moc qm2ts qmake qtconfig uic ; do
+    ln -sf ../lib${LIBDIRSUFFIX}/$PRGNAM-$VERSION/bin/$file .
+  done
+cd -
+
+# Make a link to qt-mt.pc
+mkdir -p $PKG/opt/kde3/lib${LIBDIRSUFFIX}/pkgconfig
+cd $PKG/opt/kde3/lib${LIBDIRSUFFIX}/pkgconfig
+  ln -sf ../$PRGNAM-$VERSION/lib/pkgconfig/qt-mt.pc .
+cd -
+
+# Add a documentation directory:
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  FAQ INSTALL LICENSE.GPL* LICENSE.QPL MANIFEST PLATFORMS README* changes* \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+
+# Make a link to "qt3" w/o version number
+cd $PKG/opt/kde3/lib${LIBDIRSUFFIX}
+  ln -sf qt3-${VERSION} qt3
+cd -
+
+# This much documentation isn't needed for the compat qt3 package -- look in the
+# source if you need it.
+rm -rf $PKG/opt/kde3/lib${LIBDIRSUFFIX}/qt3/doc
+
+mkdir -p $PKG/install
+cat $CWD/doinst.sh | sed -e "s|/lib|/lib${LIBDIRSUFFIX}|" \
+  > $PKG/install/doinst.sh
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+
