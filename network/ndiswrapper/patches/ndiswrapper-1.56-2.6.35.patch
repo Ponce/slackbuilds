@@ -1,0 +1,90 @@
+Index: a/driver/wrapndis.c
+===================================================================
+--- a/driver/wrapndis.c	(revision 2723)
++++ a/driver/wrapndis.c	(working copy)
+@@ -950,20 +950,34 @@ static void set_multicast_list(struct nd
+ 		packet_filter |= NDIS_PACKET_TYPE_PROMISCUOUS |
+ 			NDIS_PACKET_TYPE_ALL_LOCAL;
+ 	} else if (net_dev->flags & IFF_ALLMULTI ||
+-		   net_dev->mc_count > wnd->multicast_size) {
++		   netdev_mc_count(net_dev) > wnd->multicast_size) {
+ 		packet_filter |= NDIS_PACKET_TYPE_ALL_MULTICAST;
+ 		TRACE2("0x%08x", packet_filter);
+-	} else if (net_dev->mc_count > 0) {
++	} else if (netdev_mc_count(net_dev) > 0) {
+ 		int i, size;
+ 		char *buf;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,35)
++		struct netdev_hw_addr *ha;
++#else
+ 		struct dev_mc_list *mclist;
+-		size = min(wnd->multicast_size, net_dev->mc_count);
+-		TRACE2("%d, %d", wnd->multicast_size, net_dev->mc_count);
++#endif
++		size = min(wnd->multicast_size, netdev_mc_count(net_dev));
++		TRACE2("%d, %d", wnd->multicast_size, netdev_mc_count(net_dev));
+ 		buf = kmalloc(size * ETH_ALEN, GFP_KERNEL);
+ 		if (!buf) {
+ 			WARNING("couldn't allocate memory");
+ 			EXIT2(return);
+ 		}
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,35)
++		i = 0;
++		netdev_for_each_mc_addr(ha, net_dev) {
++			if (i >= size)
++				break;
++			memcpy(buf + i * ETH_ALEN, ha->addr, ETH_ALEN);
++			TRACE2(MACSTRSEP, MAC2STR(ha->addr));
++ 			i++;
++ 		}
++#else
+ 		mclist = net_dev->mc_list;
+ 		for (i = 0; i < size && mclist; mclist = mclist->next) {
+ 			if (mclist->dmi_addrlen != ETH_ALEN)
+@@ -972,6 +986,7 @@ static void set_multicast_list(struct nd
+ 			TRACE2(MACSTRSEP, MAC2STR(mclist->dmi_addr));
+ 			i++;
+ 		}
++#endif
+ 		res = mp_set(wnd, OID_802_3_MULTICAST_LIST, buf, i * ETH_ALEN);
+ 		if (res == NDIS_STATUS_SUCCESS && i > 0)
+ 			packet_filter |= NDIS_PACKET_TYPE_MULTICAST;
+Index: a/driver/usb.c
+===================================================================
+--- a/driver/usb.c	(revision 2723)
++++ a/driver/usb.c	(working copy)
+@@ -191,7 +191,7 @@ static void wrap_free_urb(struct urb *ur
+ 	if (wrap_urb->flags & WRAP_URB_COPY_BUFFER) {
+ 		USBTRACE("freeing DMA buffer for URB: %p %p",
+ 			 urb, urb->transfer_buffer);
+-		usb_buffer_free(IRP_WRAP_DEVICE(irp)->usb.udev,
++		usb_free_coherent(IRP_WRAP_DEVICE(irp)->usb.udev,
+ 				urb->transfer_buffer_length,
+ 				urb->transfer_buffer, urb->transfer_dma);
+ 	}
+@@ -304,7 +304,7 @@ static struct urb *wrap_alloc_urb(struct
+ #endif
+ 		    )) {
+ 		urb->transfer_buffer =
+-			usb_buffer_alloc(wd->usb.udev, buf_len, alloc_flags,
++			usb_alloc_coherent(wd->usb.udev, buf_len, alloc_flags,
+ 					 &urb->transfer_dma);
+ 		if (!urb->transfer_buffer) {
+ 			WARNING("couldn't allocate dma buf");
+Index: a/driver/ntoskernel.h
+===================================================================
+--- a/driver/ntoskernel.h	(revision 2723)
++++ a/driver/ntoskernel.h	(working copy)
+@@ -324,6 +324,12 @@ typedef u32 pm_message_t;
+ 	kmem_cache_create(name, size, align, flags, NULL)
+ #endif
+ 
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,34)
++#define netdev_mc_count(dev) ((dev)->mc_count)
++#define usb_alloc_coherent(dev, size, mem_flags, dma) (usb_buffer_alloc((dev), (size), (mem_flags), (dma)))
++#define usb_free_coherent(dev, size, addr, dma) (usb_buffer_free((dev), (size), (addr), (dma)))
++#endif
++
+ #include "winnt_types.h"
+ #include "ndiswrapper.h"
+ #include "pe_linker.h"
