@@ -2,7 +2,7 @@
 
 # Slackware build script for virtualbox-ose
 
-# Copyright 2008-2010 Heinz Wiesinger, Amsterdam, The Netherlands
+# Copyright 2008-2011 Heinz Wiesinger, Amsterdam, The Netherlands
 # Copyright 2008 Mauro Giachero <mauro.giachero@gmail.com>
 # All rights reserved.
 #
@@ -23,9 +23,9 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-PRGNAM=virtualbox-ose
+PRGNAM=virtualbox
 SRCNAM=VirtualBox
-VERSION=3.2.10
+VERSION=4.0.4
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -95,13 +95,13 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $SRCNAM-${VERSION}_OSE
-tar xvf $CWD/$SRCNAM-${VERSION}-OSE.tar.bz2
+tar xvf $CWD/$SRCNAM-${VERSION}.tar.bz2
 cd $SRCNAM-${VERSION}_OSE
 chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
 
 GROUP="vboxusers"
-MODE="750"
+MODE="755"
 mkdir -p $PKG/lib/udev/rules.d
 echo 'KERNEL=="vboxdrv", NAME="vboxdrv", OWNER="root", GROUP="vboxusers", MODE="0660"' \
   > $PKG/lib/udev/rules.d/60-vboxdrv.rules
@@ -113,14 +113,15 @@ patch -d src/VBox/Installer/linux -i $CWD/vboxdrv.sh-setup.diff
 # Support for the qt4-frontend
 if [ "${QT4:-yes}" = "yes" ]; then
   mkdir -p $PKG/usr/share/applications
-  cp -f src/VBox/Installer/linux/virtualbox.desktop $PKG/usr/share/applications/
-  sed -i "s|\$VBOX_DOC_PATH|/usr/share/virtualbox|" \
-    $PKG/usr/share/applications/virtualbox.desktop
   guiapp="VirtualBox"
 else
   qtgui+=" --disable-qt4"
   guiapp=""
 fi
+
+# Do not require makeself. We don't plan on building an automatic installer
+# Patch taken from gentoo
+patch -p1 -i $CWD/virtualbox-4-makeself-check.patch
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -128,6 +129,7 @@ CXXFLAGS="$SLKCFLAGS" \
   --ose \
   --disable-kmods \
   --disable-pulse \
+  --enable-vde \
   $web_service \
   $harden \
   $qtgui
@@ -141,13 +143,14 @@ kmk -j ${JOBS} LOCALCFG=./LocalConfig.kmk
 
 mkdir -p $PKG/usr/{lib$LIBDIRSUFFIX,share,include}/virtualbox \
   $PKG/usr/{bin,src} \
-  $PKG/usr/share/pixmaps \
+  $PKG/usr/share/{pixmaps,mime/packages} \
   $PKG/etc/{default,rc.d,vbox}
 
 cp -f src/VBox/Installer/linux/vboxdrv.sh.in $PKG/etc/rc.d/rc.vboxdrv.new
 sed -i "s/%PACKAGE%/virtualbox/g" $PKG/etc/rc.d/rc.vboxdrv.new
 sed -i "s/%NOLSB%/yes/" $PKG/etc/rc.d/rc.vboxdrv.new
 sed -i "s/%DEBIAN%/no/" $PKG/etc/rc.d/rc.vboxdrv.new
+sed -i "s/%GROUP%/vboxusers/" $PKG/etc/rc.d/rc.vboxdrv.new
 sed -i "s/\[ -z \"\$DEBIAN\"/#\[ -z \"\$DEBIAN\"/" $PKG/etc/rc.d/rc.vboxdrv.new
 
 cp -f $CWD/vbox.cfg $PKG/etc/vbox/vbox.cfg.new
@@ -155,25 +158,53 @@ sed -i "s|LIBDIR|lib$LIBDIRSUFFIX|" $PKG/etc/vbox/vbox.cfg.new
 cp -f $CWD/virtualbox.default $PKG/etc/default/virtualbox.new
 
 cd out/linux.$BUILDDIR/release/bin/
-  rm -f vboxdrv.ko virtualbox.desktop
-  mv VBox.png $PKG/usr/share/pixmaps/
+  rm -f vboxdrv.ko
   mv src $PKG/usr/src/virtualbox-kernel-$VERSION
+
+  if [ "${QT4:-yes}" = "yes" ]; then
+    mv virtualbox.desktop $PKG/usr/share/applications/
+    sed -i "s|\$VBOX_DOC_PATH|/usr/share/virtualbox|" \
+      $PKG/usr/share/applications/virtualbox.desktop
+  fi
+  mv VBox.png $PKG/usr/share/pixmaps/
+
+  cd icons
+    for i in *; do
+      install -d $PKG/usr/share/icons/hicolor/$i/mimetypes
+      mv $i/* $PKG/usr/share/icons/hicolor/$i/mimetypes
+    done
+  cd -
+  rm -rf icons
+
+  mv virtualbox.xml $PKG/usr/share/mime/packages
+
+  export VBOX_INSTALL_PATH=/usr/lib$LIBDIRSUFFIX/virtualbox
+  cd sdk/installer
+    python ./vboxapisetup.py install --prefix "/usr" --root $PKG
+  cd -
+  rm -rf sdk/installer
+
   mv sdk $PKG/usr/share/virtualbox/
   if [ "${QT4:-yes}" = "yes" ]; then
     mv nls* *.tar.bz2 $PKG/usr/share/virtualbox/
   fi
   install -m $MODE -g $GROUP VBoxSysInfo.sh $PKG/usr/share/virtualbox/
+  install -m $MODE -g $GROUP VBoxCreateUSBNode.sh $PKG/usr/share/virtualbox/
   install -m $MODE -g $GROUP VBoxTunctl $PKG/usr/bin/
-  rm -f VoxSysInfo.sh VBoxTunctl
+  rm -f VBoxSysInfo.sh VBoxCreateUSBNode.sh VBoxTunctl
   mv * $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/
   chown -R root:$GROUP $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/
   chmod -R $MODE $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/
   mv $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/VBox.sh $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/VBox
-cd -
+cd $TMP/$SRCNAM-${VERSION}_OSE
 
-for i in VBoxManage VBoxSDL VBoxHeadless VBoxVRDP $guiapp $vboxwebsrv; do
-  ln -s /usr/lib$LIBDIRSUFFIX/virtualbox/VBox $PKG/usr/bin/$i ;
+for i in VBoxManage vboxmanage VBoxSDL vboxsdl VBoxHeadless vboxheadless VBoxVRDP $guiapp $vboxwebsrv; do
+  ln -s /usr/lib$LIBDIRSUFFIX/virtualbox/VBox $PKG/usr/bin/$i
 done
+
+if [ "$guiapp" = "VirtualBox" ]; then
+  ln -s /usr/lib$LIBDIRSUFFIX/virtualbox/VBox $PKG/usr/bin/virtualbox
+fi
 
 if [ "$vboxwebsrv" = "vboxwebsrv" ]; then
   mkdir -p $PKG/var/{lib,log}/vboxweb
@@ -186,8 +217,8 @@ if [ "$vboxwebsrv" = "vboxwebsrv" ]; then
 fi
 
 if [ "$harden" = "--enable-hardening" ]; then
-  for i in VBoxSDL VBoxHeadless $guiapp; do
-    chmod 4${MODE} $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/$i
+  for i in VBoxSDL VBoxHeadless $guiapp VBoxNetDHCP VBoxNetAdpCtl; do
+    chmod 4711 $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/$i
   done
 fi
 
