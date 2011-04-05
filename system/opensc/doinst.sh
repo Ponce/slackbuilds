@@ -12,4 +12,3 @@ config() {
 }
 
 config etc/opensc.conf.new
-
