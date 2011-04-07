@@ -8,3 +8,5 @@ if [ -e usr/share/icons/hicolor/icon-theme.cache ]; then
   fi
 fi
 
+chroot . /usr/bin/glib-compile-schemas /usr/share/glib-2.0/schemas/
+
