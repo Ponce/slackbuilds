@@ -2,7 +2,7 @@
 
 # Slackware build script for cyrus-imapd
 
-# Copyright 2010, mario <mario@slackverse.org>
+# Copyright 2010-2011, mario <mario@slackverse.org>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,16 +23,16 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=cyrus-imapd
-VERSION=${VERSION:-2.3.16}
+VERSION=${VERSION:-2.4.8}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-# Automatically determine the architecture we're building on:
+PATCHES=${PATCHES:-yes}
+
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
     i?86) ARCH=i486 ;;
     arm*) ARCH=arm ;;
-    # Unless $ARCH is already set, use uname -m for all other archs:
        *) ARCH=$( uname -m ) ;;
   esac
 fi
@@ -56,14 +56,14 @@ else
   LIBDIRSUFFIX=""
 fi
 
-# Bail if user isn't valid on your system
-if ! grep -q ^cyrus: /etc/passwd ; then
-  echo "  You must have a cyrus user to run this script."
-  echo "    # groupadd -g 238 cyrus"
-  echo "    # useradd -d /var/imap -s /bin/sh -u 238 -g 238 cyrus"
-  echo "  Or something similar."
+bailout() {
+  printf "\nYou must have a \"cyrus\" user and group to run this script.\n"
+  printf "Something like this will create them:\n"
+  printf "\t# groupadd -g 238 cyrus\n\t# useradd -d /var/imap -s /bin/sh -u 238 -g 238 cyrus\n\n"
   exit 1
-fi
+}
+getent group cyrus >/dev/null || bailout
+getent passwd cyrus >/dev/null || bailout
 
 # Build with mysql database by default, sqlite/mysql/postgresql are supported
 DATABASE=${DATABASE:-mysql}
@@ -89,6 +89,12 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
+if [ "$PATCHES" = yes ]; then
+# Patches for autocreate/autosieve
+  patch -p1 <$CWD/patches/cyrus-imapd-2.4.4-autocreate-0.10-0-slackware.patch
+  patch -p1 <$CWD/patches/cyrus-imapd-2.4.4-autosieve-0.6.0.patch
+fi
+
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -105,8 +111,8 @@ CXXFLAGS="$SLKCFLAGS" \
   --with-bdb-incdir=/usr/include/db4 \
   --with-cyrus-user=cyrus \
   --with-cyrus-group=cyrus \
-  $DATABASE \
-  --build=$ARCH-slackware-linux
+  --build=$ARCH-slackware-linux \
+  $DATABASE
 
 make PERL_MM_OPT='INSTALLDIRS=vendor'
 make install DESTDIR=$PKG
@@ -133,14 +139,16 @@ find $PKG -name perllocal.pod \
   | xargs rm -f
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a COPYRIGHT README README.andrew doc/ master/conf tools/ $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a COPYRIGHT README* doc/* master/conf tools/ $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
 
 # Clean up the obsolete /usr/lib  on 64bit systems.
-if [ "$ARCH" = "x86_64" ]; then
-    rmdir $PKG/usr/lib
-fi
+[ "$ARCH" = "x86_64" ] && rmdir $PKG/usr/lib
+
+# Remove perllocal.pod and other special files; remove empty directories
+find $PKG -name perllocal.pod -o -name ".packlist" -o -name "*.bs" | xargs rm -f || true
+find $PKG -depth -type d -empty -delete || true
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
