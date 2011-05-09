@@ -5,13 +5,15 @@
 # This script is dedicated to the public domain
 
 PRGNAM=darktable
-VERSION=${VERSION:-0.7.1}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-0.8}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+#   SSE2 instructions are *required* at runtime. That's a proper subset of i686, but
+#   hopefully forcing i686 in the package name will alert users of older cpus.
+    i?86) ARCH=i686 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
@@ -22,10 +24,7 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
+if [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
@@ -37,12 +36,6 @@ else
 fi
 
 set -e
-
-if [ ${GKEYRING:-no} = "yes" ]; then
-  WITHGKEYRING="--enable-gkeyring"
-else
-  WITHGKEYRING="--disable-gkeyring"
-fi
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -57,39 +50,42 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-# Suppress warning from gconf
-sed -i -e '/gettext_domain/d' darktable.schemas.in
-
-# Patch to build with exiv2-0.21.1
-patch -p1 < $CWD/exiv2-0.21.1.patch
-
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --disable-static \
-  --build=$ARCH-slackware-linux \
-  $WITHGKEYRING
-
-make
-make install DESTDIR=$PKG
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+    -DMAN_INSTALL_DIR=/usr/man \
+    -DBINARY_PACKAGE_BUILD=1 \
+    -DDONT_INSTALL_GCONF_SCHEMAS=On \
+    -DCMAKE_BUILD_TYPE=Release ..
+  VERBOSE=1 make 
+  make install DESTDIR=$PKG
+cd ..
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
+# Install the gconf schema, suppressing warning messages
+mkdir -p $PKG/etc/gconf/schemas
+sed -e '/gettext_domain/d' \
+  < data/darktable.schemas \
+  > $PKG/etc/gconf/schemas/darktable.schemas
+
+# MAN_INSTALL_DIR is currently ignored :-(
+mv $PKG/usr/share/man $PKG/usr
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-# configure --docdir is ignored, so fix the wrongly installed docs
+# Fix the doc location too
 mv $PKG/usr/share/doc $PKG/usr
 mv $PKG/usr/doc/$PRGNAM $PKG/usr/doc/$PRGNAM-$VERSION
 # Add a few missed docs
-cp -a ChangeLog NEWS TODO $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a doc/ChangeLog doc/NEWS doc/TODO $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+( cd $PKG/usr/doc ; ln -s $PRGNAM-$VERSION $VERSION )
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
