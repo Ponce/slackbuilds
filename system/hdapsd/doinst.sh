@@ -11,13 +11,18 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-# Keep same perms on rc.hdapsd.new:
-if [ -e etc/rc.d/rc.hdapsd ]; then
-  cp -a etc/rc.d/rc.hdapsd etc/rc.d/rc.hdapsd.new.incoming
-  cat etc/rc.d/rc.hdapsd.new > etc/rc.d/rc.hdapsd.new.incoming
-  mv etc/rc.d/rc.hdapsd.new.incoming etc/rc.d/rc.hdapsd.new
-fi
+preserve_perms() {
+  NEW="$1"
+  OLD="$(dirname $NEW)/$(basename $NEW .new)"
+  if [ -e $OLD ]; then
+    cp -a $OLD ${NEW}.incoming
+    cat $NEW > ${NEW}.incoming
+    mv ${NEW}.incoming $NEW
+  fi
+  config $NEW
+}
 
-config /etc/rc.d/rc.hdapsd.new
-config /etc/hdapsd.conf.new
+preserve_perms etc/rc.d/rc.hdapsd.new
+config etc/rc.d/rc.hdapsd.new
+config etc/hdapsd.conf.new
 
