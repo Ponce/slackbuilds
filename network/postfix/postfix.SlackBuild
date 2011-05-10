@@ -1,5 +1,6 @@
 #!/bin/bash
-# Copyright 2006, Alan Hicks, Lizella, GA
+#
+# Copyright 2006, 2011 Alan Hicks, Lizella, GA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -19,17 +20,17 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-PRGNAM="postfix"
-VERSION="2.6.1"
+# Updates by mario@slackverse.org, 2010-2011
+
+PRGNAM=postfix
+VERSION=${VERSION:-2.8.3}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-# Automatically determine the architecture we're building on:
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
     i?86) ARCH=i486 ;;
     arm*) ARCH=arm ;;
-    # Unless $ARCH is already set, use uname -m for all other archs:
        *) ARCH=$( uname -m ) ;;
   esac
 fi
@@ -51,6 +52,41 @@ elif [ "$ARCH" = "x86_64" ]; then
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
+fi
+
+# Build with dovecot sasl by default, cyrus/dovecot are supported
+SASL=${SASL:-dovecot}
+case "$SASL" in
+     dovecot) SASLARGS='-DDEF_SERVER_SASL_TYPE=\"dovecot\"' 
+              SASLLIBS="" ;;
+       cyrus) SASLARGS='-DUSE_CYRUS_SASL -I/usr/include/sasl'
+              SASLLIBS="-L/usr/lib${LIBDIRSUFFIX}/sasl2 -lsasl2" ;;
+           *) SASLARGS=''
+              SASLLIBS="" ;;
+esac
+
+# Build with no database support by default
+DATABASE=${DATABASE:-none}
+case "$DATABASE" in
+       mysql) DBARGS='-DHAS_MYSQL -I/usr/include/mysql'
+              DBLIBS="-L/usr/lib${LIBDIRSUFFIX}/mysql -lmysqlclient -lz -lm" ;;
+           *) DBARGS=''
+              DBLIBS="" ;;
+esac
+
+# MySQL compile hack
+if [ $DATABASE == "mysql" ] && [ -f /usr/include/mysql/events.h ]; then
+
+cat << EOF
+
+  Postfix will fail to compile with mysql support if a system-wide
+  events.h file is not removed (postfix has its own events.h).
+  Either disable mysql support or (re)move events.h, eg:
+
+  # mv /usr/include/mysql/events.h /usr/include/mysql/events.h.bak
+
+EOF
+  exit
 fi
 
 set -e
@@ -96,82 +132,6 @@ EOF
   exit
 fi
 
-# Alan Hicks, 2008.03.26
-# This should be phased out by now, but I'm leaving it in here
-# for historical purposes only.
-fix_perms() {
-config_directory=$PKG/etc/postfix
-daemon_directory=$PKG/usr/libexec/postfix
-command_directory=$PKG/usr/sbin
-queue_directory=$PKG/var/spool/postfix
-sendmail_path=$PKG/usr/sbin/sendmail
-newaliases_path=$PKG/usr/bin/newaliases
-mailq_path=$PKG/usr/bin/mailq
-html_directory=$PKG/usr/doc/$PRGNAM-$VERSION/html
-manpage_directory=$PKG/usr/man
-readme_directory=$PKG/usr/doc/$PRGNAM-$VERSION/README_FILES
-mail_owner=postfix
-setgid_group=postdrop
-# Any line beginning with # is a comment.
-if echo $line | grep -v "^#" 2>&1 > /dev/null; then
-  FILE="$(echo $line | awk -F: '{ print $1 }')"
-  FILE_PREFIX="$(echo $FILE | cut -f 1 -d '/')"
-  FILE_SUFFIX="$(echo $FILE | cut -f 2- -d '/')"
-  TYPE="$(echo $line | awk -F: '{ print $2 }')"
-  OWNER="$(echo $line | awk -F: '{ print $3 }')"
-  GROUP="$(echo $line | awk -F: '{ print $4 }')"
-  PERMS="$(echo $line | awk -F: '{ print $5 }')"
-  # skip this interation if the line we're fed is no good
-  if [ "$TYPE" = "h" ]; then
-    continue
-  elif [ "$TYPE" = "l" ]; then
-    continue
-  elif [ "$FILE_PREFIX" = "\$sample_directory" ]; then
-    continue
-  fi
-  # Tag the actual groups
-  if [ "$GROUP" = "-" ]; then
-    GROUP=root
-  elif [ "$GROUP" = "\$setgid_group" ]; then
-    GROUP="$setgid_group"
-  fi
-  # Tag the postfix owner
-  if [ "$OWNER" = "\$mail_owner" ]; then
-    OWNER="$mail_owner"
-  fi
-  if [ "$FILE_SUFFIX" = "$FILE_PREFIX" ]; then
-    FILE_SUFFIX=""
-  fi
-  if [ "$FILE_PREFIX" = "\$config_directory" ]; then
-    chown $OWNER:$GROUP $config_directory/$FILE_SUFFIX
-    chmod $PERMS $config_directory/$FILE_SUFFIX
-  elif [ "$FILE_PREFIX" = "\$daemon_directory" ]; then
-    chown $OWNER:$GROUP $daemon_directory/$FILE_SUFFIX
-    chmod $PERMS $daemon_directory/$FILE_SUFFIX
-  elif [ "$FILE_PREFIX" = "\$command_directory" ]; then
-    chown $OWNER:$GROUP $command_directory/$FILE_SUFFIX
-    chmod $PERMS $command_directory/$FILE_SUFFIX
-  elif [ "$FILE_PREFIX" = "\$queue_directory" ]; then
-    chown $OWNER:$GROUP $queue_directory/$FILE_SUFFIX
-    chmod $PERMS $queue_directory/$FILE_SUFFIX
-  elif [ "$FILE_PREFIX" = "\$html_directory" ]; then
-    chown $OWNER:$GROUP $html_directory/$FILE_SUFFIX
-    chmod $PERMS $html_directory/$FILE_SUFFIX
-  elif [ "$FILE_PREFIX" = "\$manpage_directory" ]; then
-    chown $OWNER:$GROUP $manpage_directory/$FILE_SUFFIX
-    chmod $PERMS $manpage_directory/$FILE_SUFFIX
-  elif [ "$FILE_PREFIX" = "\$readme_directory" ]; then
-    chown $OWNER:$GROUP $readme_directory/$FILE_SUFFIX
-    chmod $PERMS $readme_directory/$FILE_SUFFIX
-  elif [ "$FILE_PREFIX" = "\$sendmail_path" ]; then
-    chown $OWNER:$GROUP $sendmail_path
-    chmod $PERMS $sendmail_path
-  else
-    echo "NOT FOUND!!! : $FILE_PREFIX"
-  fi
-fi
-}
-
 rm -fr $PKG $TMP/$PRGNAM-$VERSION
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
@@ -181,13 +141,14 @@ cd $PRGNAM-$VERSION
 # TLS, and SASL support
 # Postfix unfortunately does not use a handy ./configure script so you
 # must generate the makefiles using (what else?) "make makefiles". The
-# following includes support for TLS and SASL. It should automatically
-# find PCRE and DB3 support. The docs have information for adding
-# additional support such as MySQL or LDAP.
+# following includes support for TLS, SASL and MYSQL if you setup your
+# variables properly (see the README file). It should
+# automatically find PCRE and DB3 support. The docs have information
+# for adding additional support such as LDAP.
 
 make makefiles \
-  CCARGS='-DUSE_SASL_AUTH -DDEF_SERVER_SASL_TYPE=\"dovecot\" -DUSE_TLS' \
-  AUXLIBS="-lssl -lcrypto"
+  CCARGS="-DUSE_SASL_AUTH -DUSE_TLS $SASLARGS $DBARGS" \
+  AUXLIBS="-lssl -lcrypto $SASLLIBS $DBLIBS"
 
 make
 
