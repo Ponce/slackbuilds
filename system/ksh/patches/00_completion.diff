@@ -1,0 +1,117 @@
+Index: bin/ksh/edit.c
+===================================================================
+RCS file: /cvs/src/bin/ksh/edit.c,v
+retrieving revision 1.34
+diff -u -r1.34 edit.c
+--- ksh/edit.c	20 May 2010 01:13:07 -0000	1.34
++++ ksh/edit.c	9 May 2011 19:44:06 -0000
+@@ -357,20 +357,6 @@
+ 
+ 	toglob = add_glob(str, slen);
+ 
+-	/* remove all escaping backward slashes */
+-	escaping = 0;
+-	for (i = 0, idx = 0; toglob[i]; i++) {
+-		if (toglob[i] == '\\' && !escaping) {
+-			escaping = 1;
+-			continue;
+-		}
+-
+-		toglob[idx] = toglob[i];
+-		idx++;
+-		if (escaping) escaping = 0;
+-	}
+-	toglob[idx] = '\0';
+-
+ 	/*
+ 	 * Convert "foo*" (toglob) to an array of strings (words)
+ 	 */
+@@ -378,7 +364,7 @@
+ 	s = pushs(SWSTR, ATEMP);
+ 	s->start = s->str = toglob;
+ 	source = s;
+-	if (yylex(ONEWORD) != LWORD) {
++	if (yylex(ONEWORD|RMBKSLSH) != LWORD) {
+ 		source = sold;
+ 		internal_errorf(0, "fileglob: substitute error");
+ 		return 0;
+@@ -394,6 +380,20 @@
+ 	if (nwords == 1) {
+ 		struct stat statb;
+ 
++		/* remove all escaping backward slashes (see below) */
++		escaping = 0;
++		for (i = 0, idx = 0; toglob[i]; i++) {
++			if (toglob[i] == '\\' && !escaping) {
++				escaping = 1;
++				continue;
++			}
++
++			toglob[idx] = toglob[i];
++			idx++;
++			if (escaping) escaping = 0;
++		}
++		toglob[idx] = '\0';
++
+ 		/* Check if globbing failed (returned glob pattern),
+ 		 * but be careful (E.g. toglob == "ab*" when the file
+ 		 * "ab*" exists is not an error).
+@@ -821,7 +821,7 @@
+ 	int rval = 0;
+ 
+ 	for (add = 0, wlen = len; wlen - add > 0; add++) {
+-		if (strchr("\"#$&'()*;<=>?[\\]`{|}", s[add]) ||
++		if (strchr(ESCAPEDCHARS, s[add]) ||
+ 		    strchr(ifs, s[add])) {
+ 			if (putbuf_func(s, add) != 0) {
+ 				rval = -1;
+Index: bin/ksh/lex.c
+===================================================================
+RCS file: /cvs/src/bin/ksh/lex.c,v
+retrieving revision 1.45
+diff -u -r1.45 lex.c
+--- ksh/lex.c	9 Mar 2011 09:30:39 -0000	1.45
++++ ksh/lex.c	9 May 2011 19:44:07 -0000
+@@ -299,6 +299,10 @@
+ 					}
+ 					/* FALLTHROUGH */
+ 				default:
++					if ((cf & RMBKSLSH) && strchr(" " ESCAPEDCHARS, c)) {
++						*wp++ = QCHAR, *wp++ = c;
++						break;
++					}
+ 					Xcheck(ws, wp);
+ 					if (c) { /* trailing \ is lost */
+ 						*wp++ = CHAR, *wp++ = '\\';
+Index: bin/ksh/lex.h
+===================================================================
+RCS file: /cvs/src/bin/ksh/lex.h,v
+retrieving revision 1.11
+diff -u -r1.11 lex.h
+--- ksh/lex.h	29 May 2006 18:22:24 -0000	1.11
++++ ksh/lex.h	9 May 2011 19:44:07 -0000
+@@ -113,6 +113,7 @@
+ #define CMDWORD BIT(8)		/* parsing simple command (alias related) */
+ #define HEREDELIM BIT(9)	/* parsing <<,<<- delimiter */
+ #define HEREDOC BIT(10)		/* parsing heredoc */
++#define RMBKSLSH BIT(11)	/* remove backslashes */
+ 
+ #define	HERES	10		/* max << in line */
+ 
+Index: bin/ksh/sh.h
+===================================================================
+RCS file: /cvs/src/bin/ksh/sh.h,v
+retrieving revision 1.30
+diff -u -r1.30 sh.h
+--- ksh/sh.h	4 Jan 2010 18:07:11 -0000	1.30
++++ ksh/sh.h	9 May 2011 19:44:07 -0000
+@@ -398,6 +398,9 @@
+ #define OBRACE	'{'
+ #define CBRACE	'}'
+ 
++/* Characters to be escaped */
++#define ESCAPEDCHARS "\"#$&'()*;<=>?[\\]`{|}"
++
+ /* Determine the location of the system (common) profile */
+ #define KSH_SYSTEM_PROFILE "/etc/profile"
+ 
