@@ -3,7 +3,7 @@ new file mode 100644
 --- /dev/null
 +++ b/Demo/Makefile.am
 @@ -0,0 +1,152 @@
-+AM_CPPFLAGS = -I$(top_srcdir)/Include
++AM_CPPFLAGS = -I$(top_srcdir)/Include $(AMD_CFLAGS) $(UFCONFIG_CFLAGS)
 +LDADD = $(top_builddir)/Source/libumfpack.la
 +
 +EXTRA_DIST = \
@@ -230,8 +230,9 @@ diff --git a/Include/Makefile.am b/Include/Makefile.am
 new file mode 100644
 --- /dev/null
 +++ b/Include/Makefile.am
-@@ -0,0 +1,34 @@
-+include_HEADERS = \
+@@ -0,0 +1,35 @@
++pkgincludedir = $(includedir)/umfpack
++pkginclude_HEADERS = \
 +	umfpack.h \
 +	umfpack_col_to_triplet.h \
 +	umfpack_defaults.h \
@@ -269,15 +270,18 @@ diff --git a/Makefile.am b/Makefile.am
 new file mode 100644
 --- /dev/null
 +++ b/Makefile.am
-@@ -0,0 +1,2 @@
+@@ -0,0 +1,5 @@
 +SUBDIRS = Include Source Demo Doc
 +EXTRA_DIST = README.txt
++
++pkgconfigdir = $(libdir)/pkgconfig
++pkgconfig_DATA = umfpack.pc
 diff --git a/Source/Makefile.am b/Source/Makefile.am
 new file mode 100644
 --- /dev/null
 +++ b/Source/Makefile.am
 @@ -0,0 +1,315 @@
-+AM_CPPFLAGS = -I$(top_srcdir)/Include
++AM_CPPFLAGS = -I$(top_srcdir)/Include $(CHOLMOD_CFLAGS) $(AMD_CFLAGS) $(UFCONFIG_CFLAGS)
 +AM_CPPFLAGS += $(UMFPACK_NCHOLMOD)
 +
 +# non-user-callable umf_*.[ch] files:
@@ -588,10 +592,10 @@ new file mode 100644
 +	libumf_zl.la libumfpack_zl.la
 +
 +if CHOLMOD
-+libumfpack_la_LIBADD += -lcholmod
++libumfpack_la_LIBADD += $(CHOLMOD_LIBS)
 +endif
-+libumfpack_la_LIBADD += -lamd $(BLAS_LIBS) -lm
-+libumfpack_la_LDFLAGS = -no-undefined -version-info 10:0:5
++libumfpack_la_LIBADD += $(AMD_LIBS) $(BLAS_LIBS) -lm
++libumfpack_la_LDFLAGS = -no-undefined -version-info 10:1:5
 diff --git a/acx_blas.m4 b/acx_blas.m4
 new file mode 100644
 --- /dev/null
@@ -792,9 +796,9 @@ diff --git a/configure.ac b/configure.ac
 new file mode 100644
 --- /dev/null
 +++ b/configure.ac
-@@ -0,0 +1,63 @@
-+AC_PREREQ([2.65])
-+AC_INIT([UMFPACK], [5.5.0], [davis@cise.ufl.edu])
+@@ -0,0 +1,72 @@
++AC_PREREQ([2.68])
++AC_INIT([UMFPACK],[5.5.1],[davis@cise.ufl.edu])
 +AC_CONFIG_SRCDIR([Source/umfpack_global.c])
 +AC_CONFIG_HEADER([config.h])
 +AM_INIT_AUTOMAKE([foreign])
@@ -821,7 +825,17 @@ new file mode 100644
 +LIBS_SAVED=$LIBS
 +
 +AC_CHECK_LIB([m], [sqrt])
-+AC_CHECK_LIB([amd], [amd_aat])
++
++AC_CHECK_HEADERS([float.h stdlib.h string.h sys/time.h unistd.h])
++
++PKG_PROG_PKG_CONFIG
++PKG_CHECK_MODULES([UFCONFIG],[ufconfig],
++	[],
++	[AC_MSG_ERROR([cannot find ufconfig])])
++PKG_CHECK_MODULES([AMD],[amd],
++	[],
++	[AC_MSG_ERROR([cannot find amd])])
++UMFPACK_REQUIRES="ufconfig amd"
 +
 +sinclude(acx_blas.m4)
 +ACX_BLAS
@@ -830,14 +844,10 @@ new file mode 100644
 +fi
 +
 +if test "x$with_cholmod" = "xyes"; then
-+	AC_CHECK_HEADERS([cholmod.h])
-+	AC_CHECK_LIB([cholmod], [cholmod_solve],
-+		[],
-+		[AC_MSG_ERROR([cannot find libcholmod])])
++	PKG_CHECK_MODULES([CHOLMOD],[cholmod],
++		[UMFPACK_REQUIRES="$UMFPACK_REQUIRES cholmod"],
++		[AC_MSG_ERROR([cannot find cholmod])])
 +fi
-+
-+AC_CHECK_HEADERS([float.h stdlib.h string.h sys/time.h unistd.h])
-+AC_CHECK_HEADERS([UFconfig.h])
 +
 +AC_TYPE_SIZE_T
 +
@@ -849,10 +859,30 @@ new file mode 100644
 +
 +AM_CONDITIONAL([CHOLMOD], [test "x$with_cholmod" = "xyes"])
 +
++AC_SUBST([UMFPACK_REQUIRES])
++
 +AC_CONFIG_FILES([
++	umfpack.pc
 +	Makefile
 +	Demo/Makefile
 +	Doc/Makefile
 +	Include/Makefile
 +	Source/Makefile])
 +AC_OUTPUT
+diff --git a/umfpack.pc.in b/umfpack.pc.in
+new file mode 100644
+--- /dev/null
++++ b/umfpack.pc.in
+@@ -0,0 +1,12 @@
++prefix=@prefix@
++exec_prefix=@exec_prefix@
++libdir=@libdir@
++includedir=@includedir@
++
++Name: @PACKAGE_NAME@
++Description: Sparse multifrontal LU factorization
++Version: @PACKAGE_VERSION@
++Requires.private: @UMFPACK_REQUIRES@
++Libs: -L${libdir} -lumfpack
++Libs.private: @BLAS_LIBS@ -lm
++Cflags: -I${includedir}/umfpack
