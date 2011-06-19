@@ -5,7 +5,7 @@
 # Written by Larry Hajali <larryhaja[at]gmail[dot]com>
 
 PRGNAM=bsnes
-VERSION=${VERSION:-0.072}
+VERSION=${VERSION:-0.079}
 SRCVER=${VERSION:2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
@@ -42,10 +42,9 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-mkdir $PRGNAM-$VERSION
-cd $PRGNAM-$VERSION
-tar xvf $CWD/${PRGNAM}_v${SRCVER}.tar.bz2
+rm -rf ${PRGNAM}_v${SRCVER}-source
+tar xvf $CWD/${PRGNAM}_v${SRCVER}-source.tar.bz2
+cd ${PRGNAM}_v${SRCVER}-source
 find . -type d -exec chmod -R 0755 {} \;
 chown -R root:root .
 find . \
@@ -54,61 +53,65 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-cd $PRGNAM
+# Patch makefile so SLKCFLAGS are recognized and give option to choose
+# Qt4 or Gtk interface.
+patch -p1 < $CWD/bsnes-0.076-toolkit.patch
+patch -p1 < $CWD/bsnes-0.077-makefile.patch
 
-# Patch makefile so SLKCFLAGS and LIBDIRSUFFIX are recognized.
-cat $CWD/bsnes-0.072-makefile.patch \
-  | sed -e "/^\+/s|/lib/|/lib${LIBDIRSUFFIX}/|g" \
-  | patch -p1
+# Fix snespurify scripts.
+sed -i 's|g++-4.5|g++|g' snespurify/cc-{gtk,qt}.sh
+
+cd $PRGNAM
 
 # Remove pulseaudio as there is no package for it at SBo.
 # Comment out or delete the following 4 lines to enable pulseaudio.
 sed -i \
   -e 's|audio.pulseaudio ||' \
   -e 's|audio.pulseaudiosimple ||' \
-  -e '/pulse/d' ui-qt/Makefile
+  -e '/pulse/d' ui{,-gameboy}/Makefile
 
-for profile in compatibility performance accuracy; do
-  CXXFLAGS="$SLKCFLAGS" \
-  make \
-    platform=x \
-    compiler=gcc \
-    prefix=/usr \
-    ui=ui-qt \
-    profile=$profile
+# Choose whether qt or gtk interface is used. Qt4 is default.
+INTERFACE=${INTERFACE:-QT4}
+if ! [ "$INTERFACE" == 'QT4' ]; then
+  TOOLKIT='gtk'
+else
+  TOOLKIT='qt'
+fi
 
-  make install DESTDIR=$PKG prefix=/usr profile=$profile
-  make clean
-done
+# Determine which mode to build bsnes.
+# Possible values for PROFILE are accuracy, compatibility, and performance.
+PROFILE=${PROFILE:-accuracy}
 
-# Install the launcher
-cd launcher
-sed -i -e '/^clear/d' -e "s|-O3|$SLKCFLAGS|" cc.sh
-./cc.sh
-install -m 0755 ../out/bsnes $PKG/usr/bin/bsnes
+# Determine which mode for profile in compatibility performance accuracy; do
+CXXFLAGS="$SLKCFLAGS" \
+make \
+  platform=x \
+  compiler=gcc \
+  prefix=/usr \
+  toolkit="$TOOLKIT" \
+  profile="$PROFILE"
+
+make install DESTDIR=$PKG prefix=/usr
 cd ..
 
-# Install plugins.
-for i in snesfilter snesreader supergameboy; do
-  cd ../${i}
-  CXXFLAGS="$SLKCFLAGS" \
-  make \
-    platform=x \
-    compiler=gcc \
-    prefix=/usr
-
-  make install DESTDIR=$PKG prefix=/usr
-  ( cd $PKG/usr/lib${LIBDIRSUFFIX} ; ln -s lib${i}.so lib${i}.so.1 )
-  cd -
-done
+# Compile snespurify. It helps clean up ROMS for use with bsnes.
+cd snespurify
+# Fix snespurify scripts.
+sed -i -e 's|g++-4.5|g++|g' -e "s|-O3|$SLKCFLAGS|" cc-{gtk,qt}.sh
+if [ "$INTERFACE" == "QT4" ]; then
+  ./cc-qt.sh
+  install -m 0755 snespurify-qt $PKG/usr/bin
+else
+  ./cc-gtk.sh
+  install -m 0755 snespurify-gtk $PKG/usr/bin
+fi
+cd ..
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a ui-qt/data/*.html $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-find $PKG/usr/doc -type f -exec chmod 0644 {} \;
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
