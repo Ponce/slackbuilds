@@ -18,5 +18,6 @@ if [ -e etc/rc.d/rc.amavisd-new ]; then
   mv etc/rc.d/rc.amavisd-new.new.incoming etc/rc.d/rc.amavisd-new.new
 fi
 
-config etc/rc.d/rc.amavisd.new
+config etc/rc.d/rc.amavisd-new.new
 config etc/amavisd.conf.new
+config etc/logrotate.d/amavisd-new.new
