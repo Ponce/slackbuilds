@@ -1,0 +1,152 @@
+From 6af44d2fa0cdcba11368cf4eee141e42bf0dd422 Mon Sep 17 00:00:00 2001
+From: Alexander Polakov <polachok@gmail.com>
+Date: Sun, 29 May 2011 14:55:46 +0400
+Subject: [PATCH 1/8] ksh/vi mode: complete as command on Ctrl-f.
+
+ * adds a flag for x_cf_glob() to force completion like it was a command
+ * new argument for complete_word() to pass the flag
+ * reuse print_expansions() unused argument to pass the flag
+
+ Why: useful for sudo or one-liner completion
+ XXX: use different key combination?
+---
+ edit.c |    2 ++
+ edit.h |    7 ++++---
+ vi.c   |   22 +++++++++++-----------
+ 3 files changed, 17 insertions(+), 14 deletions(-)
+
+diff --git a/edit.c b/edit.c
+index 6c357a7..0b1ff7d 100644
+--- a/edit.c
++++ b/edit.c
+@@ -599,6 +599,8 @@ x_cf_glob(int flags, const char *buf, int buflen, int pos, int *startp,
+ 	len = x_locate_word(buf, buflen, pos, startp, &is_command);
+ 	if (!(flags & XCF_COMMAND))
+ 		is_command = 0;
++	if (flags & XCF_FORCE_COMMAND)
++		is_command = 1;
+ 	/* Don't do command globing on zero length strings - it takes too
+ 	 * long and isn't very useful.  File globs are more likely to be
+ 	 * useful, so allow these.
+diff --git a/edit.h b/edit.h
+index f966fe4..9c75ffc 100644
+--- a/edit.h
++++ b/edit.h
+@@ -38,9 +38,10 @@ typedef struct {
+ EXTERN X_chars edchars;
+ 
+ /* x_cf_glob() flags */
+-#define XCF_COMMAND	BIT(0)	/* Do command completion */
+-#define XCF_FILE	BIT(1)	/* Do file completion */
+-#define XCF_FULLPATH	BIT(2)	/* command completion: store full path */
++#define XCF_COMMAND		BIT(0)	/* Do command completion */
++#define XCF_FILE		BIT(1)	/* Do file completion */
++#define XCF_FULLPATH		BIT(2)	/* command completion: store full path */
++#define XCF_FORCE_COMMAND	BIT(3)	/* Force completion as a command */
+ #define XCF_COMMAND_FILE (XCF_COMMAND|XCF_FILE)
+ 
+ /* edit.c */
+diff --git a/vi.c b/vi.c
+index 889b35a..e4173c7 100644
+--- a/vi.c
++++ b/vi.c
+@@ -58,7 +58,7 @@ static int	newcol(int, int);
+ static void	display(char *, char *, int);
+ static void	ed_mov_opt(int, char *);
+ static int	expand_word(int);
+-static int	complete_word(int, int);
++static int	complete_word(int, int, int);
+ static int	print_expansions(struct edstate *, int);
+ static int	char_len(int);
+ static void	x_vi_zotc(int);
+@@ -651,7 +651,7 @@ vi_insert(int ch)
+ 		break;
+ 
+ 	case Ctrl('f'):
+-		complete_word(0, 0);
++		complete_word(0, 0, XCF_FORCE_COMMAND);
+ 		break;
+ 
+ 	case Ctrl('e'):
+@@ -660,7 +660,7 @@ vi_insert(int ch)
+ 
+ 	case Ctrl('i'):
+ 		if (Flag(FVITABCOMPLETE)) {
+-			complete_word(0, 0);
++			complete_word(0, 0, 0);
+ 			break;
+ 		}
+ 		/* FALLTHROUGH */
+@@ -1111,14 +1111,14 @@ vi_cmd(int argcnt, const char *cmd)
+ 
+ 		case '=':			/* at&t ksh */
+ 		case Ctrl('e'):			/* Nonstandard vi/ksh */
+-			print_expansions(es, 1);
++			print_expansions(es, 0);
+ 			break;
+ 
+ 
+ 		case Ctrl('i'):			/* Nonstandard vi/ksh */
+ 			if (!Flag(FVITABCOMPLETE))
+ 				return -1;
+-			complete_word(1, argcnt);
++			complete_word(1, argcnt, 0);
+ 			break;
+ 
+ 		case Ctrl('['):			/* some annoying at&t ksh's */
+@@ -1126,7 +1126,7 @@ vi_cmd(int argcnt, const char *cmd)
+ 				return -1;
+ 		case '\\':			/* at&t ksh */
+ 		case Ctrl('f'):			/* Nonstandard vi/ksh */
+-			complete_word(1, argcnt);
++			complete_word(1, argcnt, 0);
+ 			break;
+ 
+ 
+@@ -1939,7 +1939,7 @@ expand_word(int command)
+ }
+ 
+ static int
+-complete_word(int command, int count)
++complete_word(int command, int count, int flags)
+ {
+ 	static struct edstate *buf;
+ 	int rval = 0;
+@@ -1953,7 +1953,7 @@ complete_word(int command, int count)
+ 
+ 	/* Undo previous completion */
+ 	if (command == 0 && expanded == COMPLETE && buf) {
+-		print_expansions(buf, 0);
++		print_expansions(buf, flags);
+ 		expanded = PRINT;
+ 		return 0;
+ 	}
+@@ -1971,7 +1971,7 @@ complete_word(int command, int count)
+ 	/* XCF_FULLPATH for count 'cause the menu printed by print_expansions()
+ 	 * was done this way.
+ 	 */
+-	nwords = x_cf_glob(XCF_COMMAND_FILE | (count ? XCF_FULLPATH : 0),
++	nwords = x_cf_glob(XCF_COMMAND_FILE | (count ? XCF_FULLPATH : 0) | flags,
+ 	    es->cbuf, es->linelen, es->cursor,
+ 	    &start, &end, &words, &is_command);
+ 	if (nwords == 0) {
+@@ -2044,14 +2044,14 @@ complete_word(int command, int count)
+ }
+ 
+ static int
+-print_expansions(struct edstate *e, int command)
++print_expansions(struct edstate *e, int flags)
+ {
+ 	int nwords;
+ 	int start, end;
+ 	char **words;
+ 	int is_command;
+ 
+-	nwords = x_cf_glob(XCF_COMMAND_FILE|XCF_FULLPATH,
++	nwords = x_cf_glob(XCF_COMMAND_FILE|XCF_FULLPATH|flags,
+ 	    e->cbuf, e->linelen, e->cursor,
+ 	    &start, &end, &words, &is_command);
+ 	if (nwords == 0) {
+-- 
+1.7.5
+

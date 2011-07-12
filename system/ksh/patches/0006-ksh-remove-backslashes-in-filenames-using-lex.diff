@@ -1,0 +1,115 @@
+From 458d69d8f10d582fd7a546eabc1b555bb7337627 Mon Sep 17 00:00:00 2001
+From: Alexander Polakov <polachok@gmail.com>
+Date: Sun, 29 May 2011 16:05:58 +0400
+Subject: [PATCH 6/8] ksh: remove backslashes in filenames using lex.
+
+ * this also removes the check for matching pattern and
+   returned filename. if it returns 1 name, then it must
+   be the filename of an existing file, right? i think
+   so.
+
+ Why:
+
+  * less ugly code
+  * working completion for special characters like [], () and so
+  * suggested by martynas
+---
+ edit.c |   31 +++++++------------------------
+ lex.c  |    4 ++++
+ lex.h  |    1 +
+ 3 files changed, 12 insertions(+), 24 deletions(-)
+
+diff --git a/edit.c b/edit.c
+index 9cdcc6d..01c2fe6 100644
+--- a/edit.c
++++ b/edit.c
+@@ -351,7 +351,7 @@ x_file_glob(int flags, const char *str, int slen, char ***wordsp)
+ {
+ 	char *toglob;
+ 	char **words;
+-	int nwords, i, idx, escaping;
++	int nwords;
+ 	XPtrV w;
+ 	struct source *s, *sold;
+ 
+@@ -360,20 +360,6 @@ x_file_glob(int flags, const char *str, int slen, char ***wordsp)
+ 
+ 	toglob = add_glob(str, slen);
+ 
+-	/* remove all escaping backward slashes */
+-	escaping = 0;
+-	for (i = 0, idx = 0; toglob[i]; i++) {
+-		if (toglob[i] == '\\' && !escaping) {
+-			escaping = 1;
+-			continue;
+-		}
+-
+-		toglob[idx] = toglob[i];
+-		idx++;
+-		if (escaping) escaping = 0;
+-	}
+-	toglob[idx] = '\0';
+-
+ 	/*
+ 	 * Convert "foo*" (toglob) to an array of strings (words)
+ 	 */
+@@ -381,7 +367,7 @@ x_file_glob(int flags, const char *str, int slen, char ***wordsp)
+ 	s = pushs(SWSTR, ATEMP);
+ 	s->start = s->str = toglob;
+ 	source = s;
+-	if (yylex(ONEWORD) != LWORD) {
++	if (yylex(ONEWORD|RMBKSLSH) != LWORD) {
+ 		source = sold;
+ 		internal_errorf(0, "fileglob: substitute error");
+ 		return 0;
+@@ -397,15 +383,12 @@ x_file_glob(int flags, const char *str, int slen, char ***wordsp)
+ 	if (nwords == 1) {
+ 		struct stat statb;
+ 
+-		/* Check if globbing failed (returned glob pattern),
+-		 * but be careful (E.g. toglob == "ab*" when the file
+-		 * "ab*" exists is not an error).
+-		 * Also, check for empty result - happens if we tried
+-		 * to glob something which evaluated to an empty
+-		 * string (e.g., "$FOO" when there is no FOO, etc).
++		/* Check if file exists, also, check for empty
++		 * result - happens if we tried to glob something
++		 * which evaluated to an empty string (e.g.,
++		 * "$FOO" when there is no FOO, etc).
+ 		 */
+-		if ((strcmp(words[0], toglob) == 0 &&
+-		    stat(words[0], &statb) < 0) ||
++		 if((stat(words[0], &statb) < 0) ||
+ 		    words[0][0] == '\0') {
+ 			x_free_words(nwords, words);
+ 			words = NULL;
+diff --git a/lex.c b/lex.c
+index ef741c6..fe3d91d 100644
+--- a/lex.c
++++ b/lex.c
+@@ -299,6 +299,10 @@ yylex(int cf)
+ 					}
+ 					/* FALLTHROUGH */
+ 				default:
++					if (cf & RMBKSLSH) {
++						*wp++ = QCHAR, *wp++ = c;
++						break;
++					}
+ 					Xcheck(ws, wp);
+ 					if (c) { /* trailing \ is lost */
+ 						*wp++ = CHAR, *wp++ = '\\';
+diff --git a/lex.h b/lex.h
+index 0904fbd..6a0dbf9 100644
+--- a/lex.h
++++ b/lex.h
+@@ -113,6 +113,7 @@ typedef union {
+ #define CMDWORD BIT(8)		/* parsing simple command (alias related) */
+ #define HEREDELIM BIT(9)	/* parsing <<,<<- delimiter */
+ #define HEREDOC BIT(10)		/* parsing heredoc */
++#define RMBKSLSH BIT(11)	/* remove backslashes */
+ 
+ #define	HERES	10		/* max << in line */
+ 
+-- 
+1.7.5
+
