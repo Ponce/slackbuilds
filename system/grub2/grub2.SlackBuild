@@ -2,20 +2,19 @@
 
 # Slackware build script for grub2
 
-# Written by crocket (crockabiscuit@yahoo.com)
+# Written by crocket (crockabiscuit@gmail.com)
 
 PRGNAM=grub2
-ARCNAM=grub
-VERSION=${VERSION:-1.98}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.99}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-# Automatically determine the architecture we're building on:
+ARCNAM=grub
+
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
     i?86) ARCH=i486 ;;
     arm*) ARCH=arm ;;
-    # Unless $ARCH is already set, use uname -m for all other archs:
        *) ARCH=$( uname -m ) ;;
   esac
 fi
@@ -25,7 +24,7 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-FONT_SIZE=${FONT_SIZE:-16}
+FONT_SIZE=${FONT_SIZE:-19}
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
@@ -34,7 +33,9 @@ elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
+  # -fPIC generates errors with grub2 1.99
+  # SLKCFLAGS="-O2 -fPIC"
+  SLKCFLAGS="-O2"
   LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
@@ -47,7 +48,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $ARCNAM-$VERSION
-tar xvf $CWD/$ARCNAM-$VERSION.tar.gz
+tar xvf $CWD/$ARCNAM-$VERSION.tar.xz
 cd $ARCNAM-$VERSION
 chown -R root:root .
 find . \
@@ -62,6 +63,7 @@ CXXFLAGS="$SLKCFLAGS" \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
+  --localstatedir=/var \
   --infodir=/usr/info \
   --mandir=/usr/man \
   --build=$ARCH-slackware-linux \
@@ -69,30 +71,26 @@ CXXFLAGS="$SLKCFLAGS" \
 make
 make install DESTDIR=$PKG
 
-# Copy grub files from ubuntu.
 mkdir -p $PKG/etc/default
-cat $CWD/etc.default.grub > $PKG/etc/default/grub
-sed "s#/usr/lib#/usr/lib${LIBDIRSUFFIX}#" \
-  $CWD/05_debian_theme > $PKG/etc/grub.d/05_debian_theme
+cat $CWD/etc.default.grub > $PKG/etc/default/grub.new
 
-# Don't strip the files because it breaks module loading.
-#find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-#  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+find $PKG/usr/bin | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+find $PKG/usr/sbin | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 # convert gnu-unifont to a font useable by grub2 gfxterm.
 $PKG/usr/bin/grub-mkfont -o $PKG/usr/share/grub/unifont.pf2 -abv \
   -s $FONT_SIZE /usr/share/fonts/TTF/unifont.ttf
 
-# Copy a snapshot version of grub2 info since the current version's is deficient.
-cat $CWD/grub.INFO > $PKG/usr/info/grub.info
-gzip -9 $PKG/usr/info/*.info*
 rm -f $PKG/usr/info/dir
+gzip -9 $PKG/usr/info/*.info*
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $(find $PKG/usr/man -type l); do ln -s $(readlink $i).gz $i.gz; rm $i; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS COPYING ChangeLog INSTALL NEWS README THANKS TODO docs/grub.cfg \
+cp -a ABOUT-NLS AUTHORS BUGS COPYING ChangeLog INSTALL NEWS README THANKS TODO \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
@@ -102,11 +100,12 @@ cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 # Add .new extension to all configuration files
 # and add them to doinst.sh
-for file in $(find $PKG/etc -type f)
+for file in $(find $PKG/etc -type f -perm -444)
 do
   mv $file $file.new
-  chmod -x $file.new # leaving execution permission is dangerous
-  echo config ${file#$PKG/}.new >> $PKG/install/doinst.sh
+  # This leads grub-mkconfig to abnormal behaviors.
+  # chmod -x $file.new
+  echo "config ${file#$PKG/}.new" >> $PKG/install/doinst.sh
 done
 
 cd $PKG
