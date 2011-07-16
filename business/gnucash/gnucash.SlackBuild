@@ -2,7 +2,7 @@
 
 # Slackware build script for gnucash
 
-# Copyright 2008  Vincent Batts, vbatts@hashbangbash.com, http://hashbangbash.com/
+# Copyright 2008,2009,2010,2011  Vincent Batts, vbatts@hashbangbash.com, http://hashbangbash.com/
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,8 +23,8 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=gnucash
-VERSION=2.2.9
-BUILD=${BUILD:-2}
+VERSION=2.4.5
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -40,6 +40,10 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
+DBI=${DBI:-false}
+WEBKIT=${WEBKIT:-false}
+OPT_ARGS=""
+
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
   LIBDIRSUFFIX=""
@@ -49,9 +53,28 @@ elif [ "$ARCH" = "i686" ]; then
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
+elif [ "$ARCH" = "s390" ]; then
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "arm" ]; then
+  SLKCFLAGS="-O2 -march=armv4t"
+  LIBDIRSUFFIX=""
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
+fi
+
+if [ ! "$DBI" = "false" ] ; then
+  OPT_ARGS="--enable-dbi --with-dbi-dbd-dir=/usr/lib${LIBDIRSUFFIX}/dbd/"
+  echo $0 : building with dbi enabled
+  sleep 0.5
+else
+  OPT_ARGS="--disable-dbi"
+fi
+if [ ! "$WEBKIT" = "false" ] ; then
+  OPT_ARGS="$OPT_ARGS --enable-webkit --with-html-engine=webkit"
+  echo $0 : building with webkit enabled
+  sleep 0.5
 fi
 
 set -e
@@ -69,9 +92,6 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-# Patch for new goffice API
-patch -p1 < $CWD/gnucash_goffice.patch
-
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -82,10 +102,10 @@ CXXFLAGS="$SLKCFLAGS" \
   --infodir=/usr/info \
   --mandir=/usr/man \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --enable-python-bindings \
   --enable-ofx \
   --disable-aqbanking \
-  --disable-sql \
-  --disable-static \
+  $OPT_ARGS \
   --build=$ARCH-slackware-linux
 
 make
@@ -112,26 +132,30 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
-# Handle the schemas and such (hopefully) properly
-GCONF_CONFIG_SOURCE="xml::etc/gconf/gconf.xml.defaults"
-for RAWNAME in $(find $PKG/etc/gconf/schemas -name "*.schemas") ; do
-  SCHEMA=$(basename $RAWNAME)
-  cat << EOF >> $PKG/install/doinst.sh
-GCONF_CONFIG_SOURCE="xml::etc/gconf/gconf.xml.defaults" \
-chroot . gconftool-2 --makefile-install-rule /etc/gconf/schemas/$SCHEMA 1>/dev/null
-EOF
+# handle the schemas and such (hopefully) properly
+export GCONF_CONFIG_SOURCE="xml::etc/gconf/gconf.xml.defaults"
+for rawname in $(find $PKG/etc/gconf/schemas -name "*.schemas") ; do
+  schema=$(basename $rawname)
+  cat << eof >> $PKG/install/doinst.sh
+GCONF_CONFIG_SOURCE="${GCONF_CONFIG_SOURCE}" \
+chroot . gconftool-2 \
+  --config-source=$GCONF_CONFIG_SOURCE \
+  --makefile-install-rule /etc/gconf/schemas/$schema 1>/dev/null
+eof
 done
-for RAWNAME in $(find $PKG/etc/gconf/schemas -name "*.entries") ; do
-  ENTRY=$(basename $RAWNAME)
-  cat << EOF >> $PKG/install/doinst.sh
-GCONF_CONFIG_SOURCE="xml::etc/gconf/gconf.xml.defaults" \
+for rawname in $(find $PKG/etc/gconf/schemas -name "*.entries") ; do
+  entry=$(basename $rawname)
+  cat << eof >> $PKG/install/doinst.sh
+GCONF_CONFIG_SOURCE="${GCONF_CONFIG_SOURCE}" \
 chroot . gconftool-2 --direct \
   --config-source=$GCONF_CONFIG_SOURCE \
-  --load /etc/gconf/schemas/$ENTRY 1>/dev/null
-EOF
+  --load /etc/gconf/schemas/$entry 1>/dev/null
+eof
 done
 unset GCONF_CONFIG_SOURCE
 
 cd $PKG
 /sbin/makepkg -p -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+
