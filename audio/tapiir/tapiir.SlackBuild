@@ -1,0 +1,123 @@
+#!/bin/sh
+
+# Slackware build script for tapiir
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+PRGNAM=tapiir
+VERSION=${VERSION:-0.7.3}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tgz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+if [ "${ALSA:-yes}" = "no" ]; then
+  ALSA_OPT="--without-alsa"
+fi
+
+# Prevent segfaults when running "tapiir --alsa --help"
+patch -p1 < $CWD/alsaio_help_fix_segfault.diff
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure $ALSA_OPT \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --build=$ARCH-slackware-linux
+
+# Don't use "make; make install": it builds/installs extra junk, setuid
+# root binaries, and doesn't install the man page or other docs. It's
+# less work to do without.
+
+make -C src $PRGNAM
+install -d -m0755 $PKG/usr/bin
+install -s -m0755 src/$PRGNAM $PKG/usr/bin
+
+# We don't need separate _jack and _alsa binaries,
+# replace 'em with very small shell scripts.
+sed 's/@ARG@/jack/g' $CWD/$PRGNAM.sh > $PKG/usr/bin/${PRGNAM}_jack
+[ "$ALSA" != "no" ] && \
+  sed 's/@ARG@/alsa/g' $CWD/$PRGNAM.sh > $PKG/usr/bin/${PRGNAM}_alsa
+chmod 0755 $PKG/usr/bin/${PRGNAM}_*
+
+mkdir -p $PKG/usr/man/man1
+gzip -9c doc/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+
+cd $PKG/usr/man/man1
+ln -s $PRGNAM.1.gz ${PRGNAM}_jack.1.gz
+[ "$ALSA" != "no" ] && ln -s ${PRGNAM}.1.gz ${PRGNAM}_alsa.1.gz
+cd -
+
+mkdir -p $PKG/usr/share/applications
+cat $CWD/${PRGNAM}_jack.desktop \
+  > $PKG/usr/share/applications/${PRGNAM}_jack.desktop
+[ "$ALSA" != "no" ] && \
+  cat $CWD/${PRGNAM}_alsa.desktop \
+  > $PKG/usr/share/applications/${PRGNAM}_alsa.desktop
+mkdir -p $PKG/usr/share/pixmaps
+cat doc/images/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  doc/examples doc/images AUTHORS doc/*.html doc/*.txt \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Fix docs permissions, they are awful. The funky u+rwx,etc stuff is needed
+# because GNU's chmod won't clear the setgid bit with a numeric mode! Really!
+# (Why does upstream ship with setgid bits on the docs? I dunno, but this is
+# pretty much unmaintained, so they're never going to fix it)
+find $PKG/usr/doc -type f -a -name "Makefile*" -exec rm {} \;
+find $PKG/usr/doc -type d -exec chmod u=rwx,g=rx,o=rx,a-st {} \;
+find $PKG/usr/doc -type f -exec chmod u=rw,g=r,o=r,a-st {} \;
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
