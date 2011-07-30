@@ -1,0 +1,123 @@
+#!/bin/sh
+
+# Copyright 2008-2011  Giorgio Peron Campodarsego Italy
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=nexus
+VERSION=${VERSION:-1.9.2}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  NEXUS_ARCH="linux-x86-32"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  NEXUS_ARCH="linux-x86-32"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  NEXUS_ARCH="linux-x86-64"
+  LIBDIRSUFFIX="64"
+else
+  echo "ARCH $ARCH not supported"
+  exit 1
+fi
+
+set -e 
+
+# Check if the 'nexus' user & group exist:
+if [ "$(grep ^nexus /etc/passwd)" = "" -o "$(grep ^nexus /etc/group)" = "" ] ; then
+  printf "\nYou must have a nexus user and group.\n\nExample:\n"
+  printf "\t# groupadd -g 252 nexus\n"
+  printf "\t# useradd -u 252 -d /dev/null -s /bin/sh -g nexus nexus\n\n"
+  exit 1
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-oss-webapp-$VERSION
+tar xvf $CWD/$PRGNAM-oss-webapp-$VERSION-bundle.tar.gz
+cd $PRGNAM-oss-webapp-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+DIR=$PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKG/var/{lib,log,run}/$PRGNAM
+mkdir -p $PKG/etc/rc.d
+mkdir -p $PKG/etc/$PRGNAM
+
+cp -r bin/jsw/conf/* $PKG/etc/nexus/
+mkdir -p $DIR/bin/jsw/lib
+cp -r bin/jsw/lib $DIR/bin/jsw
+cp -r bin/jsw/license $PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $DIR/bin/jsw/$NEXUS_ARCH
+cp -r bin/jsw/$NEXUS_ARCH $DIR/bin/jsw
+cp -r runtime $DIR
+cp -r conf/* $PKG/etc/nexus/
+mkdir -p $PKG/var/tmp/$PRGNAM
+cp *.txt $PKG/usr/doc/$PRGNAM-$VERSION
+
+#Put startup script in place and set correct location
+cat $CWD/rc.$PRGNAM | \
+  sed -e "s/@NEXUS_ARCH@/$NEXUS_ARCH/g" \
+      -e "s/@LIBDIRSUFFIX@/$LIBDIRSUFFIX/g" \
+  > $PKG/etc/rc.d/rc.$PRGNAM.new
+
+#Create links to configurarion files
+cd $DIR
+  ln -sf ../../../etc/nexus conf
+cd -
+cd $DIR/bin/jsw
+  ln -sf ../../../../../etc/nexus conf
+cd -
+
+#Replace two configuration files
+rm $PKG/etc/nexus/plexus.properties
+cat $CWD/plexus.properties > $PKG/etc/nexus/plexus.properties.new
+rm $PKG/etc/nexus/wrapper.conf
+cat $CWD/wrapper.conf > $PKG/etc/nexus/wrapper.conf.new
+
+#Fix ownership of some dirs
+chown -R nexus:nexus $PKG/var/{lib,log,run,tmp}/nexus
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
