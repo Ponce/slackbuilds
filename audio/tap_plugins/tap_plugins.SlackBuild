@@ -1,0 +1,146 @@
+#!/bin/sh
+
+# Slackware build script for tap_plugins
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+PRGNAM=tap_plugins
+VERSION=${VERSION:-0.7.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+fi
+
+# You almost certainly do NOT want FORCE_SLACK_CFLAGS=yes
+# (it's here for purists, and for troubleshooting purposes)
+FORCE_SLACK_CFLAGS=${FORCE_SLACK_CFLAGS:-no}
+
+# You may need FORCE_SYSTEM_LADSPA_H=yes if building against a version
+# of ladspa_sdk other than 1.13 (try without first)
+FORCE_SYSTEM_LADSPA_H=${FORCE_SYSTEM_LADSPA_H:-no}
+
+PLUGINS_SRCNAM=tap-plugins
+DOCS_SRCNAM=tap-plugins-doc
+DOCS_VERSION=20040817
+REVERBED_SRCNAM=tap-reverbed
+REVERBED_VERSION=r0
+
+set -e
+
+# First build the plugins
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PLUGINS_SRCNAM-$VERSION
+tar xvf $CWD/$PLUGINS_SRCNAM-$VERSION.tar.gz
+cd $PLUGINS_SRCNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+if [ "$FORCE_SLACK_CFLAGS" = "yes" ]; then
+  sed -i '/^CFLAGS/s/\(=.*\) -O3 \(.*\)\(-c\)/\1 '"$SLKCFLAGS"' \3/' Makefile
+fi
+
+if [ "$FORCE_SYSTEM_LADSPA_H" = "yes" ]; then
+  rm -f ladspa.h
+  cp /usr/include/ladspa.h .
+fi
+
+make
+strip *.so
+make install \
+  INSTALL_PLUGINS_DIR=$PKG/usr/lib$LIBDIRSUFFIX/ladspa/ \
+  INSTALL_LRDF_DIR=$PKG/usr/share/ladspa/rdf/
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+for i in COPYING CREDITS README; do
+  cat $i > $PKG/usr/doc/$PRGNAM-$VERSION/$i.plugins
+done
+
+# Now build the reverb editor
+cd $TMP
+rm -rf $REVERBED_SRCNAM-$REVERBED_VERSION
+tar xvf $CWD/$REVERBED_SRCNAM-$REVERBED_VERSION.tar.gz
+cd $REVERBED_SRCNAM-$REVERBED_VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --build=$ARCH-slackware-linux
+
+if [ "$FORCE_SLACK_CFLAGS" = "yes" ]; then
+  # CFLAGS not supported by autoconf!
+  sed -i '/^CFLAGS/s/=.*-fPIC/= '"$SLKCFLAGS"' -fPIC/' src/Makefile
+fi
+
+make
+
+# more trouble than it's worth to get 'make install' to handle DESTDIR
+strip src/reverbed
+mkdir -p $PKG/usr/bin
+cp src/reverbed $PKG/usr/bin/reverbed.bin
+cat src/.reverbed > $PKG/usr/doc/$PRGNAM-$VERSION/dot.reverbed.default
+
+# Shell script wrapper
+sed 's/@VERSION@/'$VERSION'/g' < $CWD/reverbed.sh > $PKG/usr/bin/reverbed
+chmod 0755 $PKG/usr/bin/reverbed
+
+# ChangeLog and NEWS are 0-length placeholders
+for i in AUTHORS COPYING README; do
+  cat $i > $PKG/usr/doc/$PRGNAM-$VERSION/$i.reverbed
+done
+
+# Now package up the HTML docs
+cd $PKG/usr/doc/$PRGNAM-$VERSION
+  tar xvf $CWD/$DOCS_SRCNAM-$DOCS_VERSION.tar.gz
+  chown -R root:root .
+  find . \
+   \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+   -exec chmod 755 {} \; -o \
+   \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+   -exec chmod 644 {} \;
+cd -
+
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.SBo
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
