@@ -1,0 +1,148 @@
+#!/bin/bash
+
+# Slackware build script for qm-vamp-plugins
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+PRGNAM=qm-vamp-plugins
+VERSION=${VERSION:-1.7}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# No CFLAGS support (releases are tested with their own opts)
+
+if [ "$ARCH" = "i486" ]; then
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  LIBDIRSUFFIX="64"
+else
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+# Remove SSE/SSE2 flags as needed from the CFLAGS
+fix_sse_flags() {
+  local makefile="$1"
+
+  if [ "$USE_SSE2" != "yes" ]; then
+    sed -i \
+      -e 's/-msse2//g' \
+      $makefile
+  fi
+
+  if [ "$USE_SSE" != "yes" ]; then
+    sed -i \
+      -e 's/-msse//g' \
+      -e 's/-mfpmath=sse//g' \
+      $makefile
+  fi
+}
+
+# Private static lib that's distributed as a separate tarball. Main
+# program links to it, but it doesn't need to be installed system-wide
+# as nothing else uses it. It's assumed that qm-dsp's version number
+# will always match the main one.
+LIBNAM=qm-dsp
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION $LIBNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$LIBNAM-$VERSION.tar.gz
+
+cd $LIBNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+# Why doesn't the include path include the project's own include/ dir?
+# (without this, it can't find its own headers)
+sed -i 's,-I\.,-I. -Iinclude,' build/general/Makefile.inc
+
+# SSE/SSE2 support:
+case "$SSE" in
+  "yes") USE_SSE=yes ;;
+  "no")  USE_SSE=no  ;;
+  *)     if grep -q '\<sse\>' /proc/cpuinfo; then
+           USE_SSE=yes
+         else
+           USE_SSE=no
+         fi
+         ;;
+esac
+
+if [ "$USE_SSE" = "yes" ]; then
+  case "$SSE2" in
+    "yes") USE_SSE2=yes ;;
+    "no")  USE_SSE2=no  ;;
+    *)     if grep -q '\<sse2\>' /proc/cpuinfo; then
+             USE_SSE2=yes
+           else
+             USE_SSE2=no
+           fi
+           ;;
+  esac
+else
+  USE_SSE2=no
+fi
+
+echo "USE_SSE=$USE_SSE and USE_SSE2=$USE_SSE2"
+
+# Note about the Makefiles: Makefile.linux64 works fine on 32-bit. The difference
+# between the .linux and .linux64 Makefiles is that the .linux64 one uses atlas
+# instead of plain unoptimized lapack and blas. There's nothing magically 64-bit
+# about atlas...
+fix_sse_flags build/linux/Makefile.linux64
+make -f build/linux/Makefile.linux64
+cd -
+
+# main makefile looks for ../qm-dsp (no version suffix), so:
+ln -s $LIBNAM-$VERSION $LIBNAM
+
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+
+fix_sse_flags build/linux/Makefile.linux64
+make -f build/linux/Makefile.linux64
+
+# no 'make install' target, just cp it.
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/vamp
+cp $PRGNAM.so $PRGNAM.cat $PRGNAM.n3 $PKG/usr/lib$LIBDIRSUFFIX/vamp
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  README.txt COPYING \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
