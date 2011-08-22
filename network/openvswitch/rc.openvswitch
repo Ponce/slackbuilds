@@ -1,0 +1,68 @@
+#!/bin/sh
+# Start/stop/restart openvswitch.
+
+# To start Open vSwitch automatically at boot, be sure this script is
+# executable:
+#
+#   % chmod 755 /etc/rc.d/rc.openvswitch
+
+# Before you can run Open vSwitch daemon, you must have a database.  To
+# install an initial database, perform the following as root:
+#
+#   % modprobe openvswitch_mod
+#   % ovsdb-tool create /etc/openvswitch/ovs-vswitchd.conf.db @DOCDIR@/schema/vswitch.ovsschema
+#
+
+# Module to make Open vSwitch compatible with Linux bridge utils:
+BRCOMPAT=0
+
+SOCKET=/var/run/openvswitch/db.sock
+VSPID=/var/run/openvswitch/ovs-vswitchd.pid
+DBPID=/var/run/openvswitch/ovsdb-server.pid
+
+# Insert kernel driver for Open vSwitch:
+/sbin/modprobe openvswitch_mod
+
+# Insert kernel driver for VLANs:
+/sbin/modprobe 8021q
+
+# Insert kernel driver for bridge util compatibility:
+if [ $BRCOMPAT -ne 0 ] ; then
+  /sbin/modprobe brcompat_mod
+fi
+
+# Start openvswitch:
+openvswitch_start() {
+  echo "Starting openvswitch:  /etc/rc.d/rc.openvswitch"
+  /usr/sbin/ovsdb-server /etc/openvswitch/ovs-vswitchd.conf.db --remote=punix:$SOCKET --detach --pidfile=$DBPID
+  /usr/bin/ovs-vsctl --no-wait init
+  /usr/sbin/ovs-vswitchd unix:$SOCKET --detach --pidfile=$VSPID
+}
+
+# Stop openvswitch:
+openvswitch_stop() {
+  echo "Stopping openvswitch:  /etc/rc.d/rc.openvswitch"
+  if [ -e $VSPID ]; then
+    pid=$(cat $VSPID)
+    /usr/bin/ovs-appctl -t /var/run/openvswitch/ovs-vswitchd.$pid.ctl exit
+  fi
+  if [ -e $DBPID ]; then
+    pid=$(cat $DBPID)
+    /usr/bin/ovs-appctl -t /var/run/openvswitch/ovsdb-server.$pid.ctl exit
+  fi
+}
+
+case "$1" in
+'start')
+  openvswitch_start
+  ;;
+'stop')
+  openvswitch_stop
+  ;;
+'restart')
+  openvswitch_stop
+  openvswitch_start
+  ;;
+*)
+  echo "usage $0 start|stop|restart"
+esac
