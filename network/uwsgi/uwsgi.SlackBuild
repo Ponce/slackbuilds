@@ -4,7 +4,7 @@
 # Written by Audrius Kažukauskas <audrius@neutrino.lt>
 
 PRGNAM=uwsgi
-VERSION=${VERSION:-0.9.6.7}
+VERSION=${VERSION:-0.9.8.3}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -35,6 +35,19 @@ else
   LIBDIRSUFFIX=""
 fi
 
+# Build Python 2.6 plugin.
+PYTHON26=${PYTHON26:-yes}
+
+# Set this to "yes" if you want to build a plugin for Python 3.2.  Requires
+# python3 to be installed.
+PYTHON32=${PYTHON32:-no}
+
+# Perl PSGI plugin is disabled for now, as it works only on -current.
+PSGI=${PSGI:-no}
+
+# Build Ruby Rack plugin.
+RACK=${RACK:-yes}
+
 set -eu
 
 rm -rf $PKG
@@ -50,11 +63,50 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-CFLAGS="$SLKCFLAGS" \
-python uwsgiconfig.py --build
+# Create build config file.
+cat > buildconf/package.ini <<EOF
+[uwsgi]
+inherit = default
+plugin_dir = /usr/lib$LIBDIRSUFFIX/uwsgi-$VERSION
+embedded_plugins = null
+EOF
 
+# Build uWSGI core.
+CFLAGS="$SLKCFLAGS" \
+python uwsgiconfig.py --build package
 install -D -m 755 uwsgi $PKG/usr/bin/uwsgi
-strip --strip-unneeded $PKG/usr/bin/uwsgi
+
+# Create directory for plugins.
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/uwsgi-$VERSION
+
+# Change the path, so that plugins would be placed inside $PKG.
+sed -i "s|= /usr|= $PKG/usr|" buildconf/package.ini
+
+# List of plugins to build.
+PLUGINS="cache ping rpc fastrouter http ugreen"
+
+# Decide which language plugins to build.
+[ "$PYTHON26" = "yes" ] && PLUGINS="$PLUGINS python26"
+[ "$PYTHON32" = "yes" ] && PLUGINS="$PLUGINS python32"
+[ "$PSGI" = "yes" ] && PLUGINS="$PLUGINS psgi"
+[ "$RACK" = "yes" ] && PLUGINS="$PLUGINS rack"
+
+# Build plugins.
+for PLUGIN in $PLUGINS ; do
+  CFLAGS="$SLKCFLAGS" \
+  python uwsgiconfig.py --plugin plugins/$PLUGIN package
+done
+
+# Create a few symlinks for automatic plugin loading.
+( cd $PKG/usr/bin
+  [ "$PYTHON26" = "yes" ] && ln -sf uwsgi uwsgi_python26 || true
+  [ "$PYTHON32" = "yes" ] && ln -sf uwsgi uwsgi_python32 || true
+  [ "$PSGI" = "yes" ] && ln -sf uwsgi uwsgi_psgi || true
+  [ "$RACK" = "yes" ] && ln -sf uwsgi uwsgi_rack || true
+)
+
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a ChangeLog LICENSE README $PKG/usr/doc/$PRGNAM-$VERSION
