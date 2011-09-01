@@ -11,5 +11,5 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-depmod -a
+depmod -a @KERNEL@
 
