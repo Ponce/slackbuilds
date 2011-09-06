@@ -1,0 +1,173 @@
+#!/bin/sh
+
+# Slackware build script for OpenOffice
+
+# Copyright 2006,2007,2008,2009,2010  Robby Workman, Northport, Alabama, ASA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Modified by Gerardo, email: gerardo.gr90@gmail.com
+#  Thanks to Robby Workman who wrote the openoffice.org slackbuild for
+#  the version 3.2.1, which i use as a basis for this slackbuild.
+
+
+PRGNAM=openoffice.org
+VERSION=${VERSION:-3.3.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+# These variables seem to change with (almost) every release...
+SRCVERSION=$VERSION
+SRCSHORT=$(echo $VERSION | cut -f1-2 -d.) #"3.3"
+
+# Automatically determine the architecture we're building on:
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}	# For consistency's sake, use this
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}	# Drop the package in /tmp
+
+OOLANG=${OOLANG:-es}
+PKG_LANG=${OOLANG//-/_} # Leave this alone
+
+# Until now all releases were without the JRE...
+WJRE=${WJRE:-yes}
+
+# If you want to disable java support by removing executable permissions
+# from OpenOffice's java loader (this will not affect other apps), set this
+# variable to "YES"   Default is "NO"
+DISABLE_JAVA=${DISABLE_JAVA:-NO}
+
+# Change source package name
+if [ "$ARCH" = "x86_64" ]; then
+  SRCARCH="x86-64"
+  PKGARCH="$ARCH"
+elif [ "$ARCH" = "arm" ]; then
+  printf "\n$ARCH is unsupported for OOo...\n\n"
+  exit 1
+else
+  SRCARCH="x86"
+  PKGARCH="i586"
+fi
+
+# Specify if we are going to include de JRE pkg
+if [ $WJRE != no ]; then
+  TARJRE="-wJRE"
+else
+  TARJRE=""
+fi
+
+# Building the final name.
+TARNAME="OOo_${VERSION}_Linux_${SRCARCH}_install-rpm${TARJRE}_${OOLANG}.tar.gz"
+
+ls $TARNAME
+
+# Check if we have the tarball
+if [ ! -r $TARBALL ]; then
+  echo "$TARBALL not found"
+  exit 1
+fi
+
+# Ignore this - it's just to get the toplevel directory name of the
+# extracted tarball archive
+SOURCEDIR=$(tar tzf $CWD/$TARNAME 2>/dev/null | head -n 1 | tr -d \/)
+# If the above operation failed for some reason, unset SOURCEDIR so that
+# the "set -eu" below will cause us to bail out with an error
+[ -z $SOURCEDIR ] && unset SOURCEDIR
+
+set -eu
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+rm -rf $TMP/$SOURCEDIR
+
+# Extract tarball
+tar xvf $CWD/$TARNAME -C $TMP
+
+# We'll remove this regardless of whether we're using the jre tarball...
+rm -rf $TMP/$SOURCEDIR/{JavaSetup.jar,installdata,setup}
+rm -rf $TMP/$SOURCEDIR/RPMS/{userland,jre-*-linux-*.rpm}
+
+cd $TMP/$SOURCEDIR/RPMS
+
+# We only need the freedesktop integration, so we move it to the current location
+mv desktop-integration/openoffice.org$SRCSHORT-freedesktop-menus-$SRCSHORT-*.noarch.rpm .
+
+# We don't want this, so we delete the *onlineupdate*.rpm
+rm -f *onlineupdate*.rpm
+
+# Extract the files from the *.rpm
+for FILE in *.rpm ; do rpm2cpio < $FILE | cpio -imdv ; done
+rm -rf desktop-integration *.rpm
+mv opt usr $PKG
+cd $PKG
+
+# Kill a broken symlink
+rm -f $PKG/usr/share/applications/openoffice.org3-startcenter.desktop
+
+# Create symlinks in /usr/bin to actual binaries
+# Cambiar los nombres de sbase,scalc, etc, por los de open office
+cd $PKG/usr/bin
+  for FILE in \
+    sbase scalc sdraw simpress smath soffice spadmin swriter unopkg ; do
+      rm -f $FILE
+      ln -sf ../../opt/openoffice.org3/program/$FILE $FILE ;
+  done
+cd -
+
+# Remove DejaVu and Liberation fonts - these are included in other packages
+rm -f opt/openoffice.org/basis3.2/share/fonts/truetype/[DL]*.ttf
+
+# Fix Exec commands in the desktop files
+# See http://bugzilla.xfce.org/show_bug.cgi?id=2430
+cd $PKG//opt/openoffice.org3/share/xdg/
+  for APP in base calc draw impress math writer; do
+    sed -i 's%Exec=openoffice.org3 -%Exec=s%' $APP.desktop ;
+  done
+cd -
+
+# Move docs to their expected locations
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cd $PKG/opt/openoffice.org3
+  mv README* *LICENSE* readmes $PKG/usr/doc/$PRGNAM-$VERSION
+cd -
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Disable Java support if desired (see above)
+if [ "$DISABLE_JAVA" = "YES" ]; then
+  chmod -x $PKG/opt/$PRGNAM$SRCSHORT/ure/bin/javaldx
+fi
+
+# We create the install dir, and add to it the slack-desc and doinst.sh file
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+# Fix ownership and permissions and make the package
+chown -R root:root .
+find . -type d -exec chmod 755 {} \;
+chmod -R u+rw,go+r-w,a-s .
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-${VERSION}_${PKG_LANG}-$PKGARCH-$BUILD$TAG.${PKGTYPE:-tgz}
