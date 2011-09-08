@@ -11,12 +11,17 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-# Keep same perms on rc.g15daemon.new:
-if [ -e etc/rc.d/rc.g15daemon ]; then
-  cp -a etc/rc.d/rc.g15daemon etc/rc.d/rc.g15daemon.new.incoming
-  cat etc/rc.d/rc.g15daemon.new > etc/rc.d/rc.g15daemon.new.incoming
-  mv etc/rc.d/rc.g15daemon.new.incoming etc/rc.d/rc.g15daemon.new
-fi
+perms(){
 
-config etc/rc.d/rc.g15daemon.new
+  # Keep same perms on $1.new:
+  if [ -e "$1" ]; then
+    cp -a "$1" "$1".new.incoming
+    cat "$1".new > "$1".new.incoming
+    mv "$1".new.incoming "$1".new
+  fi
 
+  config "$1".new
+}
+
+perms etc/rc.d/rc.g15daemon
+perms etc/rc.d/rc.g15daemon.conf
