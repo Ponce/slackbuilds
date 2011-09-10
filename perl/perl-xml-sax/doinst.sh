@@ -1,4 +1,4 @@
-if [ -f usr/lib/perl5/vendor_perl/5.10.0/XML/SAX/ParserDetails.ini ]; then
+if [ -f @PERLPATH@/XML/SAX/ParserDetails.ini ]; then
 	echo "ParserDetails.ini file already installed.";
 else
  	perl -MXML::SAX -e "XML::SAX->add_parser(q(XML::SAX::PurePerl))->save_parsers()"
