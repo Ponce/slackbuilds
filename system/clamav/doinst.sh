@@ -13,9 +13,22 @@ config() {
   done
 }
 
+preserve_perms() {
+  NEW="$1"
+  OLD="$(dirname $NEW)/$(basename $NEW .new)"
+  if [ -e $OLD ]; then
+    cp -a $OLD ${NEW}.incoming
+    cat $NEW > ${NEW}.incoming
+    mv ${NEW}.incoming $NEW
+  fi
+  config $NEW
+}
+
+preserve_perms etc/rc.d/rc.clamav.new
 config etc/freshclam.conf.new
 config etc/clamd.conf.new
-config etc/rc.d/rc.clamav.new
-config var/log/clamd.log.new ; rm -f var/log/clamd.log.new
-config var/log/freshclam.log.new ; rm -f var/log/freshclam.log.new
+config etc/clamav-milter.conf.new
+# Remove new log if one is already present
+config var/log/clamav/clamd.log.new ; rm -f var/log/clamav/clamd.log.new
+config var/log/clamav/freshclam.log.new ; rm -f var/log/clamav/freshclam.log.new
 

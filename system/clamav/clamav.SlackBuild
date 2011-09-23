@@ -23,19 +23,18 @@
 
 # Modified to SBo format with the help of Yalla-One
 # Version bump and various other changes by Robby Workman
+# New version bump and various other changes by ponce
 # No additional license terms added
 
 PRGNAM=clamav
-VERSION=0.95.2
+VERSION=${VERSION:-0.97.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-# Automatically determine the architecture we're building on:
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
     i?86) ARCH=i486 ;;
     arm*) ARCH=arm ;;
-    # Unless $ARCH is already set, use uname -m for all other archs:
        *) ARCH=$( uname -m ) ;;
   esac
 fi
@@ -95,6 +94,35 @@ cd $PRGNAM-$VERSION || exit 1
 chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
 
+# Specify the desired mirror in the update config file
+# http://www.iana.org/cctld/cctld-whois.htm
+sed -i "s/^\#DatabaseMirror.*/DatabaseMirror db.${COUNTRY}.clamav.net/" etc/freshclam.conf
+
+sed \
+  -e "s/^Example/#Example/" \
+  -e "s/^\#LogSyslog/LogSyslog/" \
+  -e "s/^\#LogFacility/LogFacility/" \
+  -e "s/^\#PidFile.*/PidFile \/var\/run\/clamav\/freshclam.pid/" \
+  -e "s/^\#UpdateLogFile.*/UpdateLogFile \/var\/log\/clamav\/freshclam.log/" \
+  -e "s/^\#AllowSupplementaryGroups.*/AllowSupplementaryGroups yes/" \
+  -e "s/^\#DatabaseOwner.*/DatabaseOwner ${CLAMUSR}/" \
+  -e "s/^\#NotifyClamd.*/NotifyClamd \/etc\/clamd.conf/" \
+  -i etc/freshclam.conf
+sed \
+  -e "s/^Example/#Example/" \
+  -e "s/^\#LogSyslog/LogSyslog/" \
+  -e "s/^\#LogFacility/LogFacility/" \
+  -e "s/^\#LogFile\ .*/LogFile \/var\/log\/clamav\/clamd.log/" \
+  -e "s/^\#PidFile.*/PidFile \/var\/run\/clamav\/clamd.pid/" \
+  -e "s/^\#LocalSocket\ .*/LocalSocket \/var\/run\/clamav\/clamd.socket/" \
+  -e "s/^\#LocalSocketGroup.*/LocalSocketGroup ${CLAMGRP}/" \
+  -e "s/^\#LocalSocketMode/LocalSocketMode/" \
+  -e "s/^\#FixStaleSocket/FixStaleSocket/" \
+  -e "s/^\#User.*/User ${CLAMUSR}/" \
+  -e "s/^\#AllowSupplementaryGroups.*/AllowSupplementaryGroups yes/" \
+  -e "s/^\#ExitOnOOM/ExitOnOOM/" \
+  -i etc/clamd.conf
+
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -109,51 +137,38 @@ CXXFLAGS="$SLKCFLAGS" \
   --enable-milter \
   --enable-id-check \
   --disable-static \
+  --disable-experimental \
   --build=$ARCH-slackware-linux
 
-make
-
-# Patch the configuration files
-patch -p1 < $CWD/config/clamd.conf.patch
-patch -p1 < $CWD/config/freshclam.conf.patch
-
+make V=1
 make install DESTDIR=$PKG
 
 # Prepare the config files:
-mv $PKG/etc/clamd.conf $PKG/etc/clamd.conf.new
-mv $PKG/etc/freshclam.conf $PKG/etc/freshclam.conf.new
+for cf in clamd freshclam clamav-milter; do
+  mv $PKG/etc/$cf.conf $PKG/etc/$cf.conf.new
+done
 
-# Specify the desired mirror in the update config file
-# http://www.iana.org/cctld/cctld-whois.htm
-sed -i "s/@COUNTRY@/${COUNTRY}/g" $PKG/etc/freshclam.conf.new
-
-# Our rc script:
-mkdir -p $PKG/etc/rc.d/
-cp $CWD/config/rc.clamav $PKG/etc/rc.d/rc.clamav.new
-chown root:root $PKG/etc/rc.d/rc.clamav.new
-chmod 0755 $PKG/etc/rc.d/rc.clamav.new
+# Our rc script and logrotate entry:
+install -D -m 0755 $CWD/rc.clamav $PKG/etc/rc.d/rc.clamav.new
+install -D -m 0644 $CWD/logrotate.clamav $PKG/etc/logrotate.d/clamav
 
 # Fixup some ownership and permissions issues
 chown -R root:root $PKG
 chmod -R o-w $PKG
 chown ${CLAMUSR} $PKG/usr/sbin/clamav-milter
 chmod 4700 $PKG/usr/sbin/clamav-milter
-chown -R ${CLAMUSR}:${CLAMGRP} $PKG/var/lib/clamav
 chmod 0770 $PKG/var/lib/clamav
 chmod 0660 $PKG/var/lib/clamav/*
 
-# Create pid and socket directory
-mkdir -p $PKG/var/run/clamav
-chown -R ${CLAMUSR}:${CLAMGRP} $PKG/var/run/clamav
-chmod 771 $PKG/var/run/clamav
+# Create pid, socket and log directories
+mkdir -p $PKG/var/{log,run}/clamav
+chmod 771 $PKG/var/{log,run}/clamav
 
 # Create log files in such a way that they won't clobber existing ones
-mkdir -p $PKG/var/log
-touch $PKG/var/log/{clamd,freshclam}.log.new
-chown ${CLAMUSR}:${CLAMGRP} $PKG/var/log/clamd.log.new
-chmod 660 $PKG/var/log/clamd.log.new
-chown ${CLAMUSR}:${CLAMGRP} $PKG/var/log/freshclam.log.new
-chmod 660 $PKG/var/log/freshclam.log.new
+touch $PKG/var/log/clamav/{clamd,freshclam}.log.new
+chmod 660 $PKG/var/log/clamav/{clamd,freshclam}.log.new
+
+chown -R ${CLAMUSR}:${CLAMGRP} $PKG/var/{lib,log,run}/clamav
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
