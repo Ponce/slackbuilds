@@ -10,12 +10,22 @@ config() {
     # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-# Keep same perms on rc.ntop.new:
-if [ -e etc/rc.d/rc.ntop ]; then
-  cp -a etc/rc.d/rc.ntop etc/rc.d/rc.ntop.new.incoming
-  cat etc/rc.d/rc.ntop.new > etc/rc.d/rc.ntop.new.incoming
-  mv etc/rc.d/rc.ntop.new.incoming etc/rc.d/rc.ntop.new
-fi
+preserve_perms() {
+  NEW="$1"
+  OLD="$(dirname $NEW)/$(basename $NEW .new)"
+  if [ -e $OLD ]; then
+    cp -a $OLD ${NEW}.incoming
+    cat $NEW > ${NEW}.incoming
+    mv ${NEW}.incoming $NEW
+  fi
+  config $NEW
+}
 
-config etc/rc.d/rc.ntop.new
+preserve_perms etc/rc.d/rc.ntop.new
 config etc/logrotate.d/ntop.new
+config etc/ntop/specialMAC.txt.gz.new
+config etc/ntop/ntop-cert.pem.new
+config etc/ntop/GeoIPASNum.dat.new
+config etc/ntop/GeoLiteCity.dat.new
+config etc/ntop/etter.finger.os.gz.new
+config etc/ntop/oui.txt.gz.new
