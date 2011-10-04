@@ -16,19 +16,17 @@
 
 NAME="cdemud"
 DESC="cdemu-daemon"
-LOCK="/var/lock/${DESC}.lock"
+MODULE="vhba"
+CTL_DEVICE="/dev/vhba_ctl"
 PID=$(/sbin/pidof -o %PPID ${NAME})
-
-# Get the configuration information from /etc/rc.d/rc.cdemud.conf:
-. /etc/rc.d/rc.cdemud.conf
 
 start() 
 {
     # Check if already started
     if [ -n "${PID}" ] ;then
-	echo "${DESC} is already running at pid: ${PID}"
-	return ${RETVAL}
-	exit
+        echo "${DESC} is already running at pid: ${PID}"
+        return ${RETVAL}
+        exit
     fi
 
     # Load module
@@ -36,10 +34,11 @@ start()
         echo -n "Inserting ${MODULE} kernel module"
         modprobe "${MODULE}" >/dev/null 2>&1
         RETVAL=$?
-	if [ ${RETVAL} -eq 0 ]; then
+        if [ ${RETVAL} -eq 0 ]; then
             echo -e "\t\t\t\t\t[  OK  ]\r"
         else
             echo -e "\t\t\t\t\t[FAILED]\r"
+            exit 1
         fi
     fi
     
@@ -59,97 +58,70 @@ start()
             fi
         done
 
-	if [ ${RETVAL} -eq 0 ]; then
+        if [ ${RETVAL} -eq 0 ]; then
             echo -e "\t\t\t\t[  OK  ]\r"
         else
             echo -e "\t\t\t\t[FAILED]\r"
+            exit 1
         fi
     fi
 
-
-    # Daemon arguments
-    DAEMON_ARGS="--daemonize"
-    
-    if [ -n "${DEVICES}" ]; then
-        DAEMON_ARGS="${DAEMON_ARGS} --num-devices=${DEVICES}"
-    fi
-    if [ -n "${CTL_DEVICE}" ]; then
-        DAEMON_ARGS="${DAEMON_ARGS} --ctl-device=${CTL_DEVICE}"
-    fi
-    if [ -n "${AUDIO_DRIVER}" ]; then
-        DAEMON_ARGS="${DAEMON_ARGS} --audio-driver=${AUDIO_DRIVER}"
-    fi
-    if [ -n "${BUS}" ]; then
-        DAEMON_ARGS="${DAEMON_ARGS} --bus=${BUS}"
-    fi
-
     # Start daemon
-    echo -n "Starting ${DESC}"
-    $NAME ${DAEMON_ARGS} >/dev/null 2>&1
-    RETVAL=$?
-    if [ ${RETVAL} -eq 0 ] && touch ${LOCK} ; then
-        echo -e "\t\t\t\t\t\t[  OK  ]\r"
-        else
-        echo -e "\t\t\t\t\t\t[FAILED]\r"
-    fi
+    # ... we don't really start the daemon, this is done by dbus
     return ${RETVAL}
 }
 
 stop() 
 {
-        # Stopping daemon
-        echo -n "Stopping ${DESC}"
-	if [ -n "${PID}" ] ;then
-            $NAME -k >/dev/null 2>&1
-            RETVAL=$?
-            if [ ${RETVAL} -eq 0 ]; then
-                echo -e "\t\t\t\t\t\t[  OK  ]\r"
-                else
-                echo -e "\t\t\t\t\t\t[FAILED]\r"
-            fi
-	 else 
-            echo -e "\t\t\t\tWarning: ${DESC} isn't running"
-	    RETVAL=0
-	 fi
-					    
+    # Stopping daemon
+    echo -n "Stopping ${DESC}"
+    if [ -n "${PID}" ] ;then
+        kill ${PID}
+        RETVAL=$?
+        if [ ${RETVAL} -eq 0 ]; then
+            echo -e "\t\t\t\t\t\t[  OK  ]\r"
+            else
+            echo -e "\t\t\t\t\t\t[FAILED]\r"
+        fi
+        sleep 2
+    else 
+        echo -e "\t\t\t\tWarning: ${DESC} isn't running"
+        RETVAL=0
+    fi
 
-          # Unload module
-          echo -n "Removing ${MODULE} kernel module"
-          LOADED=`lsmod | grep -o -e ^${MODULE} -`
-          if [ "${LOADED}" = "${MODULE}" ]; then
-              modprobe -r "${MODULE}" >/dev/null 2>&1
-              RETVAL=$?
-              if [ ${RETVAL} -eq 0 ]; then
-                  echo -e "\t\t\t\t\t[  OK  ]\r"
-                  else
-                  echo -e "\t\t\t\t\t[FAILED]\r"
-              fi
-          return ${RETVAL}
-          if [ $RETVAL -eq 0 ]; then
-	      rm -f $LOCK
-          fi
-          else
-              echo -e "\t\t\tWarning: ${MODULE} isn't loaded"
-              RETVAL=0
-          fi
-          return ${RETVAL}
+    # Unload module
+    echo -n "Removing ${MODULE} kernel module"
+    LOADED=`lsmod | grep -o -e ^${MODULE} -`
+    if [ "${LOADED}" = "${MODULE}" ]; then
+        modprobe -r "${MODULE}" >/dev/null 2>&1
+        RETVAL=$?
+        if [ ${RETVAL} -eq 0 ]; then
+            echo -e "\t\t\t\t\t[  OK  ]\r"
+        else
+            echo -e "\t\t\t\t\t[FAILED]\r"
+        fi
+    else
+        echo -e "\t\t\tWarning: ${MODULE} isn't loaded"
+        RETVAL=0
+    fi
+    return ${RETVAL}
 }
 
 restart() {
-          stop
-          RETVAL=$?
-          if [ ${RETVAL} -eq 0 ]; then
-              PID=$(/sbin/pidof -o %PPID ${NAME})
-              start
-              RETVAL=$?
-              if [ ${RETVAL} -ne 0 ]; then
-		  echo "Couldn't start ${DESC} retry in 3sec."
-		  sleep 3
-		  start
-		  RETVAL=$?
-              fi
-          fi
-          return ${RETVAL}
+    stop
+    RETVAL=$?
+    if [ ${RETVAL} -eq 0 ]; then
+        PID=$(/sbin/pidof -o %PPID ${NAME})
+        start
+        RETVAL=$?
+        if [ ${RETVAL} -ne 0 ]; then
+            echo "Couldn't start ${DESC} retry in 3sec."
+            sleep 3
+            start
+            RETVAL=$?
+        fi
+    fi
+    return ${RETVAL}
 }
 
 # See how we were called.
