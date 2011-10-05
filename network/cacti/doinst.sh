@@ -12,4 +12,4 @@ config() {
 }
 
 config etc/cacti/config.php.new
-
+config var/log/cacti/cacti.log.new
