@@ -1,3 +1,4 @@
+#!/bin/sh
 config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
@@ -10,4 +11,5 @@ config() {
   fi
   # Otherwise, we leave the .new copy for the admin to consider...
 }
+
 config etc/offlineimap.conf.new
