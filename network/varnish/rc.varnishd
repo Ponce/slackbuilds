@@ -1,0 +1,78 @@
+#!/bin/sh
+
+# varnish rc script
+# written by Matt Schurenko <matt.schurenko@gmail.com>
+
+USAGE="usage: $0 start|stop|restart"
+BIN='/usr/sbin/varnishd'
+CONF='/etc/varnish/default.vcl'
+PID='/var/run/varnish.pid'
+
+##
+# adjust the following variables accordingly
+##
+BACKING_FILE='/var/lib/varnish-cache'
+ADMIN_IP='127.0.0.1'
+ADMIN_PORT=8001
+HTTP_IP='0.0.0.0'
+HTTP_PORT=80
+CACHE_SIZE='1g'
+# ttl assigned to objects without ttl values (default 120s)
+DEFAULT_TTL=604800 # 7 days
+FILE_DESCRIPTORS=131072
+MIN_THREADS=5
+MAX_THREADS=500
+THREAD_TIMEOUT=300
+# maximum number of http headers (default is 64)
+HTTP_HEADERS=384
+# connection timout for backend (default is 0.4s)
+CONNECT_TIMEOUT='4.0'
+
+VARNISH_OPTS="-f $CONF \
+              -s file,${BACKING_FILE},$CACHE_SIZE \
+              -T $ADMIN_IP:${ADMIN_PORT} \
+              -a $HTTP_IP:${HTTP_PORT} \
+              -t $DEFAULT_TTL \
+              -w${MIN_THREADS},${MAX_THREADS},${THREAD_TIMEOUT} \
+              -P $PID"
+
+VARNISH_PARAMS="-p http_headers=$HTTP_HEADERS \
+               -p connect_timeout=$CONNECT_TIMEOUT"
+
+varnish_start() {
+	if [ -e $PID ];then
+		if [ `pgrep varnishd|head -n1` == `cat $PID` ];then
+			echo "varnish is already running"
+			exit 1
+		else # pid file must be stale
+			"$PID exists but pid doesn't match pid of varnishd. please investigate."
+			exit 2
+		fi
+	fi
+	ulimit -n $FILE_DESCRIPTORS
+	echo "starting varnish..."
+	$BIN $VARNISH_OPTS $VARNISH_PARAMS
+}
+varnish_stop() {
+	echo "stopping varnish..."
+	killall `echo $BIN | awk -F'/' '{print $NF}'`
+	if [ -e $PID ];then
+		rm $PID
+	fi
+}
+
+case "$1" in
+	start)
+		varnish_start
+	;;
+	stop)
+		varnish_stop
+	;;
+	restart)
+		varnish_stop
+		sleep 1
+		varnish_start
+	;;
+	*) echo -e $USAGE
+	;;
+esac
