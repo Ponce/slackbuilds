@@ -1,0 +1,217 @@
+Remove disabled FP support.
+From Okan Demirmen.
+Index: ksh_limval.h
+===================================================================
+RCS file: /home/okan/hack/open/cvs/src/bin/ksh/ksh_limval.h,v
+retrieving revision 1.2
+diff -u -p -r1.2 ksh_limval.h
+--- ksh_limval.h	18 Dec 2004 20:55:52 -0000	1.2
++++ ksh_limval.h	14 Mar 2011 10:03:41 -0000
+@@ -4,10 +4,6 @@
+ 
+ /* limits.h is included in sh.h */
+ 
+-#ifndef DMAXEXP
+-# define DMAXEXP	128	/* should be big enough */
+-#endif
+-
+ #ifndef BITS
+ # define BITS(t)	(CHAR_BIT * sizeof(t))
+ #endif
+Index: shf.c
+===================================================================
+RCS file: /home/okan/hack/open/cvs/src/bin/ksh/shf.c,v
+retrieving revision 1.15
+diff -u -p -r1.15 shf.c
+--- shf.c	2 Apr 2006 00:48:33 -0000	1.15
++++ shf.c	14 Mar 2011 10:03:19 -0000
+@@ -705,15 +705,7 @@ shf_smprintf(const char *fmt, ...)
+ 	return shf_sclose(&shf); /* null terminates */
+ }
+ 
+-#undef FP			/* if you want floating point stuff */
+-
+ #define BUF_SIZE	128
+-#define FPBUF_SIZE	(DMAXEXP+16)/* this must be >
+-				 *	MAX(DMAXEXP, log10(pow(2, DSIGNIF)))
+-				 *    + ceil(log10(DMAXEXP)) + 8 (I think).
+-				 * Since this is hard to express as a
+-				 * constant, just use a large buffer.
+-				 */
+ 
+ /*
+  *	What kinda of machine we on?  Hopefully the C compiler will optimize
+@@ -744,18 +736,6 @@ shf_smprintf(const char *fmt, ...)
+ #define FL_NUMBER	0x200	/* a number was formated %[douxefg] */
+ 
+ 
+-#ifdef FP
+-#include <math.h>
+-
+-static double
+-my_ceil(double d)
+-{
+-	double		i;
+-
+-	return d - modf(d, &i) + (d < 0 ? -1 : 1);
+-}
+-#endif /* FP */
+-
+ int
+ shf_vfprintf(struct shf *shf, const char *fmt, va_list args)
+ {
+@@ -769,17 +749,6 @@ shf_vfprintf(struct shf *shf, const char
+ 	char		numbuf[(BITS(long) + 2) / 3 + 1];
+ 	/* this stuff for dealing with the buffer */
+ 	int		nwritten = 0;
+-#ifdef FP
+-	/* should be in <math.h>
+-	 *  extern double frexp();
+-	 */
+-	extern char *ecvt();
+-
+-	double		fpnum;
+-	int		expo, decpt;
+-	char		style;
+-	char		fpbuf[FPBUF_SIZE];
+-#endif /* FP */
+ 
+ 	if (!fmt)
+ 		return 0;
+@@ -946,134 +915,6 @@ shf_vfprintf(struct shf *shf, const char
+ 					precision = len; /* no loss */
+ 			}
+ 			break;
+-
+-#ifdef FP
+-		case 'e':
+-		case 'g':
+-		case 'f':
+-		    {
+-			char *p;
+-
+-			/*
+-			 *	This could probably be done better,
+-			 *  but it seems to work.  Note that gcvt()
+-			 *  is not used, as you cannot tell it to
+-			 *  not strip the zeros.
+-			 */
+-			flags |= FL_NUMBER;
+-			if (!(flags & FL_DOT))
+-				precision = 6;	/* default */
+-			/*
+-			 *	Assumes doubles are pushed on
+-			 *  the stack.  If this is not so, then
+-			 *  FL_LONG/FL_SHORT should be checked.
+-			 */
+-			fpnum = va_arg(args, double);
+-			s = fpbuf;
+-			style = c;
+-			/*
+-			 *  This is the same as
+-			 *	expo = ceil(log10(fpnum))
+-			 *  but doesn't need -lm.  This is an
+-			 *  approximation as expo is rounded up.
+-			 */
+-			(void) frexp(fpnum, &expo);
+-			expo = my_ceil(expo / LOG2_10);
+-
+-			if (expo < 0)
+-				expo = 0;
+-
+-			p = ecvt(fpnum, precision + 1 + expo,
+-				 &decpt, &tmp);
+-			if (c == 'g') {
+-				if (decpt < -4 || decpt > precision)
+-					style = 'e';
+-				else
+-					style = 'f';
+-				if (decpt > 0 && (precision -= decpt) < 0)
+-					precision = 0;
+-			}
+-			if (tmp)
+-				*s++ = '-';
+-			else if (flags & FL_PLUS)
+-				*s++ = '+';
+-			else if (flags & FL_BLANK)
+-				*s++ = ' ';
+-
+-			if (style == 'e')
+-				*s++ = *p++;
+-			else {
+-				if (decpt > 0) {
+-					/* Overflow check - should
+-					 * never have this problem.
+-					 */
+-					if (decpt > &fpbuf[sizeof(fpbuf)] - s - 8)
+-						decpt = &fpbuf[sizeof(fpbuf)] - s - 8;
+-					(void) memcpy(s, p, decpt);
+-					s += decpt;
+-					p += decpt;
+-				} else
+-					*s++ = '0';
+-			}
+-
+-			/* print the fraction? */
+-			if (precision > 0) {
+-				*s++ = '.';
+-				/* Overflow check - should
+-				 * never have this problem.
+-				 */
+-				if (precision > &fpbuf[sizeof(fpbuf)] - s - 7)
+-					precision = &fpbuf[sizeof(fpbuf)] - s - 7;
+-				for (tmp = decpt;  tmp++ < 0 &&
+-					    precision > 0 ; precision--)
+-					*s++ = '0';
+-				tmp = strlen(p);
+-				if (precision > tmp)
+-					precision = tmp;
+-				/* Overflow check - should
+-				 * never have this problem.
+-				 */
+-				if (precision > &fpbuf[sizeof(fpbuf)] - s - 7)
+-					precision = &fpbuf[sizeof(fpbuf)] - s - 7;
+-				(void) memcpy(s, p, precision);
+-				s += precision;
+-				/*
+-				 *	`g' format strips trailing
+-				 *  zeros after the decimal.
+-				 */
+-				if (c == 'g' && !(flags & FL_HASH)) {
+-					while (*--s == '0')
+-						;
+-					if (*s != '.')
+-						s++;
+-				}
+-			} else if (flags & FL_HASH)
+-				*s++ = '.';
+-
+-			if (style == 'e') {
+-				*s++ = (flags & FL_UPPER) ? 'E' : 'e';
+-				if (--decpt >= 0)
+-					*s++ = '+';
+-				else {
+-					*s++ = '-';
+-					decpt = -decpt;
+-				}
+-				p = &numbuf[sizeof(numbuf)];
+-				for (tmp = 0; tmp < 2 || decpt ; tmp++) {
+-					*--p = '0' + decpt % 10;
+-					decpt /= 10;
+-				}
+-				tmp = &numbuf[sizeof(numbuf)] - p;
+-				(void) memcpy(s, p, tmp);
+-				s += tmp;
+-			}
+-
+-			len = s - fpbuf;
+-			s = fpbuf;
+-			precision = len;
+-			break;
+-		    }
+-#endif /* FP */
+ 
+ 		case 's':
+ 			if (!(s = va_arg(args, char *)))
+
+
