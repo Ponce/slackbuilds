@@ -1,0 +1,143 @@
+#!/bin/sh
+
+# Slackware build script for Tiger
+
+# Written by Menno Duursma <druiloor@zonnet.nl>
+# currently maintained by pyllyukko <pyllyukko AT maimed dot org>
+
+# This program is free software. It comes without any warranty.
+# Granted WTFPL, Version 2, as published by Sam Hocevar. See
+# http://sam.zoy.org/wtfpl/COPYING for more details.
+
+PRGNAM=tiger
+VERSION=${VERSION:-3.2.3}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e # Exit on most errors
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+
+# The package can be verified with Javier Fernández-Sanguino's PGP key (0xDC814B09)
+# If we have GnuPG installed, we try to verify the signature.
+if [ -x "/usr/bin/gpg" -a -x "/usr/bin/gpgv" ]
+then
+  set +e
+  # This will check if we have the correct key in our keyring.
+  # For the trustedkeys.gpg, see "man 1 gpgv".
+  /usr/bin/gpg --keyring trustedkeys.gpg --no-default-keyring --list-keys 0xDC814B09 &>/dev/null
+  GPG_RET=${?}
+  # 2 means we don't have his key, 0 means we do.
+  set -e
+  # If we have the key and the signature file, we verify the package with GPG
+  if [ ${GPG_RET} -eq 0 -a \
+       -f "${CWD}/${PRGNAM}-${VERSION}.tar.gz.sig" ]
+  then
+    /usr/bin/gpgv "${CWD}/${PRGNAM}-${VERSION}.tar.gz.sig"
+  fi
+fi
+
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+# The build errs on this
+# see http://cvs.savannah.gnu.org/viewvc/tiger/tiger/util/genmsgidx?r1=1.6&r2=1.7
+patch --verbose -p1 < $CWD/patches/tiger-3.2.3-build-fix.diff
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS"
+export CFLAGS CXXFLAGS
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --mandir=/usr/man \
+  --with-tigerhome=/usr/libexec/tiger \
+  --with-tigerbin=/usr/sbin \
+  --with-tigerconfig=/etc/tiger \
+  --with-tigerwork=/var/lib/tiger/work \
+  --with-tigerlog=/var/log/tiger
+
+make
+make -j1 install DESTDIR=$PKG
+
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+install -D -m 0644 $CWD/config/tiger.cron $PKG/etc/cron.d/tiger.new
+install -D -m 0640 $CWD/config/tiger.ignore $PKG/etc/tiger/tiger.ignore.new
+install -D -m 0640 $CWD/config/tiger.default $PKG/etc/default/tiger.new
+
+# From the .spec: 3.- This should be done by the Makefile, grumble...
+install -D -m 0644 version.h $PKG/usr/lib/tiger/version.h
+
+# Remove unnecesary stuff
+( cd $PKG
+  for system in AIX HPUX IRIX NeXT SunOS UNICOS UNICOSMK Tru64 MacOSX ; do
+    rm -rf ./usr/libexec/tiger/systems/$system
+  done
+  find . -type d -name CVS | xargs -iX rm -rf "X"
+)
+
+( cd $PKG/etc/tiger
+  mv -v cronrc cronrc.new
+  mv -v tigerrc tigerrc.new
+)
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a [A-Z][A-Z]* site-* tigerrc* \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a other/cert-usc20.txt contrib/fix_tiger_GROUPS.sh audit \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/html
+cp $PKG/usr/libexec/tiger/html/*.html $PKG/usr/doc/$PRGNAM-$VERSION/html
+
+# Delete the redundant stuff
+rm -rf $PKG/usr/libexec/tiger/html
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh >  $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
