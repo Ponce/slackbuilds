@@ -10,6 +10,7 @@ config() {
   fi
   # Otherwise, we leave the .new copy for the admin to consider...
 }
+
 preserve_perms() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
@@ -25,3 +26,4 @@ preserve_perms etc/rc.d/rc.tor.new
 config etc/tor/tor-tsocks.conf.new
 config etc/tor/torrc.new
 config etc/logrotate.d/tor.new
+
