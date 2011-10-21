@@ -1,0 +1,116 @@
+#!/bin/sh
+
+# Slackware build script for amd-app-sdk
+
+# Copyright (c) 2011 Alan Alberghini <414N@slacky.it>
+# All rights reserved.
+#
+#   Permission to use, copy, modify, and distribute this software for
+#   any purpose with or without fee is hereby granted, provided that
+#   the above copyright notice and this permission notice appear in all
+#   copies.
+#
+#   THIS SOFTWARE IS PROVIDED AS IS'' AND ANY EXPRESSED OR IMPLIED
+#   WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#   MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+#   IN NO EVENT SHALL THE AUTHORS AND COPYRIGHT HOLDERS AND THEIR
+#   CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+#   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+#   USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+#   ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+#   OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+#   OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+#   SUCH DAMAGE.
+# -----------------------------------------------------------------------------
+#
+# Build history:
+#
+# 1 - Initial release.
+
+PRGNAM=amd-app-sdk
+INT_NAME=AMD-APP-SDK
+VERSION=${VERSION:-2.4}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+# Automatically determine the architecture we're building on or use supplied ARCH
+# (only x86 and x86_64 are supported)
+TESTARCH=${ARCH:-`uname -m`}
+case "$TESTARCH" in
+  x86|i*86) ARCH=x86; BITNESS=32 ;;
+  x86_64) ARCH=x86_64; BITNESS=64 ;;
+  *) echo "$ARCH architecture not supported. Please specify a supported ARCH (x86 or x86_64)."
+   	  exit 1 ;;
+esac
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+ARCHIVE_NAME="AMD-APP-SDK-v$VERSION-lnx${BITNESS}"
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $ARCHIVE_NAME
+tar xvf $CWD/$ARCHIVE_NAME.tgz
+cd $ARCHIVE_NAME
+
+# If we're packaging a 64 bit package, let's remove all 32 bit parts first (no multilib).
+# RFC: should all these files really be removed, given that the user already downloaded them in the
+# source tarball, which comes multilib by itself?
+
+if [ ${ARCH} = x86_64 ]
+then
+	find . -type d -name x86 -depth -exec rm -r {} \;
+fi
+
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Create output directories and copy everything inside /opt
+
+mkdir -p $PKG/opt/$PRGNAM $PKG/etc/profile.d $PKG/usr/doc/$PRGNAM-$VERSION
+
+mv * $PKG/opt/$PRGNAM
+
+# Install the icd registration tarball into $PKG root
+
+( cd $PKG && tar xf $PKG/opt/$PRGNAM/icd-registration.tgz )
+
+# Copy the profile scripts in their final location...
+
+if [ ${ARCH} = x86 ]
+then
+	install -m0755 $CWD/amd-app-sdk32.sh $PKG/etc/profile.d
+	install -m0755 $CWD/amd-app-sdk32.csh $PKG/etc/profile.d
+else
+        install -m0755 $CWD/amd-app-sdk64.sh $PKG/etc/profile.d
+        install -m0755 $CWD/amd-app-sdk64.csh $PKG/etc/profile.d
+fi
+
+chown -R root:root $PKG/etc
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+
+# Link documentation and samples from /opt
+ln -sf /opt/$PRGNAM/docs/opencl $PKG/usr/doc/$PRGNAM-$VERSION
+ln -sf /opt/$PRGNAM/samples $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
