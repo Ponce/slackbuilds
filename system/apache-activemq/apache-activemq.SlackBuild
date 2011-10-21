@@ -1,0 +1,126 @@
+#!/bin/sh
+
+# Slackware build script for Apache Active MQ.
+
+# Copyright 2011-2012 Marco Bonetti <sid77@slackware.it>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=apache-activemq
+VERSION=${VERSION:-5.5.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+ACTIVEMQ_USER=${ACTIVEMQ_USER:-activemq}
+ACTIVEMQ_UID=${ACTIVEMQ_UID:-253}
+ACTIVEMQ_GROUP=${ACTIVEMQ_GROUP:-activemq}
+ACTIVEMQ_GID=${ACTIVEMQ_GID:-253}
+
+# i486 or x86_64 only
+ARCH=${ARCH:-i486}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+ACTIVEMQ_HOME=/usr/share/activemq
+
+DOCS="LICENSE NOTICE README.txt WebConsole-README.txt docs user-guide.html example"
+
+bailout() {
+  echo "  You must have a $ACTIVEMQ_USER user and $ACTIVEMQ_GROUP group to run this script. "
+  echo "  Something like this should suffice for most systems: "
+  echo "    # groupadd -g $ACTIVEMQ_GID $ACTIVEMQ_GROUP "
+  echo "    # useradd -u $ACTIVEMQ_UID -g $ACTIVEMQ_GID -c \"Apache Active MQ\" -d /var/lib/activemq -s /bin/sh $ACTIVEMQ_USER "
+  echo "  Giving /bin/sh as $ACTIVEMQ_USER shell is important as the init script will try tu 'su -' to it."
+  exit 1
+}
+
+# Bail if user and/or group isn't valid on your system
+# uid=250 is suggested to avoid conflicts with other SBo packages,
+# but it's your call: http://slackbuilds.org/uid_gid.txt
+if ! grep -q "^$ACTIVEMQ_USER:" /etc/passwd; then
+  bailout
+elif ! grep -q "^$ACTIVEMQ_GROUP:" /etc/group; then
+  bailout
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION-bin.tar.gz
+cd $PRGNAM-$VERSION
+
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+# Worst file permissions ever seen in a package...
+find . -type d -exec chmod 755 {} \;
+find . -type f -not -path './bin/*' -exec chmod 644 {} \;
+chmod 644 ./bin/wrapper.jar
+
+mkdir -p $PKG/etc/activemq \
+  $PKG/usr/share/activemq/data \
+  $PKG/var/{run,lib,log}/activemq
+
+cp -f conf/* $PKG/etc/activemq/
+rm -rf bin/macosx
+cp -rf bin lib $PKG/usr/share/activemq/
+cp -rf webapps $PKG/var/lib/activemq/
+
+chown -R $ACTIVEMQ_USER:$ACTIVEMQ_GROUP $PKG/usr/share/activemq/data
+chown -R $ACTIVEMQ_USER:$ACTIVEMQ_GROUP $PKG/var/{run,lib,log}/activemq
+
+# LOTS of stuff, some of them are just sample config files though.
+# First I fix log4j properties, then I rename the files.
+( cd $PKG/etc/activemq
+  sed -i -e 's:data/activemq.log:log/activemq.log:g' *
+  sed -i -e 's:data/audit.log:log/audit.log:g' *
+  for F in `find . -type f`; do mv $F $F.new; done
+)
+
+# These links are still needed for activemq to actually work
+ln -sf /etc/activemq $PKG/usr/share/activemq/conf
+ln -sf /var/lib/activemq/webapps $PKG/usr/share/activemq/webapps
+ln -sf /var/log/activemq $PKG/usr/share/activemq/log
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/etc/default
+cat $CWD/default.activemq > $PKG/etc/default/activemq.new
+
+mkdir -p $PKG/etc/rc.d
+cat $CWD/rc.activemq > $PKG/etc/rc.d/rc.activemq.new
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
