@@ -1,0 +1,150 @@
+#!/bin/sh
+
+# Copyright 2011 Giorgio Peron, Campodarsego, PD, Italy  giorgio.peron@gmail.com
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+PRGNAM=jboss-as
+VERSION=${VERSION:-7.0.1.Final}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+ARCH=noarch
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+# Check if the 'jboss' user & group exist:
+if [ "$(grep ^jboss /etc/passwd)" = "" -o "$(grep ^jboss /etc/group)" = "" ] ; then
+  printf "\nYou must have a jboss user and group.\n\nExample:\n"
+  printf "\t# groupadd -g 254 jboss\n"
+  printf "\t# useradd -u 254 -M -r -s /bin/bash -d /usr/share/jboss-as -c \"JBoss Application Server\" -g jboss jboss\n\n"
+  exit 1
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT 
+cd $TMP
+tar xvzf $CWD/$PRGNAM-$VERSION.tar.gz
+
+# move everything to /usr/share/jboss-as
+mkdir -p $PKG/usr/share/$PRGNAM
+mv $TMP/$PRGNAM-$VERSION/* $PKG/usr/share/$PRGNAM
+cd $PKG/usr/share/$PRGNAM
+chown -R root:root .
+
+# Move the docs to our standard location first
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+mv docs/* $PKG/usr/doc/$PRGNAM-$VERSION
+mv *.txt $PKG/usr/doc/$PRGNAM-$VERSION
+rm -rf docs 
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# directory server: jboss/standalone/* -> /var/lib/jboss/standalone/*
+cd $PKG
+mkdir -p $PKG/var/lib/$PRGNAM
+mv $PKG/usr/share/$PRGNAM/standalone $PKG/var/lib/$PRGNAM
+cd $PKG/usr/share/$PRGNAM
+ln -sf ../../../var/lib/$PRGNAM/standalone 
+mv $PKG/usr/share/$PRGNAM/domain $PKG/var/lib/$PRGNAM
+cd $PKG/usr/share/$PRGNAM
+ln -sf ../../../var/lib/$PRGNAM/domain 
+mkdir -p $PKG/etc/$PRGNAM/{standalone,domain}
+mv $PKG/var/lib/$PRGNAM/standalone/configuration $PKG/etc/$PRGNAM/standalone/
+mv $PKG/var/lib/$PRGNAM/domain/configuration $PKG/etc/$PRGNAM/domain/
+cd $PKG/var/lib/$PRGNAM/standalone
+ln -sf ../../../../etc/$PRGNAM/standalone/configuration configuration 
+cd $PKG/var/lib/$PRGNAM/domain
+ln -sf ../../../../etc/$PRGNAM/domain/configuration configuration 
+mkdir -p $PKG/var/{log,tmp}/$PRGNAM/standalone
+cd $PKG/var/lib/$PRGNAM/standalone
+ln -sf ../../../log/$PRGNAM/standalone log 
+ln -sf ../../../tmp/$PRGNAM/standalone tmp 
+
+mv $PKG/usr/share/$PRGNAM/bin/standalone.conf $PKG/etc/$PRGNAM/standalone/
+mv $PKG/usr/share/$PRGNAM/bin/domain.conf $PKG/etc/$PRGNAM/domain/
+cd $PKG/usr/share/$PRGNAM/bin
+ln -sf ../../../../etc/$PRGNAM/standalone/standalone.conf 
+ln -sf ../../../../etc/$PRGNAM/domain/domain.conf 
+
+# the xml history need some special treatment
+mkdir -p $PKG/var/lib/$PRGNAM/standalone/standalone_xml_history
+mkdir -p $PKG/var/lib/$PRGNAM/domain/domain_xml_history
+mkdir -p $PKG/var/lib/$PRGNAM/domain/host_xml_history
+cd $PKG/etc/$PRGNAM/standalone/configuration
+ln -sf ../../../../var/lib/$PRGNAM/standalone/standalone_xml_history 
+cd $PKG/etc/$PRGNAM/domain/configuration
+ln -sf ../../../../var/lib/$PRGNAM/domain/domain_xml_history 
+ln -sf ../../../../var/lib/$PRGNAM/domain/host_xml_history 
+ 
+# Add /etc/rc.d/rc.jboss.new
+mkdir -p $PKG/etc/rc.d
+cat $CWD/rc.$PRGNAM > $PKG/etc/rc.d/rc.$PRGNAM.new
+
+# Add /etc/profile.d/jboss-as.sh
+mkdir -p $PKG/etc/profile.d
+cat > $PKG/etc/profile.d/$PRGNAM.sh << EOF
+#!/bin/sh
+export JBOSS_HOME=/usr/share/jboss-as
+EOF
+cat > $PKG/etc/profile.d/$PRGNAM.csh << EOF
+#!/bin/csh
+setenv JBOSS_HOME /usr/share/jboss-as
+EOF
+chmod +x $PKG/etc/profile.d/$PRGNAM.*
+
+# Remove win*z executables
+rm $PKG/usr/share/$PRGNAM/bin/*.bat
+chmod 0755 $PKG/usr/share/$PRGNAM/bin/*.sh
+
+mkdir -p $PKG/usr/bin
+cd $PKG/usr/bin
+ln -sf ../share/$PRGNAM/bin/domain.sh 
+ln -sf ../share/$PRGNAM/bin/standalone.sh 
+ln -sf ../share/$PRGNAM/bin/jboss-admin.sh 
+ln -sf ../share/$PRGNAM/bin/wsprovide.sh 
+ln -sf ../share/$PRGNAM/bin/wsconsume.sh 
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+chown -R root:root $PKG
+find $PKG \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+chown -R jboss:jboss $PKG/var/{lib,log,tmp}/$PRGNAM
+chown -R jboss:jboss $PKG/etc/$PRGNAM/{standalone,domain}
+
+# Don't overwrite existing configuration:
+cd $PKG
+for cf in $( find etc/$PRGNAM/ -type f ); do
+  chmod -x $cf
+  mv $cf $cf.new
+  echo "config $cf.new" >> install/doinst.sh
+done
+
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
