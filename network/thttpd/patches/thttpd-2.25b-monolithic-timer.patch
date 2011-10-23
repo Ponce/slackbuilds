@@ -1,0 +1,126 @@
+diff -Nru thttpd-2.25b.orig/configure.in thttpd-2.25b/configure.in
+--- thttpd-2.25b.orig/configure.in	2003-12-25 20:41:13.000000000 +0200
++++ thttpd-2.25b/configure.in	2010-07-08 00:04:25.000000000 +0300
+@@ -123,6 +123,8 @@
+ 	;;
+ esac
+ 
++AC_CHECK_LIB(rt, clock_gettime)
++
+ AC_ACME_TM_GMTOFF
+ AC_ACME_INT64T
+ AC_ACME_SOCKLENT
+diff -Nru thttpd-2.25b.orig/thttpd.c thttpd-2.25b/thttpd.c
+--- thttpd-2.25b.orig/thttpd.c	2003-12-25 21:06:52.000000000 +0200
++++ thttpd-2.25b/thttpd.c	2010-07-08 00:41:28.000000000 +0300
+@@ -742,7 +742,7 @@
+ 	}
+ 
+     /* Main loop. */
+-    (void) gettimeofday( &tv, (struct timezone*) 0 );
++    tmr_prepare_timeval( &tv );
+     while ( ( ! terminate ) || num_connects > 0 )
+ 	{
+ 	/* Do we need to re-open the log file? */
+@@ -761,7 +761,7 @@
+ 	    syslog( LOG_ERR, "fdwatch - %m" );
+ 	    exit( 1 );
+ 	    }
+-	(void) gettimeofday( &tv, (struct timezone*) 0 );
++	tmr_prepare_timeval( &tv );
+ 
+ 	if ( num_ready == 0 )
+ 	    {
+diff -Nru thttpd-2.25b.orig/timers.c thttpd-2.25b/timers.c
+--- thttpd-2.25b.orig/timers.c	2002-08-22 04:04:12.000000000 +0300
++++ thttpd-2.25b/timers.c	2010-07-08 11:47:03.000000000 +0300
+@@ -41,7 +41,13 @@
+ 
+ ClientData JunkClientData;
+ 
+-
++#undef HAVE_LIBRT_MONO
++#if defined(HAVE_LIBRT) && defined(CLOCK_MONOTONIC)
++#define HAVE_LIBRT_MONO
++#include <time.h>
++static int use_monotonic = 0;		/* monotonic clock runtime availability flag */
++static struct timeval tv_diff;		/* system time - monotonic difference at start */
++#endif
+ 
+ static unsigned int
+ hash( Timer* t )
+@@ -145,6 +151,26 @@
+ 	timers[h] = (Timer*) 0;
+     free_timers = (Timer*) 0;
+     alloc_count = active_count = free_count = 0;
++
++    /* Check for monotonic clock availability */
++#ifdef HAVE_LIBRT_MONO
++    struct timespec ts;
++    struct timeval tv_start, tv;
++    
++    /* Try to get monotonic clock time */
++    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
++	use_monotonic = 1;
++
++	/* Get current system time */
++	(void) gettimeofday( &tv_start , (struct timezone*) 0 );
++	tv.tv_sec = ts.tv_sec;
++	tv.tv_usec = ts.tv_nsec / 1000L;
++	/* Calculate and save the difference: tv_start is since the Epoch, so tv_start > ts
++	    tv_diff = tv_start - tv	*/
++	timersub( &tv_start, &tv, &tv_diff );
++    }
++#endif
++
+     }
+ 
+ 
+@@ -176,7 +202,7 @@
+     if ( nowP != (struct timeval*) 0 )
+ 	t->time = *nowP;
+     else
+-	(void) gettimeofday( &t->time, (struct timezone*) 0 );
++	tmr_prepare_timeval( &t->time );
+     t->time.tv_sec += msecs / 1000L;
+     t->time.tv_usec += ( msecs % 1000L ) * 1000L;
+     if ( t->time.tv_usec >= 1000000L )
+@@ -349,3 +375,27 @@
+     if ( active_count + free_count != alloc_count )
+ 	syslog( LOG_ERR, "timer counts don't add up!" );
+     }
++
++/* Fill timeval structure for further usage by the package. */
++void
++tmr_prepare_timeval( struct timeval *tv )
++{
++#ifdef HAVE_LIBRT_MONO
++    struct timespec ts;
++    struct timeval tv0;
++
++    if (use_monotonic) {	/* use monotonic clock source ? */
++	if (clock_gettime(CLOCK_MONOTONIC,&ts) < 0) {
++	    perror("clock_gettime"); return;
++	}
++	tv0.tv_sec = ts.tv_sec;
++	tv0.tv_usec = ts.tv_nsec / 1000L;
++	/* Return system time value like it was running accurately */
++	timeradd( &tv_diff, &tv0, tv );
++    } else {
++#endif
++	(void) gettimeofday( tv , (struct timezone*) 0 );
++#ifdef HAVE_LIBRT_MONO
++    }
++#endif
++}
+diff -Nru thttpd-2.25b.orig/timers.h thttpd-2.25b/timers.h
+--- thttpd-2.25b.orig/timers.h	2001-04-13 08:37:41.000000000 +0300
++++ thttpd-2.25b/timers.h	2010-07-08 00:09:15.000000000 +0300
+@@ -106,4 +106,7 @@
+ /* Generate debugging statistics syslog message. */
+ extern void tmr_logstats( long secs );
+ 
++/* Fill timeval structure for further usage by the package. */
++extern void tmr_prepare_timeval( struct timeval *tv );
++
+ #endif /* _TIMERS_H_ */
