@@ -1,5 +1,3 @@
-# $Cambridge: exim/src/src/EDITME,v 1.27 2010/06/12 15:21:25 jetmore Exp $
-
 ##################################################
 #          The Exim mail transport agent         #
 ##################################################
@@ -286,17 +284,17 @@ LOOKUP_DBM=yes
 LOOKUP_LSEARCH=yes
 LOOKUP_DNSDB=yes
 
-# LOOKUP_CDB=yes
+LOOKUP_CDB=yes
 LOOKUP_DSEARCH=yes
 # LOOKUP_IBASE=yes
 LOOKUP_LDAP=yes
-LOOKUP_MYSQL=yes
+# LOOKUP_MYSQL=yes
 # LOOKUP_NIS=yes
 # LOOKUP_NISPLUS=yes
 # LOOKUP_ORACLE=yes
 LOOKUP_PASSWD=yes
 # LOOKUP_PGSQL=yes
-LOOKUP_SQLITE=yes
+# LOOKUP_SQLITE=yes
 # LOOKUP_WHOSON=yes
 
 # These two settings are obsolete; all three lookups are compiled when
@@ -345,8 +343,21 @@ PCRE_LIBS=-lpcre
 # specified in INCLUDE. The settings below are just examples; -lpq is for
 # PostgreSQL, -lgds is for Interbase, -lsqlite3 is for SQLite.
 
-LOOKUP_INCLUDE=-I/usr/include/mysql
-LOOKUP_LIBS=-L/usr/lib$(LIBDIRSUFFIX)/mysql -lldap -lmysqlclient -lsqlite3
+LOOKUP_INCLUDE=
+LOOKUP_LIBS=-lldap
+
+# Uncomment for MySQL lookups.
+#LOOKUP_MYSQL=yes
+#LOOKUP_INCLUDE+=-I/usr/include/mysql
+#LOOKUP_LIBS+=-L/usr/lib$(LIBDIRSUFFIX)/mysql -lmysqlclient_r
+
+# Uncomment for PostgreSQL lookups.
+#LOOKUP_PGSQL=yes
+#LOOKUP_LIBS+=-lpq
+
+# Uncomment for SQLite lookups.
+#LOOKUP_SQLITE=yes
+#LOOKUP_LIBS+=-lsqlite3
 
 
 #------------------------------------------------------------------------------
@@ -357,7 +368,7 @@ LOOKUP_LIBS=-L/usr/lib$(LIBDIRSUFFIX)/mysql -lldap -lmysqlclient -lsqlite3
 # files are defaulted in the OS/Makefile-Default file, but can be overridden in
 # local OS-specific make files.
 
-EXIM_MONITOR=eximon.bin
+# EXIM_MONITOR=eximon.bin
 
 
 #------------------------------------------------------------------------------
@@ -528,7 +539,7 @@ FIXED_NEVER_USERS=root
 #
 # As a strictly transient measure to ease migration to 4.73, the
 # WHITELIST_D_MACROS value definies a colon-separated list of macro-names
-# which are permitted to be overriden from the command-line which will be
+# which are permitted to be overridden from the command-line which will be
 # honoured by the Exim user.  So these are macros that can persist to delivery
 # time.
 # Examples might be -DTLS or -DSPOOL=/some/dir.  The values on the
@@ -821,13 +832,13 @@ EXTRALIBS += -ldl
 # is included only when requested by setting the following parameter to the
 # location of your Radius configuration file:
 
-RADIUS_CONFIG_FILE=/etc/radiusclient/radiusclient.conf
+# RADIUS_CONFIG_FILE=/etc/radiusclient/radiusclient.conf
 # RADIUS_CONFIG_FILE=/etc/radius.conf
 
 # If you have set RADIUS_CONFIG_FILE, you should also set one of these to
 # indicate which RADIUS library is used:
 
-RADIUS_LIB_TYPE=RADIUSCLIENT
+# RADIUS_LIB_TYPE=RADIUSCLIENT
 # RADIUS_LIB_TYPE=RADIUSCLIENTNEW
 # RADIUS_LIB_TYPE=RADLIB
 
@@ -844,8 +855,6 @@ RADIUS_LIB_TYPE=RADIUSCLIENT
 #
 # If you do not set RADIUS_LIB_TYPE, Exim assumes the radiusclient library,
 # using the original API.
-
-EXTRALIBS += -lradiusclient
 
 
 #------------------------------------------------------------------------------
@@ -1208,6 +1217,26 @@ PID_FILE_PATH=/var/run/exim.pid
 
 # SUPPORT_MOVE_FROZEN_MESSAGES=yes
 
+
+#------------------------------------------------------------------------------
+# Expanding match_* second paramters: BE CAREFUL IF ENABLING THIS!
+# It has proven too easy in practice for administrators to configure security
+# problems into their Exim install, by treating match_domain{}{} and friends
+# as a form of string comparison, where the second string comes from untrusted
+# data. Because these options take lists, which can include lookup;LOOKUPDATA
+# style elements, a foe can then cause Exim to, eg, execute an arbitrary MySQL
+# query, dropping tables.
+# From Exim 4.77 onwards, the second parameter is not expanded; it can still
+# be a list literal, or a macro, or a named list reference.  There is also
+# the new expansion condition "inlisti" which does expand the second parameter,
+# but treats it as a list of strings; also, there's "eqi" which is probably
+# what is normally wanted.
+#
+# If you really need to have the old behaviour, know what you are doing and
+# will not complain if your system is compromised as a result of doing so, then
+# uncomment this option to get the old behaviour back.
+
+# EXPAND_LISTMATCH_RHS=yes
 
 #------------------------------------------------------------------------------
 # Disabling the use of fsync(): DO NOT UNCOMMENT THE FOLLOWING LINE unless you
