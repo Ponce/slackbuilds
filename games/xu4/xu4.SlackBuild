@@ -1,0 +1,164 @@
+#!/bin/bash
+
+# Slackware build script for xu4
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+PRGNAM=xu4
+VERSION=${VERSION:-20111026_svn}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+# There actually are some executables in the lib dir. If there hadn't
+# been, I would have left it as /usr/lib even on 64-bit, or better yet
+# change to /usr/share. As it is, it has to be /usr/lib64 on 64-bit.
+LIBDIR=/usr/lib$LIBDIRSUFFIX
+PKGLIBDIR=$PKG/$LIBDIR
+
+# Fix path to "profiles/" dir used by -p option. Patch makes it use
+# ~/.xu4/profiles/ rather than ./profiles off the current dir.
+patch -p1 < $CWD/profile_path.diff
+
+# Fix hard-coded libdir. Ugh.
+sed -i -e "s,/usr/lib,$LIBDIR," src/u4file.cpp
+
+# Stop u4 from writing border.png in the current dir (it never *reads* it!)
+sed -i -e '/border\.png/s,^,//,' src/imagemgr.cpp
+
+# The -DNPERF stops u4 from creating a debug/ in the current dir.
+make -C src DEBUGCXXFLAGS="-DNPERF $SLKCFLAGS" prefix=/usr libdir=$PKGLIBDIR
+make -C src install prefix=$PKG/usr libdir=$PKGLIBDIR
+
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# If we have the official release rather than the "dragon" one, repackage
+# it with the same layout as the dragon release. Note that the official
+# release isn't the default because there's no direct download link for
+# the .info file (the site requires javascript + registration).
+if [ -e $CWD/UltimaIV.zip ]; then
+  sh $CWD/repackage.sh $CWD/UltimaIV.zip
+fi
+
+# The game data. This is the zip file, not the self-extracting exe (the
+# exe lacks the documentation, for one thing).
+cat $CWD/ultima4.zip > $PKGLIBDIR/u4/ultima4.zip
+
+# Replace stock .desktop file with one that validates.
+cat $CWD/u4.desktop > $PKG/usr/share/applications/u4.desktop
+
+# These files should be (but aren't) installed by "make install". Without
+# them, we get no music!
+install -m0644 mid/*.it $PKGLIBDIR/u4/music/
+
+# Remove execute permission from data files. Grr.
+chmod 644 $PKG/usr/share/pixmaps/* $PKG/usr/share/applications/*
+find $PKGLIBDIR \
+  -type f -a \
+  \( -name \*.mid -o -name \*.vga -o -name \*.png -o \
+     -name \*.xml -o -name \*.dtd -o -name \*.ogg \) \
+  -print0 | xargs -0 chmod 644
+
+# Docs. N.B. we don't need border.png.
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/developers
+cp -a *.html AUTHORS COPYING README $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a doc/* $PKG/usr/doc/$PRGNAM-$VERSION/developers
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Include the upgrade (and extract its docs) if we have it.
+if [ -e $CWD/u4upgrad.zip ]; then
+  cat $CWD/u4upgrad.zip > $PKGLIBDIR/u4/u4upgrad.zip
+  cd $PKG/usr/doc/$PRGNAM-$VERSION
+  unzip $CWD/u4upgrad.zip Readme.txt
+  mv Readme.txt Readme-Upgrade.txt
+  cd -
+fi
+
+# Include the PDF docs, if we have them.
+if [ -e $CWD/ultima4_scanned_docs.zip ]; then
+  mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/pdf
+  cd $PKG/usr/doc/$PRGNAM-$VERSION/pdf
+  unzip $CWD/ultima4_scanned_docs.zip '*.pdf'
+  mv ultima4_scanned_docs/Ultima_IV_-_Cluebook_-_PC.pdf Hints.pdf
+  mv ultima4_scanned_docs/Ultima_IV_-_Manual_-_PC.pdf History.pdf
+  mv ultima4_scanned_docs/Ultima_IV_-_Spellbook_-_PC.pdf Wisdom.pdf
+  rm -rf ultima4_scanned_docs
+  cd -
+fi
+
+# Include the original Ultima IV docs.
+cd $PKG/usr/doc/$PRGNAM-$VERSION
+unzip $CWD/ultima4.zip '*.txt' '*.doc' '*.bmp' '*.jpg' || true
+
+# These docs only apply to running the original game on DOS or Windows. Bye.
+rm -f Readme.txt Readme.doc
+
+# The Word versions of the docs don't really offer much improvement
+# over the plain text ones, but here they are.
+mkdir ms_word_docs
+mv *.doc ms_word_docs
+
+# Fix permissions and line endings.
+[ -e Map.bmp ] && chmod 644 Map.bmp
+[ -e Map.jpg ] && chmod 644 Map.jpg
+chmod 644 *.txt ms_word_docs/*.doc
+sed -i 's/\r//' *.txt
+cd -
+
+# I hate packages called "xfoo" whose binaries are called "foo".
+ln -s u4 $PKG/usr/bin/$PRGNAM
+
+# I also hate binaries that take options but have no man pages, so here's
+# the one I made. Enjoy.
+mkdir -p $PKG/usr/man/man1
+sed "s/@VERSION@/$VERSION/" $CWD/u4.1 | gzip -9c - > $PKG/usr/man/man1/u4.1.gz
+ln -s u4.1.gz $PKG/usr/man/man1/$PRGNAM.1.gz
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
