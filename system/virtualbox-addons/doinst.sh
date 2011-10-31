@@ -23,12 +23,17 @@ preserve_perms() {
 }
 
 # Fix starting of kde within virtualbox
-cat << EOF >> usr/share/apps/kconf_update/kwin_blacklist.upd
+BLACKLIST="usr/share/apps/kconf_update/kwin_blacklist.upd"
+VBOX_TEST=$(grep -c "Blacklist-virtualbox" $BLACKLIST)
+
+if [ "$VBOX_TEST" = "0" ]; then
+cat << EOF >> $BLACKLIST
 Id=Blacklist-virtualbox
 Options=overwrite
 File=kwinrc
 Script=kwin_blacklist_vbox.sh,sh
 EOF
+fi
 
 preserve_perms etc/rc.d/rc.vboxadd.new
 preserve_perms etc/rc.d/rc.vboxadd-service.new
