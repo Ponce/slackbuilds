@@ -1,18 +1,18 @@
 #!/bin/sh
 # Slackware build script for Hydra
 # Written by Larry Hajali <larryhaja[at]gmail[dot]com>
+# Updated by Kent Fritz <fritz.kent@gmail.com>
 
 PRGNAM=hydra
-VERSION=${VERSION:-5.4}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-7.1}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+XHYDRA=${XHYDRA:-1}
 
-# Automatically determine the architecture we're building on:
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
     i?86) ARCH=i486 ;;
     arm*) ARCH=arm ;;
-    # Unless $ARCH is already set, use uname -m for all other archs:
        *) ARCH=$( uname -m ) ;;
   esac
 fi
@@ -36,6 +36,14 @@ else
   LIBDIRSUFFIX=""
 fi
 
+if [ "$XHYDRA" = "1" ]; then
+    CONFIG_OPTS=""
+    MAKE_OPTS=""
+else 
+    CONFIG_OPTS="--disable-xhydra"
+    MAKE_OPTS="XHYDRA_SUPPORT="
+fi
+
 set -e
 
 rm -rf $PKG
@@ -52,49 +60,43 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-# Removes a glibc error when http-form option is used
-# Patch from gentoo: http://bugs.gentoo.org/show_bug.cgi?id=209116
-patch -p0 < $CWD/patches/hydra-http-form.patch
 
-# Add ability to specify additional libdir locations to search, and also
-# merge in some precursors for the next patch
-patch -p1 < $CWD/patches/hydra-5.4-configure_fixups.patch
+echo CONFIG_OPTS is $CONFIG_OPTS
+./configure $CONFIG_OPTS
+make OPTS="-I. $SLKCFLAGS" $MAKE_OPTS
+make install PREFIX=$PKG/usr DIR=/bin
 
-# Patch needed to compile against new versions of libssh.
-patch -p1 < $CWD/patches/hydra-5.4-libssh-0.4.patch
-
-# Fixup Makefile.am before configuring
-patch -p1 < $CWD/patches/hydra-5.4-Makefile_am.patch
-
-# sed statements cleans up some code for the gui
-sed -i 's|/foo/bar/protected.html|/|' hydra-gtk/xhydra.glade
-sed -i 's|/foo/bar/protected.html|/|' hydra-gtk/src/interface.c
-
-EXTRA_LIBDIRS="/lib64 /usr/lib64" \
-./configure \
-  --enable-pw-inspector=yes \
-  --enable-static=no
-
-make EXTRA_CFLAGS="$SLKCFLAGS"
-make install PREFIX=$PKG DIR=/usr/bin
-
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# remove dpl4hydra stuff as it is somewhat broken
+rm $PKG/usr/bin/dpl4hydra*
 
 # Add a desktop menu item
-mkdir -p $PKG/usr/share/{applications,pixmaps}
-install -m 0644 $CWD/$PRGNAM.desktop $PKG/usr/share/applications/
-cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+if [ "$XHYDRA" = "1" ]; then
+  mkdir -p $PKG/usr/share/{applications,pixmaps}
+  install -m 0644 $CWD/$PRGNAM.desktop $PKG/usr/share/applications/
+  convert hydra-logo.ico $PKG/usr/share/pixmaps/$PRGNAM.png
+fi
+
+if [ "$XHYDRA" = "0" ]; then
+  rm $PKG/usr/man/man1/xhydra.1
+fi
+find $PKG/usr/man -type f -exec gzip -9 {} \;
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  CHANGES LICENSE* README TODO hydra-gtk/COPYING hydra-gtk/INSTALL \
+  CHANGES LICENSE* README dpl4hydra* \
   $PKG/usr/doc/$PRGNAM-$VERSION
+if [ "$XHYDRA" = "1" ]; then
+  mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/hydra-gtk
+  cp -a hydra-gtk/COPYING hydra-gtk/INSTALL hydra-gtk/README \
+    $PKG/usr/doc/$PRGNAM-$VERSION/hydra-gtk
+fi
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-cat $CWD/doinst.sh > $PKG/install/doinst.sh
+if [ "$XHYDRA" = "1" ]; then
+  cat $CWD/doinst.sh > $PKG/install/doinst.sh
+fi
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
