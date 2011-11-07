@@ -14,3 +14,5 @@ config() {
 config etc/gconf/2/path.new
 config etc/gconf/2/evoldap.conf.new
 
+chroot . /usr/bin/gio-querymodules @LIBDIR@/gio/modules/ 1>/dev/null 2>/dev/null
+
