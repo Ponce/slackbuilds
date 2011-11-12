@@ -1,0 +1,129 @@
+#!/bin/sh
+
+# Slackware build script for XEmacs
+
+# Created by Sean MacLennan <xemacs@seanm.ca>
+# Modified by Robby Workman <rworkman@slackbuilds.org> for 
+#   better consistency with existing SBo scripts...
+
+PRGNAM=xemacs
+VERSION=21.4.22
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+BASE_VERSION=2.27
+EFS_VERSION=1.34
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+    SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+    LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+    SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+    LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+    # XEmacs will not run compiled -fPIC
+    SLKCFLAGS="-O2"
+    LIBDIRSUFFIX="64"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $OUPUT $PKG
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xf $CWD/$PRGNAM-$VERSION.tar.bz2
+cd $PRGNAM-$VERSION
+chown -R root.root .
+
+# These patches allow building xemacs with xemacs installed
+# dump-paths patch from Enrico Scholz
+patch -p1 < $CWD/patches/dump-paths.patch || exit 1
+patch -p1 < $CWD/patches/check-features.patch || exit 1
+
+# XEmacs is hardcoded to look in lib
+if [ "$ARCH" = "x86_64" ]; then
+  patch -p1 < $CWD/patches/lib64.patch
+fi
+
+# Sighhhhhh.....
+patch -p1 < $CWD/patches/mod-shift.patch
+
+CFLAGS="$SLKCFLAGS" \
+  ./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib$LIBDIRSUFFIX \
+  --datadir=/usr/lib${LIBDIRSUFFIX} \
+  --with-sound=none \
+  --with-file-coding \
+  $ARCH-slackware-linux
+
+make
+make install \
+  prefix=$PKG/usr \
+  libdir=$PKG/usr/lib${LIBDIRSUFFIX} \
+  datadir=$PKG/usr/lib${LIBDIRSUFFIX}
+
+# Add minimal packages to allow package tools to work
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/xemacs/xemacs-packages
+tar xf $CWD/xemacs-base-$BASE_VERSION-pkg.tar.gz -C $PKG/usr/lib${LIBDIRSUFFIX}/xemacs/xemacs-packages
+tar xf $CWD/efs-$EFS_VERSION-pkg.tar.gz -C $PKG/usr/lib${LIBDIRSUFFIX}/xemacs/xemacs-packages
+# Make sure the .elc files are newer
+find $PKG/usr/lib${LIBDIRSUFFIX}/xemacs/xemacs-packages -name \*.elc -exec touch {} \;
+
+make datadir=$PKG/usr/lib${LIBDIRSUFFIX} gzip-el
+
+# What is this 2.3M for?????
+rm -rf $PKG/usr/lib$LIBDIRSUFFIX/xemacs-$VERSION/$ARCH-slackware-linux/include
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | \
+  grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+gzip $PKG/usr/man/*/*
+
+# gzip info stuff, but not the dir file
+gzip -9 $PKG/usr/lib${LIBDIRSUFFIX}/xemacs-$VERSION/info/*
+gzip -d $PKG/usr/lib${LIBDIRSUFFIX}/xemacs-$VERSION/info/dir.gz
+
+# Fixup some conflicts with stock Slackware packages
+for file in b2m ctags etags rcs-checkin ; do mv $PKG/usr/bin/$file{,-xemacs} ; done
+for file in ctags etags ; do mv $PKG/usr/man/man1/$file{,-xemacs}.1.gz ; done
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  BUGS CHANGES-* COPYING ChangeLog Installation PROBLEMS README* \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cat <<EOF >$PKG/install/doinst.sh
+# Make sure the elc files are newer than the el files
+touch usr/lib${LIBDIRSUFFIX}/xemacs-$VERSION/lisp/*.elc
+touch usr/lib${LIBDIRSUFFIX}/xemacs-$VERSION/lisp/*/*.elc
+touch usr/lib${LIBDIRSUFFIX}/xemacs/xemacs-packages/lisp/xemacs-base/*.elc
+touch usr/lib${LIBDIRSUFFIX}/xemacs/xemacs-packages/lisp/efs/*.elc
+EOF
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+
+# Clean up the extra stuff:
+if [ "$1" = "--cleanup" ]; then
+    rm -rf $TMP/$PRGNAM-${VERSION}
+    rm -rf $PKG
+fi
