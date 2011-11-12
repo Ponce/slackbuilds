@@ -24,3 +24,13 @@ preserve_perms() {
 
 preserve_perms etc/rc.d/rc.nginx.new
 config etc/logrotate.d/nginx.new
+config etc/nginx/fastcgi_params.new 
+config etc/nginx/fastcgi.conf.new 
+config etc/nginx/mime.types.new 
+config etc/nginx/nginx.conf.new 
+config etc/nginx/koi-utf.new 
+config etc/nginx/koi-win.new 
+config etc/nginx/scgi_params.new
+config etc/nginx/uwsgi_params.new
+config etc/nginx/win-utf.new
+
