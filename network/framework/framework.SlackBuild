@@ -23,7 +23,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=framework
-VERSION=${VERSION:-3.4.1}
+VERSION=${VERSION:-4.0.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -43,14 +43,36 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 BASEINSTDIR="opt"
-INSTDIR="$BASEINSTDIR/metasploit3"
+INSTDIR="$BASEINSTDIR/framework-${VERSION}"
+
+# PostgreSQL user and group
+PG_UID=${PG_UID:-209}
+PG_GID=${PG_GID:-209}
+
+# On which port is PostgreSQL listening to?
+# Default is 7175, set PG_PORT to any other value if you want to customize it.
+PG_PORT=${PG_PORT:-7175}
+
+# Bail out if user or group isn't valid on your system
+# For slackbuilds.org, assigned postgres uid/gid are 209/209
+# See http://slackbuilds.org/uid_gid.txt
+# Other popular choice is 26/26
+if ! grep ^postgres: /etc/group 2>&1 > /dev/null; then
+  echo "  You must have a postgres group to run this script."
+  echo "    # groupadd -g $PG_GID postgres"
+  exit 1
+elif ! grep ^postgres: /etc/passwd 2>&1 > /dev/null; then
+  echo "  You must have a postgres user to run this script."
+  echo "    # useradd -u $PG_UID -g $PG_GID -d /var/lib/pgsql postgres"
+  exit 1
+fi
 
 if [ "$ARCH" = "i486" ]; then
-  INSTALLERARCH="i686"
+  INSTALLERARCH=""
 elif [ "$ARCH" = "i686" ]; then
-  INSTALLERARCH="i686"
+  INSTALLERARCH=""
 elif [ "$ARCH" = "x86_64" ]; then
-  INSTALLERARCH="x86_64"
+  INSTALLERARCH="-x64"
 fi
 
 set -e
@@ -58,42 +80,57 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 
-# Unpack the installer
-sh $CWD/framework-$VERSION-linux-$INSTALLERARCH.run --noexec --keep --target $TMP/$PRGNAM-$VERSION
+# Install Metasploit Framework DIRECTLY under /opt/framework-${VRESION} (sorry!)
+echo "Installing the Metasploit Framework..."
+chown root:root $CWD/framework-$VERSION-linux$INSTALLERARCH-full.run
+chmod 755 $CWD/framework-$VERSION-linux$INSTALLERARCH-full.run
+$CWD/framework-$VERSION-linux$INSTALLERARCH-full.run \
+  --mode unattended \
+  --unattendedmodeui minimal \
+  --postgres_port $PG_PORT
 
-# Install the framework under /opt/metasploit3
-( cd $TMP/$PRGNAM-$VERSION
-  mkdir -p $PKG/$INSTDIR
-  echo "Extracting the Metasploit operating environment..."
-  tar --directory=$PKG/$BASEINSTDIR -xf metasploit.tar
-  cp run.sh env.sh $PKG/$INSTDIR/
-  cp msfupdate $PKG/$INSTDIR/app/
-  echo ""
+# Stop Metasploit Framework PostgreSQL
+echo "Stopping Metasploit Framework PostgreSQL..."
+/etc/init.d/framework-postgres stop
 
-  echo "Extracting the Metasploit Framework..."
-  tar --directory=$PKG/$INSTDIR -xf msf3.tar
-  echo ""
+# Move install dir
+mkdir -p $PKG/$BASEINSTDIR
+mv /$INSTDIR $PKG/$BASEINSTDIR/
 
-  echo "Installing links into /usr/bin..."
-  mkdir -p $PKG/usr/bin
-  ( cd $PKG/usr/bin
-    for file in $(ls ../../$INSTDIR/bin/msf*); do
-      ln -sf $file $(basename $file)
-    done
-  )
-  echo ""
-) || exit 1
+# Fix init script and move it to the right directory
+# This script is not handled by the uninstaller and the user should not call
+# the uninstall script anyway, so no problem if we made it more Slackware-ish
+echo "Fixing Metasploit Framework PostgreSQL init script..."
+mkdir -p $PKG/etc/rc.d
+mv /etc/init.d/framework-postgres $PKG/etc/rc.d/rc.framework-postgres.new
+chown root:root $PKG/etc/rc.d/rc.framework-postgres.new
+chmod 755 $PKG/etc/rc.d/rc.framework-postgres.new
+
+# Install /usr/bin links
+mkdir -p $PKG/usr/bin
+echo "Installing links into /usr/bin..."
+( cd $PKG/usr/bin
+  for file in $(ls ../../$INSTDIR/app/msf*); do
+    ln -sf $file $(basename $file)
+  done
+  # also links armitage
+  ln -sf ../../$INSTDIR/app/armitage armitage
+)
 
 # Every useful doc is included inside the framework folder, just copy over the
 # README which contains the important copyright disclaimer and the cron script
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a $PKG/$INSTDIR/msf3/README $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/msfupdate.sh > $PKG/usr/doc/$PRGNAM-$VERSION/msfupdate.sh
+cat $CWD/msfupdate.logrotate > $PKG/usr/doc/$PRGNAM-$VERSION/msfupdate.logrotate
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
+# Do NOT chown -R root:root or it will bork the shipped PostgreSQL
+# installation: the bitrock installer should have taken care of permissions
 cd $PKG
-chown -R root:root .
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
