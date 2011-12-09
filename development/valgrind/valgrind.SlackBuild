@@ -5,16 +5,14 @@
 # Updated by Peter Wang <novalazy@gmail.com>
 
 PRGNAM=valgrind
-VERSION=3.6.1
-BUILD=${BUILD:-2}
+VERSION=3.7.0
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-# Automatically determine the architecture we're building on:
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
     i?86) ARCH=i486 ;;
     arm*) ARCH=arm ;;
-    # Unless $ARCH is already set, use uname -m for all other archs:
        *) ARCH=$( uname -m ) ;;
   esac
 fi
@@ -31,7 +29,9 @@ elif [ "$ARCH" = "i686" ]; then
    SLKCFLAGS="-O2 -march=i686 -mtune=i686"
    LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
-   SLKCFLAGS="-O2 -fPIC"
+   # The valgrind build system already passes -fpic
+   # and forcing -fPIC results in a build failure.
+   SLKCFLAGS="-O2"
    LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
@@ -47,11 +47,6 @@ cd $PRGNAM-$VERSION || exit 1
 chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
 
-# Apply upstream patches to fix https://bugs.kde.org/show_bug.cgi?id=277045
-# Thanks to Ricardo Nabinger Sanchez for reporting the solution.
-patch -p0 < $CWD/valgrind-r11856.patch || exit 1
-patch -p0 < $CWD/valgrind-r11904.patch || exit 1
-
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -63,15 +58,17 @@ CXXFLAGS="$SLKCFLAGS" \
   || exit 1
 
 make || exit 1
-make install-strip DESTDIR=$PKG || exit 1
+make install DESTDIR=$PKG || exit 1
 
-( cd $PKG/usr/man
-  find . -type f -exec gzip -9 {} \;
-  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
-)
+# Do NOT strip the shared objects, as recommended by the developers.
+find $PKG -print0 | xargs -0 file | grep -e "executable" | grep ELF \
+      | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS COPYING FAQ.txt NEWS README* \
+cp -a AUTHORS COPYING* FAQ.txt NEWS README* \
   $PKG/usr/doc/$PRGNAM-$VERSION
 mv $PKG/usr/share/doc/valgrind/html $PKG/usr/doc/$PRGNAM-$VERSION
 # The doc directory is the only thing in $PKG/usr/share, and the only things
