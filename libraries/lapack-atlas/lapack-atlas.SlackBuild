@@ -1,0 +1,289 @@
+#!/bin/sh
+
+# Slackware script to build the LAPACK libraries against ATLAS.
+
+# Written by Serban Udrea <s.udrea@gsi.de>
+# Includes the code to make dynamic libs from the lapack.SlackBuild by
+# Eugene Suter <easuter@gmail.com>
+
+# Licence: LICENCE file in the tarball
+
+PRGNAM=lapack-atlas
+VERSION=${VERSION:-3.3.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+SRCNAM=lapack # The source is still that of LAPACK
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-${PRGNAM}
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  NOOPTFLAGS="-fPIC"
+  LIBDIRSUFFIX="64"
+fi
+
+set -e # Exit on most errors
+
+# This is the system destination directory. When installing the
+# package produced by this script, LAPACK's files will be written to
+# $SYS_DESTDIR/lib or $SYS_DESTDIR/lib64 on appropriate platforms, etc.
+# Nevertheless, by default the documentation files go to
+# /usr/doc/$PRGNAM-$VERSION. You may change this through the variable
+# DEFAULT_DOCS, see below.
+SYS_DESTDIR=${SYS_DESTDIR:-/usr}
+
+# Check if SYS_DESTDIR is an absolute path. If not, exit with error.
+# NOTE: The $ is used because echo adds a \n at the end of the string.
+echo "$SYS_DESTDIR" | grep -vE '/\.\./|/\.\.$' | grep -qE '^/' || \
+{ echo "ERROR: The system destination directory has no absolute path!" \
+&& echo "       The value of SYS_DESTDIR is $SYS_DESTDIR" \
+&& echo "       Please set it properly! " \
+&& exit 1; }
+
+# You may want to have the documentation files installed under
+# $SYS_DESTDIR/doc/$PRGNAM-$VERSION not /usr/doc/$PRGNAM-$VERSION.
+# To achieve this just set the following variable to something like
+# "no".
+DEFAULT_DOCS=${DEFAULT_DOCS:-yes}
+DEFAULT_DOCS=$(echo "$DEFAULT_DOCS"|cut -b 1|tr a-z A-Z) # Make Y or N out of yes, Yes, No, no, etc.
+if [ "$DEFAULT_DOCS" = "Y" ]; then
+  DOC_DIR="$PKG/usr/doc/${PRGNAM}-$VERSION"
+else
+  DOC_DIR="$PKG$SYS_DESTDIR/doc/${PRGNAM}-$VERSION"
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tgz
+cd $SRCNAM-$VERSION
+
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+# Within Makefile it is asumed that lapack_testing.py is executable. 
+# This is not the case, thus if TEST_LAPACK is enabled, make fails.
+chmod 755 ./lapack_testing.py
+
+# If you say "no" here, the script will NOT try to link LAPACK against 
+# the multi-threaded ATLAS libraries.  If you leave it to "yes" and the 
+# multi-threaded ATLAS libraries are not available, the script will default 
+# to linking against the single threaded ones and raise a warning.
+USE_ATLAS_PT_LIBS="${USE_ATLAS_PT_LIBS:-yes}"
+USE_ATLAS_PT_LIBS=$(echo "$USE_ATLAS_PT_LIBS"|cut -b 1|tr a-z A-Z) # Make Y or N out of yes, Yes, No, no, etc.
+
+# Change the following to yes if you would like to run the tests for LAPACK.
+TEST_LAPACK="${TEST_LAPACK:-no}"
+# Make Y or N out of yes, Yes, No, no, etc.
+TEST_LAPACK=$(echo "$TEST_LAPACK"|cut -b 1|tr a-z A-Z)
+
+# Search for the latest installed atlas package 
+# (not necessarily the one with the latest version).
+# For this to work the system clock should also work properly.
+# NOTE: The echo statement below is for getting around "set -e" this time.
+ATLAS_PKG="$(ls -1 -dc /var/log/packages/atlas* 2>/dev/null | \
+          head -n 1 || echo -n)"
+
+# Check if an atlas package was found. Exit if not!
+[ ! "$ATLAS_PKG" ] && \
+echo "ERROR: Couldn't find the ATLAS package." && exit 1
+
+# Pick up the SETTINGS file containing the appropriate flags, use again the 
+# echo trick against "set -e".  You may also provide your own path to a file 
+# containing apropriate settings, see the README for details
+ATLAS_SETTINGS_FILE=${ATLAS_SETTINGS_FILE:-"/$(grep SETTINGS "$ATLAS_PKG" || echo -n)"}
+
+[ "${ATLAS_SETTINGS_FILE}1" = "/1" ] && \
+echo "ERROR: No location available for the file with ATLAS settings." && exit 1
+
+# Check that we deal with a regular file which is readable
+[ -f "$ATLAS_SETTINGS_FILE" -a -r "$ATLAS_SETTINGS_FILE" ] || \
+{ echo "ERROR: $ATLAS_SETTINGS_FILE is not a regular file or is not readable by us." && exit 1; }
+
+# Source the atlas settings.
+. "$ATLAS_SETTINGS_FILE"
+
+# Check for the presence of variables provided by the ATLAS_SETTINGS_FILE
+{ [ "$ATLAS_COMPILER" ] && \
+  [ "$ATLAS_F77FLAGS" ] && \
+  [ "$ATLAS_NOOPT" ]; } ||
+{ echo "ERROR: Improper ATLAS settings; empty or undefined variables." && exit 1; }
+
+# This is the timer to be used for LAPACK. If you stay with gfortran,
+# presently the default compiler on Slackware, you can leave the value as is.
+# Otherwise, please read LAPACK's make.inc for more informations.
+LAPACK_TIMER="${LAPACK_TIMER:-INT_ETIME}"
+
+# Looking for the libraries provided by ATLAS. If one asks for threaded 
+# libraries and these are available we will try to link against them.
+if [ "$USE_ATLAS_PT_LIBS" = "Y" ]; then
+  # Set proper library names for the threaded ATLAS libs.
+  ATLAS_BLASLIB="libptf77blas.a"
+  ATLAS_CBLASLIB="libptcblas.a"
+  # Find out the full paths to the ATLAS libraries
+  ATLAS_BLASLIB_P="/$(grep "$ATLAS_BLASLIB" "$ATLAS_PKG" || echo -n)"
+  # We need this to finally link against the mixed LAPACK library, resulting 
+  # from the full LAPACK and the optimized LAPACK routines provided by ATLAS.
+  ATLAS_CBLASLIB_P="/$(grep "$ATLAS_CBLASLIB" "$ATLAS_PKG" || echo -n)" 
+  if [ "${ATLAS_BLASLIB_P}1" = "/1" -o "${ATLAS_CBLASLIB_P}1" = "/1" ]; then
+    # Oops! The threaded libraries are not available!
+    echo ""
+    echo "WARNING: No threaded ATLAS libraries available!"
+    echo "WARNING: Linking against non-threaded libraries!"
+    echo ""
+    ATLAS_BLASLIB="libf77blas.a"
+    ATLAS_CBLASLIB="libcblas.a"
+    USE_ATLAS_PT_LIBS="N"
+  fi
+else
+  # Set proper library names for the unthreaded ATLAS libs.
+  ATLAS_BLASLIB="libf77blas.a"
+  ATLAS_CBLASLIB="libcblas.a"
+fi
+
+# Find out the full paths to the ATLAS libraries
+ATLAS_BLASLIB="/$(grep "$ATLAS_BLASLIB" "$ATLAS_PKG" || echo -n)"
+ATLAS_CBLASLIB="/$(grep "$ATLAS_CBLASLIB" "$ATLAS_PKG" || echo -n)"
+ATLAS_EXTRA_LIB="/$(grep libatlas.a "$ATLAS_PKG" || echo -n)"
+ATLAS_LAPACK="/$(grep liblapack.a "$ATLAS_PKG" || echo -n)"
+
+# Check that we got what we expected
+{ [ "${ATLAS_BLASLIB}1" = "/1" ] || \
+  [ "${ATLAS_CBLASLIB}1" = "/1" ] || \
+  [ "${ATLAS_EXTRA_LIB}1" = "/1" ] || \
+  [ "${ATLAS_LAPACK}1" = "/1" ]; } && \
+{ echo "ERROR: ATLAS libraries missing from the Slackware ATLAS package log." && exit 1; }
+
+# Check that the library files are there.
+# NOTE: After the installation of this package, the incomplete LAPACK library 
+#       installed by ATLAS gets substituted by the complete one provided by us
+[ -f "$ATLAS_BLASLIB" -a -r "$ATLAS_BLASLIB" ] || \
+{ echo "ERROR: $ATLAS_BLASLIB is not a regular file or is not readable by us." && exit 1; }
+
+[ -f "$ATLAS_CBLASLIB" -a -r "$ATLAS_CBLASLIB" ] || \
+{ echo "ERROR: $ATLAS_CBLASLIB is not a regular file or is not readable by us." && exit 1; }
+
+[ -f "$ATLAS_EXTRA_LIB" -a -r "$ATLAS_EXTRA_LIB" ] || \
+{ echo "ERROR: $ATLAS_EXTRA_LIB is not a regular file or is not readable by us." && exit 1; }
+
+[ -f "$ATLAS_LAPACK" -a -r "$ATLAS_LAPACK" ] || \
+{ echo "ERROR: $ATLAS_LAPACK is not a regular file or is not readable by us." && exit 1; }
+
+ATLAS_LIBS="${ATLAS_BLASLIB} ${ATLAS_EXTRA_LIB}"
+
+# Copy the pre-configured make.inc file but edit it accordingly
+sed $CWD/make.inc.atlas \
+    -e s%XXX_FORTRAN_XXX%"$ATLAS_COMPILER"% \
+    -e s%XXX_TIMER_XXX%"$LAPACK_TIMER"% \
+    -e s%XXX_BLASLIB_XXX%"$ATLAS_LIBS"% > \
+    make.inc
+
+# Set the compilation flags.
+LAPACK_OPTS="$ATLAS_F77FLAGS $NOOPTFLAGS"
+LAPACK_NOOPT="$ATLAS_NOOPT $NOOPTFLAGS"
+
+# Build objects and static library files
+make cleanlib
+make OPTS="$LAPACK_OPTS" NOOPT="$LAPACK_NOOPT" lapacklib
+
+# Merge the ATLAS incomplete LAPACK library with the
+# just built full LAPACK.
+mkdir -p merging_dir
+( cd merging_dir
+  ar x "$ATLAS_LAPACK"
+  ar r "../lib${SRCNAM}.a" *.o
+)
+rm -rf merging_dir
+
+if [ "$TEST_LAPACK" = "Y" ]; then
+  # We want to test LAPACK, thus we have to build tmglib and then run the tests
+  make OPTS="$LAPACK_OPTS" NOOPT="$LAPACK_NOOPT" tmglib
+ 
+  # Update make.inc taking into account that the LAPACK library has
+  # been merged with the optimized LAPACK routines provided by ATLAS.
+  ATLAS_LIBS="${ATLAS_BLASLIB} ${ATLAS_CBLASLIB} ${ATLAS_EXTRA_LIB}"
+
+  if [ "$USE_ATLAS_PT_LIBS" = "Y" ]; then
+    # Add the threads library
+    ATLAS_LIBS=${ATLAS_LIBS}" -lpthread"
+  fi
+
+  cat "$CWD/make.inc.atlas" | \
+    sed -e s%XXX_FORTRAN_XXX%"$ATLAS_COMPILER"% \
+      -e s%XXX_TIMER_XXX%"$LAPACK_TIMER"% \
+      -e s%XXX_BLASLIB_XXX%"$ATLAS_LIBS"% > \
+      make.inc
+
+  make OPTS="$LAPACK_OPTS" NOOPT="$LAPACK_NOOPT" lapack_testing
+
+  # Put the test results together
+  TEST_OUTPUT="TEST.RESULTS.tgz"
+  tar czf "$TEST_OUTPUT" TESTING/*.out
+fi
+ 
+#LAPACK only.
+( mkdir "shared_$SRCNAM"
+  cd "shared_$SRCNAM"
+  ar -x "../lib$SRCNAM.a"
+  gcc -fPIC -lgfortran -shared *.o -Wl,-soname,"$SRCNAM.so.$VERSION" \
+      -o "lib$SRCNAM.so.$VERSION"
+)
+
+mkdir -p "$PKG$SYS_DESTDIR/lib${LIBDIRSUFFIX}"
+cp "lib$SRCNAM.a" "$PKG$SYS_DESTDIR/lib${LIBDIRSUFFIX}"
+cp "shared_$SRCNAM/lib$SRCNAM.so.$VERSION" "$PKG$SYS_DESTDIR/lib${LIBDIRSUFFIX}"
+( cd "$PKG$SYS_DESTDIR/lib${LIBDIRSUFFIX}"
+  chmod 755 "lib$SRCNAM.so.$VERSION"
+  ln -s "lib$SRCNAM.so.$VERSION" "lib$SRCNAM.so"
+)
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | \
+  grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p "$DOC_DIR"
+cat "$CWD/${PRGNAM}.SlackBuild" > "$DOC_DIR/${PRGNAM}.SlackBuild"
+cat README > "$DOC_DIR/README"
+cat "$CWD/README.SLACKWARE" > "$DOC_DIR/README.SLACKWARE"
+cat LICENSE > "$DOC_DIR/LICENSE"
+
+# If the tests have been performed, also copy the results to the doc directory.
+if [ -f "$TEST_OUTPUT" ]; then
+  cp -p "$TEST_OUTPUT" "$DOC_DIR"
+fi
+
+# Signal that lapack got compiled against atlas
+# echo "Y" > "$DOC_DIR/WITH_ATLAS"
+
+if [ "$USE_ATLAS_PT_LIBS" = "Y" ]; then
+ # Signal that lapack got compiled with thread support
+ echo "$USE_ATLAS_PT_LIBS" > "$DOC_DIR/WITH_THREADS"
+fi
+
+mkdir -p "$PKG/install"
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd "$PKG"
+/sbin/makepkg -l y -c n $OUTPUT/${PRGNAM}-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
