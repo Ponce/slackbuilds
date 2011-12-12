@@ -11,8 +11,8 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/povray/__VERSION__/povray.conf.new
-config etc/povray/__VERSION__/povray.ini.new
+config etc/povray/@VERSION@/povray.conf.new
+config etc/povray/@VERSION@/povray.ini.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
