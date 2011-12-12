@@ -11,5 +11,5 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/latrace.conf.new
+config etc/latrace.d/latrace.conf.new
 
