@@ -3,11 +3,17 @@
 # Slackware build script for John the Ripper
 
 # Written by Murat D. Kadirov <banderols@gmail.com>
+#
+# 20/Nov/2011 * Updated to 1.7.8 and jambo-patch 8
+#               Thanks a lot Kent Fritz for patch with many improvements
+
 
 PRGNAM=john
-VERSION=${VERSION:-1.7.3.1}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.7.8}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+
+JUMBOVERSION=${JUMBOVERSION:-8}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -23,26 +29,38 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i486" ]; then
-  COMPILE="make clean linux-x86-any"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  COMPILE="make clean linux-x86-sse2"
+  if grep -q ^flags.*sse2 /proc/cpuinfo; then
+    TARGET=linux-x86-sse2
+  elif grep -q ^flags.*mmx /proc/cpuinfo; then
+    TARGET=linux-x86-mmx
+  else
+    TARGET=linux-x86-any
+  fi
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
-  COMPILE="make clean linux-x86-64"
+  TARGET=linux-x86-64
   LIBDIRSUFFIX="64"
-elif [ "$ARCH" = "athlonxp" ]; then 
-  COMPILE="make clean linux-x86-mmx"
+else
+  TARGET=generic
   LIBDIRSUFFIX=""
 fi
 
-set -e 
-
+set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
+
+# Soft-link in tarball causes x bit to be set below; nuke it 
+rm -f $PRGNAM-$VERSION/README
+
+# Apply the Jumbo patch?
+if [ "$JUMBO" = "1" ]; then
+  zcat $CWD/john-1.7.8-jumbo-${JUMBOVERSION}.diff.gz | patch -p0 || exit 1
+  mv $PRGNAM-$VERSION/README-jumbo $PRGNAM-$VERSION/doc/README-jumbo 
+fi
+
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find . \
@@ -51,34 +69,30 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-# DON'T APPLY BOTH PATCHES AT THE SAME TIME !!
+mkdir -p $PKG/usr/share/john
+cp -a run/* $PKG/usr/share/john
+rm $PKG/usr/share/john/mailer
 
-# Patch for John the Ripper to support MPI. MPI allows you to use multiple processors
-# on a single system, or a cluster of systems for cracking passwords.
-#zcat $CWD/john-1.7.3.1-mpi8-small.patch.gz | patch -p1 || exit 1
+#cd src
+  make -C src clean $TARGET CFLAGS="-DJOHN_SYSTEMWIDE=1 -c -Wall -O2 -fomit-frame-pointer"
+#cd -
 
-# The jumbo patch enables processing of many password hash types
-# and ciphers that are not supported by the official JtR.
-#zcat $CWD/john-1.7.3.1-all-2.diff.gz | patch -p1 || exit 1
-
-cd src
-  $COMPILE
-cd -
+# Merge /usr/share/dict/words into password list?
+if [ "$MERGEWORDS" = "1" ]; then
+  mv run/password.lst run/password.lst.orig
+  grep -h -v '^#!comment:' run/password.lst.orig /usr/share/dict/words | \
+   run/unique run/password.lst
+  cp -a run/password.lst.orig $PKG/usr/share/john
+  cp -a run/password.lst $PKG/usr/share/john
+  chmod 644 $PKG/usr/share/john/password.lst
+fi
 
 mkdir -p $PKG/usr/bin
-mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM
-cp -a $TMP/$PRGNAM-$VERSION/run/*  $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM
-
-# wrapper
-cat << EOF > $PKG/usr/bin/john
-#!/bin/sh
-# John The Ripper launcher
-/usr/lib${LIBDIRSUFFIX}/john/john "\$@"
-EOF
-chmod 0755 $PKG/usr/bin/john
-
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+cp -a run/$PRGNAM $PKG/usr/bin/$PRGNAM
+cp -a run/mailer $PKG/usr/bin/mailer
+ln -s $PRGNAM $PKG/usr/bin/unafs
+ln -s $PRGNAM $PKG/usr/bin/unique
+ln -s $PRGNAM $PKG/usr/bin/unshadow
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a doc/* $PKG/usr/doc/$PRGNAM-$VERSION
