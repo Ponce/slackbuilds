@@ -23,10 +23,11 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=openvswitch
-VERSION=1.2.1
+VERSION=1.2.2
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
-MODULEPATH=${MODULEPATH:-/lib/modules/`uname -r`}
+
+KERNEL=${KERNEL:-$(uname -r)}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -57,18 +58,6 @@ fi
 
 set -e
 
-if [ ! -d $MODULEPATH ]; then
-  echo "Missing module path $MODULEPATH!  Exiting script..."
-  exit
-fi
-
-if [ ! -h $MODULEPATH/build ]; then
-  echo "Missing source patch $MODULEPATH/build!  Exiting script..."
-  exit
-fi
-
-KERNELPATH=$(readlink $MODULEPATH/build)
-
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
@@ -86,12 +75,13 @@ CXXFLAGS="$SLKCFLAGS" \
   --localstatedir=/var \
   --mandir=/usr/man \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --with-l26=$KERNELPATH \
+  --with-l26=/lib/modules/${KERNEL}/build \
   --enable-ndebug \
-  --enable-ssl
+  --enable-ssl \
+  --build=$ARCH-slackware-linux
 
 make
-make DESTDIR=$TMP/package-$PRGNAM install
+make install DESTDIR=$PKG
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -99,35 +89,30 @@ find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/{schema,xen}
-install -m 644 AUTHORS COPYING ChangeLog CodingStyle INSTALL.KVM \
-  INSTALL.Linux INSTALL.RHEL INSTALL.SSL INSTALL.XenServer INSTALL.bridge \
-  INSTALL.userspace NOTICE PORTING README README-gcov REPORTING-BUGS \
-  SubmittingPatches WHY-OVS \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-install -m 644 $CWD/xen/vif-openvswitch $CWD/xen/network-openvswitch \
-  $CWD/xen/README \
-  $PKG/usr/doc/$PRGNAM-$VERSION/xen
-install -m 644 vswitchd/vswitch.ovsschema \
-  $PKG/usr/doc/$PRGNAM-$VERSION/schema
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-
-mkdir -p $PKG$MODULEPATH/kernel/extra/openvswitch
+mkdir -p $PKG/lib/modules/${KERNEL}/kernel/extra/openvswitch
 install -m 644 datapath/linux/openvswitch_mod.ko \
-  $PKG$MODULEPATH/kernel/extra/openvswitch
+  $PKG/lib/modules/${KERNEL}/kernel/extra/openvswitch
 install -m 644 datapath/linux/brcompat_mod.ko \
-  $PKG$MODULEPATH/kernel/extra/openvswitch
+  $PKG/lib/modules/${KERNEL}/kernel/extra/openvswitch
 
-mkdir -p $PKG/etc/openvswitch
+mkdir -p $PKG/etc/openvswitch $PKG/etc/rc.d $PKG/var/run/openvswitch
+sed -e "s,@DOCDIR@,/usr/doc/$PRGNAM-$VERSION,g" $CWD/rc.openvswitch \
+  > $PKG/etc/rc.d/rc.openvswitch.new
+chmod 0755 $PKG/etc/rc.d/rc.openvswitch.new
 
-mkdir -p $PKG/etc/rc.d
-sed -e "s/@DOCDIR@/\/usr\/doc\/$PRGNAM-$VERSION/g" $CWD/rc.openvswitch > $PKG/etc/rc.d/rc.openvswitch.new
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/{schema,xen}
+cp -a \
+  AUTHORS COPYING ChangeLog CodingStyle INSTALL* NOTICE PORTING README* \
+  REPORTING-BUGS SubmittingPatches WHY-OVS \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a vswitchd/vswitch.ovsschema $PKG/usr/doc/$PRGNAM-$VERSION/schema
+cp $CWD/xen/vif-openvswitch $CWD/xen/network-openvswitch $CWD/xen/README \
+  $PKG/usr/doc/$PRGNAM-$VERSION/xen
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
-
-mkdir -p $PKG/var/run/openvswitch
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
