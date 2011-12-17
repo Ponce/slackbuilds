@@ -10,14 +10,18 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-# Keep same perms on rc.asterisk.new:
-if [ -e etc/rc.d/rc.asterisk ]; then
-  cp -a etc/rc.d/rc.asterisk etc/rc.d/rc.asterisk.new.incoming
-  cat etc/rc.d/rc.asterisk.new > etc/rc.d/rc.asterisk.new.incoming
-  mv etc/rc.d/rc.asterisk.new.incoming etc/rc.d/rc.asterisk.new
-fi
+preserve_perms() {
+  NEW="$1"
+  OLD="$(dirname $NEW)/$(basename $NEW .new)"
+  if [ -e $OLD ]; then
+    cp -a $OLD ${NEW}.incoming
+    cat $NEW > ${NEW}.incoming
+    mv ${NEW}.incoming $NEW
+  fi
+  config $NEW
+}
 
-config etc/rc.d/rc.asterisk.new
+preserve_perms etc/rc.d/rc.asterisk.new
 config etc/logrotate.d/asterisk.new
 config etc/asterisk/asterisk.conf.new
 config etc/asterisk/codecs.conf.new
