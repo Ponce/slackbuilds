@@ -2,7 +2,7 @@
 
 # Slackware build script for llvm
 
-# Copyright 2008-2010 Heinz Wiesinger, Amsterdam, The Netherlands
+# Copyright 2008-2011 Heinz Wiesinger, Amsterdam, The Netherlands
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,7 +23,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=llvm
-VERSION=2.7
+VERSION=2.9
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -54,6 +54,8 @@ else
   LIBDIRSUFFIX=""
 fi
 
+CLANG=${CLANG:-no}
+
 set -e
 
 rm -rf $PKG
@@ -61,9 +63,26 @@ mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tgz
-cd $PRGNAM-$VERSION
+
+if [ "$CLANG" = "no" ]; then
+  cd $PRGNAM-$VERSION
+else
+  cd $PRGNAM-$VERSION/tools
+  rm -rf clang
+  tar xvf $CWD/clang-$VERSION.tgz
+  mv clang-$VERSION clang
+  cd ../
+
+  # clang fixes for slackware
+  patch -p1 -d tools/clang -i $CWD/clang-slackware.diff
+fi
+
 chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
+
+CINC="/usr/include/"
+CINC="$CINC:/usr/lib$LIBDIRSUFFIX/gcc/$ARCH-slackware-linux/4.5.2/include/"
+CINC="$CINC:/usr/lib$LIBDIRSUFFIX/gcc/$ARCH-slackware-linux/4.5.2/include-fixed/"
 
 # --mandir doesn't work currently
 # need to disable assertions to make llvm thread-safe
@@ -78,21 +97,43 @@ CXXFLAGS="$SLKCFLAGS" \
   --enable-optimized \
   --disable-assertions \
   --enable-pic \
+  --with-c-include-dirs=$CINC \
   --build=$ARCH-slackware-linux \
   --host=$ARCH-slackware-linux
 
 # Correct libdir setting
-sed -i "s|\$(PROJ_prefix)/lib|\$(PROJ_prefix)/lib$LIBDIRSUFFIX|" Makefile.config
+sed -i "s|\$(PROJ_prefix)/lib|\$(PROJ_prefix)/lib$LIBDIRSUFFIX|" \
+  Makefile.config
+
+if [ "$CLANG" != "no" ]; then
+  sed -i "s|\$(PROJ_prefix)/lib|\$(PROJ_prefix)/lib$LIBDIRSUFFIX|" \
+    tools/clang/lib/Headers/Makefile
+fi
 
 make
 make install DESTDIR=$PKG
+
+if [ "$CLANG" != "no" ]; then
+  # install clang-static-analyzer
+  mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/clang-analyzer
+  cp -pr tools/clang/tools/scan-{build,view} \
+    $PKG/usr/lib$LIBDIRSUFFIX/clang-analyzer/
+  for i in scan-{build,view}; do
+    ln -s /usr/lib$LIBDIRSUFFIX/clang-analyzer/$i/$i \
+      $PKG/usr/bin/$i
+  done
+  for i in ccc c++; do
+    ln -s /usr/lib$LIBDIRSUFFIX/clang-analyzer/scan-build/$i-analyzer \
+      $PKG/usr/bin/$i-analyzer
+  done
+fi
 
 # Remove example libraries
 rm -f $PKG/usr/lib$LIBDIRSUFFIX/LLVMHello*
 
 # Fix wrong libdir
 sed -i -e "s|ABS_RUN_DIR/lib\"|ABS_RUN_DIR/lib$LIBDIRSUFFIX\"|" \
-    $PKG/usr/bin/llvm-config
+  $PKG/usr/bin/llvm-config
 
 mv $PKG/usr/share/* $PKG/usr/
 rmdir $PKG/usr/share
@@ -106,6 +147,13 @@ mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a CREDITS* LICENSE* README* $PKG/usr/doc/$PRGNAM-$VERSION
 mv $PKG/usr/docs/llvm/* $PKG/usr/doc/$PRGNAM-$VERSION
 rm -rf $PKG/usr/docs
+
+if [ "$CLANG" != "no" ]; then
+  mkdir $PKG/usr/doc/$PRGNAM-$VERSION/clang
+  cp -a tools/clang/{INSTALL,NOTES,README,TODO}.txt \
+    $PKG/usr/doc/$PRGNAM-$VERSION/clang
+fi
+
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
