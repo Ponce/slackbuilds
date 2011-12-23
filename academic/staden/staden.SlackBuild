@@ -1,0 +1,157 @@
+#!/bin/sh
+
+# Slackware build script for staden
+
+# Copyright 2011  Petar Petrov, ppetrov@paju.oulu.fi
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=staden		
+VERSION=${VERSION:-2.0.0b9}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}	
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+SLKTCL=tcl8.5.9		# Slackware 13.37 sources for TCL
+SLKTK=tk8.5.9		# Slackware 13.37 sources for TK
+TKLIB=tklib0.5		# Folder name of TKLIB libraries, see line 117.
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+mkdir $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION-src.tar.gz
+tar xvf $CWD/${PRGNAM}_doc-$VERSION-src.tar.gz
+
+# The sources of TCL and TK are expected to be in /tmp at build time,
+# so we unpack them in the build directory and create symlinks in /tmp.
+rm -f /tmp/$SLKTCL
+rm -f /tmp/$SLKTK
+tar xvf $CWD/$SLKTCL-src.tar.xz
+tar xvf $CWD/$SLKTK-src.tar.xz
+ln -s $TMP/$PRGNAM-$VERSION/$SLKTCL /tmp/$SLKTCL
+ln -s $TMP/$PRGNAM-$VERSION/$SLKTK /tmp/$SLKTK
+
+chown -R root:root $PRGNAM-$VERSION-src  ${PRGNAM}_doc-$VERSION-src
+find $PRGNAM-$VERSION-src  ${PRGNAM}_doc-$VERSION-src \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+cd $PRGNAM-$VERSION-src
+# On Slackware64, the components of staden (like GAP4, GAP5, PREGAP4,
+# SPIN, TREV) will not run, as they still expect their libraries to be
+# in /usr/lib not /usr/lib64. Let's correct the libraries path.
+sed -i "s:$STADENROOT/lib:$STADENROOT/lib${LIBDIRSUFFIX}:g" \
+  global.mk staden.profile copy_reads/copy_reads gap4/gap4 gap5/gap5 \
+  gap5/gap5_consensus gap5/gap5_export gap5/tg_index gap5/tg_view \
+  prefinish/finish_sanger prefinish/prefinish pregap4/pregap4 spin/spin \
+  spin_emboss/create_emboss_files trev/trev
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --with-tklib=/usr/lib${LIBDIRSUFFIX}/$TKLIB \
+  --build=$ARCH-slackware-linux
+
+make
+make install DESTDIR=$PKG
+
+# Build documentation. In the process, texi2dvi looks for tex and
+# that's why the SlackBuild should be run as real root (su -).
+# ## (or just source /etc/profile ) --rworkman
+cd ../${PRGNAM}_doc-$VERSION-src
+
+# Fix the doc and man pages paths
+sed "s:{datarootdir}/doc/staden:{prefix}/doc/$PRGNAM-$VERSION:" -i Makefile
+sed "s:{datarootdir}/man:{prefix}/man:" -i Makefile
+
+# Remove this, or there will be an error at the "make install" line.
+rm -rf i/i
+
+# Generate documentation. If you want it in the US letter format,
+# change the next line to "make unix PAPER=us".
+make unix
+make install DESTDIR=$PKG
+
+# Now that we're done building, let's remove those symlinks from earlier...
+rm -f /tmp/$SLKTCL /tmp/$SLKTK
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/usr/share/{applications,pixmaps}
+cp $CWD/desktop/* $PKG/usr/share/applications
+cp $CWD/$PRGNAM.png $PKG/usr/share/pixmaps
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cd ../$PRGNAM-$VERSION-src
+cp -a ChangeLog NEWS README.build $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/References > $PKG/usr/doc/$PRGNAM-$VERSION/References
+# Staden components expect the manual to be in /usr/share/doc/staden.
+ln -s $PRGNAM-$VERSION $PKG/usr/doc/$PRGNAM
+rm -rf $PKG/usr/share/doc # This is empty
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
