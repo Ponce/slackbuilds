@@ -12,7 +12,7 @@ config() {
 }
 
 config etc/xdg/midori/search.new
-config etc/xdg/midori/extensions/libadblock.so/config.new
+config etc/xdg/midori/extensions/adblock/config.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
