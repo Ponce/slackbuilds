@@ -11,4 +11,3 @@ config() {
 }
 
 config etc/multitail.conf.new
-
