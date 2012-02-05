@@ -28,8 +28,4 @@ config var/heimdal/kdc.conf-sample.new
 config etc/profile.d/heimdal.sh.new
 config etc/profile.d/heimdal.csh.new
 
-# Add heimdal libs to the library search path
-if ! grep -q '^/usr/heimdal/lib$' etc/ld.so.conf ; then
-  echo "/usr/heimdal/lib" >> etc/ld.so.conf
-fi
 
