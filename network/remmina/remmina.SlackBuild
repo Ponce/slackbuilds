@@ -3,18 +3,23 @@
 # Slackware build script for remmina
 
 # Written by Luis Henrique <lmello.009@gmail.com>
+# with contributions for the 1.x branch by Niels Horn <niels.horn@gmail.com>
 
 PRGNAM=remmina
-VERSION=${VERSION:-0.8.3}
+VERSION=${VERSION:-1.0.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-# Automatically determine the architecture we're building on:
+SRCNAM=Remmina
+UNTARDIR=FreeRDP-$SRCNAM-356c033
+
+AVAHI=${AVAHI:OFF}
+TELEPATHY=${TELEPATHY:OFF}
+
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
     i?86) ARCH=i486 ;;
     arm*) ARCH=arm ;;
-    # Unless $ARCH is already set, use uname -m for all other archs:
        *) ARCH=$( uname -m ) ;;
   esac
 fi
@@ -38,14 +43,14 @@ else
   LIBDIRSUFFIX=""
 fi
 
-set -e # Exit on most errors
+set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+rm -rf $UNTARDIR
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $UNTARDIR
 chown -R root:root .
 find . \
  \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
@@ -53,27 +58,40 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --build=$ARCH-slackware-linux
+# Fix libdirsuffix in CMakeLists.txt
+sed "s|/lib/remmina|/lib$LIBDIRSUFFIX/remmina|g" -i CMakeLists.txt
 
-make
-make install DESTDIR=$PKG
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=/usr/lib${LIBDIRSUFFIX} \
+    -DWITH_AVAHI=${AVAHI} \
+    -DWITH_TELEPATHY=${TELEPATHY} \
+    -DCMAKE_BUILD_TYPE=Release ..
+
+  make VERBOSE=1 
+  make install DESTDIR=$PKG
+cd ..
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+# Install desktop file (went MIA upstream, but they already fixed it in 
+# their git repo it seems - so check with next update...)
+mkdir -p $PKG/usr/share/{applications,pixmaps}
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+cat remmina/desktop/scalable/apps/$PRGNAM.svg > $PKG/usr/share/pixmaps/$PRGNAM.svg
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/{remmina,remmina-plugins}
+cp -a README $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  AUTHORS ChangeLog COPYING INSTALL NEWS README \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+  remmina/{AUTHORS,COPYING,ChangeLog,INSTALL,NEWS,README} \
+  $PKG/usr/doc/$PRGNAM-$VERSION/remmina
+cp -a \
+  remmina-plugins/{AUTHORS,COPYING,ChangeLog,INSTALL,NEWS,README*} \
+  $PKG/usr/doc/$PRGNAM-$VERSION/remmina-plugins
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
