@@ -11,5 +11,5 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config /etc/profile.d/gae.csh.new
-config /etc/profile.d/gae.sh.new
+config etc/profile.d/gae.csh.new
+config etc/profile.d/gae.sh.new
