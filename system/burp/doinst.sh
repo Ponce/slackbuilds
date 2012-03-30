@@ -17,14 +17,17 @@ preserve_perms() {
   fi
   config $NEW
 }
-config etc/burp/ssl_cert-client.pem.new
-config etc/burp/clientconfdir/testclient.new
-config etc/burp/dhfile.pem.new
-config etc/burp/ssl_cert_ca.pem.new
-config etc/burp/ssl_cert-server.pem.new
-config etc/burp/burp.conf.new
 config etc/burp/burp-server.conf.new
-preserve_perms etc/rc.d/rc.burp.new
-preserve_perms etc/burp/notify_script.new
-preserve_perms etc/burp/summary_script.new
+config etc/burp/burp.conf.new
+config etc/burp/ssl_cert-server.pem.new
+config etc/burp/ssl_cert_ca.pem.new
+config etc/burp/dhfile.pem.new
+config etc/burp/clientconfdir/testclient.new
+config etc/burp/autoupgrade/server/win32/script.new
+config etc/burp/autoupgrade/server/win64/script.new
+config etc/burp/ssl_cert-client.pem.new
 preserve_perms etc/burp/timer_script.new
+preserve_perms etc/burp/ssl_extra_checks_script.new
+preserve_perms etc/burp/summary_script.new
+preserve_perms etc/burp/notify_script.new
+preserve_perms etc/rc.d/rc.burp.new
