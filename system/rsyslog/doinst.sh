@@ -28,4 +28,3 @@ config var/log/secure.new ; rm -f var/log/secure.new
 config var/log/cron.new ; rm -f var/log/cron.new
 config var/log/maillog.new ; rm -f var/log/maillog.new
 config var/log/spooler.new ; rm -f var/log/spooler.new
-
