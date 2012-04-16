@@ -22,8 +22,15 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# Updated 20120312 by B. Watson <yalhcru@gmail.com>:
+# - Updated for v0.1.1, including poppler plugin
+# - Restore missing .desktop file and AUTHORS doc
+# - Add an icon
+# - Include generated man pages
+# - fix homepage URL
+
 PRGNAM=zathura
-VERSION=${VERSION:-0.0.8.3}
+VERSION=${VERSION:-0.1.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -40,7 +47,27 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
 set -eu
+
+# zathura no longer includes PDF support in the core. Instead it uses
+# plugins. This build includes the default PDF plugin, without which zathura
+# completely useless.
+PLUGIN=$PRGNAM-pdf-poppler
+PLUGINVER=${PLUGINVER:-$VERSION}
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -55,22 +82,55 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-make
-make install DESTDIR=$PKG
+# zathura uses rst2man from docutils to generate its man pages. Rather than
+# require docutils (1.5MB download) as a dep, just include the man pages (5KB)
+# with the SlackBuild archive.
+mkdir -p $PKG/usr/man/man1 $PKG/usr/man/man5
+cp $CWD/*.1.gz $PKG/usr/man/man1/
+cp $CWD/*.5.gz $PKG/usr/man/man5/
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+sed -i "s/-pedantic/$SLKCFLAGS/" config.mk
 
-mv $PKG/usr/share/man $PKG/usr
-rm -rf $PKG/usr/share
-find $PKG/usr/man -type f -exec gzip -9 {} \;
+make LIBDIR=/usr/lib$LIBDIRSUFFIX
+make install LIBDIR=/usr/lib$LIBDIRSUFFIX DESTDIR=$PKG RSTTOMAN=""
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a LICENSE README $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS LICENSE README $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Now build the plugin.
+cd $TMP
+# Hack, lets #include <zathura/document.h> in pdf.h work with an uninstalled
+# copy of zathura by saying "-I.."
+rm -f $PRGNAM
+ln -s $PRGNAM-$VERSION $PRGNAM
+
+rm -rf $PLUGIN-$PLUGINVER
+tar xvf $CWD/$PLUGIN-$PLUGINVER.tar.gz
+cd $PLUGIN-$PLUGINVER
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+sed -i "s/-fPIC/$SLKCFLAGS/" config.mk
+make install \
+  ZATHURA_INC=-I.. \
+  PLUGINDIR=/usr/lib$LIBDIRSUFFIX/$PRGNAM \
+  DESTDIR=$PKG \
+  ZATHURA_VERSION_CHECK=0
+strip $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM/*.so
+
+# icon converted from https://pwmt.org/img/fav.ico
+mkdir -p $PKG/usr/share/pixmaps
+cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+echo "Icon=$PRGNAM" >> $PKG/usr/share/applications/$PRGNAM.desktop
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
