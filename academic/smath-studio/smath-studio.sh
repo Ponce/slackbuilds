@@ -1,4 +1,4 @@
 #!/bin/sh
 
-cd $(dirname $(readlink -f $0))
+cd /opt/smath-studio
 exec mono ./SMathStudio_Desktop.exe "$@"
