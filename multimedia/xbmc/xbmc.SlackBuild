@@ -2,7 +2,7 @@
 
 # Slackware build script for XBMC
 
-# Copyright 2009-2011 Larry Hajali <larryhaja[at]gmail[dot]com>
+# Copyright 2009-2012 Larry Hajali <larryhaja[at]gmail[dot]com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,7 +23,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=xbmc
-VERSION=10.0
+VERSION=11.0
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -69,7 +69,7 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-# Let's get rid of the lsb_release dependency.
+# Let's get rid of the lsb_release dependency. May not be needed for 11.0.
 sed -i 's|lsb_release -d|cat /etc/slackware-version|' \
   xbmc/utils/SystemInfo.cpp
 
@@ -78,29 +78,24 @@ if ! grep 'sse2' /proc/cpuinfo 2>&1 > /dev/null; then
   patch -p1 < $CWD/patches/non-sse2-cpu.patch
 fi
 
-# Create configure scripts.
-[ ! -x bootstrap ] && chmod +x bootstrap
-./bootstrap
+# Patch for building against rtmpdump. Only needed if xbmc fails to build
+# w/rtmpdump.  See the following link for a rather obtuse explanation.
+# http://slaxbmc.blogspot.com/2011/03/23-install-xbmc-from-source.html
+patch -p1 < $CWD/patches/xbmc-rtmpdump-build.patch
 
-# Here are some additional flags that can turned on in the script
-# so XBMC will use system libraries instead of shipped libraries.
-# --enable-external-ffmpeg	* to use system ffmpeg
-# --enable-external-liba52	* to use system liba52 library
-#				  comes with a52dec
-# --enable-external-libdts	* to use system DTS Coherent Acoustics decoder
-# --enable-external-python	* to use system python (On by default)
-# --enable-external-libraries	* to enable all optional system libraries
-OPT_DEPS="--enable-external-python"
-[ "${EXT_FFMPEG:-no}" == "yes" ] && OPT_DEPS="$OPT_DEPS --enable-external-ffmpeg"
-[ "${EXT_A52DEC:-no}" == "yes" ] && OPT_DEPS="$OPT_DEPS --enable-external-liba52"
-[ "${EXT_DTS:-no}" == "yes" ] && OPT_DEPS="$OPT_DEPS --enable-external-libdts"
-[ "${EXT_ALL:-no}" == "yes" ] && OPT_DEPS="--enable-external-libraries"
+# Build external ffmpeg.
+if [ "${EXT_FFMPEG:-no}" == "yes" ]; then
+  OPT_DEPS="--enable-external-ffmpeg"
+  patch -p1 < $CWD/patches/system-includes.patch
+else
+  OPT_DEPS="--disable-external-ffmpeg"
+fi
 
 # Build webserver. Requires libmicrohttpd.
 if [ "${WEBSERVER:-no}" == "yes" ]; then
-  OPT_SERVER="--enable-webserver"
+  OPT_DEPS="$OPT_DEPS --enable-webserver"
 else
-  OPT_SERVER="--disable-webserver"
+  OPT_DEPS="$OPT_DEPS --disable-webserver"
 fi
 
 CFLAGS="$SLKCFLAGS" \
@@ -109,17 +104,17 @@ CXXFLAGS="$SLKCFLAGS" \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --enable-ccache \
+  --enable-static=no \
+  --enable-neon \
   --disable-debug \
   --enable-gl \
-  --enable-dvdcss \
   --enable-mid \
   --enable-goom \
   --enable-ffmpeg-libvorbis \
   --disable-asap-codec \
-  $OPT_SERVER \
   $OPT_DEPS \
-  --build=$ARCH-slackware-linux \
+  --enable-external-libraries \
+  --build=$ARCH-slackware-linux
 
 make
 
@@ -128,7 +123,7 @@ if ! [ "${USE_WII:-no}" = "no" ]; then
   make eventclients DESTDIR=$PKG WII_EXTRA_OPTS="-DCWIID_OLD"
 fi
 
-make install install-livedatas DESTDIR=$PKG
+make install DESTDIR=$PKG
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -138,12 +133,12 @@ mkdir -p $PKG/usr/man/man1
 for i in diskmounter.1 runXBMC.1 xbmc.bin.1 xbmc.1 xbmc-standalone.1 xbmc-send.1 \
   setAlsaVolumes.1 installXBMC.1
 do
-  install -D -m 0644 docs/manpages/$i $PKG/usr/man/man1/$i
+  install -m 0644 docs/manpages/$i $PKG/usr/man/man1/$i
 done
 
 if ! [ "${USE_WII:-no}" = "no" ]; then
   for i in xbmc-j2meremote.1 xbmc-ps3remote.1 xbmc-wiiremote.1; do
-    install -D -m 0644 docs/manpages/$i $PKG/usr/man/man1/$i
+    install -m 0644 docs/manpages/$i $PKG/usr/man/man1/$i
   done
 fi
 gzip -9 $PKG/usr/man/man?/*.?
