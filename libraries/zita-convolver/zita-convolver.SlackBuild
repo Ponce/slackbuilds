@@ -1,0 +1,131 @@
+#!/bin/bash
+
+# Slackware build script for zita-convolver
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://sam.zoy.org/wtfpl/ for details.
+
+# This SlackBuild has a bit more logic than most, due to the various
+# optimizations. See README for executive summary.
+
+PRGNAM=zita-convolver
+VERSION=${VERSION:-3.1.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# Allow the user to use -O2 (like a regular slackbuild) instead of
+# the -O3 the zita-convolver author uses.
+if [ "${FORCE_O2:-no}" = "yes" ]; then
+  OPTFLAG="-O2"
+else
+  OPTFLAG="-O3"
+fi
+
+# Source is smart enough to know about lib vs. lib64, no need for
+# LIBDIRSUFFIX here.
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="$OPTFLAG -march=i486 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="$OPTFLAG -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="$OPTFLAG -fPIC"
+else
+  SLKCFLAGS="$OPTFLAG"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+cd libs
+
+# Fix 'make install' so it strips, and so we don't waste time running ldconfig
+sed -i -e 's/install -m 755/& -s/' -e '/ldconfig$/d' Makefile
+
+# Autodetection for MMX
+if [ "${MMX:-auto}" = "auto" ]; then
+  if grep -q '\<mmx\>' /proc/cpuinfo; then
+    MMX=yes
+  else
+    MMX=no
+  fi
+fi
+
+# Autodetection for SSE
+if [ "${SSE:-auto}" = "auto" ]; then
+  if grep -q '\<sse\>' /proc/cpuinfo; then
+    SSE=yes
+  else
+    SSE=no
+  fi
+fi
+
+# MMX is now "yes" or "no" whether it was autodetected or explicitly
+# set, we're ready to tweak the Makefile
+if [ "$MMX" = "yes" ]; then
+  SLKCFLAGS="$SLKCFLAGS -mmmx"
+elif [ "$MMX" != "no" ]; then
+  echo "MMX set to invalid value $MMX (must be blank, or one of 'yes' 'no' 'auto')" 1>&2
+  exit 1
+fi
+
+# Same as above, for SSE
+if [ "$SSE" = "yes" ]; then
+  SLKCFLAGS="$SLKCFLAGS -msse -mfpmath=sse"
+elif [ "$SSE" != "no" ]; then
+  echo "SSE set to invalid value $SSE (must be blank, or one of 'yes' 'no' 'auto')" 1>&2
+  exit 1
+fi
+
+# First, ditch the hard-coded -O3 upstream shipped us:
+sed -i -e "s/-O3//" Makefile
+
+# Set CPPFLAGS according to user options.
+sed -i -e "s/-march=.*/$SLKCFLAGS/" Makefile
+
+# Done dorking with the Makefile, we now return to regular SlackBuild stuff
+make
+make install PREFIX=$PKG/usr
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  ../README ../AUTHORS ../COPYING \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+
+# Include the MMX/SSE options in the slack-desc, in case the user has to build
+# several packages (this will help keep them straight)
+sed \
+  -e "s/@MMX@/$MMX/" \
+  -e "s/@SSE@/$SSE/" \
+  $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
