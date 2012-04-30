@@ -4,16 +4,14 @@
 
 PRGNAM=murmur
 SRCNAM=mumble
-VERSION=${VERSION:-1.1.4}
+VERSION=${VERSION:-1.2.3}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-# Automatically determine the architecture we're building on:
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
     i?86) ARCH=i486 ;;
     arm*) ARCH=arm ;;
-    # Unless $ARCH is already set, use uname -m for all other archs:
        *) ARCH=$( uname -m ) ;;
   esac
 fi
@@ -22,6 +20,23 @@ CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
+
+MURMUR_GROUP=${MURMUR_GROUP:-murmur}
+MURMUR_USER=${MURMUR_USER:-murmur}
+
+if ! getent group $MURMUR_GROUP; then
+  echo "Group $MURMUR_GROUP does not exist. Create it with:"
+  echo "  # groupadd -g 261 $MURMUR_GROUP"
+  echo""
+  exit 1
+fi
+
+if ! getent passwd $MURMUR_USER; then
+  echo "User $MURMUR_USER does not exist. Create it with:"
+  echo "  # useradd -g $MURMUR_GROUP -u 261 -d /var/lib/$PRGNAM -s /bin/false $MURMUR_USER"
+  echo ""
+  exit 1
+fi
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
@@ -53,32 +68,63 @@ find . \
  -exec chmod 644 {} \;
 
 qmake \
+  -recursive \
   main.pro \
-  CONFIG+=no-client
+  CONFIG+=no-update \
+  CONFIG+=no-client \
+  CONFIG+=no-ice \
+  CONFIG+=no-bonjour
 
-make
+make release
 
-mkdir -p $PKG/usr/bin \
-  $PKG/etc \
-  $PKG/var/lib/mumble-server \
-  $PKG/var/run/mumble-server \
-  $PKG/var/log/mumble-server
-install -m 0755 ./release/murmurd $PKG/usr/bin
-install -m 0644 ./scripts/murmur.ini.system $PKG/etc/murmur.ini.new
-strip --strip-unneeded $PKG/usr/bin/* 2>/dev/null || true
+mkdir -p \
+  $PKG/etc/{logrotate.d,rc.d} \
+  $PKG/usr/bin \
+  $PKG/usr/man/man1 \
+  $PKG/var/{lib,log,run}/$PRGNAM
 
-mkdir -p $PKG/usr/man/man1
-install -m 0644 ./man/murmurd.1 $PKG/usr/man/man1
-gzip -9 $PKG/usr/man/man1/*
+install -m 644 $CWD/rc.$PRGNAM $PKG/etc/rc.d/rc.$PRGNAM.new
+install -m 755 release/murmurd $PKG/usr/bin
+install -m 644 man/murmurd.1   $PKG/usr/man/man1
 
-DOCS="CHANGES INSTALL LICENSE README README.Linux $CWD/$PRGNAM.SlackBuild"
+sed \
+  -e "s,database=.*,database=/var/lib/$PRGNAM/$PRGNAM.sqlite," \
+  -e "s,logfile=.*,logfile=/var/log/$PRGNAM/$PRGNAM.log," \
+  -e "s,pidfile=.*,pidfile=/var/run/$PRGNAM/$PRGNAM.pid," \
+  -e "s,uname=.*,uname=$MURMUR_USER," \
+ scripts/murmur.ini.system > $PKG/etc/$PRGNAM.ini.new
+
+sed \
+  -i "s,PIDFILE=.*,PIDFILE=/var/run/$PRGNAM/$PRGNAM.pid," \
+ $PKG/etc/rc.d/rc.$PRGNAM.new
+
+sed \
+  -e "s,@LOGFILE@,/var/log/$PRGNAM/$PRGNAM.log," \
+  -e "s,@USER@,$MURMUR_USER," \
+  -e "s,@GROUP@,$MURMUR_GROUP," \
+ $CWD/$PRGNAM.logrotate > $PKG/etc/logrotate.d/$PRGNAM.new
+
+chown root:$MURMUR_GROUP $PKG/etc/$PRGNAM.ini.new
+chmod o-rwx $PKG/etc/murmur.ini.new
+
+chown $MURMUR_USER:$MURMUR_GROUP $PKG/var/{lib,log,run}/$PRGNAM
+chmod o-rwx $PKG/var/lib/$PRGNAM
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-install -m 0644 $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  CHANGES INSTALL LICENSE README README.Linux \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
-mkdir -p $PKG/install $PKG/etc/rc.d
+mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
-cat $CWD/rc.murmur > $PKG/etc/rc.d/rc.murmur.new
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
