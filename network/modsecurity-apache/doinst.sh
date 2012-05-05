@@ -12,4 +12,5 @@ config() {
 }
 
 config etc/httpd/extra/modsecurity-recommended.conf.new
+config etc/httpd/crs/modsecurity_crs_10_config.conf.new
 
