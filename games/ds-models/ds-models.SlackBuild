@@ -1,0 +1,114 @@
+#!/bin/bash
+
+# Slackware build script for ds-models
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+PRGNAM=ds-models
+VERSION=${VERSION:-r14}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+ARCH=noarch
+
+# Which game(s) to support?
+SKULLTAG=${SKULLTAG:-yes}
+GZDOOM=${GZDOOM:-yes}
+
+if [ "$SKULLTAG" != "yes" -a "$GZDOOM" != "yes" ]; then
+  echo "You've set both SKULLTAG=no and GZDOOM=no; nothing to package."
+  exit 1
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG/usr/{share/games/doom,bin,doc/$PRGNAM-$VERSION} $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+# The only script provided upstream is for skulltag + gzdoom in one pk3, which
+# will only work with skulltag. So we build our own individual skulltag and
+# gzdoom packages. Script code based on Build-ST-Complete.sh
+
+# gzdoom. Note that skulltag needs these too, so GZDOOM=no just means we
+# don't install the ds-gzdoom wrapper script.
+mkdir -p work/Models
+
+for DEF_FILE in \
+  $(find ./GZ-Models/Build -maxdepth 2 -type f -name "*.def")
+do
+  cp ${DEF_FILE} work
+done
+
+for MODEL_DIR in \
+  $(find $(pwd)/GZ-Models/Build -maxdepth 2 -mindepth 2 -type d)
+do
+  cp -R ${MODEL_DIR} work/Models/
+done
+
+cp -R GZ-Models/Build/Hires work
+cd work
+  zip -r $PKG/usr/share/games/doom/GZ-Models.pk3 ./*.def ./Hires ./Models
+cd -
+rm -rf work
+
+if [ "$GZDOOM" = "yes" ]; then
+  install -m0755 $CWD/ds-gzdoom $PKG/usr/bin
+fi
+
+# ST-Models
+if [ "$SKULLTAG" = "yes" ]; then
+  mkdir -p work/Models
+
+  for DEF_FILE in \
+      $(find ST-Models/Build -maxdepth 2 -type f -name "*.def")
+  do
+      cp ${DEF_FILE} work
+  done
+
+  for MODEL_DIR in \
+      $(find ST-Models/Build -maxdepth 2 -mindepth 2 -type d)
+  do
+      cp -R ${MODEL_DIR} work/Models/
+  done
+
+  cd work
+    zip -r $PKG/usr/share/games/doom/ST-Models.pk3 ./*.def ./Models
+  cd -
+
+  rm -rf work
+  install -m0755 $CWD/ds-skulltag $PKG/usr/bin
+fi
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a Readme.txt $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Modify the slack-desc to reflect reality:
+if [ "$SKULLTAG" != "yes" ]; then
+  GAME="gzdoom only"
+elif [ "$GZDOOM" != "yes" ]; then
+  GAME="skulltag only"
+else
+  GAME="skulltag and gzdoom"
+fi
+
+mkdir -p $PKG/install
+sed "s/@GAME@/$GAME/" $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
