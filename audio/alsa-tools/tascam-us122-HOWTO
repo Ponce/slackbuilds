@@ -1,0 +1,270 @@
+How to get a Tascam US-122 working with Slackware 13.37.
+
+The Tascam US-122 is a bus-powered USB 1.1 audio interface, with 2
+channels of input (either 1/4" unbalanced or XLR balanced) and adjustable
+direct monitoring. See Tascam's product page for more information (Links
+section, below).
+
+These directions might also be useful for the US-224 and US-428. There are
+also US-122MkII and US-144MkII units which are cosmetically different,
+but might be the same thing internally (or might not; I don't have one
+for testing).
+
+Before you start: the US-122 is bus-powered, and draws quite a bit more
+power than your average USB device (though not more than the 500mA that
+the USB specification says USB ports/hubs should support). It probably
+won't work with cheap powered USB hubs (it may be detected & show up
+in alsamixer, but fail to actually play any audio). It will of course
+never work with an unpowered hub. It's also possible (but unlikely) that
+it could fry a cheap motherboard, if plugged in without a hub. If you're
+even slightly worried about this, I'd recommend getting a decent powered
+hub (one that says it supports "high power" or "hi-power" USB devices).
+
+You should read the owner's manual (see Links, below). Obviously you
+can skip the parts about installing/using the Windows/Mac drivers and
+software (which is most of the manual actually), but the product specs
+in the back are informative.
+
+Unlike some other "USB mixer" devices, the Tascam isn't just plug and
+play on Slackware Linux systems. Although it appears as a standard
+class-compliant USB audio interface (and also as a MIDI interface),
+it requires its firmware to be sent over the USB cable each time it's
+plugged in. Presumably, this is to save on cost (no ROM or flash is
+required inside the unit), and to allow for easy firmware upgrades.
+
+To get the device to work, you'll need the firmware itself, the firmware
+loader utility, and some udev rules that cause the firmware loader to
+be run when the device it plugged in. Read on for the gory details...
+
+To start with, leave the device unplugged.
+
+The commands below assume you have root access (either logged in as root,
+or via "su -". Don't use "su" without the hyphen though).
+
+Steps
+-----
+
+1. To get the US-122 working without audio glitches:
+
+# echo 'options snd_usb_usx2y nrpacks=1' > /etc/modprobe.d/tascam.conf
+
+What this does is reduce the number of audio packets sent in each USB
+packet. Without this, the Tascam worked, but every few seconds its
+audio would get "scratchy" sounding (due to dropped samples). When this
+happened, I was using jack, and it didn't report any x-runs. I don't
+really understand why nrpacks works, I found it by googling (see the
+links section, below).
+
+2. Install fxload and alsa-tools from slackbuilds.org.
+
+# sbopkg -i fxload alsa-tools
+
+If you prefer, you can download the SlackBuild tarballs and build them
+manually, instead of using sbopkg.
+
+If you're not actually using Slackware, or if you decide to compile
+alsa-tools without using the slackbuilds.org package, see the "Udev Rules"
+section of this document.
+
+3. Plug in the device.
+
+After a couple of seconds, the green USB light on the Tascam should light
+up. The snd_usb_usx2y should be auto-loaded by udev (check the output of
+"lsmod").
+
+4. Testing
+
+Have a look at the output of "aplay -l", and/or run alsamixer and press
+F6. The card should show up as "USX2Y [TASCAM US-X2Y]". It will probably
+be device #1 (the numbering starts at zero, and your internal/onboard
+audio normally shows up as device #0).
+
+Example:
+# aplay -l
+**** List of PLAYBACK Hardware Devices ****
+card 0: Intel [HDA Intel], device 0: ALC269 Analog [ALC269 Analog]
+  Subdevices: 1/1
+  Subdevice #0: subdevice #0
+card 1: USX2Y [TASCAM US-X2Y], device 0: US-X2Y Audio [US-X2Y Audio #0]
+  Subdevices: 1/1
+  Subdevice #0: subdevice #0
+
+Since it's card #1, we should be able to use it to play an mp3 or ogg file
+with mplayer, like so:
+
+# mplayer -ao alsa:device=hw=1 somesong.mp3
+
+You can use some other audio player, if you don't have mplayer installed.
+Whatever you use, set its audio device to "hw:1" (no, the "device=hw=1"
+above isn't a typo, it's how you tell mplayer to use "hw:1". Really.)
+
+Obviously you need speakers or headphones plugged into the Tascam, to
+actually hear anything. Also, the headphone and main volumes have to be
+turned up. There's no software volume control (you can't use alsamixer
+or KDE's volume control), you'll have to actually turn the knobs :)
+
+Troubleshooting
+---------------
+
+If you don't hear any audio, and/or mplayer (or whatever audio playing
+app) gives error messages and/or freezes up, the Tascam might not be
+getting enough power. Run "dmesg|tail" and look for messages like:
+
+[623530.547384] Sequence Error!(hcd_frame=226 ep=10out;wait=226,frame=223).
+[623530.547386] Most propably some urb of usb-frame 226 is still missing.
+[623530.547387] Cause could be too long delays in usb-hcd interrupt handling.
+
+Try a different powered USB hub, or try it in a USB port on the PC itself.
+
+Once you get everything working, you should be able to use the US-122
+with jack (with or without qjackctl).  Make sure to enable the MIDI ports
+(-Xseq on the jackd command line) if you plan to use them.
+
+(Apparently, the US-428 requires a daemon called us428control to be
+running, to get the MIDI controls to work. I haven't got a US-428 so I
+don't know anything about this)
+
+JACK Latency
+------------
+
+As a USB 1.x device, the Tascam's audio latency is going to be pretty
+awful. To measure it, you loop the output back into the input, and run
+jack_delay (I used a 1/4" guitar cable, connected from the headphone
+output to the left line input jack). Make sure the "Direct Monitoring"
+switch is off, or else it will feed back and jack_delay won't be able
+to measure anything.
+
+I've measured my Tascam with jack_delay. Results:
+
+# jack_delay -I system:capture_1 -O system:playback_1 -E
+        210.625 frames    4.388 ms
+
+To get jack-using applications to compensate for latency, use the -I and
+-O options. jack_delay's README says:
+
+  To determine the correct values for jack's -I and -O, set both
+  of them to zero ('default' in qjackctl) and measure the latency
+  using the -E option. Then set each of the -I and -O options to
+  half the value displayed.
+
+The options can't be fractional, so I use "-I 105 -O 105", which seems
+to work OK. My complete jackd command line looks like:
+
+/usr/bin/jackd -Z -R -P65 -dalsa -dhw:1 -r48000 -p256 -n3 -Xseq -I105 -O105
+
+With these settings, I'm able to use fluidsynth, beatrix, bristol,
+and other audio synths. I use a USB MIDI keyboard, but you could
+use the Tascam's MIDI in jack with a standard MIDI keyboard as well.
+ardour and ecasound also work for recording audio, though I haven't
+tested them thoroughly.
+
+I haven't experimented with the -p and -n options. Lower values would
+mean less latency, at the expense of more CPU and I/O overhead. I'm using
+the Tascam with an eeePC (relatively slow single core Intel Atom CPU),
+you might do better on faster hardware... but don't expect miracles:
+USB 1.1 just plain doesn't move data fast enough to get truly low latency
+audio. You'd need USB 2.0 (expensive, proprietary) or better yet, Firewire
+(also expensive) for that.
+
+If you can't seem to get rid of audio problems any other way, try
+(in order):
+
+- make sure jackd and your audio applications have the appropriate
+  POSIX capabilities (e.g. setcap cap_ipc_lock,cap_sys_nice=ep
+  /usr/bin/jackd)
+
+- add append="threadirqs" in lilo.conf (re-run lilo, reboot)
+
+- use the rtirq script from http://www.rncbc.org/jack/
+
+- recompile the kernel with CONFIG_PREEMPT=y
+
+- Use a realtime-patched kernel
+  from http://www.kernel.org/pub/linux/kernel/projects/rt/
+
+There is a lot of info out there on the 'net about reducing latency
+and/or x-runs in jack. You'll get it working if you're persistent.
+
+Miscellaneous
+-------------
+
+This isn't Slackware- or Linux-specific information, but it's not covered
+real well in the owner's manual either.
+
+Unlike some other "USB mixer" devices, the Tascam won't work as a
+standalone mixer. It's USB-powered, and needs its firmware loaded.
+
+The Direct switch sends whatever's coming in on the inputs, directly to
+the output, with no latency. In ardour, select "Options > Hardware does
+monitoring" to use this. If you want to use the Tascam + your computer
+as a live guitar effects rig (maybe using rakarrack, jack-rack, and/or
+sooperlooper), this needs to be disabled.
+
+The inputs are labelled L and R (left and right). When the Mono switch
+is in the On position, both channels are mixed together and appear on
+the left and right outputs (and on both system:capture_* ports in jack).
+The device still appears to be stereo from jack and alsa's point of view
+(just with identical audio on both channels).
+
+The insert jacks are described as "TRS jacks" in the manual. This means
+tip-ring-sleeve. Probably you'll need a stereo 1/4" Y-cable (with two
+mono 1/4" plugs or jacks on the other end) to make any use of the inserts.
+I haven't tried them yet. See http://en.wikipedia.org/wiki/TRS_connector
+
+There are no software-controllable mixer controls. You can only adjust
+the volume with the hardware knobs (separate ones for headphone and
+line outputs).
+
+You can't use the US-122's controls as a MIDI control surface. From what
+I've read, the US-428 is capable of this.
+
+Links
+-----
+
+Tascam US-122 product page: http://tascam.com/product/us-122/
+The owner's manual is in the "Downloads" section.
+
+These instructions were adapted from the Fedora Core 5 instructions here:
+http://www.astro.caltech.edu/~mcs/tascam_us122/
+
+Ubuntu forum topic about Tascam devices (there's a lot of noise, but some
+useful info too):
+http://ubuntuforums.org/showthread.php?t=30891
+
+The US-122L, US-122MkII, and US-144 are apparently completely different
+beasts. Here are a couple of pages discussing them (which may contain
+outdated information, YMMV):
+http://www.premiumorange.com/la-page-web-of-phil/index.php?page=P030001
+http://mailman.alsa-project.org/pipermail/alsa-devel/2011-November/045912.html
+
+Udev Rules
+----------
+
+If you used the slackbuilds.org package of alsa-tools, you don't need
+this (it already includes a suitable set of udev rules for the US-122,
+US-224, and US-428).
+
+# cat > /lib/udev/rules.d/99-tascam.rules <<EOF
+BUS=="usb", ACTION=="add", SYSFS{idProduct}=="8006", SYSFS{idVendor}=="1604", RUN+="/bin/sh -c '/sbin/fxload -D %N -s /usr/share/alsa/firmware/usx2yloader/tascam_loader.ihx -I /usr/share/alsa/firmware/usx2yloader/us122fw.ihx'"
+BUS=="usb", ACTION=="add", SYSFS{idProduct}=="8007", SYSFS{idVendor}=="1604", RUN+="/bin/sh -c '/usr/bin/usx2yloader'"
+EOF
+
+(the above is two long lines beginning with "BUS==". There shouldn't be any
+other line breaks)
+
+For the US-224, change the "us122fw.ihx" above to "us224fw.ihx", and
+change the SYSFS{idProduct} numbers to 8004 and 8005. For the US-428,
+the firmware is "us428fw.ihx" and the product IDs are 8000 and 8001.
+
+After creating the udev rules file, tell udevd to load it:
+
+# udevadm control --reload-rules
+
+Author
+------
+
+B. Watson (yalhcru at gmail dot com)
+
+If you find anything confusing or inaccurate in this guide, or have more
+information (particularly about the other Tascam US-series interfaces),
+let me know and I'll update the guide at some point.
