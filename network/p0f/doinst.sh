@@ -12,7 +12,3 @@ config() {
 }
 
 config etc/p0f/p0f.fp.new
-config etc/p0f/p0fa.fp.new
-config etc/p0f/p0fo.fp.new
-config etc/p0f/p0fr.fp.new
-
