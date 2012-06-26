@@ -5,16 +5,14 @@
 # Written by Larry Hajali <larryhaja[at]gmail[dot]com>
 
 PRGNAM=yabause
-VERSION=${VERSION:-0.9.10}
+VERSION=${VERSION:-0.9.11}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-# Automatically determine the architecture we're building on:
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
     i?86) ARCH=i486 ;;
     arm*) ARCH=arm ;;
-    # Unless $ARCH is already set, use uname -m for all other archs:
        *) ARCH=$( uname -m ) ;;
   esac
 fi
@@ -23,9 +21,6 @@ CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
-
-# Variable to determine gtk/qt4 interface.
-HAVE_QT4=${HAVE_QT4:-yes}
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
@@ -56,35 +51,34 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-# Determine if the user wants to use the gtk/qt4 interface.
-if [ "${HAVE_QT4}" == "yes" ]; then
-  USE_PORT="qt"
-else
-  USE_PORT="gtk"
-fi
+# Variable to determine gtk/qt interface. Default is qt.
+USE_GUI=${USE_GUI:-qt}
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --mandir=/usr/man \
-  --enable-network \
-  --enable-mic-shaders \
-  --enable-perkeyname \
-  --disable-dependency-tracking \
-  --with-x \
-  --with-q68 \
-  --with-port=${USE_PORT} \
-  --build=$ARCH-slackware-linux
+# Fix location of man file and use SLKCFLAGS.
+sed -i 's|share/man|man|' src/${USE_GUI}/CMakeLists.txt
+sed -i "s|-O3|$SLKCFLAGS|" src/CMakeLists.txt
 
-make
-make install-strip DESTDIR=$PKG
+mkdir build
+cd build
+  cmake "Unix Makefiles" \
+    -DCMAKE_INSTALL_PREFIX:PATH=/usr \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DYAB_PORTS="$USE_GUI" \
+    -DYAB_MULTIBUILD=OFF \
+    -DYAB_NETWORK=ON \
+    -DYAB_OPTIMIZED_DMA=ON \
+    -DYAB_PERKEYNAME=ON \
+    -DCMAKE_BUILD_TYPE=Release ..
 
-( cd $PKG/usr/man
-  find . -type f -exec gzip -9 {} \;
-  for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-)
+  make VERBOSE=1
+  make install DESTDIR=$PKG
+cd ..
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
