@@ -1,0 +1,492 @@
+From 079bd445d1fed5e12772a28142c916b1510fe848 Mon Sep 17 00:00:00 2001
+From: Pierre-Loup A. Griffais <git@plagman.net>
+Date: Tue, 10 Jan 2012 18:41:37 -0800
+Subject: [PATCH] vdpau_trace: WAR Flash quirks
+
+This stubs out all the tracing routines but two; one to ignore calls to
+set_background_color to ignore Flash setting the colorkey to black. The other
+wrapped function is put_bits_y_cb_cr, to swap the U and V planes as Flash sends
+them to us in the wrong order.
+---
+ trace/vdpau_trace.cpp |  411 +------------------------------------------------
+ 1 files changed, 6 insertions(+), 405 deletions(-)
+
+diff --git a/trace/vdpau_trace.cpp b/trace/vdpau_trace.cpp
+index 821209a..3e74882 100644
+--- a/trace/vdpau_trace.cpp
++++ b/trace/vdpau_trace.cpp
+@@ -1822,60 +1822,19 @@ static VdpStatus _vdp_cap_video_surface_put_bits_y_cb_cr(
+ )
+ {
+     VdpStatus ret;
++    void* swapped_source_data[3];
+ 
+-    _VdpcapPlane planes[3];
+-    uint32_t    plane_count = _VDP_TRACE_ARSIZE(planes);
+-    bool dump_data = _vdp_cap_init_planes(
+-        surface,
+-        source_data,
+-        source_pitches,
+-        0,
+-        &plane_count,
+-        planes,
+-        _vdp_cap_init_planes_adapt_surface_video,
+-        _vdp_cap_init_planes_adapt_format_bits_ycbcr,
+-        source_ycbcr_format
+-    );
+-    if (!dump_data) {
+-        plane_count = 0;
+-    }
+-
+-    fputs("vdp_video_surface_put_bits_y_cb_cr(", _vdp_cap_data.fp);
+-    if (_vdp_cap_data.level >= LEVEL_PARAMS) {
+-        fprintf(
+-            _vdp_cap_data.fp,
+-            "%u, %u, ",
+-            surface,
+-            source_ycbcr_format
+-        );
+-        _vdp_cap_dump_void_pointer_list(plane_count, source_data, true);
+-        fputs(", ", _vdp_cap_data.fp);
+-        _vdp_cap_dump_uint32_t_list(plane_count, source_pitches, true);
+-        fputs(", ", _vdp_cap_data.fp);
+-    }
+-    fputs(")\n", _vdp_cap_data.fp);
+-    if (_vdp_cap_data.level >= LEVEL_DATA) {
+-        fputs("    ... Data: ", _vdp_cap_data.fp);
+-        if (dump_data) {
+-            _vdp_cap_dump_plane_list(plane_count, planes);
+-        }
+-        else {
+-           fputs("???", _vdp_cap_data.fp);
+-        }
+-        fputs("\n", _vdp_cap_data.fp);
+-    }
++    swapped_source_data[0] = (void*)source_data[0];
++    swapped_source_data[1] = (void*)source_data[2];
++    swapped_source_data[2] = (void*)source_data[1];
+ 
+     ret = _vdp_cap_data.vdp_video_surface_put_bits_y_cb_cr(
+         surface,
+         source_ycbcr_format,
+-        source_data,
++        swapped_source_data,
+         source_pitches
+     );
+ 
+-    if (_vdp_cap_data.level >= LEVEL_PARAMS) {
+-        fprintf(_vdp_cap_data.fp, "    -> %d\n", ret);
+-    }
+-
+     return ret;
+ }
+ 
+@@ -3863,29 +3822,7 @@ static VdpStatus _vdp_cap_presentation_queue_set_background_color(
+     VdpColor * const     background_color
+ )
+ {
+-    VdpStatus ret;
+-
+-    fputs("vdp_presentation_queue_set_background_color(", _vdp_cap_data.fp);
+-    if (_vdp_cap_data.level >= LEVEL_PARAMS) {
+-        fprintf(
+-            _vdp_cap_data.fp,
+-            "%u, ",
+-            presentation_queue
+-        );
+-        _vdp_cap_dump_color(background_color);
+-    }
+-    fputs(")\n", _vdp_cap_data.fp);
+-
+-    ret = _vdp_cap_data.vdp_presentation_queue_set_background_color(
+-        presentation_queue,
+-        background_color
+-    );
+-
+-    if (_vdp_cap_data.level >= LEVEL_PARAMS) {
+-        fprintf(_vdp_cap_data.fp, "    -> %d\n", ret);
+-    }
+-
+-    return ret;
++    return VDP_STATUS_OK;
+ }
+ 
+ static VdpStatus _vdp_cap_presentation_queue_get_background_color(
+@@ -4139,18 +4076,6 @@ static VdpStatus _vdp_cap_presentation_queue_target_create_x11(
+ {
+     VdpStatus ret;
+ 
+-    fprintf(_vdp_cap_data.fp, "vdp_presentation_queue_target_create_x11(");
+-    if (_vdp_cap_data.level >= LEVEL_PARAMS) {
+-        fprintf(
+-            _vdp_cap_data.fp,
+-            "%u, %lu, %s",
+-            device,
+-            drawable,
+-            target ? "-" : "NULL"
+-        );
+-    }
+-    fputs(")\n", _vdp_cap_data.fp);
+-
+     ret = _vdp_cap_data.vdp_presentation_queue_target_create_x11(
+         device,
+         drawable,
+@@ -4182,18 +4107,6 @@ static VdpStatus _vdp_cap_get_proc_address(
+ {
+     VdpStatus ret;
+ 
+-    fputs("vdp_get_proc_address(", _vdp_cap_data.fp);
+-    if (_vdp_cap_data.level >= LEVEL_PARAMS) {
+-        fprintf(
+-            _vdp_cap_data.fp,
+-            "%u, %u, %s",
+-            device,
+-            function_id,
+-            function_pointer ? "-" : "NULL"
+-        );
+-    }
+-    fputs(")\n", _vdp_cap_data.fp);
+-
+     if (device != _vdp_cap_data.vdp_device) {
+         _VDP_TRACE_ERROR_BREAKPOINT();
+         ret =  VDP_STATUS_ERROR;
+@@ -4207,317 +4120,17 @@ static VdpStatus _vdp_cap_get_proc_address(
+         *function_pointer = 0;
+ 
+         switch (function_id) {
+-        case VDP_FUNC_ID_GET_ERROR_STRING:
+-            if (_vdp_cap_data.vdp_get_error_string) {
+-                *function_pointer = (void *)&_vdp_cap_get_error_string;
+-            }
+-            break;
+-        case VDP_FUNC_ID_GET_PROC_ADDRESS:
+-            if (_vdp_cap_data.vdp_get_proc_address) {
+-                *function_pointer = (void *)&_vdp_cap_get_proc_address;
+-            }
+-            break;
+-        case VDP_FUNC_ID_GET_API_VERSION:
+-            if (_vdp_cap_data.vdp_get_api_version) {
+-                *function_pointer = (void *)&_vdp_cap_get_api_version;
+-            }
+-            break;
+-        case VDP_FUNC_ID_GET_INFORMATION_STRING:
+-            if (_vdp_cap_data.vdp_get_information_string) {
+-                *function_pointer = (void *)&_vdp_cap_get_information_string;
+-            }
+-            break;
+-        case VDP_FUNC_ID_DEVICE_DESTROY:
+-            if (_vdp_cap_data.vdp_device_destroy) {
+-                *function_pointer = (void *)&_vdp_cap_device_destroy;
+-            }
+-            break;
+-        case VDP_FUNC_ID_GENERATE_CSC_MATRIX:
+-            if (_vdp_cap_data.vdp_generate_csc_matrix) {
+-                *function_pointer = (void *)&_vdp_cap_generate_csc_matrix;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_SURFACE_QUERY_CAPABILITIES:
+-            if (_vdp_cap_data.vdp_video_surface_query_capabilities) {
+-                *function_pointer = (void *)&_vdp_cap_video_surface_query_capabilities;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_SURFACE_QUERY_GET_PUT_BITS_Y_CB_CR_CAPABILITIES:
+-            if (_vdp_cap_data.vdp_video_surface_query_get_put_bits_y_cb_cr_capabilities) {
+-                *function_pointer = (void *)&_vdp_cap_video_surface_query_get_put_bits_y_cb_cr_capabilities;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_SURFACE_CREATE:
+-            if (_vdp_cap_data.vdp_video_surface_create) {
+-                *function_pointer = (void *)&_vdp_cap_video_surface_create;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_SURFACE_DESTROY:
+-            if (_vdp_cap_data.vdp_video_surface_destroy) {
+-                *function_pointer = (void *)&_vdp_cap_video_surface_destroy;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_SURFACE_GET_PARAMETERS:
+-            if (_vdp_cap_data.vdp_video_surface_get_parameters) {
+-                *function_pointer = (void *)&_vdp_cap_video_surface_get_parameters;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_SURFACE_GET_BITS_Y_CB_CR:
+-            if (_vdp_cap_data.vdp_video_surface_get_bits_y_cb_cr) {
+-                *function_pointer = (void *)&_vdp_cap_video_surface_get_bits_y_cb_cr;
+-            }
+-            break;
+         case VDP_FUNC_ID_VIDEO_SURFACE_PUT_BITS_Y_CB_CR:
+             if (_vdp_cap_data.vdp_video_surface_put_bits_y_cb_cr) {
+                 *function_pointer = (void *)&_vdp_cap_video_surface_put_bits_y_cb_cr;
+             }
+             break;
+-        case VDP_FUNC_ID_OUTPUT_SURFACE_QUERY_CAPABILITIES:
+-            if (_vdp_cap_data.vdp_output_surface_query_capabilities) {
+-                *function_pointer = (void *)&_vdp_cap_output_surface_query_capabilities;
+-            }
+-            break;
+-        case VDP_FUNC_ID_OUTPUT_SURFACE_QUERY_GET_PUT_BITS_NATIVE_CAPABILITIES:
+-            if (_vdp_cap_data.vdp_output_surface_query_get_put_bits_native_capabilities) {
+-                *function_pointer = (void *)&_vdp_cap_output_surface_query_get_put_bits_native_capabilities;
+-            }
+-            break;
+-        case VDP_FUNC_ID_OUTPUT_SURFACE_QUERY_PUT_BITS_INDEXED_CAPABILITIES:
+-            if (_vdp_cap_data.vdp_output_surface_query_put_bits_indexed_capabilities) {
+-                *function_pointer = (void *)&_vdp_cap_output_surface_query_put_bits_indexed_capabilities;
+-            }
+-            break;
+-        case VDP_FUNC_ID_OUTPUT_SURFACE_QUERY_PUT_BITS_Y_CB_CR_CAPABILITIES:
+-            if (_vdp_cap_data.vdp_output_surface_query_put_bits_y_cb_cr_capabilities) {
+-                *function_pointer = (void *)&_vdp_cap_output_surface_query_put_bits_y_cb_cr_capabilities;
+-            }
+-            break;
+-        case VDP_FUNC_ID_OUTPUT_SURFACE_CREATE:
+-            if (_vdp_cap_data.vdp_output_surface_create) {
+-                *function_pointer = (void *)&_vdp_cap_output_surface_create;
+-            }
+-            break;
+-        case VDP_FUNC_ID_OUTPUT_SURFACE_DESTROY:
+-            if (_vdp_cap_data.vdp_output_surface_destroy) {
+-                *function_pointer = (void *)&_vdp_cap_output_surface_destroy;
+-            }
+-            break;
+-        case VDP_FUNC_ID_OUTPUT_SURFACE_GET_PARAMETERS:
+-            if (_vdp_cap_data.vdp_output_surface_get_parameters) {
+-                *function_pointer = (void *)&_vdp_cap_output_surface_get_parameters;
+-            }
+-            break;
+-        case VDP_FUNC_ID_OUTPUT_SURFACE_GET_BITS_NATIVE:
+-            if (_vdp_cap_data.vdp_output_surface_get_bits_native) {
+-                *function_pointer = (void *)&_vdp_cap_output_surface_get_bits_native;
+-            }
+-            break;
+-        case VDP_FUNC_ID_OUTPUT_SURFACE_PUT_BITS_NATIVE:
+-            if (_vdp_cap_data.vdp_output_surface_put_bits_native) {
+-                *function_pointer = (void *)&_vdp_cap_output_surface_put_bits_native;
+-            }
+-            break;
+-        case VDP_FUNC_ID_OUTPUT_SURFACE_PUT_BITS_INDEXED:
+-            if (_vdp_cap_data.vdp_output_surface_put_bits_indexed) {
+-                *function_pointer = (void *)&_vdp_cap_output_surface_put_bits_indexed;
+-            }
+-            break;
+-        case VDP_FUNC_ID_OUTPUT_SURFACE_PUT_BITS_Y_CB_CR:
+-            if (_vdp_cap_data.vdp_output_surface_put_bits_y_cb_cr) {
+-                *function_pointer = (void *)&_vdp_cap_output_surface_put_bits_y_cb_cr;
+-            }
+-            break;
+-        case VDP_FUNC_ID_BITMAP_SURFACE_QUERY_CAPABILITIES:
+-            if (_vdp_cap_data.vdp_bitmap_surface_query_capabilities) {
+-                *function_pointer = (void *)&_vdp_cap_bitmap_surface_query_capabilities;
+-            }
+-            break;
+-        case VDP_FUNC_ID_BITMAP_SURFACE_CREATE:
+-            if (_vdp_cap_data.vdp_bitmap_surface_create) {
+-                *function_pointer = (void *)&_vdp_cap_bitmap_surface_create;
+-            }
+-            break;
+-        case VDP_FUNC_ID_BITMAP_SURFACE_DESTROY:
+-            if (_vdp_cap_data.vdp_bitmap_surface_destroy) {
+-                *function_pointer = (void *)&_vdp_cap_bitmap_surface_destroy;
+-            }
+-            break;
+-        case VDP_FUNC_ID_BITMAP_SURFACE_GET_PARAMETERS:
+-            if (_vdp_cap_data.vdp_bitmap_surface_get_parameters) {
+-                *function_pointer = (void *)&_vdp_cap_bitmap_surface_get_parameters;
+-            }
+-            break;
+-        case VDP_FUNC_ID_BITMAP_SURFACE_PUT_BITS_NATIVE:
+-            if (_vdp_cap_data.vdp_bitmap_surface_put_bits_native) {
+-                *function_pointer = (void *)&_vdp_cap_bitmap_surface_put_bits_native;
+-            }
+-            break;
+-        case VDP_FUNC_ID_OUTPUT_SURFACE_RENDER_OUTPUT_SURFACE:
+-            if (_vdp_cap_data.vdp_output_surface_render_output_surface) {
+-                *function_pointer = (void *)&_vdp_cap_output_surface_render_output_surface;
+-            }
+-            break;
+-        case VDP_FUNC_ID_OUTPUT_SURFACE_RENDER_BITMAP_SURFACE:
+-            if (_vdp_cap_data.vdp_output_surface_render_bitmap_surface) {
+-                *function_pointer = (void *)&_vdp_cap_output_surface_render_bitmap_surface;
+-            }
+-            break;
+-        case VDP_FUNC_ID_DECODER_QUERY_CAPABILITIES:
+-            if (_vdp_cap_data.vdp_decoder_query_capabilities) {
+-                *function_pointer = (void *)&_vdp_cap_decoder_query_capabilities;
+-            }
+-            break;
+-        case VDP_FUNC_ID_DECODER_CREATE:
+-            if (_vdp_cap_data.vdp_decoder_create) {
+-                *function_pointer = (void *)&_vdp_cap_decoder_create;
+-            }
+-            break;
+-        case VDP_FUNC_ID_DECODER_DESTROY:
+-            if (_vdp_cap_data.vdp_decoder_destroy) {
+-                *function_pointer = (void *)&_vdp_cap_decoder_destroy;
+-            }
+-            break;
+-        case VDP_FUNC_ID_DECODER_GET_PARAMETERS:
+-            if (_vdp_cap_data.vdp_decoder_get_parameters) {
+-                *function_pointer = (void *)&_vdp_cap_decoder_get_parameters;
+-            }
+-            break;
+-        case VDP_FUNC_ID_DECODER_RENDER:
+-            if (_vdp_cap_data.vdp_decoder_render) {
+-                *function_pointer = (void *)&_vdp_cap_decoder_render;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_MIXER_QUERY_FEATURE_SUPPORT:
+-            if (_vdp_cap_data.vdp_video_mixer_query_feature_support) {
+-                *function_pointer = (void *)&_vdp_cap_video_mixer_query_feature_support;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_MIXER_QUERY_PARAMETER_SUPPORT:
+-            if (_vdp_cap_data.vdp_video_mixer_query_parameter_support) {
+-                *function_pointer = (void *)&_vdp_cap_video_mixer_query_parameter_support;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_MIXER_QUERY_ATTRIBUTE_SUPPORT:
+-            if (_vdp_cap_data.vdp_video_mixer_query_attribute_support) {
+-                *function_pointer = (void *)&_vdp_cap_video_mixer_query_attribute_support;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_MIXER_QUERY_PARAMETER_VALUE_RANGE:
+-            if (_vdp_cap_data.vdp_video_mixer_query_parameter_value_range) {
+-                *function_pointer = (void *)&_vdp_cap_video_mixer_query_parameter_value_range;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_MIXER_QUERY_ATTRIBUTE_VALUE_RANGE:
+-            if (_vdp_cap_data.vdp_video_mixer_query_attribute_value_range) {
+-                *function_pointer = (void *)&_vdp_cap_video_mixer_query_attribute_value_range;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_MIXER_CREATE:
+-            if (_vdp_cap_data.vdp_video_mixer_create) {
+-                *function_pointer = (void *)&_vdp_cap_video_mixer_create;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_MIXER_SET_FEATURE_ENABLES:
+-            if (_vdp_cap_data.vdp_video_mixer_set_feature_enables) {
+-                *function_pointer = (void *)&_vdp_cap_video_mixer_set_feature_enables;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_MIXER_SET_ATTRIBUTE_VALUES:
+-            if (_vdp_cap_data.vdp_video_mixer_set_attribute_values) {
+-                *function_pointer = (void *)&_vdp_cap_video_mixer_set_attribute_values;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_MIXER_GET_FEATURE_SUPPORT:
+-            if (_vdp_cap_data.vdp_video_mixer_get_feature_support) {
+-                *function_pointer = (void *)&_vdp_cap_video_mixer_get_feature_support;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_MIXER_GET_FEATURE_ENABLES:
+-            if (_vdp_cap_data.vdp_video_mixer_get_feature_enables) {
+-                *function_pointer = (void *)&_vdp_cap_video_mixer_get_feature_enables;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_MIXER_GET_PARAMETER_VALUES:
+-            if (_vdp_cap_data.vdp_video_mixer_get_parameter_values) {
+-                *function_pointer = (void *)&_vdp_cap_video_mixer_get_parameter_values;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_MIXER_GET_ATTRIBUTE_VALUES:
+-            if (_vdp_cap_data.vdp_video_mixer_get_attribute_values) {
+-                *function_pointer = (void *)&_vdp_cap_video_mixer_get_attribute_values;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_MIXER_DESTROY:
+-            if (_vdp_cap_data.vdp_video_mixer_destroy) {
+-                *function_pointer = (void *)&_vdp_cap_video_mixer_destroy;
+-            }
+-            break;
+-        case VDP_FUNC_ID_VIDEO_MIXER_RENDER:
+-            if (_vdp_cap_data.vdp_video_mixer_render) {
+-                *function_pointer = (void *)&_vdp_cap_video_mixer_render;
+-            }
+-            break;
+-        case VDP_FUNC_ID_PRESENTATION_QUEUE_TARGET_DESTROY:
+-            if (_vdp_cap_data.vdp_presentation_queue_target_destroy) {
+-                *function_pointer = (void *)&_vdp_cap_presentation_queue_target_destroy;
+-            }
+-            break;
+-        case VDP_FUNC_ID_PRESENTATION_QUEUE_CREATE:
+-            if (_vdp_cap_data.vdp_presentation_queue_create) {
+-                *function_pointer = (void *)&_vdp_cap_presentation_queue_create;
+-            }
+-            break;
+-        case VDP_FUNC_ID_PRESENTATION_QUEUE_DESTROY:
+-            if (_vdp_cap_data.vdp_presentation_queue_destroy) {
+-                *function_pointer = (void *)&_vdp_cap_presentation_queue_destroy;
+-            }
+-            break;
+         case VDP_FUNC_ID_PRESENTATION_QUEUE_SET_BACKGROUND_COLOR:
+             if (_vdp_cap_data.vdp_presentation_queue_set_background_color) {
+                 *function_pointer = (void *)&_vdp_cap_presentation_queue_set_background_color;
+             }
+             break;
+-        case VDP_FUNC_ID_PRESENTATION_QUEUE_GET_BACKGROUND_COLOR:
+-            if (_vdp_cap_data.vdp_presentation_queue_get_background_color) {
+-                *function_pointer = (void *)&_vdp_cap_presentation_queue_get_background_color;
+-            }
+-            break;
+-        case VDP_FUNC_ID_PRESENTATION_QUEUE_GET_TIME:
+-            if (_vdp_cap_data.vdp_presentation_queue_get_time) {
+-                *function_pointer = (void *)&_vdp_cap_presentation_queue_get_time;
+-            }
+-            break;
+-        case VDP_FUNC_ID_PRESENTATION_QUEUE_DISPLAY:
+-            if (_vdp_cap_data.vdp_presentation_queue_display) {
+-                *function_pointer = (void *)&_vdp_cap_presentation_queue_display;
+-            }
+-            break;
+-        case VDP_FUNC_ID_PRESENTATION_QUEUE_BLOCK_UNTIL_SURFACE_IDLE:
+-            if (_vdp_cap_data.vdp_presentation_queue_block_until_surface_idle) {
+-                *function_pointer = (void *)&_vdp_cap_presentation_queue_block_until_surface_idle;
+-            }
+-            break;
+-        case VDP_FUNC_ID_PRESENTATION_QUEUE_QUERY_SURFACE_STATUS:
+-            if (_vdp_cap_data.vdp_presentation_queue_query_surface_status) {
+-                *function_pointer = (void *)&_vdp_cap_presentation_queue_query_surface_status;
+-            }
+-            break;
+-        case VDP_FUNC_ID_PREEMPTION_CALLBACK_REGISTER:
+-            if (_vdp_cap_data.vdp_preemption_callback_register) {
+-                *function_pointer = (void *)&_vdp_cap_preemption_callback_register;
+-            }
+-            break;
+-        case VDP_FUNC_ID_PRESENTATION_QUEUE_TARGET_CREATE_X11:
+-            if (_vdp_cap_data.vdp_presentation_queue_target_create_x11) {
+-                *function_pointer = (void *)&_vdp_cap_presentation_queue_target_create_x11;
+-            }
+-            break;
+         default:
+-            fprintf(
+-                _vdp_cap_data.fp,
+-                "VDPAU capture: Not able to proxy function %d",
+-                function_id
+-            );
+             ret = _vdp_cap_data.vdp_get_proc_address(device, function_id, function_pointer);
+             break;
+         }
+@@ -4527,18 +4140,6 @@ static VdpStatus _vdp_cap_get_proc_address(
+         }
+     }
+ 
+-    if (_vdp_cap_data.level >= LEVEL_PARAMS) {
+-        fprintf(_vdp_cap_data.fp, "    -> %d", ret);
+-        if (ret == VDP_STATUS_OK) {
+-            fprintf(
+-                _vdp_cap_data.fp,
+-                ", %p",
+-                *function_pointer
+-            );
+-        }
+-        fputs("\n", _vdp_cap_data.fp);
+-    }
+-
+     return ret;
+ }
+ 
+-- 
+1.7.4.1
+

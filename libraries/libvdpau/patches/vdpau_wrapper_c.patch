@@ -1,0 +1,179 @@
+From 4262513e67c3572ed19bd796ec6180cdde7ccb7e Mon Sep 17 00:00:00 2001
+From: Kiran Pawar <kpawar@nvidia.com>
+Date: Fri, 05 Aug 2011 06:15:18 +0000
+Subject: vdpau_wrapper.c: Track dynamic library handles and free them on exit using __attribute__((destructor))
+
+Signed-off-by: Kiran Pawar <kpawar@nvidia.com>
+Tested-by: Aaron Plattner <aplattner@nvidia.com>
+Signed-off-by: Aaron Plattner <aplattner@nvidia.com>
+---
+diff --git a/src/vdpau_wrapper.c b/src/vdpau_wrapper.c
+index f504775..23de3d4 100644
+--- a/src/vdpau_wrapper.c
++++ b/src/vdpau_wrapper.c
+@@ -40,6 +40,17 @@ typedef void SetDllHandle(
+     void * driver_dll_handle
+ );
+ 
++static void * _vdp_backend_dll;
++static void * _vdp_trace_dll;
++static void * _vdp_driver_dll;
++static VdpDeviceCreateX11 * _vdp_imp_device_create_x11_proc;
++
++#if defined(__GNUC__)
++
++static void _vdp_close_driver(void) __attribute__((destructor));
++
++#endif
++
+ #if DEBUG
+ 
+ static void _vdp_wrapper_error_breakpoint(char const * file, int line, char const * function)
+@@ -87,23 +98,16 @@ static char * _vdp_get_driver_name_from_dri2(
+     return driver_name;
+ }
+ 
+-VdpStatus vdp_device_create_x11(
++static VdpStatus _vdp_open_driver(
+     Display *             display,
+-    int                   screen,
+-    /* output parameters follow */
+-    VdpDevice *           device,
+-    VdpGetProcAddress * * get_proc_address
+-)
++    int                   screen)
+ {
+     char const * vdpau_driver;
+     char * vdpau_driver_dri2 = NULL;
+     char         vdpau_driver_lib[PATH_MAX];
+-    void *       backend_dll;
+     char const * vdpau_trace;
+     char const * func_name;
+ 
+-    VdpDeviceCreateX11 * vdp_imp_device_create_x11;
+-
+     vdpau_driver = getenv("VDPAU_DRIVER");
+     if (!vdpau_driver) {
+         vdpau_driver = vdpau_driver_dri2 =
+@@ -125,13 +129,13 @@ VdpStatus vdp_device_create_x11(
+         return VDP_STATUS_NO_IMPLEMENTATION;
+     }
+ 
+-    backend_dll = dlopen(vdpau_driver_lib, RTLD_NOW | RTLD_GLOBAL);
+-    if (!backend_dll) {
++    _vdp_driver_dll = dlopen(vdpau_driver_lib, RTLD_NOW | RTLD_GLOBAL);
++    if (!_vdp_driver_dll) {
+         /* Try again using the old path, which is guaranteed to fit in PATH_MAX
+          * if the complete path fit above. */
+         snprintf(vdpau_driver_lib, sizeof(vdpau_driver_lib), DRIVER_LIB_FORMAT,
+                  "", vdpau_driver, "");
+-        backend_dll = dlopen(vdpau_driver_lib, RTLD_NOW | RTLD_GLOBAL);
++        _vdp_driver_dll = dlopen(vdpau_driver_lib, RTLD_NOW | RTLD_GLOBAL);
+     }
+ 
+     if (vdpau_driver_dri2) {
+@@ -139,26 +143,28 @@ VdpStatus vdp_device_create_x11(
+         vdpau_driver_dri2 = NULL;
+     }
+ 
+-    if (!backend_dll) {
++    if (!_vdp_driver_dll) {
+         fprintf(stderr, "Failed to open VDPAU backend %s\n", dlerror());
+         _VDP_ERROR_BREAKPOINT();
+         return VDP_STATUS_NO_IMPLEMENTATION;
+     }
+ 
++    _vdp_backend_dll = _vdp_driver_dll;
++
+     vdpau_trace = getenv("VDPAU_TRACE");
+     if (vdpau_trace && atoi(vdpau_trace)) {
+-        void *         trace_dll;
+         SetDllHandle * set_dll_handle;
+ 
+-        trace_dll = dlopen(VDPAU_MODULEDIR "/libvdpau_trace.so.1", RTLD_NOW | RTLD_GLOBAL);
+-        if (!trace_dll) {
++        _vdp_trace_dll = dlopen(VDPAU_MODULEDIR "/libvdpau_trace.so.1",
++                                RTLD_NOW | RTLD_GLOBAL);
++        if (!_vdp_trace_dll) {
+             fprintf(stderr, "Failed to open VDPAU trace library %s\n", dlerror());
+             _VDP_ERROR_BREAKPOINT();
+             return VDP_STATUS_NO_IMPLEMENTATION;
+         }
+ 
+         set_dll_handle = (SetDllHandle*)dlsym(
+-            trace_dll,
++            _vdp_trace_dll,
+             "vdp_trace_set_backend_handle"
+         );
+         if (!set_dll_handle) {
+@@ -167,9 +173,9 @@ VdpStatus vdp_device_create_x11(
+             return VDP_STATUS_NO_IMPLEMENTATION;
+         }
+ 
+-        set_dll_handle(backend_dll);
++        set_dll_handle(_vdp_backend_dll);
+ 
+-        backend_dll = trace_dll;
++        _vdp_backend_dll = _vdp_trace_dll;
+ 
+         func_name = "vdp_trace_device_create_x11";
+     }
+@@ -177,17 +183,52 @@ VdpStatus vdp_device_create_x11(
+         func_name = "vdp_imp_device_create_x11";
+     }
+ 
+-    vdp_imp_device_create_x11 = (VdpDeviceCreateX11*)dlsym(
+-        backend_dll,
++    _vdp_imp_device_create_x11_proc = (VdpDeviceCreateX11*)dlsym(
++        _vdp_backend_dll,
+         func_name
+     );
+-    if (!vdp_imp_device_create_x11) {
++    if (!_vdp_imp_device_create_x11_proc) {
+         fprintf(stderr, "%s\n", dlerror());
+         _VDP_ERROR_BREAKPOINT();
+         return VDP_STATUS_NO_IMPLEMENTATION;
+     }
+ 
+-    return vdp_imp_device_create_x11(
++    return VDP_STATUS_OK;
++}
++
++static void _vdp_close_driver(void)
++{
++    if (_vdp_driver_dll) {
++        dlclose(_vdp_driver_dll);
++        _vdp_driver_dll = NULL;
++    }
++    if (_vdp_trace_dll) {
++        dlclose(_vdp_trace_dll);
++        _vdp_trace_dll = NULL;
++    }
++    _vdp_backend_dll = NULL;
++    _vdp_imp_device_create_x11_proc = NULL;
++}
++
++VdpStatus vdp_device_create_x11(
++    Display *             display,
++    int                   screen,
++    /* output parameters follow */
++    VdpDevice *           device,
++    VdpGetProcAddress * * get_proc_address
++)
++{
++    VdpStatus status;
++
++    if (!_vdp_imp_device_create_x11_proc) {
++        status = _vdp_open_driver(display, screen);
++        if (status != VDP_STATUS_OK) {
++            _vdp_close_driver();
++            return status;
++        }
++    }
++
++    return _vdp_imp_device_create_x11_proc(
+         display,
+         screen,
+         device,
+--
+cgit v0.9.0.2-2-gbebe
