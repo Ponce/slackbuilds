@@ -24,6 +24,5 @@ preserve_perms() {
   config $NEW
 }
 
-preserve_perms etc/rc.d/rc.firewall.new
 preserve_perms etc/rc.d/rc.shorewall.new
 
