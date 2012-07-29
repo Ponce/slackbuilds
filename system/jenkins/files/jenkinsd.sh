@@ -29,7 +29,7 @@ JENKINS_LOG_FILE="/var/log/jenkins/jenkins.log"
 JENKINS_CONSOLELOG_FILE="/var/log/jenkins/jenkins_console.log"
 JENKINS_PID_DIR="/var/run/jenkins/"
 JENKINS_PID_FILE="$JENKINS_PID_DIR/jenkins.pid"
-JENKINS_WEBAPPSDIR="/var/lib/jenkins/apps/"
+#JENKINS_WEBAPPSDIR="/var/lib/jenkins/apps/"
 JENKINS_WEBROOT="/var/lib/jenkins/webroot/"
 JENKINS_HOME="/var/lib/jenkins"
 OPT_ARGS=""
@@ -84,7 +84,7 @@ if [ "$JENKINS_LOG_FILE" != "" ] ; then
 fi
 
 if [ "$JENKINS_WEBAPPSDIR" != "" ] ; then
-  JENKINS_WEBAPPSDIR_ARG="--webapssDir=$JENKINS_WEBAPPSDIR"
+  JENKINS_WEBAPPSDIR_ARG="--webappsDir=$JENKINS_WEBAPPSDIR"
 fi
 
 if [ "$JENKINS_WEBROOT" != "" ] ; then
