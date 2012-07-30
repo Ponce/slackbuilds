@@ -40,3 +40,4 @@ config etc/logrotate.d/libvirtd.qemu.new
 config etc/logrotate.d/libvirtd.uml.new
 config etc/sasl2/libvirt.conf.new
 config etc/sysctl.d/libvirtd.new
+config etc/rc.d/rc.libvirt.new
