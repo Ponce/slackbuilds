@@ -1,20 +1,20 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for lingot
 
 # Written by B. Watson (yalhcru@gmail.com)
 
+# Licensed under the WTFPL. See http://sam.zoy.org/wtfpl/ for details.
+
 PRGNAM=lingot
-VERSION=${VERSION:-20091225}
+VERSION=${VERSION:-0.9.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-# Automatically determine the architecture we're building on:
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
     i?86) ARCH=i486 ;;
     arm*) ARCH=arm ;;
-    # Unless $ARCH is already set, use uname -m for all other archs:
        *) ARCH=$( uname -m ) ;;
   esac
 fi
@@ -44,7 +44,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find . \
@@ -53,11 +53,19 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
+# Slackware doesn't set up the ALSA plughw:0 device by default, so make lingot
+# use hw:0 as its default ALSA device.
+sed -i 's,plug\(hw:0\),\1,g' README src/*.c
+
+# Fix a format string error (unlikely but possible segfault/exploit),
+# patch borrowed from Debian.
+patch -p1 < $CWD/format_string.diff
+
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
-  --enable-jack=${USE_JACK:-yes} \
+  --enable-jack=${JACK:-yes} \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --localstatedir=/var \
@@ -68,10 +76,16 @@ CXXFLAGS="$SLKCFLAGS" \
 make
 make install-strip DESTDIR=$PKG
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+# man page from Debian
+mkdir -p $PKG/usr/man/man1
+gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
 
 # These are not documentation..
 rm -f $PKG/usr/doc/$PRGNAM-$VERSION/intltool*
+
+# At least one of the doc files is a zero-length placeholder.
+find $PKG/usr/doc/$PRGNAM-$VERSION -type f -a -size 0 -print0 | \
+  xargs -0 rm -f
 
 # `make install' puts the docs in --docdir, just add the SlackBuild
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
@@ -79,6 +93,12 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+if [ "${SETCAP:-yes}" = "yes" ]; then
+  cat $CWD/setcap.sh >> $PKG/install/doinst.sh
+  chown root:audio $PKG/usr/bin/$PRGNAM
+  chmod 0750 $PKG/usr/bin/$PRGNAM
+fi
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
