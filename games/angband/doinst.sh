@@ -5,19 +5,25 @@ config() {
   rm -f $NEW
 }
 
-config var/games/angband/apex/scores.raw.new
-config var/games/angband/data/artifact.raw.new
-config var/games/angband/data/ego_item.raw.new
-config var/games/angband/data/flavor.raw.new
-config var/games/angband/data/limits.raw.new
-config var/games/angband/data/monster.raw.new
-config var/games/angband/data/object.raw.new
-config var/games/angband/data/p_class.raw.new
-config var/games/angband/data/p_hist.raw.new
-config var/games/angband/data/p_race.raw.new
-config var/games/angband/data/prices.raw.new
-config var/games/angband/data/shop_own.raw.new
-config var/games/angband/data/spells.raw.new
-config var/games/angband/data/terrain.raw.new
-config var/games/angband/data/vault.raw.new
+config etc/angband/edit/artifact.txt.new
+config etc/angband/edit/ego_item.txt.new
+config etc/angband/edit/flavor.txt.new
+config etc/angband/edit/hints.txt.new
+config etc/angband/edit/limits.txt.new
+config etc/angband/edit/monster.txt.new
+config etc/angband/edit/monster_base.txt.new
+config etc/angband/edit/names.txt.new
+config etc/angband/edit/object.txt.new
+config etc/angband/edit/object_base.txt.new
+config etc/angband/edit/p_class.txt.new
+config etc/angband/edit/p_hist.txt.new
+config etc/angband/edit/p_race.txt.new
+config etc/angband/edit/pain.txt.new
+config etc/angband/edit/pit.txt.new
+config etc/angband/edit/shop_own.txt.new
+config etc/angband/edit/spell.txt.new
+config etc/angband/edit/store.txt.new
+config etc/angband/edit/terrain.txt.new
+config etc/angband/edit/vault.txt.new
+
 
