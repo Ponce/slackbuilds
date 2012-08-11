@@ -17,12 +17,6 @@ fi
 
 CONFIGS="aiplayers.cfg \
   default.cfg \
-  keys_cursor.cfg \
-  keys_cursor_single.cfg \
-  keys_twohand.cfg \
-  keys_wasd.cfg \
-  keys_x.cfg \
-  keys_zqsd.cfg \
   settings.cfg \
   settings_authentication.cfg \
   settings_dedicated.cfg \
