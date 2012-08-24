@@ -11,4 +11,4 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/default/wbar/wbar.cfg.new
+config etc/wbar.d/wbar.cfg.new
