@@ -1,0 +1,145 @@
+--- gqradio-1.9.2/src/io_radio.c	2005-02-23 04:01:18.000000000 +0000
++++ gqradio-1.9.2/src/io_radio.c	2007-02-10 18:57:17.000000000 +0000
+@@ -38,6 +38,7 @@
+   #include <fcntl.h>
+   #include <sys/ioctl.h>
+   #include <linux/videodev.h>
++  #include <linux/videodev2.h>
+   #include <errno.h>
+ #elif defined(HAVE_IOCTL_BT848)
+   #include <fcntl.h>
+@@ -108,9 +109,9 @@ static void radio_error_message(void)
+ 	printf("Error talking (ioctl) to %s, %s\n", RADIO_DEVICE, strerror(errno));
+ }
+ 
+-static guint radio_calc_steps(struct video_tuner *t)
++static guint radio_calc_steps(struct v4l2_tuner *t)
+ {
+-	if ( (t->flags & VIDEO_TUNER_LOW) )
++	if ( (t->capability & V4L2_TUNER_CAP_LOW) )
+ 		{
+ 		return 16000;	/* field is KHz */
+ 		}
+@@ -149,27 +150,21 @@ static gint radio_control_off(void)
+ 
+ static gint radio_control_set_mute(gint mute)
+ {
+-	struct video_audio av;
++	struct v4l2_control control;
+ 
+ 	if (v4l_fd == -1) return FALSE;
+ 
+-	if (ioctl(v4l_fd, VIDIOCGAUDIO, &av) != 0)
+-		{
+-		radio_error_message();
+-		return FALSE;
+-		}
+-
++	control.id = V4L2_CID_AUDIO_MUTE;
+ 	if (mute)
+ 		{
+-		av.flags |= VIDEO_AUDIO_MUTE;
++		control.value = 1;
+ 		}
+ 	else
+ 		{
+-		if (av.volume == 0 || radio_volume_boost) av.volume = 65535;
+-		av.flags &= ~VIDEO_AUDIO_MUTE;
++		control.value = 0;
+ 		}
+ 
+-	if (ioctl(v4l_fd, VIDIOCSAUDIO, &av) != 0)
++	if (ioctl(v4l_fd, VIDIOC_S_CTRL, &control) != 0)
+ 		{
+ 		radio_error_message();
+ 		return FALSE;
+@@ -180,15 +175,15 @@ static gint radio_control_set_mute(gint 
+ 
+ static gint radio_control_set_freq(guint32 freq)
+ {
+-	struct video_tuner t;
++	struct v4l2_tuner t;
++	struct v4l2_frequency vfreq;
+ 	guint32 f;
+ 	guint m;
+ 
+ 	if (v4l_fd == -1) return FALSE;
+ 
+-	t.tuner = 0;
+-
+-	if (ioctl(v4l_fd, VIDIOCGTUNER, &t) == 0)
++	memset(&t, 0, sizeof(struct v4l2_tuner));
++	if (ioctl(v4l_fd, VIDIOC_G_TUNER, &t) == 0)
+ 		{
+ 		m = radio_calc_steps(&t);
+ 		}
+@@ -199,7 +194,10 @@ static gint radio_control_set_freq(guint
+ 		}
+ 
+ 	f = (guint32)((gfloat)freq / 1000000.0 * m);
+-	if (ioctl(v4l_fd, VIDIOCSFREQ, &f) != 0)
++	vfreq.tuner = 0;
++	vfreq.type = V4L2_TUNER_RADIO;
++	vfreq.frequency = f;
++	if (ioctl(v4l_fd, VIDIOC_S_FREQUENCY, &vfreq) != 0)
+ 		{
+ 		radio_error_message();
+ 		return FALSE;
+@@ -239,7 +237,7 @@ static gint radio_real_shutdown(void)
+ 
+ static gint radio_real_test(void)
+ {
+-	struct video_tuner t;
++	struct v4l2_tuner t;
+ 
+ 	if (!radio_device) radio_device = g_strdup(RADIO_DEVICE);
+ 
+@@ -256,9 +254,8 @@ static gint radio_real_test(void)
+ 		return FALSE;
+ 		}
+ 
+-	t.tuner = 0;
+-
+-	if (ioctl(v4l_fd, VIDIOCGTUNER, &t) == 0)
++	memset(&t, 0, sizeof(struct v4l2_tuner));
++	if (ioctl(v4l_fd, VIDIOC_G_TUNER, &t) == 0)
+ 		{
+ 		guint g;
+ 
+@@ -281,19 +278,19 @@ static gint radio_real_test(void)
+ /* stereo is 0 or 1, strength is 0 to 100 (%) */
+ static gint radio_real_status(gint *stereo, gint *strength)
+ {
+-	struct video_tuner t;
+-	struct video_audio av;
++	struct v4l2_tuner t;
+ 
+ 	if (v4l_fd == -1 || !stereo || !strength) return FALSE;
+ 
+ 	/* stereo */
+ 
+-	if (ioctl(v4l_fd, VIDIOCGAUDIO, &av) != 0)
++	memset(&t, 0, sizeof(struct v4l2_tuner));
++	if (ioctl(v4l_fd, VIDIOC_G_TUNER, &t) != 0)
+ 		{
+ 		radio_error_message();
+ 		return FALSE;
+ 		}
+-	if ( (av.mode & VIDEO_SOUND_STEREO) )
++	if ( (t.audmode & V4L2_TUNER_MODE_STEREO) )
+ 		{
+ 		*stereo = TRUE;
+ 		}
+@@ -304,12 +301,6 @@ static gint radio_real_status(gint *ster
+ 
+ 	/* strength */
+ 
+-	t.tuner = 0;
+-	if (ioctl(v4l_fd, VIDIOCGTUNER, &t) != 0)
+-		{
+-		radio_error_message();
+-		return FALSE;
+-		}
+ 	*strength = (double)t.signal / 65535.0 * 100.0;	/* 16bit scale */
+ 
+ 	return TRUE;
