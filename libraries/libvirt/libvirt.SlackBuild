@@ -4,7 +4,7 @@
 # Written by Michal Bialozor <bialyy@o2.pl>
 
 PRGNAM=libvirt
-VERSION=0.9.13
+VERSION=${VERSION:-0.10.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -74,7 +74,7 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
+rm -rf $PRGNAM-$VERSION $PRGNAM-doinst-additions
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
@@ -112,75 +112,33 @@ make \
   EXAMPLE_DIR=/usr/doc/$PRGNAM-$VERSION/examples \
   install-strip DESTDIR=$PKG
 
-mv $PKG/etc/libvirt/qemu.conf \
-   $PKG/etc/libvirt/qemu.conf.new
-mv $PKG/etc/libvirt/qemu/networks/default.xml \
-   $PKG/etc/libvirt/qemu/networks/default.xml.new
-mv $PKG/etc/libvirt/libvirt.conf \
-   $PKG/etc/libvirt/libvirt.conf.new
-mv $PKG/etc/libvirt/libvirtd.conf \
-   $PKG/etc/libvirt/libvirtd.conf.new
-mv $PKG/etc/libvirt/nwfilter/qemu-announce-self.xml \
-   $PKG/etc/libvirt/nwfilter/qemu-announce-self.xml.new
-mv $PKG/etc/libvirt/nwfilter/no-arp-spoofing.xml \
-   $PKG/etc/libvirt/nwfilter/no-arp-spoofing.xml.new
-mv $PKG/etc/libvirt/nwfilter/no-mac-spoofing.xml \
-   $PKG/etc/libvirt/nwfilter/no-mac-spoofing.xml.new
-mv $PKG/etc/libvirt/nwfilter/allow-incoming-ipv4.xml \
-   $PKG/etc/libvirt/nwfilter/allow-incoming-ipv4.xml.new
-mv $PKG/etc/libvirt/nwfilter/allow-dhcp-server.xml \
-   $PKG/etc/libvirt/nwfilter/allow-dhcp-server.xml.new
-mv $PKG/etc/libvirt/nwfilter/allow-arp.xml \
-   $PKG/etc/libvirt/nwfilter/allow-arp.xml.new
-mv $PKG/etc/libvirt/nwfilter/no-arp-ip-spoofing.xml \
-   $PKG/etc/libvirt/nwfilter/no-arp-ip-spoofing.xml.new
-mv $PKG/etc/libvirt/nwfilter/no-arp-mac-spoofing.xml \
-   $PKG/etc/libvirt/nwfilter/no-arp-mac-spoofing.xml.new
-mv $PKG/etc/libvirt/nwfilter/no-other-rarp-traffic.xml \
-   $PKG/etc/libvirt/nwfilter/no-other-rarp-traffic.xml.new
-mv $PKG/etc/libvirt/nwfilter/clean-traffic.xml \
-   $PKG/etc/libvirt/nwfilter/clean-traffic.xml.new
-mv $PKG/etc/libvirt/nwfilter/qemu-announce-self-rarp.xml \
-   $PKG/etc/libvirt/nwfilter/qemu-announce-self-rarp.xml.new
-mv $PKG/etc/libvirt/nwfilter/no-mac-broadcast.xml \
-   $PKG/etc/libvirt/nwfilter/no-mac-broadcast.xml.new
-mv $PKG/etc/libvirt/nwfilter/no-ip-spoofing.xml \
-   $PKG/etc/libvirt/nwfilter/no-ip-spoofing.xml.new
-mv $PKG/etc/libvirt/nwfilter/allow-dhcp.xml \
-   $PKG/etc/libvirt/nwfilter/allow-dhcp.xml.new
-mv $PKG/etc/libvirt/nwfilter/no-other-l2-traffic.xml \
-   $PKG/etc/libvirt/nwfilter/no-other-l2-traffic.xml.new
-mv $PKG/etc/libvirt/nwfilter/allow-ipv4.xml \
-   $PKG/etc/libvirt/nwfilter/allow-ipv4.xml.new
-mv $PKG/etc/libvirt/nwfilter/no-ip-multicast.xml \
-   $PKG/etc/libvirt/nwfilter/no-ip-multicast.xml.new
-mv $PKG/etc/libvirt/lxc.conf \
-   $PKG/etc/libvirt/lxc.conf.new
-mv $PKG/etc/logrotate.d/libvirtd \
-   $PKG/etc/logrotate.d/libvirtd.new
-mv $PKG/etc/logrotate.d/libvirtd.lxc \
-   $PKG/etc/logrotate.d/libvirtd.lxc.new
-mv $PKG/etc/logrotate.d/libvirtd.qemu \
-   $PKG/etc/logrotate.d/libvirtd.qemu.new
-mv $PKG/etc/logrotate.d/libvirtd.uml \
-   $PKG/etc/logrotate.d/libvirtd.uml.new
-mv $PKG/etc/sasl2/libvirt.conf \
-   $PKG/etc/sasl2/libvirt.conf.new
-mv $PKG/etc/sysctl.d/libvirtd \
-   $PKG/etc/sysctl.d/libvirtd.new
+# don't clobber existing configuration files
+for i in etc/libvirt{,/nwfilter,/qemu/networks} etc/{logrotate.d,sasl2,sysctl.d}; do
+  for j in $(ls -1 $PKG/$i); do
+    if [ ! -d $PKG/$i/$j ]; then
+      mv $PKG/$i/$j{,.new}
+      echo "config $i/$j.new" >> $TMP/$PRGNAM-doinst-additions
+    fi
+  done
+done
 
-# add an rc.libvirt to start the daemon
+# add an rc.libvirt to start/stop/restart the daemon
 install -D -m 0755 $CWD/rc.libvirt $PKG/etc/rc.d/rc.libvirt.new
 
-# by default we got no certs
-sed -i -e 's|\#listen_tls\ =\ 0|listen_tls = 0|' $PKG/etc/libvirt/libvirtd.conf.new
+# we use $VIRTGROUP as our virtualization group, fix auth permissions and
+# consider the fact that by default we got no certs
+sed -i \
+  -e "s|^\#unix_sock_group\ =\ \"libvirt\"|unix_sock_group = \"$VIRTGROUP\"|" \
+  -e "s|^\#unix_sock_rw_perms\ =\ \"0770\"|unix_sock_rw_perms = \"0770\"|" \
+  -e "s|^\#auth_unix_ro.*|auth_unix_ro = \"none\"|" \
+  -e "s|^\#auth_unix_rw.*|auth_unix_rw = \"none\"|" \
+  -e "s|^\#listen_tls|listen_tls = 0|" \
+  $PKG/etc/libvirt/libvirtd.conf.new
 
-# we use $VIRTGROUP as our virtualization group
-sed -i -e "s|\#group\ =\ \"root\"|group = \"$VIRTGROUP\"|" $PKG/etc/libvirt/qemu.conf.new
-sed -i -e "s|\#unix_sock_group\ =\ \"libvirt\"|unix_sock_group = \"$VIRTGROUP\"|" \
-  $PKG/etc/libvirt/libvirtd.conf.new
-sed -i -e "s|\#unix_sock_rw_perms\ =\ \"0770\"|unix_sock_rw_perms = \"0770\"|" \
-  $PKG/etc/libvirt/libvirtd.conf.new
+# still, we use $VIRTGROUP as our virtualization group
+sed -i \
+  -e "s|^\#group\ =\ \"root\"|group = \"$VIRTGROUP\"|" \
+  $PKG/etc/libvirt/qemu.conf.new
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
@@ -195,6 +153,7 @@ rm -rf $PKG/usr/share/doc
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $TMP/$PRGNAM-doinst-additions >> $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
