@@ -2,7 +2,7 @@
 
 # Slackware build script for apcupsd
 
-# Copyright 2006-2011  Robby Workman  Northport, AL, USA
+# Copyright 2006-2012  Robby Workman  Northport, AL, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -26,7 +26,7 @@
 # * added log rotation
 
 PRGNAM=apcupsd
-VERSION=3.14.9
+VERSION=${VERSION:-3.14.10}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -42,14 +42,6 @@ CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
-
-# These can be changed in the config file after installing apcupsd,
-# so it's okay to leave them alone if you don't know what the values
-# should be yet.
-CGIPATH=${CGIPATH:-/var/www/cgi-bin}	# Path for cgi executables
-DEVICE=${DEVICE:-/dev/usb/hiddev0}	# Device node of UPS
-UPSTYPE=${UPSTYPE:-usb}			# Type of UPS
-UPSCABLE=${UPSCABLE:-usb}		# Cable type (RJ45<-->USB = USB)
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
@@ -76,6 +68,10 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 chmod -R a-s,u+w,go+r-w .
 
+# Create /var/lock/subsys in the init script (rc.apcupsd)
+# These days, /var/lock may be on a tmpfs, so we can't assume the dir is there
+patch -p1 < $CWD/create_lockdir_in_init_script.diff
+
 # The "--disable-install-distdir" is important - don't remove it.
 # If you enable the distribution-specific install, then apcupsd will attempt
 # to patch the /etc/rc.d/rc.6 script on your system.  This may be acceptable
@@ -97,14 +93,18 @@ CXXFLAGS="$SLKCFLAGS -DNETSNMP_NO_LEGACY_DEFINITIONS=1" \
   --sysconfdir=/etc/apcupsd \
   --disable-install-distdir \
   --enable-cgi \
-  --with-cgi-bin=$CGIPATH \
+  --with-cgi-bin=${CGIPATH:-/var/www/cgi-bin} \
   --enable-usb \
   --with-libwrap \
   --enable-snmp=yes \
-  --with-upstype=$UPSTYPE \
-  --with-upscable=$UPSCABLE \
-  --with-dev=$DEVICE \
+  --enable-gapcmon \
+  --with-upstype=${UPSTYPE:-usb} \
+  --with-upscable=${UPSCABLE:-usb} \
   --build=$ARCH-slackware-linux
+
+# Deprecated option - shouldn't be needed due to autodetection
+# --with-dev=${DEVICE:-/dev/usb/hiddev0}
+# Also, UPSCABLE refers to cable type (e.g. RJ45<-->USB = USB)
 
 make
 make install DESTDIR=$PKG
@@ -118,10 +118,6 @@ for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; r
 # Install the apcupsd init script
 install -D -m 0755 platforms/slackware/apcupsd \
   $PKG/etc/rc.d/rc.apcupsd.new
-
-# Create the /var/lock/subsys directory
-install -d -m 0755 $PKG/var/lock/subsys
-chmod 1777 $PKG/var/lock
 
 # Configure logrotate
 mkdir -p $PKG/etc/logrotate.d
