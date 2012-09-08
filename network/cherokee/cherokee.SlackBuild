@@ -5,10 +5,17 @@
 # Written by Pablo Hernan Saro (pablosaro@gmail.com)
 
 PRGNAM=cherokee
-VERSION=${VERSION:-0.99.24}
-ARCH=${ARCH:-i686}
+VERSION=${VERSION:-1.2.101}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
@@ -24,10 +31,17 @@ elif [ "$ARCH" = "i686" ]; then
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
 fi
 
 # Set the WWW root directory
-WWWROOT=${WWWROOT:-/var/www}
+WWWROOT=${WWWROOT:-/var/www/htdocs-cherokee}
+
+# Set the WWW user/group - defaulted to root, but dedicated ones are better
+WWWUSER=${WWWUSER:-cherokee}
+WWWGROUP=${WWWGROUP:-cherokee}
 
 # Enable/Disable IPv6 support
 IPV6=${IPV6:-no}
@@ -41,13 +55,29 @@ MYSQL=${MYSQL:-yes}
 # Enable/Disable trace facility (debugging options)
 TRACE=${TRACE:-no}
 
+if [ ! "$(grep "$WWWGROUP" /etc/group)" ]; then
+  printf "\n         The \"$WWWGROUP\" group you choose is not available. Create one with
+
+         groupadd -g 299 $WWWGROUP
+
+         (see http://slackbuilds.org/uid_gid.txt for current reccomendations - if any)\n\n"
+  exit 1
+elif [ ! "$(grep "$WWWUSER" /etc/passwd)" ] ; then
+  printf "\n         The \"$WWWUSER\" user you choose is not available. Create one with
+
+         useradd -u 299 -g $WWWGROUP -d ${WWWROOT} $WWWUSER
+
+         (see http://slackbuilds.org/uid_gid.txt for current reccomendations - if any)\n\n"
+  exit 1
+fi
+
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.?z*
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find . \
@@ -55,6 +85,11 @@ find . \
  -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
+
+# Apply all the patches in $CWD/patches (thanks Gentoo)
+for patch in $CWD/patches/* ; do
+  patch -p1 < $patch
+done
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -67,9 +102,12 @@ CXXFLAGS="$SLKCFLAGS" \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
   --build=$ARCH-slackware-linux \
   --with-wwwroot=$WWWROOT \
+  --with-wwwuser=$WWWUSER \
+  --with-wwwgroup=$WWWGROUP \
   --with-mysql=$MYSQL \
   --enable-ipv6=$IPV6 \
   --enable-admin=$ADMIN \
+  --disable-pam \
   --enable-trace=$TRACE
 
 make
@@ -78,14 +116,15 @@ make install DESTDIR=$PKG
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-( cd $PKG/usr/man
-  find . -type f -exec gzip -9 {} \;
-  for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-)
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/var/log/cherokee
+chown -R $WWWUSER:$WWWGROUP $PKG/var/log/cherokee
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  AUTHORS COPYING ChangeLog INSTALL NEWS README \
+  AUTHORS COPYING ChangeLog NEWS README \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
@@ -98,5 +137,3 @@ cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
-
-
