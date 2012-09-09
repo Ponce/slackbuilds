@@ -1,0 +1,143 @@
+Index: /branches/1.9/gdal/nmake.opt
+===================================================================
+--- /branches/1.9/gdal/nmake.opt	(revision 23610)
++++ /branches/1.9/gdal/nmake.opt	(revision 24437)
+@@ -469,8 +469,10 @@
+ # Uncomment for PDF support
+ # Uncomment POPPLER_BASE_STREAM_HAS_TWO_ARGS = YES for Poppler >= 0.16.0
++# Uncomment POPPLER_0_20_OR_LATER = YES for Poppler >= 0.20.0
+ #POPPLER_ENABLED = YES
+ #POPPLER_CFLAGS = -Ie:/kde/include -Ie:/kde/include/poppler
+ #POPPLER_HAS_OPTCONTENT = YES
+ #POPPLER_BASE_STREAM_HAS_TWO_ARGS = YES
++#POPPLER_0_20_OR_LATER = YES
+ #POPPLER_LIBS = e:/kde/lib/poppler.lib e:/kde/lib/freetype.lib e:/kde/lib/liblcms-1.lib advapi32.lib gdi32.lib
+ 
+Index: /branches/1.9/gdal/configure.in
+===================================================================
+--- /branches/1.9/gdal/configure.in	(revision 24333)
++++ /branches/1.9/gdal/configure.in	(revision 24437)
+@@ -2941,4 +2941,5 @@
+ POPPLER_HAS_OPTCONTENT=no
+ POPPLER_BASE_STREAM_HAS_TWO_ARGS=no
++POPPLER_0_20_OR_LATER=no
+ 
+ AC_MSG_CHECKING([for poppler])
+@@ -3000,4 +3001,17 @@
+             POPPLER_BASE_STREAM_HAS_TWO_ARGS=yes
+             AC_MSG_RESULT([yes])
++
++            # And now we check if we have Poppler >= 0.20.0
++            AC_MSG_CHECKING([if we have Poppler >= 0.20.0])
++            rm -f testpoppler.*
++            echo '#include <poppler/Error.h>' > testpoppler.cpp
++            echo 'int main(int argc, char** argv) { setErrorCallback(0,0); return 0; }' >> testpoppler.cpp
++            if test -z "`${CXX} testpoppler.cpp -c ${POPPLER_INC} 2>&1`" ; then
++                POPPLER_0_20_OR_LATER=yes
++                AC_MSG_RESULT([yes])
++            else
++                AC_MSG_RESULT([no])
++            fi
++
+         else
+             AC_MSG_RESULT([no])
+@@ -3015,4 +3029,5 @@
+ AC_SUBST(POPPLER_HAS_OPTCONTENT, $POPPLER_HAS_OPTCONTENT)
+ AC_SUBST(POPPLER_BASE_STREAM_HAS_TWO_ARGS, $POPPLER_BASE_STREAM_HAS_TWO_ARGS)
++AC_SUBST(POPPLER_0_20_OR_LATER, $POPPLER_0_20_OR_LATER)
+ AC_SUBST(POPPLER_INC, $POPPLER_INC)
+ 
+Index: /branches/1.9/gdal/frmts/pdf/pdfdataset.cpp
+===================================================================
+--- /branches/1.9/gdal/frmts/pdf/pdfdataset.cpp	(revision 23986)
++++ /branches/1.9/gdal/frmts/pdf/pdfdataset.cpp	(revision 24437)
+@@ -327,5 +327,9 @@
+         poSplashOut = new SplashOutputDev(splashModeRGB8, 4, gFalse, sColor);
+         PDFDoc* poDoc = poGDS->poDoc;
++#ifdef POPPLER_0_20_OR_LATER
++        poSplashOut->startDoc(poDoc);
++#else
+         poSplashOut->startDoc(poDoc->getXRef());
++#endif
+         double dfDPI = poGDS->dfDPI;
+ 
+@@ -518,4 +522,19 @@
+ 
+ #ifdef USE_POPPLER
++#ifdef POPPLER_0_20_OR_LATER
++static void PDFDatasetErrorFunction(void* userData, ErrorCategory eErrCatagory, int nPos, char *pszMsg)
++{
++    CPLString osError;
++
++    if (nPos >= 0)
++        osError.Printf("Pos = %d, ", nPos);
++    osError += pszMsg;
++
++    if (strcmp(osError.c_str(), "Incorrect password") == 0)
++        return;
++
++    CPLError(CE_Failure, CPLE_AppDefined, "%s", osError.c_str());
++}
++#else
+ static void PDFDatasetErrorFunction(int nPos, char *pszMsg, va_list args)
+ {
+@@ -531,4 +550,5 @@
+     CPLError(CE_Failure, CPLE_AppDefined, "%s", osError.c_str());
+ }
++#endif
+ #endif
+ 
+@@ -567,5 +587,9 @@
+ 
+     /* Set custom error handler for poppler errors */
++#ifdef POPPLER_0_20_OR_LATER
++    setErrorCallback(PDFDatasetErrorFunction, NULL);
++#else
+     setErrorFunction(PDFDatasetErrorFunction);
++#endif
+ 
+     /* poppler global variable */
+Index: /branches/1.9/gdal/frmts/pdf/makefile.vc
+===================================================================
+--- /branches/1.9/gdal/frmts/pdf/makefile.vc	(revision 22493)
++++ /branches/1.9/gdal/frmts/pdf/makefile.vc	(revision 24437)
+@@ -7,5 +7,5 @@
+ 
+ !IFDEF POPPLER_ENABLED
+-EXTRAFLAGS = $(POPPLER_CFLAGS) $(POPPLER_HAS_OPTCONTENT_FLAGS) $(POPPLER_BASE_STREAM_HAS_TWO_ARGS_FLAGS) -DUSE_POPPLER
++EXTRAFLAGS = $(POPPLER_CFLAGS) $(POPPLER_HAS_OPTCONTENT_FLAGS) $(POPPLER_BASE_STREAM_HAS_TWO_ARGS_FLAGS) $(POPPLER_0_20_OR_LATER_FLAGS) -DUSE_POPPLER
+ 
+ !IFDEF POPPLER_HAS_OPTCONTENT
+@@ -15,4 +15,8 @@
+ !IFDEF POPPLER_BASE_STREAM_HAS_TWO_ARGS
+ POPPLER_BASE_STREAM_HAS_TWO_ARGS_FLAGS = -DPOPPLER_BASE_STREAM_HAS_TWO_ARGS
++!ENDIF
++
++!IFDEF POPPLER_0_20_OR_LATER
++POPPLER_0_20_OR_LATER_FLAGS = -DPOPPLER_0_20_OR_LATER
+ !ENDIF
+ 
+Index: /branches/1.9/gdal/frmts/pdf/GNUmakefile
+===================================================================
+--- /branches/1.9/gdal/frmts/pdf/GNUmakefile	(revision 22491)
++++ /branches/1.9/gdal/frmts/pdf/GNUmakefile	(revision 24437)
+@@ -16,4 +16,9 @@
+ endif
+ 
++ifeq ($(POPPLER_0_20_OR_LATER),yes)
++CPPFLAGS +=  -DPOPPLER_0_20_OR_LATER
++endif
++
++
+ CPPFLAGS	:=	$(GDAL_INCLUDE) $(CPPFLAGS) $(POPPLER_INC) $(PODOFO_INC)
+ 
+Index: /branches/1.9/gdal/GDALmake.opt.in
+===================================================================
+--- /branches/1.9/gdal/GDALmake.opt.in	(revision 24419)
++++ /branches/1.9/gdal/GDALmake.opt.in	(revision 24437)
+@@ -386,4 +386,5 @@
+ POPPLER_HAS_OPTCONTENT = @POPPLER_HAS_OPTCONTENT@
+ POPPLER_BASE_STREAM_HAS_TWO_ARGS = @POPPLER_BASE_STREAM_HAS_TWO_ARGS@
++POPPLER_0_20_OR_LATER = @POPPLER_0_20_OR_LATER@
+ POPPLER_INC = @POPPLER_INC@
+ 
