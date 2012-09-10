@@ -367,7 +367,7 @@ PCRE_CONFIG=yes
 # ...or just enable your favourite lookups and let GNUmake handle the rest
 
 ifeq ($(LOOKUP_LDAP),yes)
-LOOKUP_LIBS+=-lldap
+LOOKUP_LIBS+=-lldap -llber
 endif
 
 ifeq ($(LOOKUP_MYSQL),yes)
