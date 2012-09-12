@@ -1,7 +1,7 @@
 #!/bin/sh
 
-# Copyright 2008, 2009, 2010  Patrick J. Volkerding, Sebeka, Minnesota, USA
-# Copyright 2011  Heinz Wiesinger, Amsterdam, The Netherlands
+# Copyright 2008, 2009, 2010, 2012  Patrick J. Volkerding, Sebeka, Minnesota, USA
+# Copyright 2011-2012  Heinz Wiesinger, Amsterdam, The Netherlands
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -27,7 +27,7 @@
 # MariaDB version maintained by:  Heinz Wiesinger <pprkut@liwjatan.at>
 
 PRGNAM=mariadb
-VERSION=5.3.6
+VERSION=5.5.27
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -44,10 +44,10 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "${EMBEDDED:-no}" = "" ]; then
-  embed=""
+if [ "${EMBEDDED:-no}" = "no" ]; then
+  embed="OFF"
 else
-  embed="--with-embedded-server"
+  embed="ON"
 fi
 
 if [ "$ARCH" = "i486" ]; then
@@ -76,64 +76,48 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS -felide-constructors -fno-exceptions -fno-rtti" \
-CXX=g++ \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --with-mysqld-user=mysql \
-  --with-unix-socket-path=/var/run/mysql/mysql.sock \
-  --localstatedir=/var/lib/mysql \
-  --mandir=/usr/man \
-  --infodir=/usr/info \
-  --enable-assembler \
-  --without-debug \
-  --enable-thread-safe-client \
-  --with-extra-charsets=complex \
-  --with-ssl=/usr \
-  --with-aria-tmp-tables \
-  --with-libevent \
-  --enable-largefile \
-  --with-readline \
-  --with-big-tables \
-  --enable-local-infile \
-  --with-plugins=max \
-  --build=$ARCH-slackware-linux \
-  $embed
+mkdir build
+cd build
+cmake \
+  -DCMAKE_C_FLAGS="$SLKCFLAGS" \
+  -DCMAKE_CXX_FLAGS="$SLKCFLAGS -felide-constructors -fno-exceptions -fno-rtti" \
+  -DBUILD_CONFIG=mysql_release \
+  -DFEATURE_SET="community" \
+  -DINSTALL_LAYOUT="RPM" \
+  -DCMAKE_INSTALL_PREFIX=/usr \
+  -DINSTALL_LIBDIR="lib${LIBDIRSUFFIX}" \
+  -DINSTALL_SBINDIR=libexec \
+  -DINSTALL_INCLUDEDIR=include/mysql \
+  -DINSTALL_MYSQLSHAREDIR=share/mysql \
+  -DINSTALL_SQLBENCHDIR= \
+  -DINSTALL_MYSQLTESTDIR=mysql-test \
+  -DINSTALL_MANDIR=man \
+  -DINSTALL_PLUGINDIR="lib${LIBDIRSUFFIX}/mysql/plugin" \
+  -DINSTALL_SCRIPTDIR=bin \
+  -DINSTALL_SUPPORTFILESDIR=share/mysql \
+  -DINSTALL_MYSQLDATADIR="/var/lib/mysql" \
+  -DMYSQL_DATADIR="/var/lib/mysql" \
+  -DMYSQL_UNIX_ADDR="/var/run/mysql/mysql.sock" \
+  -DWITH_EXTRA_CHARSETS=complex \
+  -DENABLED_LOCAL_INFILE=ON \
+  -DWITH_EMBEDDED_SERVER=$embed \
+  -DWITH_READLINE=ON \
+  -DWITH_SSL=system \
+  -DWITH_ZLIB=system \
+  -DUSE_ARIA_FOR_TMP_TABLES=ON \
+  -DMANUFACTURER="Slackware" \
+  ..
 
 make
 make install DESTDIR=$PKG
 
-# install additional headers needed for building external engine plugins
-for i in sql include regex; do
-  for j in $i/*.h; do
-    install -m 0644 $j $PKG/usr/include/mysql/
-  done
-done
+# Leave build directory:
+cd ..
 
-mkdir -p $PKG/usr/include/mysql/atomic
-for i in include/atomic/*.h; do
-  install -m 0644 $i $PKG/usr/include/mysql/atomic/
-done
-
-install -m 0644 storage/maria/ma_{pagecache,loghandler_lsn}.h \
-  $PKG/usr/include/mysql/
-install -m 0644 storage/maria/ha_maria.h \
-  $PKG/usr/include/mysql/
-sed -i "s|../storage/maria/ma_pagecache.h|ma_pagecache.h|" \
-  $PKG/usr/include/mysql/maria.h
-sed -i "s|../storage/maria/ha_maria.h|ha_maria.h|" \
-  $PKG/usr/include/mysql/sql_select.h
-
-# Add some handy library symlinks:
-cd $PKG/usr/lib${LIBDIRSUFFIX}
-  for i in libmysqlclient libmysqlclient_r; do
-    rm -f $i.so $i.so.16
-    ln -sf mysql/$i.so $i.so
-    ln -sf mysql/$i.so.16 $i.so.16
-  done
-cd -
+# remove static client libraries
+rm -f $PKG/usr/lib${LIBDIRSUFFIX}/libmysqlclient.a
+rm -f $PKG/usr/lib${LIBDIRSUFFIX}/libmysqlclient_r.a
+rm -f $PKG/usr/lib${LIBDIRSUFFIX}/libmysqld.a
 
 # The ./configure option to omit this has gone away, so we'll omit it
 # the old-fashioned way.  It's all in the source tarball if you need it.
@@ -141,10 +125,6 @@ rm -rf $PKG/usr/sql-bench
 
 # Do not include the test suite:
 rm -rf $PKG/usr/mysql-test
-
-# Install support files
-mkdir -p $PKG/etc
-cp support-files/my-{huge,large,medium,small}.cnf $PKG/etc
 
 # This is the directory where databases are stored
 mkdir -p $PKG/var/lib/mysql
@@ -160,19 +140,25 @@ chmod 0755 $PKG/var/run/mysql
 mkdir -p $PKG/etc/rc.d
 # This is intentionally chmod 644.
 cat $CWD/rc.mysqld > $PKG/etc/rc.d/rc.mysqld.new
+rm -rf $PKG/etc/init.d
+
+# Install mysqlaccess.conf
+install -m 644 scripts/mysqlaccess.conf $PKG/etc/mysqlaccess.conf.new
+
+# Mark config files under /etc as .new
+mv $PKG/etc/my.cnf $PKG/etc/my.cnf.new
+for i in client mysql-clients server; do
+  mv $PKG/etc/my.cnf.d/$i.cnf $PKG/etc/my.cnf.d/$i.cnf.new
+done
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
-
-rm -f $PKG/usr/info/dir
-gzip -9 $PKG/usr/info/*
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  COPYING* EXCEPTIONS* INSTALL-SOURCE README* Docs/INSTALL-BINARY \
+cp -a README VERSION COPYING* KNOWN_BUGS.txt INSTALL-SOURCE \
   $PKG/usr/doc/$PRGNAM-$VERSION
 find $PKG/usr/doc/$PRGNAM-$VERSION -type f -exec chmod 0644 {} \;
 
