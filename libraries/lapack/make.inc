@@ -38,7 +38,7 @@ LOADOPTS =
 # SECOND and DSECND will use a call to the Fortran standard INTERNAL FUNCTION CPU_TIME 
 #TIMER    = INT_CPU_TIME
 # If neither of this works...you can use the NONE value... In that case, SECOND and DSECND will always return 0
-TIMER     = NONE
+TIMER     = INT_ETIME
 #
 #  The archiver and the flag(s) to use when building archive (library)
 #  If you system has no ranlib, set RANLIB = echo.
