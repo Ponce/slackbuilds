@@ -24,7 +24,12 @@ preserve_perms() {
 
 # Fix starting of kde within virtualbox
 BLACKLIST="usr/share/apps/kconf_update/kwin_blacklist.upd"
-VBOX_TEST=$(grep -c "Blacklist-virtualbox" $BLACKLIST)
+
+if [ -f "$BLACKLIST" ]; then
+  VBOX_TEST=$(grep -c "Blacklist-virtualbox" $BLACKLIST)
+else
+  VBOX_TEST="0"
+fi
 
 if [ "$VBOX_TEST" = "0" ]; then
 cat << EOF >> $BLACKLIST
@@ -37,9 +42,4 @@ fi
 
 preserve_perms etc/rc.d/rc.vboxadd.new
 preserve_perms etc/rc.d/rc.vboxadd-service.new
-
-# remove existing fdi cache to recognize newly installed fdi files
-# and restart hal to regenerate the cache
-rm -f var/cache/hald/fdi-cache
-chroot . /etc/rc.d/rc.hald restart
 
