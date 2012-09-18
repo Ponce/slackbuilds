@@ -25,7 +25,7 @@
 
 PRGNAM=virtualbox
 SRCNAM=VirtualBox
-VERSION=4.1.14
+VERSION=4.2.0
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -46,7 +46,7 @@ OUTPUT=${OUTPUT:-/tmp}
 JOBS=${JOBS:-3}
 
 # Define Variable Names
-qtgui=""
+gui=""
 
 # Check for vboxusers group here
 if ! grep ^vboxusers: /etc/group 2>&1 > /dev/null; then
@@ -103,17 +103,23 @@ chmod -R u+w,go+r-w,a-s .
 GROUP="vboxusers"
 MODE="755"
 
-# We don't want a init-script building kernel modules.
+# We don't want an init-script building kernel modules.
 # Use virtualbox-kernel.SlackBuild for this.
 patch -d src/VBox/Installer/linux -i $CWD/vboxdrv.sh-setup.diff
 
 # Support for the qt4-frontend
-if [ "${QT4:-yes}" = "yes" ]; then
+if [ "${HEADLESS:-no}" = "no" ]; then
   mkdir -p $PKG/usr/share/applications
-  guiapp="VirtualBox"
+  guiapp="VirtualBox VBoxSDL VBoxBFE"
 else
-  qtgui+=" --disable-qt4"
+  gui+=" --build-headless"
   guiapp=""
+fi
+
+if [ "${JAVA:-no}" = "no" ]; then
+  java="--disable-java"
+else
+  java=""
 fi
 
 # Do not require makeself. We don't plan on building an automatic installer
@@ -123,14 +129,14 @@ patch -p1 -i $CWD/virtualbox-4-makeself-check.patch
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
-  --ose \
   --disable-kmods \
   --disable-pulse \
   --enable-vde \
   --enable-vnc \
   $web_service \
   $harden \
-  $qtgui
+  $gui \
+  $java
 
 . ./env.sh
 
@@ -139,12 +145,17 @@ sed -i "s|LIBDIR|lib$LIBDIRSUFFIX|" ./LocalConfig.kmk
 
 kmk -j ${JOBS} LOCALCFG=./LocalConfig.kmk
 
+# build VBoxFUSE
+cd src/VBox/ImageMounter/VBoxFUSE
+  kmk -j ${JOBS}
+cd -
+
 mkdir -p $PKG/usr/{lib$LIBDIRSUFFIX,share,include}/virtualbox \
   $PKG/usr/{bin,src} \
   $PKG/usr/share/{pixmaps,mime/packages} \
   $PKG/etc/{default,rc.d,vbox}
 
-for i in vboxdrv vboxballoonctrl-service; do
+for i in vboxdrv vboxballoonctrl-service vboxautostart-service; do
   cp -f src/VBox/Installer/linux/$i.sh.in $PKG/etc/rc.d/rc.$i.new
   sed -i "s/%PACKAGE%/virtualbox/g" $PKG/etc/rc.d/rc.$i.new
   sed -i "s/%NOLSB%/yes/" $PKG/etc/rc.d/rc.$i.new
@@ -161,10 +172,11 @@ cd out/linux.$BUILDDIR/release/bin/
   rm -f vboxdrv.ko
   mv src $PKG/usr/src/virtualbox-kernel-$VERSION
 
-  if [ "${QT4:-yes}" = "yes" ]; then
+  if [ "${HEADLESS:-no}" = "no" ]; then
     mv virtualbox.desktop $PKG/usr/share/applications/
     sed -i "s|\$VBOX_DOC_PATH|/usr/share/virtualbox|" \
       $PKG/usr/share/applications/virtualbox.desktop
+    mv nls* *.tar.bz2 $PKG/usr/share/virtualbox/
   fi
   mv VBox.png $PKG/usr/share/pixmaps/
 
@@ -185,12 +197,10 @@ cd out/linux.$BUILDDIR/release/bin/
   rm -rf sdk/installer
 
   mv sdk $PKG/usr/share/virtualbox/
-  if [ "${QT4:-yes}" = "yes" ]; then
-    mv nls* *.tar.bz2 $PKG/usr/share/virtualbox/
-  fi
   install -m $MODE -g $GROUP VBoxSysInfo.sh $PKG/usr/share/virtualbox/
   install -m $MODE -g $GROUP VBoxCreateUSBNode.sh $PKG/usr/share/virtualbox/
   install -m $MODE -g $GROUP VBoxTunctl $PKG/usr/bin/
+  install -m $MODE -g $GROUP VBoxFUSE $PKG/usr/bin/
   rm -f VBoxSysInfo.sh VBoxCreateUSBNode.sh VBoxTunctl
   mv * $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/
   chown -R root:$GROUP $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/
@@ -198,13 +208,16 @@ cd out/linux.$BUILDDIR/release/bin/
   mv $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/VBox.sh $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/VBox
 cd $TMP/$SRCNAM-${VERSION}
 
-for i in VBoxManage vboxmanage VBoxSDL vboxsdl VBoxHeadless \
-  vboxheadless VBoxVRDP VBoxBalloonCtrl $guiapp $vboxwebsrv; do
+for i in VBoxManage vboxmanage VBoxHeadless \
+  vboxheadless VBoxVRDP VBoxBalloonCtrl vboxballoonctrl \
+  VBoxAutostart vboxautostart $guiapp $vboxwebsrv; do
   ln -s /usr/lib$LIBDIRSUFFIX/virtualbox/VBox $PKG/usr/bin/$i
 done
 
-if [ "$guiapp" = "VirtualBox" ]; then
-  ln -s /usr/lib$LIBDIRSUFFIX/virtualbox/VBox $PKG/usr/bin/virtualbox
+if [ "${HEADLESS:-no}" = "no" ]; then
+  for i in virtualbox vboxsdl vboxbfe; do
+    ln -s /usr/lib$LIBDIRSUFFIX/virtualbox/VBox $PKG/usr/bin/$i
+  done
 fi
 
 if [ "$vboxwebsrv" = "vboxwebsrv" ]; then
@@ -218,7 +231,7 @@ if [ "$vboxwebsrv" = "vboxwebsrv" ]; then
 fi
 
 if [ "$harden" = "--enable-hardening" ]; then
-  for i in VBoxSDL VBoxHeadless $guiapp VBoxNetDHCP VBoxNetAdpCtl; do
+  for i in VBoxHeadless $guiapp VBoxNetDHCP VBoxNetAdpCtl; do
     chmod 4711 $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/$i
   done
 fi
