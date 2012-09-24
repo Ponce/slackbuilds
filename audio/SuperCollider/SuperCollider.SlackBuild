@@ -6,7 +6,9 @@
 # contact: pfeifer[dot]felix[at]googlemail[dot]com
 
 PRGNAM=SuperCollider
-VERSION=${VERSION:-3.4.4}
+VERSION=${VERSION:-3.5.5}
+PRGNAM2=SwingOSC
+VERSION2=${VERSION2:-0.70}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -43,9 +45,9 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-Source
-tar xvf $CWD/$PRGNAM-$VERSION-Source-linux.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION-Source-linux.tar.?z*
 cd $PRGNAM-Source
-unzip $CWD/SwingOSC-0.65.zip
+unzip $CWD/$PRGNAM2-$VERSION2-Linux.zip -d $PRGNAM2
 chown -R root:root .
 find . \
  \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
@@ -57,12 +59,34 @@ if [ "$LIBDIRSUFFIX" = "64" ]; then
   patch -p1 < $CWD/fixups_for_x86_64.diff
 fi
 
-cd common
-  scons PREFIX=/usr X11=yes SCEL=yes SCED=yes SCVIM=yes LID=yes READLINE=no
-  scons install DESTDIR=$PKG
-cd -
+# Pass AVAHI=yes to the script to enable avahi support
+if [ "${AVAHI:-no}" = "yes" ]; then avahi="OFF"; else avahi="ON"; fi
 
-# Compile and install SwingOSC
+# cwiid support is "autodetected"
+if [ -h /usr/lib$LIBDIRSUFFIX/libcwiid.so ]; then
+  cwiid="ON"
+else
+  cwiid="OFF"
+fi
+
+# Readline support don't work
+sed -i "s|^find_package(Readline\ 5\.0)|unset(READLINE_FOUND)|" lang/CMakeLists.txt
+
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DNO_AVAHI="$avahi" \
+    -DSC_WII="$cwiid" \
+    -DSC_ED="2" \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make 
+  make install/strip DESTDIR=$PKG
+cd ..
+
+# Install SwingOSC
 cd SwingOSC
   chmod 0755 install_linux_system.sh
   ./install_linux_system.sh $PKG/usr
@@ -76,16 +100,14 @@ cd editors/scvim
   cp -r indent $PKG/usr/share/scvim/vim   # the vim runtimepath
   cp -r syntax $PKG/usr/share/scvim/vim   # any idea where this might be globally?
   cp scvimrc $PKG/usr/share/scvim
-  cp -r scclasses $PKG/usr/share/SuperCollider/Extensions/scvim
 cd -
 
-
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mv $PKG/usr/share/doc $PKG/usr
 mv $PKG/usr/doc/$PRGNAM $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS COPYING "README LINUX" VERSION $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS ChangeLog COPYING README_LINUX.txt $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
