@@ -9,4 +9,5 @@ config() {
 }
 
 config etc/enlightenment/sysactions.conf.new
-
+config etc/xdg/menus/enlightenment.menu.new
+config etc/X11/xinit/xinitrc.enlightenment17.new
