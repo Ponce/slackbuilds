@@ -12,3 +12,5 @@ config() {
 }
 
 config etc/xdg/bashrun2/bashrun2.rc.new
+config etc/xdg/bashrun2/plugins/terminal.rc.new
+config etc/bash_completion.d/bashrun2.new
