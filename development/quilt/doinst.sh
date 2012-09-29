@@ -11,3 +11,4 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 config etc/quilt.quiltrc.new
+config etc/bash_completion.d/quilt.new
