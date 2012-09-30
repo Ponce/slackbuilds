@@ -22,5 +22,5 @@ preserve_perms() {
   config $NEW
 }
 
-preserve_perms etc/httpd/extra/mod_evasive.conf.new
+preserve_perms etc/httpd/extra/mod_chroot.conf.new
 
