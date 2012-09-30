@@ -11,4 +11,4 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config /etc/prelink.conf.new
+config etc/prelink.conf.new
