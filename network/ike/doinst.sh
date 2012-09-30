@@ -25,3 +25,6 @@ preserve_perms() {
 preserve_perms etc/rc.d/rc.iked.new
 config etc/iked.conf.new
 
+if [ -x /usr/bin/update-desktop-database ]; then
+  /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
+fi
