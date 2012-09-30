@@ -11,7 +11,8 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/csync/csync_exclude.conf
-config etc/csync/csync.conf
-config etc/csync/csync_log.conf
+config etc/csync/csync_exclude.conf.new
+config etc/csync/csync.conf.new
+config etc/csync/csync_log.conf.new
+
 
