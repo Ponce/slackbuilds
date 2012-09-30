@@ -1,4 +1,3 @@
-
 config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
@@ -16,4 +15,9 @@ config etc/mrxvt/default.menu.new
 config etc/mrxvt/submenus.menu.new
 config etc/mrxvt/mrxvtrc.new
 config etc/mrxvt/mrxvtrc.sample.new
+
+if [ -x /usr/bin/update-desktop-database ]; then
+  /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
+fi
+
 
