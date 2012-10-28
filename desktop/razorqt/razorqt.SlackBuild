@@ -26,9 +26,10 @@
 # I'll be more than happy to let you maintain this build script.  I don't
 # plan to actually use razorqt (I like xfce), but this looked too useful to
 # not have available in Slackware   --rworkman
+# Same for me (the only difference is that I use lxde ;p )   --ponce
 
 PRGNAM=razorqt
-VERSION=${VERSION:-0.4.1}
+VERSION=${VERSION:-0.5.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -65,7 +66,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
+tar xvf $CWD/$PRGNAM-$VERSION.tar.?z*
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find . \
@@ -74,8 +75,11 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-# Needed for gcc47; harmless for earlier gcc
-patch -p1 < $CWD/patches/include_unistd_h.diff
+# Fix hardcoded xdg path
+patch -p1 < $CWD/patches/dont_hardcode_xdg_path.patch
+
+# Where our system config (razor and xdg files) resides
+RCONFDIR=${RCONFDIR:-etc/razor/xdg}
 
 cmake \
   -DCMAKE_BUILD_TYPE=Release \
@@ -83,7 +87,7 @@ cmake \
   -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
   -DCMAKE_INSTALL_PREFIX:PATH="/usr" \
   -DLIB_SUFFIX:STRING="$LIBDIRSUFFIX" \
-  -DRAZOR_CONFIG_DIR:STRING=".config/razorqt"
+  -DRAZOR_ETC_XDG_DIRECTORY:PATH="/$RCONFDIR"
 
 make VERBOSE=1
 make install DESTDIR=$PKG
@@ -91,24 +95,38 @@ make install DESTDIR=$PKG
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | \
   grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-mkdir -p $PKG/etc/razorqt
-mv $PKG/etc/xdg $PKG/etc/razorqt
-
 mkdir -p $PKG/etc/X11/xinit
 cat $CWD/xinit/xinitrc.razorqt > $PKG/etc/X11/xinit/xinitrc.razorqt
 chmod 0755 $PKG/etc/X11/xinit/xinitrc.razorqt
 
 mkdir -p $PKG/etc/profile.d
-cat $CWD/profile.d/razorqt.sh > $PKG/etc/profile.d/razorqt.sh
-cat $CWD/profile.d/razorqt.csh > $PKG/etc/profile.d/razorqt.csh
+sed "s|@RCONFDIR@|/$RCONFDIR|" \
+  $CWD/profile.d/razorqt.sh > $PKG/etc/profile.d/razorqt.sh
+sed "s|@RCONFDIR@|/$RCONFDIR|" \
+  $CWD/profile.d/razorqt.csh > $PKG/etc/profile.d/razorqt.csh
 chmod 0755 $PKG/etc/profile.d/*
+
+# Don't clobber existing config files
+for i in desktop razor session windowmanagers razor-panel/panel; do
+  mv $PKG/$RCONFDIR/razor/$i.conf $PKG/$RCONFDIR/razor/$i.conf.new
+done
+# Add missing section entry in razor.conf, to avoid complains
+# from razor-confupdate python script...
+sed -i '/^theme/i [General]' $PKG/$RCONFDIR/razor/razor.conf.new
+# ...beside the fact that it looks in the wrong path...
+sed -i "s|\.razor|.config/razor|" $PKG/usr/share/razor/razor-confupdate/*
+
+# There's a small issue: seems like default configs are not created when
+# you launch razor the first time: copy them from their global dir if
+# ~/.config/razor doesn't exist
+sed -i "s|^$|if [ ! -d ~/.config/razor ]; then mkdir -p ~/.config ; cp -a /$RCONFDIR/razor ~/.config/razor ; fi|" $PKG/usr/bin/startrazor
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-cat $CWD/doinst.sh > $PKG/install/doinst.sh
+sed "s|@RCONFDIR@|$RCONFDIR|" $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
