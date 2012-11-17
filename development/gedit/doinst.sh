@@ -16,5 +16,5 @@ schema_install() {
     1>/dev/null
 }
 
-schema_install gedit-file-browser.schemas
 schema_install gedit.schemas
+schema_install gedit-file-browser.schemas
