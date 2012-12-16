@@ -1,0 +1,56 @@
+#!/bin/bash
+
+if [ ! $UID ]; then
+	echo "You must be root to use SSHblock."
+	exit 1;
+fi
+
+case "$1" in
+	'start')
+		swatch -c /etc/swatch/sshblock -t /var/log/messages &> /dev/null &
+		if [ ! `ls /etc/cron.hourly | grep sshunblock` ]; then
+			ln -s /usr/sbin/sshunblock.pl /etc/cron.hourly
+		fi
+		;;
+	'stop')
+		pid=`ps auxwww | grep swatch | grep -v grep | grep sshblock | awk '{print $2}'`
+		kill $pid
+		;;
+	'clear')
+		for ip in `iptables -nL INPUT | tail +3 | grep DROP | grep dpt:22 | awk '{print $4}'`; do
+			iptables -D INPUT -p tcp -s $ip --dport 22 --syn -j DROP
+		done
+		;;
+	'list')
+		echo "Blocked IP addresses:"
+		iptables -nL INPUT | tail +3 | grep DROP | grep dpt:22 | awk '{print $4}'
+		;;
+	'status')
+		blocking=`ps auxwww | grep swatch | grep -v grep | grep sshblock | wc -l`
+		blocked=`iptables -nL INPUT | tail +3 | grep DROP | grep dpt:22 | wc -l`
+		unblocking=`ls -l /etc/cron.hourly | grep sshunblock | wc -l`
+		if [ $blocked -eq 1 ]; then
+			pl=''
+			verb='is'
+		else
+			pl='es'
+			verb='are'
+		fi
+		if [ $blocking -gt 0 ]; then
+			echo "SSHblock is active"
+		else
+			echo "SSHblock is not running"
+		fi
+		echo "There $verb currently $blocked address$pl blocked."
+		;;
+	*)
+		echo "Usage: $0 [start|stop|clear|status|list]"
+		echo " "
+		echo "start:  Start SSHblock system"
+		echo "stop:   Stop blocking new IPs; old ones will still expire at the usual rate"
+		echo "clear:  Clear all blocked addresses"
+		echo "status: Report whether SSHblock is running, how many IPs are blocked"
+		echo "list:   List all blocked IP addresses"
+		exit
+		;;
+esac
