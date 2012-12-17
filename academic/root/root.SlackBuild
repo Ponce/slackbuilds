@@ -1,0 +1,165 @@
+#!/bin/bash
+
+# Slackware build script for ROOT
+
+# written by Jože Zobec <jozze.zepl@gmail.com>
+
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY
+# EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Modified by the slackbuilds.org project
+
+PRGNAM=root
+VERSION=${VERSION:-5.34.03}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+# GSL support
+if [[ ${GSL:-no} = "no" ]]; then
+  GSL_FLAGS="--disable-gsl-shared"
+else
+  GSL_FLAGS="--enable-gsl-shared \
+	  --with-gsl-incdir=/usr/include \
+	  --with-gsl-libdir=/usr/lib${LIBDIRSUFFIX}"
+  if [ "$MATHMORE" = "yes" ]; then
+    GSL_FLAGS="$GSL_FLAGS --enable-mathmore"
+  fi
+fi
+
+# FFTW3 support
+if [[ ${FFTW:-no} = "no" ]]; then
+  FFTW_FLAGS="--disable-fftw3"
+else
+  FFTW_FLAGS="--enable-fftw3 \
+	  --with-fftw3-incdir=/usr/include \
+	  --with-fftw3-libdir=/usr/lib${LIBDIRSUFFIX}"
+fi
+
+if [[ ${QT:-no} = "no" ]]; then
+	QT_FLAGS="--disable-qt"
+else
+	QT_FLAGS="--enable-qt"
+fi
+
+# The place where our python modules are installed
+PYTHONDIR=$(python -c "import sys, os; print os.path.join('/usr/lib${LIBDIRSUFFIX}', 'python%s' % sys.version[:3], 'site-packages')")
+
+# Get the job number to use from the MAKEFLAGS
+NUMJOBS=$(expr "$(echo $MAKEFLAGS)" : '\(-j[0-9]*\)' | sed "s|-j||" )
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvzf $CWD/$PRGNAM\_v$VERSION.source.tar.gz
+mv $PRGNAM $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+# Make sure we use system libs and headers
+rm -r graf3d/ftgl/{inc,src} || die
+rm -r graf2d/freetype/src || die
+rm -r graf3d/glew/{inc,src} || die
+rm -r core/pcre/src || die
+LANG=C LC_ALL=C find core/zip -type f -name "[a-z]*" -print0 | xargs -0 rm -f || die
+rm -r core/lzma/src/*.tar.gz || die
+
+# prefix where to install stuff
+PREFIX=/usr/ROOT
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=$PREFIX \
+  --libdir=$PREFIX/lib${LIBDIRSUFFIX} \
+  --incdir=$PREFIX/include \
+  --mandir=$PREFIX/man/man1 \
+  --etcdir=$PREFIX/etc/root \
+  --docdir=$PREFIX/doc/$PRGNAM-$VERSION \
+  --enable-roofit \
+  --enable-unuran \
+  --disable-builtin-freetype \
+  --disable-builtin-ftgl \
+  --disable-builtin-glew \
+  --disable-builtin-pcre \
+  --disable-builtin-zlib \
+  --disable-builtin-lzma \
+  $GSL_FLAGS \
+  $FFTW_FLAGS \
+  $QT_FLAGS \
+  --enable-shared \
+  --build=$ARCH-slackware-linux
+
+make -j $NUMJOBS
+make install DESTDIR=$PKG
+
+# Move some python stuff in the proper place
+mkdir -p $PKG$PYTHONDIR
+mv $PKG$PREFIX/lib$LIBDIRSUFFIX/*.py* $PKG$PREFIX/lib$LIBDIRSUFFIX/python/genreflex \
+  $PKG$PYTHONDIR/
+rm -fr $PKG$PREFIX/lib$LIBDIRSUFFIX/python
+
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneded 2> /dev/null || true
+
+find $PKG$PREFIX/man -type f -exec gzip -9 {} \;
+
+# Install some profile.d scripts to use the right paths
+mkdir -p $PKG/etc/profile.d
+echo "set path = ( \$path $PREFIX/bin )" > $PKG/etc/profile.d/root.csh
+echo "setenv MANPATH \${MANPATH}:$PREFIX/man" >> $PKG/etc/profile.d/root.csh
+echo "PATH=\$PATH:$PREFIX/bin" > $PKG/etc/profile.d/root.sh
+echo "MANPATH=\$MANPATH:$PREFIX/man" >> $PKG/etc/profile.d/root.sh
+chmod +x $PKG/etc/profile.d/root.*
+
+cat $CWD/$PRGNAM.SlackBuild > $PKG$PREFIX/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s|@LIBDIRSUFFIX@|$LIBDIRSUFFIX|" -e "s|@PREFIX@|$PREFIX|" \
+  $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
