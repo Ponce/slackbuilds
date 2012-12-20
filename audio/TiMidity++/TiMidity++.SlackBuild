@@ -4,10 +4,11 @@
 # Written by Kyle Guinn <elyk03@gmail.com>
 # Changes for Slackware 12.1 by Richard Hoyle <hoyle.richard@gmail.com>
 # Modified by Michiel van Wessem. <michiel.van.wessem@gmail.com>
+# Modified by Yair Kalvariski. <cesium2@gmail.com>
 
-PRGNAM="TiMidity++"
-VERSION="2.13.2"
-BUILD=${BUILD:-6}
+PRGNAM=TiMidity++
+VERSION=2.14.0
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -25,7 +26,7 @@ OUTPUT=${OUTPUT:-/tmp}
 
 DOCS="AUTHORS COPYING ChangeLog* INSTALL* NEWS README* TODO doc/C/README* doc/C/FAQ doc/C/CHANGES.02i"
 ENABLE_AUDIO="alsa,oss,esd,ao,vorbis,flac"
-ENABLE_DYNAMIC="gtk,ncurses,motif,tcltk,emacs,vt100"
+ENABLE_DYNAMIC="gtk,ncurses,motif,tcltk,emacs,vt100,xaw"
 
 # Support JACK.  Requires JACK, of course.
 # Disabled by default for those who don't want to install/configure it.
@@ -38,6 +39,14 @@ fi
 SPEEX=${SPEEX:-no}
 if [ "$SPEEX" = "yes" ]; then
   ENABLE_AUDIO="$ENABLE_AUDIO,speex"
+fi
+
+# Use xaw3d library in xaw interface module. Disabled by default.
+XAW3D=${XAW3D:-no}
+if [ "$XAW3D" = "yes" ]; then
+  WITH_XAW="xaw3d"
+else
+  WITH_XAW="xaw"
 fi
 
 if [ "$ARCH" = "i486" ]; then
@@ -60,25 +69,23 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
 
-# The patches here include most of those in Debian's 2.13.2-19
-# patch set, minus some gross (in both senses of the word) changes
-# to the autoconf build scripts to reflect merges of libOggFLAC
-# into libFLAC++ since FLAC-1.1.3. ===RAH
+# Patches:
+# Include tcl's bitmaps in interface to reduce clutter (from git)
+# Use tclsh (from git)
+# Remove liboggflac autoconf clutter, as it has been merged into flac
+# since FLAC-1.1.3
 for patch in $CWD/patches/* ; do
   patch -p1 < $patch
 done
 
 # Regenerate files for automake/autoconf.
-# This removes much of the cruft in Debian's patch set.
+# Required for --docdir
 autoreconf
-
-# Uncomment /etc/timidity.cfg as the default config file location
-sed -i "s|/\* #define CONFIG_FILE \"/etc/timidity.cfg\" \*/|#define CONFIG_FILE \"/etc/timidity.cfg\"|" timidity/timidity.h
 
 EXTRACFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -89,22 +96,23 @@ EXTRACFLAGS="$SLKCFLAGS" \
   --infodir=/usr/info \
   --mandir=/usr/man \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --with-module-dir=/usr/lib${LIBDIRSUFFIX}/timidity \
   --enable-audio=${ENABLE_AUDIO} \
   --enable-dynamic=${ENABLE_DYNAMIC} \
   --enable-alsaseq \
   --enable-server \
   --enable-network \
   --enable-spectrogram \
+  --enable-xdnd \
+  --with-default-path=/etc \
+  --with-module-dir=/usr/lib${LIBDIRSUFFIX}/timidity \
+  --with-xaw-resource-prefix=/etc/X11 \
+  --with-xawlib=${WITH_XAW} \
   --build=$ARCH-slackware-linux
 
 make
 make install-strip DESTDIR=$PKG
 
-( cd $PKG/usr/man
-  find . -type f -exec gzip -9 {} \;
-  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
-)
+find $PKG/usr/man -type f -exec gzip -9 {} \;
 
 # Create a default timidity.cfg
 # TiMidity++ will complain if this file is missing.
@@ -112,6 +120,10 @@ mkdir -p $PKG/etc
 cat > $PKG/etc/timidity.cfg.new << EOF
 # This is the default configuration file for TiMidity++.
 # See timidity.cfg(5) for details.
+trysource /etc/timidity/crude.cfg
+trysource /etc/timidity/freepats.cfg
+trysource /etc/timidity/eawpats.cfg
+trysource /etc/timidity/fluid.cfg
 EOF
 
 # Copy the startup script
