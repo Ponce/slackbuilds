@@ -1,0 +1,100 @@
+#!/bin/sh
+# rc.etherpad-lite 
+# Initscript that manages an instance of etherpad-Lite running on Slackware Linux. 
+#
+# Author: Luke Williams ( xocel@iquidus.org )
+# License: WTFPL <http://sam.zoy.org/wtfpl/COPYING>
+
+USER="etherpad"
+HOMEDIR="/var/etherpad-lite"
+LOGDIR="/var/log/etherpad-lite"
+PIDFILE="/var/run/etherpad-lite.pid"
+
+etherpad_start() {
+  echo "Starting Etherpad lite..."
+  # Launch etherpads run.sh script
+  /bin/su -l -c "$HOMEDIR/bin/run.sh -s /etc/etherpad-lite/settings.json >> $LOGDIR/etherpad.log 2>> $LOGDIR/error.log &" $USER 
+  # Determine and store PID. In order for this to work sucessfully
+  # the node.js server needs to have finished launching, normally 
+  # waiting 5 seconds is enough but in some situations (first launch
+  # after install for example) it can take a while longer. 
+  PID='' # Process ID
+  COUNT=0 # Count attempts at determining the Process ID
+  TIMEOUT=9 # Number of failed attempts before exiting, default:9 (9x5=45seconds)
+  while [ -z "$PID" ]; do
+  	# We don't want anyones boot process hanging here if this 
+  	# script is started on boot and etherpad is unable to lanuch.
+  	# So exit out if etherpad appears to be failing to start. 
+  	if [ $COUNT -eq $TIMEOUT ]; then
+  		echo "Unable to start Etherpad lite.."
+  		cat $LOGDIR/etherpad.log | tail -n 5
+  		rm -f "$PIDFILE"
+  		exit 1
+  	fi
+  	# Wait for node.js server to start up
+  	sleep 5
+  	# Store the PID
+  	ps ax | grep [s]erver.js | awk '{print $1}' > "$PIDFILE"
+  	# Check PID was written
+  	PID=`cat $PIDFILE 2>/dev/null`
+  	COUNT=$(($COUNT+1))
+  done
+  echo "Running."
+}
+
+etherpad_stop() {
+	echo "Stopping Etherpad lite..."
+	PID=`cat $PIDFILE 2>/dev/null`
+	if [ -z "$PID" ]; then
+	    echo " not running."
+	elif kill -15 $PID; then
+	    echo " stopped."
+	    rm -f "$PIDFILE"
+	else
+	    sleep 1
+	    if kill -9 $PID; then
+	      	echo " killed."
+	      	rm -f "$PIDFILE"
+	    else
+	      	echo " error!"
+	    	exit 1
+	    fi
+	fi
+}
+
+etherpad_status() {
+	PID=`cat $PIDFILE 2>/dev/null`
+  	if [ -z "$PID" ]; then
+    	echo "Not running."
+    	exit 1
+  	elif kill -0 $PID; then
+    	echo "Running."
+    	exit 0
+  	else
+    	echo "PID file $PIDFILE present but PID $PID is not running."
+    	exit 1
+  	fi
+}
+
+case "$1" in
+start)
+		etherpad_start
+	;;
+
+	stop)
+		etherpad_stop
+	;;
+
+	restart)
+		etherpad_stop
+		sleep 3
+		etherpad_start
+	;;
+
+	status)
+		etherpad_status
+	;;
+
+	*)
+	echo "Usage  $0 (start|stop|restart|status)"
+esac
