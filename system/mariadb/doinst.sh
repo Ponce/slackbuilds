@@ -24,6 +24,7 @@ preserve_perms() {
 
 preserve_perms etc/rc.d/rc.mysqld.new
 config etc/mysqlaccess.conf.new
+config etc/logrotate.d/mysql.new
 config etc/my.cnf.new
 config etc/my.cnf.d/client.cnf.new
 config etc/my.cnf.d/mysql-clients.cnf.new
