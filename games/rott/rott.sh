@@ -2,6 +2,9 @@
 
 # Wrapper script for Rise of the Triad, by B. Watson
 
+# Figures out which rott binary to execute, based on which
+# game data files are installed.
+
 DATADIR=/usr/share/games/rott
 CDROMFILE=$DATADIR/ROTTCD.RTC
 REGFILE=$DATADIR/DARKWAR.WAD
