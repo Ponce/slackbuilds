@@ -1,0 +1,95 @@
+#!/bin/sh
+# rc.openfire 
+# Initscript that manages an instance of openfire running on Slackware Linux. 
+# Assembled by Matteo Bernardini <ponce@slackbuilds.org>
+
+OPENFIRE_USER="openfire"
+OPENFIRE_HOME="/opt/openfire"
+OPENFIRE_PIDFILE="/var/run/openfire.pid"
+
+JAVACMD="$JAVA_HOME/bin/java"
+
+if [ ! -d "$JAVA_HOME" -o ! -x "$JAVACMD" ]; then
+  echo "Error: JAVA_HOME is not defined correctly."
+  echo "       Can not sure execute $JAVACMD."
+  exit 1
+fi
+
+# Set logs location
+OPENFIRE_LOGDIR="/var/log/openfire"
+
+# Prepare location of openfire libraries
+OPENFIRE_LIB="$OPENFIRE_HOME/lib"
+
+# Prepare openfire command line
+OPENFIRE_OPTS="-DopenfireHome=$OPENFIRE_HOME -Dopenfire.lib.dir=$OPENFIRE_LIB"
+
+# Prepare local java class path
+if [ -z "$LOCALCLASSPATH" ]; then
+  LOCALCLASSPATH="$OPENFIRE_LIB/startup.jar"
+else
+  LOCALCLASSPATH="$OPENFIRE_LIB/startup.jar:$LOCALCLASSPATH"
+fi
+
+# Export any necessary variables
+export JAVA_HOME JAVACMD
+
+# Lastly, prepare the full command that we are going to run.
+OPENFIRE_RUN_CMD="$JAVACMD -server $OPENFIRE_OPTS -classpath \"$LOCALCLASSPATH\" -jar \"$OPENFIRE_LIB/startup.jar\""
+
+openfire_start() {
+  echo "Starting Openfire..."
+  [ -f "$OPENFIRE_PIDFILE" ] && echo "openfire is already running. If it's not, remove $OPENFIRE_PIDFILE and retry." && exit 1
+  # Launch openfire
+  su - $OPENFIRE_USER -c "cd $OPENFIRE_LOGDIR ; nohup $OPENFIRE_RUN_CMD > $OPENFIRE_LOGDIR/nohup.out 2>&1 &"
+  sleep 3
+  # Store the pid
+  ps ax | grep 'java\ \-server' | awk '{print $1}' > $OPENFIRE_PIDFILE
+  echo "Running."
+}
+
+openfire_stop() {
+  echo "Stopping Openfire..."
+  [ -f "$OPENFIRE_PIDFILE" ] && kill $(cat $OPENFIRE_PIDFILE)
+  RETVAL=$?
+  [ $RETVAL -eq 0 -a -f "$OPENFIRE_PIDFILE" ] && rm -f $OPENFIRE_PIDFILE
+  echo "Stopped."
+}
+
+openfire_status() {
+  PID=$(cat $OPENFIRE_PIDFILE 2>&1)
+  if [ "$?" = "1" ]; then
+    echo "openfire is not running"
+    RETVAL=3
+  else
+    ps -p $PID > /dev/null 2>&1
+    if [ "$?" = "0" ]; then
+      echo "openfire is running"
+      RETVAL=0
+    else
+      echo "openfire is not running"
+      RETVAL=1
+    fi
+  fi
+}
+
+case "$1" in
+  start)
+    openfire_start
+    ;;
+  stop)
+    openfire_stop
+    ;;
+  restart)
+    openfire_stop
+    sleep 10
+    openfire_start
+    ;;
+  status)
+    openfire_status
+    ;;
+  *)
+    echo "Usage  $0 (start|stop|restart|status)"
+esac
+
+exit 0
