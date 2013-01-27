@@ -3,33 +3,7 @@
 # Slackware build script for dansguardian
 # http://dansguardian.org
 #
-# Parts of this SlackBuild are directly copied from 
-#   http://www.slackware.com/~alien/slackbuilds/dansguardian/
-# and are:
-#
-# Copyright (c) 2006-2008 Eric Hameleers <alien@slackware.com>
-# All rights reserved.
-#
-#   Permission to use, copy, modify, and distribute this software for
-#   any purpose with or without fee is hereby granted, provided that
-#   the above copyright notice and this permission notice appear in all
-#   copies.
-#
-#   THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESSED OR IMPLIED
-#   WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-#   MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-#   IN NO EVENT SHALL THE AUTHORS AND COPYRIGHT HOLDERS AND THEIR
-#   CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-#   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-#   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
-#   USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-#   ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-#   OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
-#   OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
-#   SUCH DAMAGE.
-#
-# All other are
-# Copyright 2006-2010  David Somero (dsomero@hotmail.com) Athens,TN USA
+# Copyright 2006-2013 David Somero (dsomero@hotmail.com) Athens,TN USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -50,16 +24,14 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=dansguardian
-VERSION=${VERSION:-2.10.1.1}
+VERSION=${VERSION:-2.12.0.3}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-# Automatically determine the architecture we're building on:
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
     i?86) ARCH=i486 ;;
     arm*) ARCH=arm ;;
-    # Unless $ARCH is already set, use uname -m for all other archs:
        *) ARCH=$( uname -m ) ;;
   esac
 fi
@@ -98,13 +70,13 @@ else
   LIBDIRSUFFIX=""
 fi
 
-set -e 
+set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find . \
@@ -113,8 +85,8 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-# Fix building with gcc4.4.
-patch -p1 < $CWD/dansguardian-2.10.1.1-gcc44.patch
+# http://sourceforge.net/p/dansguardian/patches/12/
+patch -p3 < $CWD/dg.maxuploadsize.patch
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -138,59 +110,29 @@ CXXFLAGS="$SLKCFLAGS" \
 make
 make install DESTDIR=$PKG
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-( cd $PKG/usr/man
-  find . -type f -exec gzip -9 {} \;
-  for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-)
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a COPYING INSTALL README $PKG/usr/doc/$PRGNAM-$VERSION
-
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-
-mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
-cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 mkdir -p $PKG/etc/{rc.d,logrotate.d}
 cat $PKG/usr/share/dansguardian/scripts/systemv-init > $PKG/etc/rc.d/rc.dansguardian
 
-# Note that the .new file left hanging around in /etc/logrotate.d/ will
-# probably/surely make cron'd logrotations fail, but not installing it
-# as .new here will clobber a potentially custom file.  Therefore, the
-# choice is either *we* do bad things, or the *user* screws up.  
-# This one's easy  ;-)  --rworkman
 cat $PKG/usr/share/dansguardian/scripts/dansguardian \
   > $PKG/etc/logrotate.d/dansguardian
 chown ${PROXY_USR}:${PROXY_GRP} $PKG/var/log/dansguardian
 
 # Find config files and add the .new.
-# Used by the next block of code.
-get_config_files() {
-  for i in $(ls -1 $1); do
-    if [ -d "$1/$i" ]; then
-      get_config_files "$1/$i"
-    else
-      echo -n "$1/$i.new " | sed -e "s/^$(echo $PKG | sed -e 's/\//\\\//g')\///g"
-      mv "$1/$i" "$1/$i.new"
-    fi
-  done
-}
+for FILE in $(find $PKG/etc -type f); do mv $FILE $FILE.new; done
 
-# Finish the doinst.sh by adding the .new file list and config loop
-if [ -e $PKG/etc ]; then 
-  etc_files=$(get_config_files $PKG/etc)
-
-cat <<DOINST >> $PKG/install/doinst.sh
-for FILE in $etc_files
-do
-  config \$FILE
-done
-DOINST
-fi
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
