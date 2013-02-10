@@ -23,3 +23,4 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.pcscd.new
+
