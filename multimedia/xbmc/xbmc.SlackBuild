@@ -2,7 +2,7 @@
 
 # Slackware build script for XBMC
 
-# Copyright 2009-2012 Larry Hajali <larryhaja[at]gmail[dot]com>
+# Copyright 2009-2013 Larry Hajali <larryhaja[at]gmail[dot]com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,7 +23,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=xbmc
-VERSION=11.0
+VERSION=${VERSION:-12.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -62,6 +62,8 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
+tar xvf $CWD/taglib-1.8.tar.gz
+tar xvf $CWD/$PRGNAM-pvr-addons-$VERSION-Frodo.tar.gz || tar xvf $CWD/$VERSION-Frodo.tar.gz
 chown -R root:root .
 find . \
  \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
@@ -69,13 +71,9 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-# Let's get rid of the lsb_release dependency. May not be needed for 11.0.
-sed -i 's|lsb_release -d|cat /etc/slackware-version|' \
-  xbmc/utils/SystemInfo.cpp
-
-# Fix for non-sse2 cpu's.
-if ! grep 'sse2' /proc/cpuinfo 2>&1 > /dev/null; then
-  patch -p1 < $CWD/patches/non-sse2-cpu.patch
+# Fix for sse2 cpu's.
+if grep 'sse2' /proc/cpuinfo 2>&1 > /dev/null; then
+  patch -p1 < $CWD/patches/sse2.patch
 fi
 
 # Patch for building against rtmpdump. Only needed if xbmc fails to build
@@ -83,12 +81,17 @@ fi
 # http://slaxbmc.blogspot.com/2011/03/23-install-xbmc-from-source.html
 patch -p1 < $CWD/patches/xbmc-rtmpdump-build.patch
 
+# Hack for using afpfs-ng.
+cat lib/afpfs-ng/fix_afpfs-ng_includes.patch | head -1336 | tail -1172 | patch -p1
+AFPFS_NGFLAGS="-I$PWD/include"
+
 # Build external ffmpeg.
-if [ "${EXT_FFMPEG:-no}" == "yes" ]; then
+if [ "${FFMPEG:-no}" == "yes" ]; then
   OPT_DEPS="--enable-external-ffmpeg"
-  patch -p1 < $CWD/patches/system-includes.patch
+  OPT_DEPS_ADDONS="--enable-external-ffmpeg"
 else
   OPT_DEPS="--disable-external-ffmpeg"
+  OPT_DEPS_ADDONS="--disable-external-ffmpeg"
 fi
 
 # Build webserver. Requires libmicrohttpd.
@@ -98,8 +101,50 @@ else
   OPT_DEPS="$OPT_DEPS --disable-webserver"
 fi
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
+# Use pulseaudio.
+if [ "${PULSE:-no}" == "yes" ]; then
+  OPT_DEPS="$OPT_DEPS --enable-pulse"
+fi
+
+# XBMC requires taglib >= 1.8. Slackware 14.0 comes with taglib 1.7.2.
+# We are going to build a static version of taglib for XBMC.
+cd taglib-1.8
+  cmake -G "Unix Makefiles" \
+    -DCMAKE_INSTALL_PREFIX:PATH=/usr \
+    -DENABLE_STATIC=ON \
+    -DLIB_SUFFIX="${LIBDIRSUFFIX}" \
+    -DWITH_MP4=ON \
+    -DWITH_ASF=ON \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_BUILD_TYPE=Release .
+
+  make VERBOSE=1
+  make install DESTDIR=$PWD
+cd ..
+
+# Build the pvr addons.
+cd $PRGNAM-pvr-addons-$VERSION-Frodo
+  ./bootstrap
+  CFLAGS="$SLKCFLAGS $AFPFS_NGFLAGS" \
+  CXXFLAGS="$SLKCFLAGS $AFPFS_NGFLAGS" \
+  ./configure \
+    --prefix=/usr \
+    --libdir=/usr/lib${LIBDIRSUFFIX}/xbmc/addons \
+    $OPT_DEPS_ADDONS \
+    --enable-release \
+    --enable-addons-with-dependencies=yes \
+    --docdir=/usr/doc/$PRGNAM-$VERSION \
+    --build=$ARCH-slackware-linux
+
+    make
+cd ..
+
+TAGLIB_CFLAGS="-I$PWD/taglib-1.8/usr/include" \
+TAGLIB_LIBS="-L$PWD/taglib-1.8/usr/lib${LIBDIRSUFFIX} -ltag" \
+LDFLAGS="-L$PWD/taglib-1.8/usr/lib${LIBDIRSUFFIX} -ltag" \
+CFLAGS="$SLKCFLAGS $AFPFS_NGFLAGS" \
+CXXFLAGS="$SLKCFLAGS $AFPFS_NGFLAGS" \
 ./configure \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
@@ -111,6 +156,7 @@ CXXFLAGS="$SLKCFLAGS" \
   --enable-mid \
   --enable-goom \
   --enable-ffmpeg-libvorbis \
+  --enable-alsa \
   --disable-asap-codec \
   $OPT_DEPS \
   --enable-external-libraries \
@@ -119,11 +165,19 @@ CXXFLAGS="$SLKCFLAGS" \
 make
 
 # Wii controller usage. Default is no.
-if ! [ "${USE_WII:-no}" = "no" ]; then
+if ! [ "${WII:-no}" = "no" ]; then
+  # SBO comes with latest release version of CWIID, which is 5 years old.
+  # Two options have been deactivated because they are not available in
+  # release version of cwiid.
+  patch -p1 < $CWD/patches/cwiid-old-api.patch
   make eventclients DESTDIR=$PKG WII_EXTRA_OPTS="-DCWIID_OLD"
+  find $PKG/usr/lib${LIBDIRSUFFIX}/python* -iname "*\.py" -exec chmod 0644 '{}' \;
 fi
 
 make install DESTDIR=$PKG
+
+# Remove *.in files from the pvr addons.
+find $PKG -name "*\.in" -exec rm -f '{}' \;
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -136,14 +190,16 @@ do
   install -m 0644 docs/manpages/$i $PKG/usr/man/man1/$i
 done
 
-if ! [ "${USE_WII:-no}" = "no" ]; then
+if ! [ "${WII:-no}" = "no" ]; then
   for i in xbmc-j2meremote.1 xbmc-ps3remote.1 xbmc-wiiremote.1; do
     install -m 0644 docs/manpages/$i $PKG/usr/man/man1/$i
   done
 fi
 gzip -9 $PKG/usr/man/man?/*.?
 
-cp -a tools/EventClients/README.txt $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  tools/EventClients/README.txt $PRGNAM-pvr-addons-$VERSION-Frodo/COPYING \
+  $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 rm -f $PKG/usr/share/xbmc/{README.linux,LICENSE.GPL,*.txt}
 
