@@ -1,0 +1,71 @@
+#!/bin/bash
+
+# 20130220: lit2epub by B. Watson (part of convertlit slackbuilds.org build)
+# Licensed under the WTFPL.
+
+# Wrapper script for convertlit, zips up convertlit's output dir
+# and cleans it up afterward. Leave the shebang line alone, this
+# uses at least one bash-specific feature.
+
+NAME=$( basename $0 )
+TMP=${TMP:-/tmp}
+OUTDIR=$TMP/$NAME.$$.$RANDOM
+
+set -e
+
+if [ "$1" = "" -o "$1" = "--help" -o "$1" = "-h" ]; then
+  cat <<EOF
+$NAME - convert a DRM1 .lit file to .epub
+
+Usage: $NAME input.lit [ output.epub ]
+
+Default output file is written to the current directory, named after the
+input filename with the .lit or .LIT extension changed to .epub, or the
+input filename with .epub appended, if there is no .lit extension.
+
+Use - for the output file, to output to stdout.
+
+Exit status is 0 on success, non-zero on failure.
+
+If you need to convert a non-DRM1 .lit file, use convertlit to downconvert
+to DRM1 first.
+EOF
+  exit 0
+fi
+
+INFILE="$1"
+case "$INFILE" in
+  *.lit) EXT=.lit ;;
+  *.LIT) EXT=.LIT ;;
+  *) EXT="" ;;
+esac
+
+trap "rm -rf \"$OUTDIR\"" EXIT ERR
+
+# All this rigamarole with dirname/basename/readlink needed because we run
+# zip from within our temp directory.
+if [ "$2" = "" ]; then
+  OUTFILE="$( pwd )/$( basename "$INFILE" $EXT ).epub"
+  if [ -e "$OUTFILE" ]; then
+    echo "$NAME: $OUTFILE already exists, aborting" 1>&2
+    exit 1
+  fi
+elif [ "$2" = "-" ]; then
+  OUTFILE="$OUTDIR/output.epub"
+else
+  OUTFILE="$( readlink -f "$OUTFILE" )"
+fi
+
+# convertlit and zip both want to spew status messages to stdout,
+# redirect to stderr so we can output just the .epub to stdout.
+convertlit -d "$INFILE" "$OUTDIR"/ 1>&2
+( cd "$OUTDIR" ; zip -r "$OUTFILE" * 1>&2 )
+
+if [ "$2" = "-" ]; then
+  cat "$OUTFILE"
+  OUTFILE="(standard output)"
+fi
+
+echo 1>&2
+echo "$INFILE => $OUTFILE" 1>&2
+exit 0
