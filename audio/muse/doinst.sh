@@ -1,10 +1,4 @@
-setcap cap_ipc_lock,cap_sys_nice=ep /usr/bin/muse
-
-if grep GROUP\=\"audio\" /lib/udev/rules.d/65-permissions.rules > /dev/null; then
-  echo > /dev/null
-else
-  sed '/^KERNEL=="rtc\|rtc0"/s!$! , GROUP="audio"!' -i /lib/udev/rules.d/65-permissions.rules
-fi
+setcap cap_ipc_lock,cap_sys_nice=ep /usr/bin/muse 2>/dev/null
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
