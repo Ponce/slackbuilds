@@ -6,7 +6,7 @@ config() {
     mv $NEW $OLD
   elif [ "$(cat $OLD | md5sum)" = "$(cat $NEW | md5sum)" ]; then
     # toss the redundant copy
-     rm $NEW
+    rm $NEW
   fi
   # Otherwise, we leave the .new copy for the admin to consider...
 }
