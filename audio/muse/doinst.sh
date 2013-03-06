@@ -1,4 +1,4 @@
-setcap cap_ipc_lock,cap_sys_nice=ep /usr/bin/muse 2>/dev/null
+setcap cap_ipc_lock,cap_sys_nice=ep /usr/bin/muse2 2>/dev/null
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
