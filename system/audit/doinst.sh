@@ -23,7 +23,7 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.auditd.new
-config etc/rc.d/rc.auditd.conf.new
+preserve_perms etc/rc.d/rc.auditd.conf.new
 config etc/audit/audit.rules.new
 config etc/audit/auditd.conf.new
 config etc/audisp/audispd.conf.new
@@ -33,4 +33,4 @@ config etc/audisp/plugins.d/au-remote.conf.new
 config etc/audisp/plugins.d/audispd-zos-remote.conf.new
 config etc/audisp/plugins.d/syslog.conf.new
 config etc/audisp/audisp-remote.conf.new
-
+config etc/libaudit.conf.new
