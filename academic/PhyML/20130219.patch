@@ -1,0 +1,1519 @@
+Common subdirectories: ./phyml-20120412/src/.deps and ./phyml-20120412-new-bak/src/.deps
+diff -uN ./phyml-20120412/src/help.c ./phyml-20120412-new-bak/src/help.c
+--- ./phyml-20120412/src/help.c	2011-09-22 14:51:57.000000000 +1200
++++ ./phyml-20120412-new-bak/src/help.c	2013-02-18 21:51:51.448662440 +1300
+@@ -96,7 +96,7 @@
+   PhyML_Printf("\n");
+ 
+   
+-  PhyML_Printf("%s\n\t-q (or --sequential)\n",BOLD);
++  PhyML_Printf("%s\n\t-q (or --sequential)%s\n",BOLD,FLAT);
+   PhyML_Printf("%s\t\tChanges interleaved format (default) to sequential format.\n",FLAT);
+   PhyML_Printf("\n");
+ 
+diff -uN ./phyml-20120412/src/lk.c ./phyml-20120412-new-bak/src/lk.c
+--- ./phyml-20120412/src/lk.c	2012-04-05 14:47:37.000000000 +1200
++++ ./phyml-20120412-new-bak/src/lk.c	2013-02-19 10:22:22.665284529 +1300
+@@ -472,7 +472,7 @@
+   phydbl site_lk_cat, site_lk;
+   int sum_scale_left, sum_scale_rght;
+   int fact_sum_scale;
+-  phydbl max_sum_scale;
++  phydbl max_sum_scale,min_sum_scale;
+   phydbl sum;
+   int ambiguity_check,state;
+   int catg,ns,k,l,site;
+@@ -481,11 +481,12 @@
+   phydbl multiplier;
+   int exponent, piecewise_exponent;
+   phydbl tmp;
+-  phydbl logbig;
++  phydbl logbig,logsmall;
+   phydbl inv_site_lk;
+ 
+ 
+-  logbig = LOG((phydbl)BIG);
++  logbig   = LOG((phydbl)BIG);
++  logsmall = LOG((phydbl)SMALL);
+ 
+   dim1 = tree->mod->n_catg * tree->mod->ns;
+   dim2 = tree->mod->ns;
+@@ -555,7 +556,7 @@
+                             b->Pij_rr[catg*dim3+k*dim2+l] *
+                             b->p_lk_left[site*dim1+catg*dim2+l];
+                         }
+-
++		      
+                       site_lk_cat +=
+                         sum *
+                         tree->mod->pi->v[k] *
+@@ -578,7 +579,7 @@
+                         b->Pij_rr[catg*dim3+k*dim2+l] *
+                         b->p_lk_left[site*dim1+catg*dim2+l];
+                     }
+-
++		  
+                   site_lk_cat +=
+                     sum *
+                     tree->mod->pi->v[k] *
+@@ -588,8 +589,9 @@
+ 	}
+       tree->site_lk_cat[catg] = site_lk_cat;
+     }
+-    
++
+   max_sum_scale =  (phydbl)BIG;
++  min_sum_scale =  (phydbl)SMALL;
+   For(catg,tree->mod->n_catg)
+     {
+       sum_scale_left_cat[catg] =
+@@ -606,18 +608,30 @@
+ 
+       if(sum < .0)
+ 	{
+-	  PhyML_Printf("\n. sum = %G",sum);
+-	  PhyML_Printf("\n. Err in file %s at line %d\n\n",__FILE__,__LINE__);
++	  PhyML_Printf("\n== sum = %G",sum);
++	  PhyML_Printf("\n== Err in file %s at line %d\n\n",__FILE__,__LINE__);
+ 	  Warn_And_Exit("\n");
+ 	}
+ 
+       tmp = sum + (logbig - LOG(tree->site_lk_cat[catg]))/(phydbl)LOG2;
+       if(tmp < max_sum_scale) max_sum_scale = tmp; /* min of the maxs */
++
++      tmp = sum + (logsmall - LOG(tree->site_lk_cat[catg]))/(phydbl)LOG2;
++      if(tmp > min_sum_scale) min_sum_scale = tmp; /* max of the mins */
+     }
+ 
+-/*   fact_sum_scale = (int)((max_sum_scale + min_sum_scale) / 2); */
++  if(min_sum_scale > max_sum_scale)
++    {
++      /* PhyML_Printf("\n== Numerical precision issue alert."); */
++      /* PhyML_Printf("\n== min_sum_scale = %G max_sum_scale = %G",min_sum_scale,max_sum_scale); */
++      /* PhyML_Printf("\n== Err in file %s at line %d\n\n",__FILE__,__LINE__); */
++      /* Warn_And_Exit("\n"); */
++      min_sum_scale = max_sum_scale;
++    }
++
++  fact_sum_scale = (int)((max_sum_scale + min_sum_scale) / 2);
+ 
+-  fact_sum_scale = (int)(max_sum_scale / 2);
++  /* fact_sum_scale = (int)(max_sum_scale / 2); */
+ 
+   /* Apply scaling factors */
+   For(catg,tree->mod->n_catg)
+@@ -651,12 +665,13 @@
+ 
+       if(isinf(site_lk_cat))
+ 	{
+-	  PhyML_Printf("\n+ site=%4d cat=%4d site_lk_cat=%G sum_scale=%d max=%G fact=%d expo=%d dbl=%G",
++	  PhyML_Printf("\n+ site=%4d cat=%4d site_lk_cat=%G sum_scale=%d max=%G min=%G fact=%d expo=%d dbl=%G",
+ 		       tree->curr_site,
+ 		       catg,
+ 		       tree->site_lk_cat[catg],
+ 		       sum_scale_left_cat[catg]+sum_scale_rght_cat[catg],
+ 		       max_sum_scale,
++		       min_sum_scale,
+ 		       fact_sum_scale,
+ 		       -(sum_scale_left_cat[catg]+sum_scale_rght_cat[catg])+fact_sum_scale,
+ 		       (double)tree->site_lk_cat[catg] * pow(2.,-(sum_scale_left_cat[catg]+sum_scale_rght_cat[catg])+fact_sum_scale));
+@@ -678,13 +693,11 @@
+ 			   fact_sum_scale,
+ 			   -(sum_scale_left_cat[catg]+sum_scale_rght_cat[catg])+fact_sum_scale,
+ 			   (double)tree->site_lk_cat[catg] * pow(2.,-(sum_scale_left_cat[catg]+sum_scale_rght_cat[catg])+fact_sum_scale));
+-
++	      
+ 	      Exit("\n");
+ 	    }
+-
+ 	  site_lk_cat = .0;
+ 	}
+-
+       tree->site_lk_cat[catg] = site_lk_cat;
+     }
+ 
+@@ -694,6 +707,24 @@
+       site_lk += tree->site_lk_cat[catg] * tree->mod->gamma_r_proba->v[catg];
+     }
+ 
++  if(isinf(site_lk))
++    {
++      PhyML_Printf("\n= Site = %d",site);
++      PhyML_Printf("\n= invar = %d",tree->data->invar[site]);
++      PhyML_Printf("\n= scale_left = %d scale_rght = %d",sum_scale_left,sum_scale_rght);
++      PhyML_Printf("\n= lk = %G log(lk) = %f < %G",site_lk,log_site_lk,-BIG);
++      PhyML_Printf("\n= fact_sum_scale = %d",fact_sum_scale);
++      For(catg,tree->mod->n_catg) PhyML_Printf("\n. rr=%f p=%f lk=%G expo=%d",
++					       tree->mod->gamma_rr->v[catg],
++					       tree->mod->gamma_r_proba->v[catg],
++					       tree->site_lk_cat[catg],
++					       -(sum_scale_left_cat[catg]+sum_scale_rght_cat[catg])+fact_sum_scale);
++      PhyML_Printf("\n= pinv = %G",tree->mod->pinvar->v);
++      PhyML_Printf("\n= bl mult = %G",tree->mod->br_len_multiplier->v);
++      PhyML_Printf("\n. Err in file %s at line %d",__FILE__,__LINE__);
++      Warn_And_Exit("\n");
++    }
++
+ 
+   inv_site_lk = 0.;
+   
+@@ -741,19 +772,22 @@
+ 
+   log_site_lk = LOG(site_lk) - (phydbl)LOG2 * fact_sum_scale;
+ 
+-
+   For(catg,tree->mod->n_catg) tree->log_site_lk_cat[catg][site] = LOG(tree->site_lk_cat[catg]) - (phydbl)LOG2 * fact_sum_scale;
+   
+   if(isinf(log_site_lk) || isnan(log_site_lk))
+     {
+-      PhyML_Printf("\n. Site = %d",site);
+-      PhyML_Printf("\n. invar = %d",tree->data->invar[site]);
+-      PhyML_Printf("\n. scale_left = %d scale_rght = %d",sum_scale_left,sum_scale_rght);
+-      PhyML_Printf("\n. inv_site_lk = %f",inv_site_lk);
+-      PhyML_Printf("\n. Lk = %G LOG(Lk) = %f < %G",site_lk,log_site_lk,-BIG);
+-      For(catg,tree->mod->n_catg) PhyML_Printf("\n. rr=%f p=%f",tree->mod->gamma_rr->v[catg],tree->mod->gamma_r_proba->v[catg]);
+-      PhyML_Printf("\n. pinv = %G",tree->mod->pinvar->v);
+-      PhyML_Printf("\n. bl mult = %G",tree->mod->br_len_multiplier->v);
++      PhyML_Printf("\n= Site = %d",site);
++      PhyML_Printf("\n= invar = %d",tree->data->invar[site]);
++      PhyML_Printf("\n= scale_left = %d scale_rght = %d",sum_scale_left,sum_scale_rght);
++      PhyML_Printf("\n= inv_site_lk = %f",inv_site_lk);
++      PhyML_Printf("\n= lk = %G log(lk) = %f < %G",site_lk,log_site_lk,-BIG);
++      For(catg,tree->mod->n_catg) PhyML_Printf("\n. rr=%f p=%f lk=%G",
++					       tree->mod->gamma_rr->v[catg],
++					       tree->mod->gamma_r_proba->v[catg],
++					       tree->site_lk_cat[catg]);
++      PhyML_Printf("\n= pinv = %G",tree->mod->pinvar->v);
++      PhyML_Printf("\n= bl mult = %G",tree->mod->br_len_multiplier->v);
++      PhyML_Printf("\n= fact_sum_scale = %d",fact_sum_scale);
+ 
+       /* int i; */
+       /* For(i,2*tree->n_otu-3) */
+@@ -802,6 +836,7 @@
+     Alias_One_Subpatt((d==b->left)?(b->rght):(b->left),d,tree);
+ 
+   if(d->tax) return;
++
+   
+   if(tree->mod->use_m4mod == NO)
+     {
+@@ -813,6 +848,10 @@
+ 	{
+ 	  Update_P_Lk_AA(tree,b,d);
+ 	}
++      else
++        {
++	  Update_P_Lk_Generic(tree,b,d);
++        }
+     }
+   else
+     {
+@@ -1044,7 +1083,7 @@
+ 		  
+ 		  p_lk[site*NsNg+catg*Ns+i] = p1_lk1 * p2_lk2;
+ 		  
+-		  /* 	      PhyML_Printf("\n+ %G",p_lk[site*NsNg+catg*Ns+i]); */
++                  /* PhyML_Printf("\n+ %G",p_lk[site*NsNg+catg*Ns+i]); */
+ 		  
+ 		  if(p_lk[site*NsNg+catg*Ns+i] < smallest_p_lk) smallest_p_lk = p_lk[site*NsNg+catg*Ns+i] ;
+ 		}
+diff -uN ./phyml-20120412/src/Makefile ./phyml-20120412-new-bak/src/Makefile
+--- ./phyml-20120412/src/Makefile	1970-01-01 12:00:00.000000000 +1200
++++ ./phyml-20120412-new-bak/src/Makefile	2013-02-18 21:54:46.957806553 +1300
+@@ -0,0 +1,1082 @@
++# Makefile.in generated by automake 1.11.1 from Makefile.am.
++# src/Makefile.  Generated from Makefile.in by configure.
++
++# Copyright (C) 1994, 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002,
++# 2003, 2004, 2005, 2006, 2007, 2008, 2009  Free Software Foundation,
++# Inc.
++# This Makefile.in is free software; the Free Software Foundation
++# gives unlimited permission to copy and/or distribute it,
++# with or without modifications, as long as this notice is preserved.
++
++# This program is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY, to the extent permitted by law; without
++# even the implied warranty of MERCHANTABILITY or FITNESS FOR A
++# PARTICULAR PURPOSE.
++
++
++
++
++pkgdatadir = $(datadir)/phyml
++pkgincludedir = $(includedir)/phyml
++pkglibdir = $(libdir)/phyml
++pkglibexecdir = $(libexecdir)/phyml
++am__cd = CDPATH="$${ZSH_VERSION+.}$(PATH_SEPARATOR)" && cd
++install_sh_DATA = $(install_sh) -c -m 644
++install_sh_PROGRAM = $(install_sh) -c
++install_sh_SCRIPT = $(install_sh) -c
++INSTALL_HEADER = $(INSTALL_DATA)
++transform = $(program_transform_name)
++NORMAL_INSTALL = :
++PRE_INSTALL = :
++POST_INSTALL = :
++NORMAL_UNINSTALL = :
++PRE_UNINSTALL = :
++POST_UNINSTALL = :
++build_triplet = x86_64-unknown-linux-gnu
++host_triplet = x86_64-unknown-linux-gnu
++bin_PROGRAMS = phyml$(EXEEXT)
++#bin_PROGRAMS = test$(EXEEXT)
++#bin_PROGRAMS = phyml-mpi$(EXEEXT)
++#bin_PROGRAMS = rf$(EXEEXT)
++#bin_PROGRAMS = m4$(EXEEXT)
++#bin_PROGRAMS = tiporder$(EXEEXT)
++#bin_PROGRAMS = part$(EXEEXT)
++#bin_PROGRAMS =  \
++#	phycont$(EXEEXT)
++#bin_PROGRAMS = phytime$(EXEEXT)
++subdir = src
++DIST_COMMON = $(srcdir)/Makefile.am $(srcdir)/Makefile.in
++ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
++am__aclocal_m4_deps = $(top_srcdir)/configure.ac
++am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
++	$(ACLOCAL_M4)
++mkinstalldirs = $(install_sh) -d
++CONFIG_HEADER = $(top_builddir)/config.h
++CONFIG_CLEAN_FILES =
++CONFIG_CLEAN_VPATH_FILES =
++am__installdirs = "$(DESTDIR)$(bindir)"
++PROGRAMS = $(bin_PROGRAMS)
++am__m4_SOURCES_DIST = main.c utilities.c utilities.h optimiz.c \
++	optimiz.h lk.c lk.h bionj.c bionj.h models.c models.h free.c \
++	free.h help.c help.h simu.c simu.h eigen.c eigen.h pars.c \
++	pars.h alrt.c alrt.h interface.c interface.h cl.c cl.h mg.c \
++	mg.h times.c times.h mcmc.c mcmc.h rates.c rates.h spr.c spr.h \
++	draw.c draw.h stats.c stats.h tiporder.c tiporder.h m4.c m4.h
++#am_m4_OBJECTS = main.$(OBJEXT) \
++#	utilities.$(OBJEXT) \
++#	optimiz.$(OBJEXT) \
++#	lk.$(OBJEXT) \
++#	bionj.$(OBJEXT) \
++#	models.$(OBJEXT) \
++#	free.$(OBJEXT) \
++#	help.$(OBJEXT) \
++#	simu.$(OBJEXT) \
++#	eigen.$(OBJEXT) \
++#	pars.$(OBJEXT) \
++#	alrt.$(OBJEXT) \
++#	interface.$(OBJEXT) \
++#	cl.$(OBJEXT) \
++#	mg.$(OBJEXT) \
++#	times.$(OBJEXT) \
++#	mcmc.$(OBJEXT) \
++#	rates.$(OBJEXT) \
++#	spr.$(OBJEXT) \
++#	draw.$(OBJEXT) \
++#	stats.$(OBJEXT) \
++#	tiporder.$(OBJEXT) \
++#	m4.$(OBJEXT)
++m4_OBJECTS = $(am_m4_OBJECTS)
++m4_DEPENDENCIES =
++am__part_SOURCES_DIST = main.c utilities.c utilities.h optimiz.c \
++	optimiz.h lk.c lk.h bionj.c bionj.h models.c models.h free.c \
++	free.h help.c help.h simu.c simu.h eigen.c eigen.h pars.c \
++	pars.h alrt.c alrt.h interface.c interface.h cl.c cl.h mg.c \
++	mg.h spr.c spr.h m4.c m4.h draw.c draw.h stats.c stats.h \
++	tiporder.c tiporder.h
++#am_part_OBJECTS = main.$(OBJEXT) \
++#	utilities.$(OBJEXT) \
++#	optimiz.$(OBJEXT) \
++#	lk.$(OBJEXT) \
++#	bionj.$(OBJEXT) \
++#	models.$(OBJEXT) \
++#	free.$(OBJEXT) \
++#	help.$(OBJEXT) \
++#	simu.$(OBJEXT) \
++#	eigen.$(OBJEXT) \
++#	pars.$(OBJEXT) \
++#	alrt.$(OBJEXT) \
++#	interface.$(OBJEXT) \
++#	cl.$(OBJEXT) \
++#	mg.$(OBJEXT) \
++#	spr.$(OBJEXT) \
++#	m4.$(OBJEXT) \
++#	draw.$(OBJEXT) \
++#	stats.$(OBJEXT) \
++#	tiporder.$(OBJEXT)
++part_OBJECTS = $(am_part_OBJECTS)
++part_DEPENDENCIES =
++am__phycont_SOURCES_DIST = main.c utilities.c utilities.h optimiz.c \
++	optimiz.h lk.c lk.h bionj.c bionj.h models.c models.h free.c \
++	free.h help.c help.h simu.c simu.h eigen.c eigen.h pars.c \
++	pars.h alrt.c alrt.h interface.c interface.h cl.c cl.h spr.c \
++	spr.h times.c times.h m4.c m4.h draw.c draw.h rates.c rates.h \
++	mcmc.c mcmc.h stats.c stats.h mg.c mg.h tiporder.c tiporder.h
++#am_phycont_OBJECTS =  \
++#	main.$(OBJEXT) \
++#	utilities.$(OBJEXT) \
++#	optimiz.$(OBJEXT) \
++#	lk.$(OBJEXT) \
++#	bionj.$(OBJEXT) \
++#	models.$(OBJEXT) \
++#	free.$(OBJEXT) \
++#	help.$(OBJEXT) \
++#	simu.$(OBJEXT) \
++#	eigen.$(OBJEXT) \
++#	pars.$(OBJEXT) \
++#	alrt.$(OBJEXT) \
++#	interface.$(OBJEXT) \
++#	cl.$(OBJEXT) \
++#	spr.$(OBJEXT) \
++#	times.$(OBJEXT) \
++#	m4.$(OBJEXT) \
++#	draw.$(OBJEXT) \
++#	rates.$(OBJEXT) \
++#	mcmc.$(OBJEXT) \
++#	stats.$(OBJEXT) \
++#	mg.$(OBJEXT) \
++#	tiporder.$(OBJEXT)
++phycont_OBJECTS = $(am_phycont_OBJECTS)
++phycont_DEPENDENCIES =
++am__phyml_SOURCES_DIST = main.c utilities.c utilities.h optimiz.c \
++	optimiz.h lk.c lk.h bionj.c bionj.h models.c models.h free.c \
++	free.h help.c help.h simu.c simu.h eigen.c eigen.h pars.c \
++	pars.h alrt.c alrt.h interface.c interface.h cl.c cl.h spr.c \
++	spr.h draw.c draw.h stats.c stats.h rates.c rates.h mcmc.c \
++	mcmc.h times.c times.h tiporder.c tiporder.h mg.c mg.h m4.c \
++	m4.h
++am_phyml_OBJECTS = main.$(OBJEXT) \
++	utilities.$(OBJEXT) \
++	optimiz.$(OBJEXT) \
++	lk.$(OBJEXT) \
++	bionj.$(OBJEXT) \
++	models.$(OBJEXT) \
++	free.$(OBJEXT) \
++	help.$(OBJEXT) \
++	simu.$(OBJEXT) \
++	eigen.$(OBJEXT) \
++	pars.$(OBJEXT) \
++	alrt.$(OBJEXT) \
++	interface.$(OBJEXT) \
++	cl.$(OBJEXT) \
++	spr.$(OBJEXT) \
++	draw.$(OBJEXT) \
++	stats.$(OBJEXT) \
++	rates.$(OBJEXT) \
++	mcmc.$(OBJEXT) \
++	times.$(OBJEXT) \
++	tiporder.$(OBJEXT) \
++	mg.$(OBJEXT) \
++	m4.$(OBJEXT)
++phyml_OBJECTS = $(am_phyml_OBJECTS)
++phyml_DEPENDENCIES =
++am__phyml_mpi_SOURCES_DIST = main.c utilities.c utilities.h optimiz.c \
++	optimiz.h lk.c lk.h bionj.c bionj.h models.c models.h free.c \
++	free.h help.c help.h simu.c simu.h eigen.c eigen.h pars.c \
++	pars.h alrt.c alrt.h interface.c interface.h cl.c cl.h spr.c \
++	spr.h draw.c draw.h mpi_boot.c mpi_boot.h stats.c stats.h \
++	rates.c rates.h mcmc.c mcmc.h times.c times.h tiporder.c \
++	tiporder.h mg.c mg.h m4.c m4.h xml.c xml.h
++#am_phyml_mpi_OBJECTS = main.$(OBJEXT) \
++#	utilities.$(OBJEXT) \
++#	optimiz.$(OBJEXT) \
++#	lk.$(OBJEXT) \
++#	bionj.$(OBJEXT) \
++#	models.$(OBJEXT) \
++#	free.$(OBJEXT) \
++#	help.$(OBJEXT) \
++#	simu.$(OBJEXT) \
++#	eigen.$(OBJEXT) \
++#	pars.$(OBJEXT) \
++#	alrt.$(OBJEXT) \
++#	interface.$(OBJEXT) \
++#	cl.$(OBJEXT) \
++#	spr.$(OBJEXT) \
++#	draw.$(OBJEXT) \
++#	mpi_boot.$(OBJEXT) \
++#	stats.$(OBJEXT) \
++#	rates.$(OBJEXT) \
++#	mcmc.$(OBJEXT) \
++#	times.$(OBJEXT) \
++#	tiporder.$(OBJEXT) \
++#	mg.$(OBJEXT) \
++#	m4.$(OBJEXT) \
++#	xml.$(OBJEXT)
++phyml_mpi_OBJECTS = $(am_phyml_mpi_OBJECTS)
++phyml_mpi_DEPENDENCIES =
++am__phytime_SOURCES_DIST = main.c utilities.c utilities.h optimiz.c \
++	optimiz.h lk.c lk.h bionj.c bionj.h models.c models.h free.c \
++	free.h help.c help.h simu.c simu.h eigen.c eigen.h pars.c \
++	pars.h alrt.c alrt.h interface.c interface.h cl.c cl.h spr.c \
++	spr.h times.c times.h m4.c m4.h draw.c draw.h rates.c rates.h \
++	mcmc.c mcmc.h stats.c stats.h mg.c mg.h tiporder.c tiporder.h
++#am_phytime_OBJECTS = main.$(OBJEXT) \
++#	utilities.$(OBJEXT) optimiz.$(OBJEXT) \
++#	lk.$(OBJEXT) bionj.$(OBJEXT) \
++#	models.$(OBJEXT) free.$(OBJEXT) \
++#	help.$(OBJEXT) simu.$(OBJEXT) \
++#	eigen.$(OBJEXT) pars.$(OBJEXT) \
++#	alrt.$(OBJEXT) interface.$(OBJEXT) \
++#	cl.$(OBJEXT) spr.$(OBJEXT) times.$(OBJEXT) \
++#	m4.$(OBJEXT) draw.$(OBJEXT) rates.$(OBJEXT) \
++#	mcmc.$(OBJEXT) stats.$(OBJEXT) mg.$(OBJEXT) \
++#	tiporder.$(OBJEXT)
++phytime_OBJECTS = $(am_phytime_OBJECTS)
++phytime_DEPENDENCIES =
++am__rf_SOURCES_DIST = main.c utilities.c utilities.h optimiz.c \
++	optimiz.h lk.c lk.h bionj.c bionj.h models.c models.h free.c \
++	free.h help.c help.h simu.c simu.h eigen.c eigen.h pars.c \
++	pars.h alrt.c alrt.h interface.c interface.h cl.c cl.h mg.c \
++	mg.h times.c times.h mcmc.c mcmc.h rates.c rates.h spr.c spr.h \
++	draw.c draw.h stats.c stats.h tiporder.c tiporder.h m4.c m4.h
++#am_rf_OBJECTS = main.$(OBJEXT) \
++#	utilities.$(OBJEXT) \
++#	optimiz.$(OBJEXT) \
++#	lk.$(OBJEXT) \
++#	bionj.$(OBJEXT) \
++#	models.$(OBJEXT) \
++#	free.$(OBJEXT) \
++#	help.$(OBJEXT) \
++#	simu.$(OBJEXT) \
++#	eigen.$(OBJEXT) \
++#	pars.$(OBJEXT) \
++#	alrt.$(OBJEXT) \
++#	interface.$(OBJEXT) \
++#	cl.$(OBJEXT) \
++#	mg.$(OBJEXT) \
++#	times.$(OBJEXT) \
++#	mcmc.$(OBJEXT) \
++#	rates.$(OBJEXT) \
++#	spr.$(OBJEXT) \
++#	draw.$(OBJEXT) \
++#	stats.$(OBJEXT) \
++#	tiporder.$(OBJEXT) \
++#	m4.$(OBJEXT)
++rf_OBJECTS = $(am_rf_OBJECTS)
++rf_DEPENDENCIES =
++am__test_SOURCES_DIST = main.c utilities.c utilities.h optimiz.c \
++	optimiz.h lk.c lk.h bionj.c bionj.h models.c models.h free.c \
++	free.h help.c help.h simu.c simu.h eigen.c eigen.h pars.c \
++	pars.h alrt.c alrt.h interface.c interface.h cl.c cl.h spr.c \
++	spr.h draw.c draw.h stats.c stats.h rates.c rates.h mcmc.c \
++	mcmc.h times.c times.h tiporder.c tiporder.h mg.c mg.h m4.c \
++	m4.h xml.c xml.h
++#am_test_OBJECTS = main.$(OBJEXT) \
++#	utilities.$(OBJEXT) \
++#	optimiz.$(OBJEXT) \
++#	lk.$(OBJEXT) \
++#	bionj.$(OBJEXT) \
++#	models.$(OBJEXT) \
++#	free.$(OBJEXT) \
++#	help.$(OBJEXT) \
++#	simu.$(OBJEXT) \
++#	eigen.$(OBJEXT) \
++#	pars.$(OBJEXT) \
++#	alrt.$(OBJEXT) \
++#	interface.$(OBJEXT) \
++#	cl.$(OBJEXT) \
++#	spr.$(OBJEXT) \
++#	draw.$(OBJEXT) \
++#	stats.$(OBJEXT) \
++#	rates.$(OBJEXT) \
++#	mcmc.$(OBJEXT) \
++#	times.$(OBJEXT) \
++#	tiporder.$(OBJEXT) \
++#	mg.$(OBJEXT) \
++#	m4.$(OBJEXT) \
++#	xml.$(OBJEXT)
++test_OBJECTS = $(am_test_OBJECTS)
++test_DEPENDENCIES =
++am__tiporder_SOURCES_DIST = main.c utilities.c utilities.h optimiz.c \
++	optimiz.h lk.c lk.h bionj.c bionj.h models.c models.h free.c \
++	free.h help.c help.h simu.c simu.h eigen.c eigen.h pars.c \
++	pars.h alrt.c alrt.h interface.c interface.h cl.c cl.h mg.c \
++	mg.h times.c times.h mcmc.c mcmc.h rates.c rates.h spr.c spr.h \
++	m4.c m4.h draw.c draw.h stats.c stats.h tiporder.c tiporder.h
++#am_tiporder_OBJECTS = main.$(OBJEXT) \
++#	utilities.$(OBJEXT) \
++#	optimiz.$(OBJEXT) \
++#	lk.$(OBJEXT) \
++#	bionj.$(OBJEXT) \
++#	models.$(OBJEXT) \
++#	free.$(OBJEXT) \
++#	help.$(OBJEXT) \
++#	simu.$(OBJEXT) \
++#	eigen.$(OBJEXT) \
++#	pars.$(OBJEXT) \
++#	alrt.$(OBJEXT) \
++#	interface.$(OBJEXT) \
++#	cl.$(OBJEXT) \
++#	mg.$(OBJEXT) \
++#	times.$(OBJEXT) \
++#	mcmc.$(OBJEXT) \
++#	rates.$(OBJEXT) \
++#	spr.$(OBJEXT) \
++#	m4.$(OBJEXT) \
++#	draw.$(OBJEXT) \
++#	stats.$(OBJEXT) \
++#	tiporder.$(OBJEXT)
++tiporder_OBJECTS = $(am_tiporder_OBJECTS)
++tiporder_DEPENDENCIES =
++DEFAULT_INCLUDES = -I. -I$(top_builddir)
++depcomp = $(SHELL) $(top_srcdir)/depcomp
++am__depfiles_maybe = depfiles
++am__mv = mv -f
++COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
++	$(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
++AM_V_CC = $(am__v_CC_$(V))
++am__v_CC_ = $(am__v_CC_$(AM_DEFAULT_VERBOSITY))
++am__v_CC_0 = @echo "  CC    " $@;
++AM_V_at = $(am__v_at_$(V))
++am__v_at_ = $(am__v_at_$(AM_DEFAULT_VERBOSITY))
++am__v_at_0 = @
++CCLD = $(CC)
++LINK = $(CCLD) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@
++AM_V_CCLD = $(am__v_CCLD_$(V))
++am__v_CCLD_ = $(am__v_CCLD_$(AM_DEFAULT_VERBOSITY))
++am__v_CCLD_0 = @echo "  CCLD  " $@;
++AM_V_GEN = $(am__v_GEN_$(V))
++am__v_GEN_ = $(am__v_GEN_$(AM_DEFAULT_VERBOSITY))
++am__v_GEN_0 = @echo "  GEN   " $@;
++SOURCES = $(m4_SOURCES) $(part_SOURCES) $(phycont_SOURCES) \
++	$(phyml_SOURCES) $(phyml_mpi_SOURCES) $(phytime_SOURCES) \
++	$(rf_SOURCES) $(test_SOURCES) $(tiporder_SOURCES)
++DIST_SOURCES = $(am__m4_SOURCES_DIST) $(am__part_SOURCES_DIST) \
++	$(am__phycont_SOURCES_DIST) $(am__phyml_SOURCES_DIST) \
++	$(am__phyml_mpi_SOURCES_DIST) $(am__phytime_SOURCES_DIST) \
++	$(am__rf_SOURCES_DIST) $(am__test_SOURCES_DIST) \
++	$(am__tiporder_SOURCES_DIST)
++ETAGS = etags
++CTAGS = ctags
++DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
++ACLOCAL = ${SHELL} /home/guindon/Downloads/phyml-20120412/missing --run aclocal-1.11
++AMTAR = ${SHELL} /home/guindon/Downloads/phyml-20120412/missing --run tar
++AM_DEFAULT_VERBOSITY = 1
++AUTOCONF = ${SHELL} /home/guindon/Downloads/phyml-20120412/missing --run autoconf
++AUTOHEADER = ${SHELL} /home/guindon/Downloads/phyml-20120412/missing --run autoheader
++AUTOMAKE = ${SHELL} /home/guindon/Downloads/phyml-20120412/missing --run automake-1.11
++AWK = gawk
++CC = gcc
++CCDEPMODE = depmode=gcc3
++CFLAGS = -ansi -pedantic -Wall -std=c99 -O0 -g
++CPP = gcc -E
++CPPFLAGS = 
++CYGPATH_W = echo
++DEFS = $(REVISION)
++DEPDIR = .deps
++ECHO_C = 
++ECHO_N = -n
++ECHO_T = 
++EGREP = /usr/bin/grep -E
++EXEEXT = 
++GREP = /usr/bin/grep
++INSTALL = /usr/bin/install -c
++INSTALL_DATA = ${INSTALL} -m 644
++INSTALL_PROGRAM = ${INSTALL}
++INSTALL_SCRIPT = ${INSTALL}
++INSTALL_STRIP_PROGRAM = $(install_sh) -c -s
++LDFLAGS = 
++LIBOBJS = 
++LIBS = -lm 
++LTLIBOBJS = 
++MAKEINFO = ${SHELL} /home/guindon/Downloads/phyml-20120412/missing --run makeinfo
++MKDIR_P = /usr/bin/mkdir -p
++OBJEXT = o
++PACKAGE = phyml
++PACKAGE_BUGREPORT = s.guindon@auckland.ac.nz
++PACKAGE_NAME = PhyML
++PACKAGE_STRING = PhyML 20120412
++PACKAGE_TARNAME = phyml
++PACKAGE_URL = 
++PACKAGE_VERSION = 20120412
++PATH_SEPARATOR = :
++SET_MAKE = 
++SHELL = /bin/sh
++STRIP = 
++VERSION = 20120412
++abs_builddir = /home/guindon/Downloads/phyml-20120412/src
++abs_srcdir = /home/guindon/Downloads/phyml-20120412/src
++abs_top_builddir = /home/guindon/Downloads/phyml-20120412
++abs_top_srcdir = /home/guindon/Downloads/phyml-20120412
++ac_ct_CC = gcc
++am__include = include
++am__leading_dot = .
++am__quote = 
++am__tar = ${AMTAR} chof - "$$tardir"
++am__untar = ${AMTAR} xf -
++bindir = ${exec_prefix}/bin
++build = x86_64-unknown-linux-gnu
++build_alias = 
++build_cpu = x86_64
++build_os = linux-gnu
++build_vendor = unknown
++builddir = .
++datadir = ${datarootdir}
++datarootdir = ${prefix}/share
++docdir = ${datarootdir}/doc/${PACKAGE_TARNAME}
++dvidir = ${docdir}
++exec_prefix = ${prefix}
++host = x86_64-unknown-linux-gnu
++host_alias = 
++host_cpu = x86_64
++host_os = linux-gnu
++host_vendor = unknown
++htmldir = ${docdir}
++includedir = ${prefix}/include
++infodir = ${datarootdir}/info
++install_sh = ${SHELL} /home/guindon/Downloads/phyml-20120412/install-sh
++libdir = ${exec_prefix}/lib
++libexecdir = ${exec_prefix}/libexec
++localedir = ${datarootdir}/locale
++localstatedir = ${prefix}/var
++mandir = ${datarootdir}/man
++mkdir_p = /usr/bin/mkdir -p
++oldincludedir = /usr/include
++pdfdir = ${docdir}
++prefix = /usr/local
++program_transform_name = s,x,x,
++psdir = ${docdir}
++sbindir = ${exec_prefix}/sbin
++sharedstatedir = ${prefix}/com
++srcdir = .
++sysconfdir = ${prefix}/etc
++target_alias = 
++top_build_prefix = ../
++top_builddir = ..
++top_srcdir = ..
++PROG = PHYML
++#PROG = TEST
++#PROG = PHYML
++#PROG = RF
++#PROG = M4
++#PROG = TIPORDER
++#PROG = RWRAP
++#PROG = PART
++#PROG = PHYCONT
++#PROG = PHYTIME
++#phytime_SOURCES = main.c \
++#utilities.c utilities.h\
++#optimiz.c optimiz.h\
++#lk.c lk.h\
++#bionj.c bionj.h\
++#models.c models.h\
++#free.c free.h\
++#help.c help.h\
++#simu.c simu.h\
++#eigen.c eigen.h\
++#pars.c pars.h\
++#alrt.c alrt.h\
++#interface.c interface.h\
++#cl.c cl.h\
++#spr.c spr.h\
++#times.c times.h\
++#m4.c m4.h\
++#draw.c draw.h\
++#rates.c rates.h\
++#mcmc.c mcmc.h\
++#stats.c stats.h\
++#mg.c mg.h\
++#tiporder.c tiporder.h
++
++#phytime_LDADD = -lm
++#phycont_SOURCES = main.c \
++#utilities.c utilities.h\
++#optimiz.c optimiz.h\
++#lk.c lk.h\
++#bionj.c bionj.h\
++#models.c models.h\
++#free.c free.h\
++#help.c help.h\
++#simu.c simu.h\
++#eigen.c eigen.h\
++#pars.c pars.h\
++#alrt.c alrt.h\
++#interface.c interface.h\
++#cl.c cl.h\
++#spr.c spr.h\
++#times.c times.h\
++#m4.c m4.h\
++#draw.c draw.h\
++#rates.c rates.h\
++#mcmc.c mcmc.h\
++#stats.c stats.h\
++#mg.c mg.h\
++#tiporder.c tiporder.h
++
++# continuous.c continuous.h
++#phycont_LDADD = -lm
++# if WANT_RWRAP
++# lib_LTLIBRARIES = librwrap.la
++# librwrap_la_SOURCES = main.c \
++# utilities.c utilities.h\
++# optimiz.c optimiz.h\
++# lk.c lk.h\
++# bionj.c bionj.h\
++# models.c models.h\
++# free.c free.h\
++# help.c help.h\
++# simu.c simu.h\
++# eigen.c eigen.h\
++# pars.c pars.h\
++# alrt.c alrt.h\
++# interface.c interface.h\
++# cl.c cl.h\
++# mg.c mg.h\
++# spr.c spr.h\
++# m4.c m4.h\
++# draw.c draw.h\
++# mcmc.c mcmc.h\
++# stats.c stats.h\
++# times.c times.h\
++# tiporder.c tiporder.h\
++# rates.c rates.h\
++# rwrapper.c rwrapper.h
++# librwrap_la_LIBADD = -lm
++# librwrap_la_LDFLAGS = -I/Library/Frameworks/R.framework/Resources/include -I/Library/Frameworks/R.framework/Resources/include/i386 -I/usr/local/include -flat_namespace -undefined suppress -shared -module
++# librwrap_la_CFLAGS=-std=gnu99 -fPIC
++# else 
++#part_SOURCES = main.c \
++#utilities.c utilities.h\
++#optimiz.c optimiz.h\
++#lk.c lk.h\
++#bionj.c bionj.h\
++#models.c models.h\
++#free.c free.h\
++#help.c help.h\
++#simu.c simu.h\
++#eigen.c eigen.h\
++#pars.c pars.h\
++#alrt.c alrt.h\
++#interface.c interface.h\
++#cl.c cl.h\
++#mg.c mg.h\
++#spr.c spr.h\
++#m4.c m4.h\
++#draw.c draw.h\
++#stats.c stats.h\
++#tiporder.c tiporder.h
++
++#part_LDADD = -lm
++#tiporder_SOURCES = main.c \
++#utilities.c utilities.h\
++#optimiz.c optimiz.h\
++#lk.c lk.h\
++#bionj.c bionj.h\
++#models.c models.h\
++#free.c free.h\
++#help.c help.h\
++#simu.c simu.h\
++#eigen.c eigen.h\
++#pars.c pars.h\
++#alrt.c alrt.h\
++#interface.c interface.h\
++#cl.c cl.h\
++#mg.c mg.h\
++#times.c times.h\
++#mcmc.c mcmc.h\
++#rates.c rates.h\
++#spr.c spr.h\
++#m4.c m4.h\
++#draw.c draw.h\
++#stats.c stats.h\
++#tiporder.c tiporder.h
++
++#tiporder_LDADD = -lm
++#m4_SOURCES = main.c \
++#utilities.c utilities.h\
++#optimiz.c optimiz.h\
++#lk.c lk.h\
++#bionj.c bionj.h\
++#models.c models.h\
++#free.c free.h\
++#help.c help.h\
++#simu.c simu.h\
++#eigen.c eigen.h\
++#pars.c pars.h\
++#alrt.c alrt.h\
++#interface.c interface.h\
++#cl.c cl.h\
++#mg.c mg.h\
++#times.c times.h\
++#mcmc.c mcmc.h\
++#rates.c rates.h\
++#spr.c spr.h\
++#draw.c draw.h\
++#stats.c stats.h\
++#tiporder.c tiporder.h\
++#m4.c m4.h
++
++#m4_LDADD = -lm
++#rf_SOURCES = main.c \
++#utilities.c utilities.h\
++#optimiz.c optimiz.h\
++#lk.c lk.h\
++#bionj.c bionj.h\
++#models.c models.h\
++#free.c free.h\
++#help.c help.h\
++#simu.c simu.h\
++#eigen.c eigen.h\
++#pars.c pars.h\
++#alrt.c alrt.h\
++#interface.c interface.h\
++#cl.c cl.h\
++#mg.c mg.h\
++#times.c times.h\
++#mcmc.c mcmc.h\
++#rates.c rates.h\
++#spr.c spr.h\
++#draw.c draw.h\
++#stats.c stats.h\
++#tiporder.c tiporder.h\
++#m4.c m4.h
++
++#rf_LDADD = -lm
++#phyml_mpi_SOURCES = main.c \
++#utilities.c  utilities.h\
++#optimiz.c  optimiz.h\
++#lk.c  lk.h\
++#bionj.c bionj.h\
++#models.c  models.h\
++#free.c  free.h\
++#help.c  help.h\
++#simu.c  simu.h\
++#eigen.c  eigen.h\
++#pars.c  pars.h\
++#alrt.c  alrt.h\
++#interface.c  interface.h\
++#cl.c  cl.h\
++#spr.c spr.h\
++#draw.c  draw.h\
++#mpi_boot.c  mpi_boot.h\
++#stats.c stats.h\
++#rates.c rates.h\
++#mcmc.c mcmc.h\
++#times.c times.h\
++#tiporder.c tiporder.h\
++#mg.c mg.h\
++#m4.c m4.h\
++#xml.c xml.h
++
++#phyml_mpi_LDADD = -lm
++#test_SOURCES = main.c \
++#utilities.c  utilities.h\
++#optimiz.c  optimiz.h\
++#lk.c  lk.h\
++#bionj.c bionj.h\
++#models.c  models.h\
++#free.c  free.h\
++#help.c  help.h\
++#simu.c  simu.h\
++#eigen.c  eigen.h\
++#pars.c  pars.h\
++#alrt.c  alrt.h\
++#interface.c  interface.h\
++#cl.c  cl.h\
++#spr.c spr.h\
++#draw.c  draw.h\
++#stats.c stats.h\
++#rates.c rates.h\
++#mcmc.c mcmc.h\
++#times.c times.h\
++#tiporder.c tiporder.h\
++#mg.c mg.h\
++#m4.c m4.h\
++#xml.c xml.h
++
++#test_LDADD = -lm
++phyml_SOURCES = main.c \
++utilities.c  utilities.h\
++optimiz.c  optimiz.h\
++lk.c  lk.h\
++bionj.c bionj.h\
++models.c  models.h\
++free.c  free.h\
++help.c  help.h\
++simu.c  simu.h\
++eigen.c  eigen.h\
++pars.c  pars.h\
++alrt.c  alrt.h\
++interface.c  interface.h\
++cl.c  cl.h\
++spr.c spr.h\
++draw.c  draw.h\
++stats.c stats.h\
++rates.c rates.h\
++mcmc.c mcmc.h\
++times.c times.h\
++tiporder.c tiporder.h\
++mg.c mg.h\
++m4.c m4.h
++
++phyml_LDADD = -lm 
++all: all-am
++
++.SUFFIXES:
++.SUFFIXES: .c .o .obj
++$(srcdir)/Makefile.in:  $(srcdir)/Makefile.am  $(am__configure_deps)
++	@for dep in $?; do \
++	  case '$(am__configure_deps)' in \
++	    *$$dep*) \
++	      ( cd $(top_builddir) && $(MAKE) $(AM_MAKEFLAGS) am--refresh ) \
++	        && { if test -f $@; then exit 0; else break; fi; }; \
++	      exit 1;; \
++	  esac; \
++	done; \
++	echo ' cd $(top_srcdir) && $(AUTOMAKE) --foreign src/Makefile'; \
++	$(am__cd) $(top_srcdir) && \
++	  $(AUTOMAKE) --foreign src/Makefile
++.PRECIOUS: Makefile
++Makefile: $(srcdir)/Makefile.in $(top_builddir)/config.status
++	@case '$?' in \
++	  *config.status*) \
++	    cd $(top_builddir) && $(MAKE) $(AM_MAKEFLAGS) am--refresh;; \
++	  *) \
++	    echo ' cd $(top_builddir) && $(SHELL) ./config.status $(subdir)/$@ $(am__depfiles_maybe)'; \
++	    cd $(top_builddir) && $(SHELL) ./config.status $(subdir)/$@ $(am__depfiles_maybe);; \
++	esac;
++
++$(top_builddir)/config.status: $(top_srcdir)/configure $(CONFIG_STATUS_DEPENDENCIES)
++	cd $(top_builddir) && $(MAKE) $(AM_MAKEFLAGS) am--refresh
++
++$(top_srcdir)/configure:  $(am__configure_deps)
++	cd $(top_builddir) && $(MAKE) $(AM_MAKEFLAGS) am--refresh
++$(ACLOCAL_M4):  $(am__aclocal_m4_deps)
++	cd $(top_builddir) && $(MAKE) $(AM_MAKEFLAGS) am--refresh
++$(am__aclocal_m4_deps):
++install-binPROGRAMS: $(bin_PROGRAMS)
++	@$(NORMAL_INSTALL)
++	test -z "$(bindir)" || $(MKDIR_P) "$(DESTDIR)$(bindir)"
++	@list='$(bin_PROGRAMS)'; test -n "$(bindir)" || list=; \
++	for p in $$list; do echo "$$p $$p"; done | \
++	sed 's/$(EXEEXT)$$//' | \
++	while read p p1; do if test -f $$p; \
++	  then echo "$$p"; echo "$$p"; else :; fi; \
++	done | \
++	sed -e 'p;s,.*/,,;n;h' -e 's|.*|.|' \
++	    -e 'p;x;s,.*/,,;s/$(EXEEXT)$$//;$(transform);s/$$/$(EXEEXT)/' | \
++	sed 'N;N;N;s,\n, ,g' | \
++	$(AWK) 'BEGIN { files["."] = ""; dirs["."] = 1 } \
++	  { d=$$3; if (dirs[d] != 1) { print "d", d; dirs[d] = 1 } \
++	    if ($$2 == $$4) files[d] = files[d] " " $$1; \
++	    else { print "f", $$3 "/" $$4, $$1; } } \
++	  END { for (d in files) print "f", d, files[d] }' | \
++	while read type dir files; do \
++	    if test "$$dir" = .; then dir=; else dir=/$$dir; fi; \
++	    test -z "$$files" || { \
++	      echo " $(INSTALL_PROGRAM_ENV) $(INSTALL_PROGRAM) $$files '$(DESTDIR)$(bindir)$$dir'"; \
++	      $(INSTALL_PROGRAM_ENV) $(INSTALL_PROGRAM) $$files "$(DESTDIR)$(bindir)$$dir" || exit $$?; \
++	    } \
++	; done
++
++uninstall-binPROGRAMS:
++	@$(NORMAL_UNINSTALL)
++	@list='$(bin_PROGRAMS)'; test -n "$(bindir)" || list=; \
++	files=`for p in $$list; do echo "$$p"; done | \
++	  sed -e 'h;s,^.*/,,;s/$(EXEEXT)$$//;$(transform)' \
++	      -e 's/$$/$(EXEEXT)/' `; \
++	test -n "$$list" || exit 0; \
++	echo " ( cd '$(DESTDIR)$(bindir)' && rm -f" $$files ")"; \
++	cd "$(DESTDIR)$(bindir)" && rm -f $$files
++
++clean-binPROGRAMS:
++	-test -z "$(bin_PROGRAMS)" || rm -f $(bin_PROGRAMS)
++m4$(EXEEXT): $(m4_OBJECTS) $(m4_DEPENDENCIES) 
++	@rm -f m4$(EXEEXT)
++	$(AM_V_CCLD)$(LINK) $(m4_OBJECTS) $(m4_LDADD) $(LIBS)
++part$(EXEEXT): $(part_OBJECTS) $(part_DEPENDENCIES) 
++	@rm -f part$(EXEEXT)
++	$(AM_V_CCLD)$(LINK) $(part_OBJECTS) $(part_LDADD) $(LIBS)
++phycont$(EXEEXT): $(phycont_OBJECTS) $(phycont_DEPENDENCIES) 
++	@rm -f phycont$(EXEEXT)
++	$(AM_V_CCLD)$(LINK) $(phycont_OBJECTS) $(phycont_LDADD) $(LIBS)
++phyml$(EXEEXT): $(phyml_OBJECTS) $(phyml_DEPENDENCIES) 
++	@rm -f phyml$(EXEEXT)
++	$(AM_V_CCLD)$(LINK) $(phyml_OBJECTS) $(phyml_LDADD) $(LIBS)
++phyml-mpi$(EXEEXT): $(phyml_mpi_OBJECTS) $(phyml_mpi_DEPENDENCIES) 
++	@rm -f phyml-mpi$(EXEEXT)
++	$(AM_V_CCLD)$(LINK) $(phyml_mpi_OBJECTS) $(phyml_mpi_LDADD) $(LIBS)
++phytime$(EXEEXT): $(phytime_OBJECTS) $(phytime_DEPENDENCIES) 
++	@rm -f phytime$(EXEEXT)
++	$(AM_V_CCLD)$(LINK) $(phytime_OBJECTS) $(phytime_LDADD) $(LIBS)
++rf$(EXEEXT): $(rf_OBJECTS) $(rf_DEPENDENCIES) 
++	@rm -f rf$(EXEEXT)
++	$(AM_V_CCLD)$(LINK) $(rf_OBJECTS) $(rf_LDADD) $(LIBS)
++test$(EXEEXT): $(test_OBJECTS) $(test_DEPENDENCIES) 
++	@rm -f test$(EXEEXT)
++	$(AM_V_CCLD)$(LINK) $(test_OBJECTS) $(test_LDADD) $(LIBS)
++tiporder$(EXEEXT): $(tiporder_OBJECTS) $(tiporder_DEPENDENCIES) 
++	@rm -f tiporder$(EXEEXT)
++	$(AM_V_CCLD)$(LINK) $(tiporder_OBJECTS) $(tiporder_LDADD) $(LIBS)
++
++mostlyclean-compile:
++	-rm -f *.$(OBJEXT)
++
++distclean-compile:
++	-rm -f *.tab.c
++
++include ./$(DEPDIR)/alrt.Po
++include ./$(DEPDIR)/bionj.Po
++include ./$(DEPDIR)/cl.Po
++include ./$(DEPDIR)/draw.Po
++include ./$(DEPDIR)/eigen.Po
++include ./$(DEPDIR)/free.Po
++include ./$(DEPDIR)/help.Po
++include ./$(DEPDIR)/interface.Po
++include ./$(DEPDIR)/lk.Po
++include ./$(DEPDIR)/m4.Po
++include ./$(DEPDIR)/main.Po
++include ./$(DEPDIR)/mcmc.Po
++include ./$(DEPDIR)/mg.Po
++include ./$(DEPDIR)/models.Po
++include ./$(DEPDIR)/mpi_boot.Po
++include ./$(DEPDIR)/optimiz.Po
++include ./$(DEPDIR)/pars.Po
++include ./$(DEPDIR)/rates.Po
++include ./$(DEPDIR)/simu.Po
++include ./$(DEPDIR)/spr.Po
++include ./$(DEPDIR)/stats.Po
++include ./$(DEPDIR)/times.Po
++include ./$(DEPDIR)/tiporder.Po
++include ./$(DEPDIR)/utilities.Po
++include ./$(DEPDIR)/xml.Po
++
++.c.o:
++	$(AM_V_CC)$(COMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ $<
++	$(AM_V_at)$(am__mv) $(DEPDIR)/$*.Tpo $(DEPDIR)/$*.Po
++#	$(AM_V_CC) \
++#	source='$<' object='$@' libtool=no \
++#	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) \
++#	$(COMPILE) -c $<
++
++.c.obj:
++	$(AM_V_CC)$(COMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ `$(CYGPATH_W) '$<'`
++	$(AM_V_at)$(am__mv) $(DEPDIR)/$*.Tpo $(DEPDIR)/$*.Po
++#	$(AM_V_CC) \
++#	source='$<' object='$@' libtool=no \
++#	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) \
++#	$(COMPILE) -c `$(CYGPATH_W) '$<'`
++
++ID: $(HEADERS) $(SOURCES) $(LISP) $(TAGS_FILES)
++	list='$(SOURCES) $(HEADERS) $(LISP) $(TAGS_FILES)'; \
++	unique=`for i in $$list; do \
++	    if test -f "$$i"; then echo $$i; else echo $(srcdir)/$$i; fi; \
++	  done | \
++	  $(AWK) '{ files[$$0] = 1; nonempty = 1; } \
++	      END { if (nonempty) { for (i in files) print i; }; }'`; \
++	mkid -fID $$unique
++tags: TAGS
++
++TAGS:  $(HEADERS) $(SOURCES)  $(TAGS_DEPENDENCIES) \
++		$(TAGS_FILES) $(LISP)
++	set x; \
++	here=`pwd`; \
++	list='$(SOURCES) $(HEADERS)  $(LISP) $(TAGS_FILES)'; \
++	unique=`for i in $$list; do \
++	    if test -f "$$i"; then echo $$i; else echo $(srcdir)/$$i; fi; \
++	  done | \
++	  $(AWK) '{ files[$$0] = 1; nonempty = 1; } \
++	      END { if (nonempty) { for (i in files) print i; }; }'`; \
++	shift; \
++	if test -z "$(ETAGS_ARGS)$$*$$unique"; then :; else \
++	  test -n "$$unique" || unique=$$empty_fix; \
++	  if test $$# -gt 0; then \
++	    $(ETAGS) $(ETAGSFLAGS) $(AM_ETAGSFLAGS) $(ETAGS_ARGS) \
++	      "$$@" $$unique; \
++	  else \
++	    $(ETAGS) $(ETAGSFLAGS) $(AM_ETAGSFLAGS) $(ETAGS_ARGS) \
++	      $$unique; \
++	  fi; \
++	fi
++ctags: CTAGS
++CTAGS:  $(HEADERS) $(SOURCES)  $(TAGS_DEPENDENCIES) \
++		$(TAGS_FILES) $(LISP)
++	list='$(SOURCES) $(HEADERS)  $(LISP) $(TAGS_FILES)'; \
++	unique=`for i in $$list; do \
++	    if test -f "$$i"; then echo $$i; else echo $(srcdir)/$$i; fi; \
++	  done | \
++	  $(AWK) '{ files[$$0] = 1; nonempty = 1; } \
++	      END { if (nonempty) { for (i in files) print i; }; }'`; \
++	test -z "$(CTAGS_ARGS)$$unique" \
++	  || $(CTAGS) $(CTAGSFLAGS) $(AM_CTAGSFLAGS) $(CTAGS_ARGS) \
++	     $$unique
++
++GTAGS:
++	here=`$(am__cd) $(top_builddir) && pwd` \
++	  && $(am__cd) $(top_srcdir) \
++	  && gtags -i $(GTAGS_ARGS) "$$here"
++
++distclean-tags:
++	-rm -f TAGS ID GTAGS GRTAGS GSYMS GPATH tags
++
++distdir: $(DISTFILES)
++	@srcdirstrip=`echo "$(srcdir)" | sed 's/[].[^$$\\*]/\\\\&/g'`; \
++	topsrcdirstrip=`echo "$(top_srcdir)" | sed 's/[].[^$$\\*]/\\\\&/g'`; \
++	list='$(DISTFILES)'; \
++	  dist_files=`for file in $$list; do echo $$file; done | \
++	  sed -e "s|^$$srcdirstrip/||;t" \
++	      -e "s|^$$topsrcdirstrip/|$(top_builddir)/|;t"`; \
++	case $$dist_files in \
++	  */*) $(MKDIR_P) `echo "$$dist_files" | \
++			   sed '/\//!d;s|^|$(distdir)/|;s,/[^/]*$$,,' | \
++			   sort -u` ;; \
++	esac; \
++	for file in $$dist_files; do \
++	  if test -f $$file || test -d $$file; then d=.; else d=$(srcdir); fi; \
++	  if test -d $$d/$$file; then \
++	    dir=`echo "/$$file" | sed -e 's,/[^/]*$$,,'`; \
++	    if test -d "$(distdir)/$$file"; then \
++	      find "$(distdir)/$$file" -type d ! -perm -700 -exec chmod u+rwx {} \;; \
++	    fi; \
++	    if test -d $(srcdir)/$$file && test $$d != $(srcdir); then \
++	      cp -fpR $(srcdir)/$$file "$(distdir)$$dir" || exit 1; \
++	      find "$(distdir)/$$file" -type d ! -perm -700 -exec chmod u+rwx {} \;; \
++	    fi; \
++	    cp -fpR $$d/$$file "$(distdir)$$dir" || exit 1; \
++	  else \
++	    test -f "$(distdir)/$$file" \
++	    || cp -p $$d/$$file "$(distdir)/$$file" \
++	    || exit 1; \
++	  fi; \
++	done
++check-am: all-am
++check: check-am
++all-am: Makefile $(PROGRAMS)
++installdirs:
++	for dir in "$(DESTDIR)$(bindir)"; do \
++	  test -z "$$dir" || $(MKDIR_P) "$$dir"; \
++	done
++install: install-am
++install-exec: install-exec-am
++install-data: install-data-am
++uninstall: uninstall-am
++
++install-am: all-am
++	@$(MAKE) $(AM_MAKEFLAGS) install-exec-am install-data-am
++
++installcheck: installcheck-am
++install-strip:
++	$(MAKE) $(AM_MAKEFLAGS) INSTALL_PROGRAM="$(INSTALL_STRIP_PROGRAM)" \
++	  install_sh_PROGRAM="$(INSTALL_STRIP_PROGRAM)" INSTALL_STRIP_FLAG=-s \
++	  `test -z '$(STRIP)' || \
++	    echo "INSTALL_PROGRAM_ENV=STRIPPROG='$(STRIP)'"` install
++mostlyclean-generic:
++
++clean-generic:
++
++distclean-generic:
++	-test -z "$(CONFIG_CLEAN_FILES)" || rm -f $(CONFIG_CLEAN_FILES)
++	-test . = "$(srcdir)" || test -z "$(CONFIG_CLEAN_VPATH_FILES)" || rm -f $(CONFIG_CLEAN_VPATH_FILES)
++
++maintainer-clean-generic:
++	@echo "This command is intended for maintainers to use"
++	@echo "it deletes files that may require special tools to rebuild."
++clean: clean-am
++
++clean-am: clean-binPROGRAMS clean-generic mostlyclean-am
++
++distclean: distclean-am
++	-rm -rf ./$(DEPDIR)
++	-rm -f Makefile
++distclean-am: clean-am distclean-compile distclean-generic \
++	distclean-tags
++
++dvi: dvi-am
++
++dvi-am:
++
++html: html-am
++
++html-am:
++
++info: info-am
++
++info-am:
++
++install-data-am:
++
++install-dvi: install-dvi-am
++
++install-dvi-am:
++
++install-exec-am: install-binPROGRAMS
++
++install-html: install-html-am
++
++install-html-am:
++
++install-info: install-info-am
++
++install-info-am:
++
++install-man:
++
++install-pdf: install-pdf-am
++
++install-pdf-am:
++
++install-ps: install-ps-am
++
++install-ps-am:
++
++installcheck-am:
++
++maintainer-clean: maintainer-clean-am
++	-rm -rf ./$(DEPDIR)
++	-rm -f Makefile
++maintainer-clean-am: distclean-am maintainer-clean-generic
++
++mostlyclean: mostlyclean-am
++
++mostlyclean-am: mostlyclean-compile mostlyclean-generic
++
++pdf: pdf-am
++
++pdf-am:
++
++ps: ps-am
++
++ps-am:
++
++uninstall-am: uninstall-binPROGRAMS
++
++.MAKE: install-am install-strip
++
++.PHONY: CTAGS GTAGS all all-am check check-am clean clean-binPROGRAMS \
++	clean-generic ctags distclean distclean-compile \
++	distclean-generic distclean-tags distdir dvi dvi-am html \
++	html-am info info-am install install-am install-binPROGRAMS \
++	install-data install-data-am install-dvi install-dvi-am \
++	install-exec install-exec-am install-html install-html-am \
++	install-info install-info-am install-man install-pdf \
++	install-pdf-am install-ps install-ps-am install-strip \
++	installcheck installcheck-am installdirs maintainer-clean \
++	maintainer-clean-generic mostlyclean mostlyclean-compile \
++	mostlyclean-generic pdf pdf-am ps ps-am tags uninstall \
++	uninstall-am uninstall-binPROGRAMS
++
++
++# all-am:	intro $(bin_PROGRAMS)$(EXEEXT)
++all-am:	intro $(bin_PROGRAMS)
++	@echo ""
++	@echo "Done."
++
++intro:	
++	@echo ""
++	@echo ""
++	@echo ":: Building [$(bin_PROGRAMS)]. Version $(VERSION) ::"
++	@echo ""
++	@echo ""
++
++# Tell versions [3.59,3.63) of GNU make to not export all variables.
++# Otherwise a system limit (for SysV at least) may be exceeded.
++.NOEXPORT:
+diff -uN ./phyml-20120412/src/mcmc.c ./phyml-20120412-new-bak/src/mcmc.c
+--- ./phyml-20120412/src/mcmc.c	2012-03-20 14:10:49.000000000 +1300
++++ ./phyml-20120412-new-bak/src/mcmc.c	2013-02-18 21:51:51.459662430 +1300
+@@ -1977,7 +1977,7 @@
+       if(tree->mod->n_catg > 1)
+ 	{
+ 	  if(tree->mod->free_mixt_rates == NO)
+-	    PhyML_Fprintf(fp,"%G\t",tree->mod->alpha);
++	    PhyML_Fprintf(fp,"%G\t",tree->mod->alpha->v);
+ 	  else
+ 	    {
+ 	      For(i,tree->mod->n_catg) PhyML_Fprintf(fp,"%G\t",tree->mod->gamma_r_proba->v[i]);
+diff -uN ./phyml-20120412/src/optimiz.c ./phyml-20120412-new-bak/src/optimiz.c
+--- ./phyml-20120412/src/optimiz.c	2012-03-13 19:04:03.000000000 +1300
++++ ./phyml-20120412-new-bak/src/optimiz.c	2013-02-18 21:51:51.462662427 +1300
+@@ -979,29 +979,18 @@
+ 
+   if((tree->mod->s_opt->opt_free_mixt_rates) && (tree->mod->free_mixt_rates == YES))
+     {
+-      /* int failed; */
++      int failed;
+       int i;
+         
+-      /* failed = 0; */
+-      /* tree->mod->update_eigen = 1; */
+-      /* BFGS(tree,tree->mod->gamma_r_proba_unscaled,tree->mod->n_catg,1.e-5,1.e-5, */
+-      /* 	   &Return_Abs_Lk, */
+-      /* 	   &Num_Derivative_Several_Param, */
+-      /* 	   &Lnsrch_Free_Mixt_Rates,&failed); */
+-
+       if(verbose) Print_Lk(tree,"[Rate class freqs.  ]");
+ 
++      failed = 0;
++      tree->mod->update_eigen = 1;
++      BFGS(tree,tree->mod->gamma_r_proba_unscaled,tree->mod->n_catg,1.e-5,1.e-5,
++      	   &Return_Abs_Lk,
++      	   &Num_Derivative_Several_Param,
++      	   &Lnsrch_Free_Mixt_Rates,&failed);
+ 
+-      /* For(i,tree->mod->n_catg-1) */
+-      /* 	{ */
+-      /* 	  Generic_Brent_Lk(&(tree->mod->gamma_r_proba_unscaled->v[i]), */
+-      /* 			   0., */
+-      /* 			   100, */
+-      /* 			   tree->mod->s_opt->min_diff_lk_global, */
+-      /* 			   tree->mod->s_opt->brent_it_max, */
+-      /* 			   tree->mod->s_opt->quickdirty, */
+-      /* 			   Wrap_Lk,NULL,tree,NULL); */
+-      /* 	} */
+ 
+       tree->mod->gamma_r_proba_unscaled->v[tree->mod->n_catg-1] = 100.;
+       For(i,tree->mod->n_catg-1)
+diff -uN ./phyml-20120412/src/tree ./phyml-20120412-new-bak/src/tree
+--- ./phyml-20120412/src/tree	1970-01-01 12:00:00.000000000 +1200
++++ ./phyml-20120412-new-bak/src/tree	2013-02-19 10:09:36.962892889 +1300
+@@ -0,0 +1 @@
++((((((tax6:0.01,(tax5:0.01,tax1:0.026):0.008):0.003,(tax7:0.003,tax3:0.003):0.01271127):0.01,tax2:0.01):0.01,tax10:0.01):0.01,tax9:0.01):0.01,tax8:0.01,tax4:0.1);
+\ No newline at end of file
+diff -uN ./phyml-20120412/src/utilities.c ./phyml-20120412-new-bak/src/utilities.c
+--- ./phyml-20120412/src/utilities.c	2012-04-11 11:48:30.000000000 +1200
++++ ./phyml-20120412-new-bak/src/utilities.c	2013-02-19 10:16:57.770281203 +1300
+@@ -1668,6 +1668,7 @@
+ 
+   Detect_Align_File_Format(io);
+ 
++
+   switch(io->data_file_format)
+     {
+     case PHYLIP: 
+@@ -1861,7 +1862,7 @@
+     {
+       if(!Get_Token(fp,token)) break;
+ 
+-/*       PhyML_Printf("\n+ Token: '%s' next_token=%d cur_token=%d",token,nxt_token_t,cur_token_t); */
++      PhyML_Printf("\n+ Token: '%s' next_token=%d cur_token=%d",token,nxt_token_t,cur_token_t);
+ 
+       if(token[0] == ';') 
+ 	{
+@@ -1940,7 +1941,7 @@
+ 	}
+       while(c != '"');
+       *token = c;
+-      c = fgetc(fp);
++      /* c = fgetc(fp); */
+       if(c == EOF) return 0;
+       *(token+1) = '\0';
+       return 1;
+@@ -1950,6 +1951,8 @@
+     {
+       Skip_Comment(fp);
+       c = fgetc(fp);
++      *token = c;
++      token++;
+       if(c == EOF) return 0;
+       return 1;
+     }
+@@ -1967,7 +1970,7 @@
+   else if(c == '-') { *token = c; token++; }
+   else
+     {
+-      while(isgraph(c) && c != ';' && c != '-' && c != ',')
++      while(isgraph(c) && c != ';' && c != '-' && c != ',' && c != '=')
+ 	{
+ 	  *(token++) = c;
+ 	  c = fgetc(fp);
+@@ -2308,8 +2311,6 @@
+ 
+ }
+ 
+-
+-
+ //////////////////////////////////////////////////////////////
+ //////////////////////////////////////////////////////////////
+ 
+@@ -7756,7 +7757,7 @@
+ 
+ #ifndef PHYTIME
+   mod->l_min = 1.E-8;
+-  mod->l_max = 100.0;
++  mod->l_max = 10.0;
+ #else
+   mod->l_min = 1.E-8;
+   mod->l_max = 2.0;
+@@ -8049,11 +8050,23 @@
+   t_node **bip1, **bip2;
+   int bip_size1, bip_size2, bip_size;
+   int different,identical;
++  int n_edges;
+ 
+   /* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
+   /* WARNING: call Match_Tip_Numbers and Get_Bip before using this function. */
+   /* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
+   
++  if(on_existing_edges_only == YES)
++    {
++      n_edges = 0;
++      For(i,2*tree1->n_otu-3) 
++	if(tree1->t_edges[i]->does_exist && tree2->t_edges[i]->does_exist) n_edges++;
++      n_edges -= tree1->n_otu;
++    }
++  else
++    {
++      n_edges = tree1->n_otu-3;
++    }
+   
+   identical = 0;
+   different = 0;
+@@ -8070,7 +8083,7 @@
+ 	      bip_size2 = MIN(b2->left->bip_size[b2->l_r],b2->rght->bip_size[b2->r_l]);
+ 
+ 	      if(bip_size2 > 1 && ((on_existing_edges_only == YES && b2->does_exist) || (on_existing_edges_only == NO)))
+-		{
++		{		  
+ 		  if(bip_size1 == bip_size2)
+ 		    {
+ 		      bip_size = bip_size1;
+@@ -8139,17 +8152,21 @@
+ 			  b1->bip_score++;
+ 			  b2->bip_score++;
+ 			  identical++;			  
+-			  break;
++			  goto out;
++			}
++		      else 
++			{
++			  different++; // Bipartitions have identical sizes but distinct elements
+ 			}
+-		      else different++; // Bipartitions has identical size but distinct elements
+ 		    }
+ 		  else different++; // Biparition have different sizes
+ 		}
+ 	    }
+ 	}
++    out: ;
+     }
+-  
+-  return different;
++  return n_edges - identical;
++  /* return different; */
+ }
+ 
+ //////////////////////////////////////////////////////////////
+@@ -12242,6 +12259,9 @@
+ 
+   aLRT(tree);
+   
++  Br_Len_Involving_Invar(tree);
++  Rescale_Br_Len_Multiplier_Tree(tree);
++
+   Free(s_tree);
+   s_tree = Write_Tree(tree,NO);
+ 
+@@ -12481,6 +12501,9 @@
+       Warn_And_Exit("");
+     }
+ 
++
++  if(node_list_size == 1) return node_list[0];
++
+   list = (t_node ***)mCalloc(node_list_size,sizeof(t_node **));
+   For(i,node_list_size) list[i] = (t_node **)mCalloc(2*tree->n_otu-1,sizeof(t_node *));
+   size = (int *)mCalloc(node_list_size,sizeof(int));
+diff -uN ./phyml-20120412/src/utilities.h ./phyml-20120412-new-bak/src/utilities.h
+--- ./phyml-20120412/src/utilities.h	2012-04-11 11:39:02.000000000 +1200
++++ ./phyml-20120412-new-bak/src/utilities.h	2013-02-18 21:51:51.452662435 +1300
+@@ -272,6 +272,8 @@
+ /* #define P_LK_LIM_SUP 2.037035976e+90 /\* R: format(2^(+300),digits=10) *\/ */
+ #define  P_LK_LIM_INF   3.054936e-151 /* 2^-500 */
+ #define  P_LK_LIM_SUP   3.273391e+150 /* 2^500 */
++/* #define  P_LK_LIM_INF   1.499697e-241 /\* 2^-800 *\/ */
++/* #define  P_LK_LIM_SUP   6.668014e+240 /\* 2^800 *\/ */
+ 
+ 
+ /*!********************************************************/
