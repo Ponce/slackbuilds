@@ -1,0 +1,101 @@
+diff -Naur compface-1.5.2.orig/compface.c compface-1.5.2/compface.c
+--- compface-1.5.2.orig/compface.c	2005-10-04 14:28:47.000000000 +0200
++++ compface-1.5.2/compface.c	2013-02-27 20:37:04.022999237 +0100
+@@ -19,7 +19,7 @@
+ #include "config.h"
+ #endif
+ 
+-#include "compface_private.h"
++#include "compface.h"
+ 
+ int
+ compface(fbuf)
+diff -Naur compface-1.5.2.orig/compface.h compface-1.5.2/compface.h
+--- compface-1.5.2.orig/compface.h	2005-10-04 14:29:00.000000000 +0200
++++ compface-1.5.2/compface.h	2013-02-27 20:43:45.252969068 +0100
+@@ -143,7 +143,6 @@
+ int AllWhite P((char *, int, int)) ;
+ int BigPop P((Prob *)) ;
+ int compface P((char *)) ;
+-int main P((int, char *[])) ;
+ int ReadBuf P(()) ;
+ int Same P((char *, int, int)) ;
+ int uncompface P((char *)) ;
+diff -Naur compface-1.5.2.orig/file.c compface-1.5.2/file.c
+--- compface-1.5.2.orig/file.c	2005-10-04 14:28:47.000000000 +0200
++++ compface-1.5.2/file.c	2013-02-27 20:43:16.611971224 +0100
+@@ -77,8 +77,42 @@
+ {
+ 	register int c, i;
+ 	register char *s, *t;
++	static char table_inv[] = { 0,8,4,12,2,10,6,14,1,9, 5,13, 3,11, 7,15 };
++	static char table_nop[] = { 0,1,2, 3,4, 5,6, 7,8,9,10,11,12,13,14,15 };
++	char *table = table_nop;	/* optionally invert bits in nibble */
++	register inc = 0;			/* optionally swap nimmles */
++	int bits;
++	int len;
+ 
+ 	t = s = fbuf;
++
++	/* Does this look like an X bitmap ? */
++	if (sscanf(s, "#define %*s %d", &bits) == 1) {
++		if (bits == 48) {
++			char type1[256];
++			char type2[256];
++			while (*s && *s++ != '\n');
++			if (sscanf(s, "#define %*s %d", &bits) == 1) if (bits == 48) {
++				while (*s && *s++ != '\n');
++				for (len=0; s[len] && s[len]!='\n'; len++);
++				if (len<255) {
++				  if (sscanf(s, "static %s %s", type1,type2)==2 &&
++					(!strcmp(type1, "char") || 
++				    	 !strcmp(type2, "char"))) {
++						while (*s && *s++ != '\n');
++						inc = 1;
++						table = table_inv;
++					}
++				  else fprintf(stderr, "warning: xbitmap line 3 not static [unsigned] short ...\n");
++				} else fprintf(stderr, "warning: xbitmap line 3 too long\n");
++			}
++			else fprintf(stderr, "warning: xbitmaps must be 48x48\n");
++		}
++		else fprintf(stderr, "warning: xbitmaps must be 48x48\n");
++	}
++	/* Ensure s is reset if it was not an X bitmap ... */
++	if (! inc) s = fbuf;
++
+ 	for(i = strlen(s); i > 0; i--)
+ 	{
+ 		c = (int)*(s++);
+@@ -89,7 +123,7 @@
+ 				status = ERR_EXCESS;
+ 				break;
+ 			}
+-			*(t++) = c - '0';
++			(t++)[inc] = table[c - '0']; inc = -inc;
+ 		}
+ 		else if ((c >= 'A') && (c <= 'F'))
+ 		{
+@@ -98,7 +132,7 @@
+ 				status = ERR_EXCESS;
+ 				break;
+ 			}
+-			*(t++) = c - 'A' + 10;
++			(t++)[inc] = table[c - 'A' + 10]; inc = -inc;
+ 		}
+ 		else if ((c >= 'a') && (c <= 'f'))
+ 		{
+@@ -107,10 +141,10 @@
+ 				status = ERR_EXCESS;
+ 				break;
+ 			}
+-			*(t++) = c - 'a' + 10;
++			(t++)[inc] = table[c - 'a' + 10]; inc = -inc;
+ 		}
+-		else if (((c == 'x') || (c == 'X')) && (t > fbuf) && (*(t-1) == 0))
+-			t--;
++		else if (((c == 'x') || (c == 'X')) && (t > fbuf) && 
++				((t-1)[-inc] == table[0])){t--; inc = -inc;}
+ 	}
+ 	if (t < fbuf + DIGITS)
+ 		longjmp(comp_env, ERR_INSUFF);
