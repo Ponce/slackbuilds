@@ -2,9 +2,10 @@
 
 # Slackware build script for libvirt
 # Written by Michal Bialozor <bialyy@o2.pl>
+# Maintained by Bogdan Radulescu <bogdan@nimblex.net>
 
 PRGNAM=libvirt
-VERSION=${VERSION:-0.10.2}
+VERSION=${VERSION:-1.0.3}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -39,42 +40,12 @@ PYTHONSITEPKG=$(python -c "import sys, os; print os.path.join('/usr/lib${LIBDIRS
 
 VIRTGROUP=${VIRTGROUP:-users}
 
-if [ "${OPENVZ:-no}" = "no" ]; then
-  enable_openvz="--without-openvz"
-else
-  enable_openvz="--with-openvz"
-fi
-
-if [ "${XEN:-no}" = "no" ]; then
-  enable_xen="--without-xen"
-else
-  enable_xen="--with-xen"
-fi
-
-if [ "${VMWARE:-no}" = "no" ]; then
-  enable_vmware="--without-vmware"
-else
-  enable_vmware="--with-vmware"
-fi
-
-if [ "${ESX:-no}" = "no" ]; then
-  enable_esx="--without-esx"
-else
-  enable_esx="--with-esx"
-fi
-
-if [ "${VBOX:-no}" = "no" ]; then
-  enable_vbox="--without-vbox"
-else
-  enable_vbox="--with-vbox"
-fi
-
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION $PRGNAM-doinst-additions
+rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
@@ -95,14 +66,7 @@ CFLAGS="$SLKCFLAGS" \
   --with-yajl \
   --with-python=/usr \
   --with-qemu-group=$VIRTGROUP \
-  $enable_xen \
-  $enable_openvz \
-  $enable_vmware \
-  $enable_esx \
-  $enable_vbox \
-  --with-init-script=none \
-  --without-hal \
-  --build=$ARCH-slackware-linux
+  --with-init-script=none
 
 make \
   HTML_DIR=/usr/doc/$PRGNAM-$VERSION \
@@ -112,20 +76,10 @@ make \
   EXAMPLE_DIR=/usr/doc/$PRGNAM-$VERSION/examples \
   install-strip DESTDIR=$PKG
 
-# don't clobber existing configuration files
-for i in etc/libvirt{,/nwfilter,/qemu/networks} etc/{logrotate.d,sasl2,sysctl.d}; do
-  for j in $(ls -1 $PKG/$i); do
-    if [ ! -d $PKG/$i/$j ]; then
-      mv $PKG/$i/$j{,.new}
-      echo "config $i/$j.new" >> $TMP/$PRGNAM-doinst-additions
-    fi
-  done
-done
-
 # add an rc.libvirt to start/stop/restart the daemon
 install -D -m 0755 $CWD/rc.libvirt $PKG/etc/rc.d/rc.libvirt.new
 
-# we use $VIRTGROUP as our virtualization group, fix auth permissions and
+# we use $VIRTGROUP as our virtualization group, fix auth permissions, and
 # consider the fact that by default we got no certs
 sed -i \
   -e "s|^\#unix_sock_group\ =\ \"libvirt\"|unix_sock_group = \"$VIRTGROUP\"|" \
@@ -133,27 +87,36 @@ sed -i \
   -e "s|^\#auth_unix_ro.*|auth_unix_ro = \"none\"|" \
   -e "s|^\#auth_unix_rw.*|auth_unix_rw = \"none\"|" \
   -e "s|^\#listen_tls|listen_tls|" \
-  $PKG/etc/libvirt/libvirtd.conf.new
+  $PKG/etc/libvirt/libvirtd.conf
 
 # still, we use $VIRTGROUP as our virtualization group
 sed -i \
   -e "s|^\#group\ =\ \"root\"|group = \"$VIRTGROUP\"|" \
-  $PKG/etc/libvirt/qemu.conf.new
+  $PKG/etc/libvirt/qemu.conf
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  ABOUT-NLS AUTHORS ChangeLog COPYING* INSTALL README NEWS TODO \
+  AUTHORS ChangeLog COPYING* INSTALL README NEWS TODO \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-rm -rf $PKG/usr/share/doc
+rm -r $PKG/usr/share/doc
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
-cat $TMP/$PRGNAM-doinst-additions >> $PKG/install/doinst.sh
+
+# Don't clobber existing configuration files
+for i in etc/libvirt{,/nwfilter,/qemu/networks} etc/{logrotate.d,sasl2,sysctl.d}; do
+  for j in $(ls -1 $PKG/$i); do
+    if [ ! -d $PKG/$i/$j ]; then
+      mv $PKG/$i/$j{,.new}
+      echo "config $i/$j.new" >> $PKG/install/doinst.sh
+    fi
+  done
+done
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
