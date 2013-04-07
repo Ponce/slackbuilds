@@ -22,7 +22,7 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.cdemud.new
-config etc/dbus-1/system.d/cdemud-dbus.conf.new
+config etc/dbus-1/system.d/cdemu-daemon-dbus.conf.new
 config etc/udev/rules.d/99-vhba.rules.new
 
 # Reload dbus configuration

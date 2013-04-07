@@ -3,7 +3,7 @@
 # Slackware build script for cdemu-daemon
 #
 # Copyright 2008  Niklas "Nille" Åkerström
-# Copyright 2010-2012  Niels Horn, Rio de Janeiro, RJ, Brazil
+# Copyright 2010-2013  Niels Horn, Rio de Janeiro, RJ, Brazil
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,10 +23,10 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# Revision date: 2012/09/15
+# Revision date: 2013/03/31
 
 PRGNAM=cdemu-daemon
-VERSION=${VERSION:-1.5.0}
+VERSION=${VERSION:-2.0.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -70,18 +70,18 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 chmod -R a-s,u+rw,go+r-w .
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib$LIBDIRSUFFIX \
-  --sysconfdir=/etc \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --build=$ARCH-slackware-linux
-
-make
-make install-strip DESTDIR=$PKG
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_MANDIR=/usr/man \
+    -DSESSION_BUS_SERVICE=ON \
+    -DSYSTEM_BUS_SERVICE=ON \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make VERBOSE=1
+  make install DESTDIR=$PKG
+cd ..
 
 # Fix standard configuration to make it more "Slackware"-like
 sed \
@@ -89,18 +89,26 @@ sed \
   -e "/^CONFIG_FILE/s|/etc/sysconfig/|/etc/|" \
   -i $PKG/usr/libexec/$PRGNAM-system.sh
 
+# Fix a silly error in the dbus file
+sed \
+  -e "/^Name=/s/CdemuDaemon/CDEmuDaemon/" \
+  -i $PKG/usr/share/dbus-1/system-services/net.sf.cdemu.CDEmuDaemon.service
+
 # Install init script
 mkdir -p $PKG/etc/rc.d
 install -m 0755 $CWD/rc.cdemud $PKG/etc/rc.d/rc.cdemud.new
 
 # dbus and udev rules
-mv $PKG/etc/dbus-1/system.d/cdemud-dbus.conf \
-  $PKG/etc/dbus-1/system.d/cdemud-dbus.conf.new
-sed -i 's/group="cdemu"/group="'$GROUP'"/' \
-  $PKG/etc/dbus-1/system.d/cdemud-dbus.conf.new
+mv $PKG/etc/dbus-1/system.d/cdemu-daemon-dbus.conf \
+  $PKG/etc/dbus-1/system.d/cdemu-daemon-dbus.conf.new
+sed -i 's/group="root"/group="'$GROUP'"/' \
+  $PKG/etc/dbus-1/system.d/cdemu-daemon-dbus.conf.new
 mkdir -p $PKG/etc/udev/rules.d
 echo 'KERNEL=="vhba_ctl", NAME="%k", MODE="0660", OWNER="root", GROUP="'$GROUP'"' \
   > $PKG/etc/udev/rules.d/99-vhba.rules.new
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
