@@ -1,0 +1,153 @@
+#!/bin/sh
+
+# Slackware build script for opensmtpd
+
+# Copyright 2013  Robby Workman, Northport, Alabama, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=opensmtpd
+VERSION=${VERSION:-5.3.1p1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+bailout() {
+  printf "\nYou must have smtpd, smtpf, smtpl, and smtpq users on the system \n"
+  printf "for privilege separation - something like this should suffice: \n"
+  printf "\tuseradd -u 270 -g 0 -r -s /bin/false -d /var/empty smtpd \n"
+  printf "\tuseradd -u 271 -g 0 -r -s /bin/false -d /var/empty smtpf \n"
+  printf "\tuseradd -u 272 -g 0 -r -s /bin/false -d /var/empty smtpl \n"
+  printf "\tuseradd -u 273 -g 0 -r -s /bin/false -d /var/empty smtpq \n\n"
+  exit 1
+}
+
+if ! getent passwd smtpd 1>/dev/null 2>/dev/null ; then
+  bailout
+elif ! getent passwd smtpf 1>/dev/null 2>/dev/null ; then
+  bailout
+elif ! getent passwd smtpl 1>/dev/null 2>/dev/null ; then
+  bailout
+elif ! getent passwd smtpq 1>/dev/null 2>/dev/null ; then
+  bailout
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+./bootstrap
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc/opensmtpd \
+  --localstatedir=/var \
+  --with-sock-dir=/var/run \
+  --mandir=/usr/man \
+  --with-mantype=doc \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --with-maildir=/var/spool/mail \
+  --with-privsep-user=smtpd \
+  --with-filter-user=smtpf \
+  --with-queue-user=smtpq \
+  --with-lookup-user=smtpl \
+  --build=$ARCH-slackware-linux
+
+# the "smtpl" user won't actually be used until 5.4, but it's harmless
+# to go ahead and have it present - I'm less likely to forget later :)
+
+make
+make install DESTDIR=$PKG
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | \
+  grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Create a nice compat symlink for sendmail
+ln -s smtpctl $PKG/usr/sbin/sendmail
+
+# Replace some hardlinks with symlinks
+rm -f $PKG/usr/bin/{newaliases,mailq} $PKG/usr/libexec/opensmtpd/makemap
+ln -s ../sbin/makemap $PKG/usr/bin/newaliases
+ln -s ../sbin/smtpctl $PKG/usr/bin/mailq
+ln -s ../../sbin/makemap $PKG/usr/libexec/opensmtpd/makemap
+
+mkdir -p $PKG/etc/rc.d
+cat $CWD/rc.opensmtpd > $PKG/etc/rc.d/rc.opensmtpd.new
+
+# Don't clobber the config file
+mv $PKG/etc/opensmtpd/smtpd.conf $PKG/etc/opensmtpd/smtpd.conf.new
+
+# Create (but don't clobber) the aliases file
+cat $CWD/aliases > $PKG/etc/opensmtpd/aliases.new
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  INSTALL LICENSE README.md THANKS examples \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
