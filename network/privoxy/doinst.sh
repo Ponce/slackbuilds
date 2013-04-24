@@ -31,12 +31,15 @@ fi
 
 preserve_perms etc/rc.d/rc.privoxy.new
 config etc/privoxy/config.new
-config etc/privoxy/default.action.new
-config etc/privoxy/default.filter.new
 config etc/privoxy/match-all.action.new
 config etc/privoxy/trust.new
 config etc/privoxy/user.action.new
 config etc/privoxy/user.filter.new
-for conf_file in etc/privoxy/templates/*.new; do
-  config $conf_file
-done
+
+# These files are not intended to be edited and will be overwritten.
+# To disregard, uncomment these and the .new renaming in privoxy.SlackBuild.
+#config etc/privoxy/default.action.new
+#config etc/privoxy/default.filter.new
+#for conf_file in etc/privoxy/templates/*.new; do
+#  config $conf_file
+#done
