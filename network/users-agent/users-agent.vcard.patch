@@ -1,0 +1,135 @@
+--- users-agent	2004-08-07 16:58:45.000000000 -0400
++++ users-agent.vcard	2004-08-07 16:58:59.000000000 -0400
+@@ -214,18 +214,18 @@
+ 
+     my $fromJID = $iq->GetFrom("jid");
+ 
+-    my $command = "SELECT * FROM jud WHERE jid ='".$fromJID->GetJID()."';";
++    my $command = "SELECT `n-given`,`n-family`,`nickname`,`email` FROM vcard WHERE `collection-owner` ='".$fromJID->GetJID()."';";
+ 
+     my $sth = $dbh->prepare($command);
+     $sth->execute;
+     my $ref = $sth->fetchrow_hashref();
+     if (defined($ref))
+     {
+-        $fields{first} = $ref->{first};
+-        $fields{last} = $ref->{last};
+-        $fields{nick} = $ref->{nick};
++        $fields{first} = $ref->{'n-given'};
++        $fields{last} = $ref->{'n-family'};
++        $fields{nick} = $ref->{nickname};
+         $fields{email} = $ref->{email};
+-        $fields{registered} = 1;
++        $fields{registered} = $ref->{'collection-owner'};
+     }
+     $sth->finish();
+ 
+@@ -273,8 +273,6 @@
+     my $iqReply = $iq->Reply(type=>"result");
+     my $iqReplyQuery = $iqReply->NewQuery("jabber:iq:register");
+ 
+-    $dbh->do("DELETE FROM jud WHERE jid='".$fromJID->GetJID()."';");
+-
+     my @xData = $query->GetX("jabber:x:data");
+     my %fields;
+     if ($#xData > -1)
+@@ -296,8 +294,20 @@
+         $fields{email} = $query->GetEmail();
+     }
+ 
+-    $dbh->do("INSERT INTO jud VALUES(".$dbh->quote($fromJID->GetJID()).",'',".$dbh->quote($fields{first}).",".$dbh->quote($fields{last}).",".$dbh->quote($fields{nick}).",".$dbh->quote($fields{email}).");");
+-
++    my $rowExists = $dbh->do("SELECT `collection-owner` FROM vcard WHERE `collection-owner` = ".$dbh->quote($fromJID->GetJID()));
++    
++    if ( $rowExists == 1)
++    {
++        $dbh->do("UPDATE vcard
++        SET `n-given`=".$dbh->quote($fields{first}).",`n-family`=".$dbh->quote($fields{last}).",nickname=".$dbh->quote($fields{nick}).",email=".$dbh->quote($fields{email}).
++        "WHERE `collection-owner` = ".$dbh->quote($fromJID->GetJID()).";");      
++    }
++    else
++    {
++        $dbh->do("INSERT INTO vcard (`collection-owner`,`n-given`,`n-family`,`nickname`,`email`)
++        VALUES (".$dbh->quote($fromJID->GetJID()).",".$dbh->quote($fields{first}).",".$dbh->quote($fields{last}).",".$dbh->quote($fields{nick}).",".$dbh->quote($fields{email}).");");
++    }
++    
+     $dbh->do("OPTIMIZE TABLE jud;");
+     
+     $Debug->Log1("iqRegisterSetCB: reply(",$iqReply->GetXML(),")");
+@@ -369,20 +379,30 @@
+         {
+             next if ($field->GetValue() eq "");
+             next if ($field->GetVar() eq "speed");
+-
+-            push(@commands,$field->GetVar()." LIKE ".$dbh->quote($likeSpeed.$field->GetValue()."%"));
++            
++            push(@commands,"`n-given` LIKE ".$dbh->quote($likeSpeed.$field->GetValue()."%"))
++                if ($field->GetVar() eq "first");
++    
++            push(@commands,"`n-family` LIKE ".$dbh->quote($likeSpeed.$field->GetValue()."%"))
++                if ($field->GetVar() eq "last");
++    
++            push(@commands,"nickname LIKE ".$dbh->quote($likeSpeed.$field->GetValue()."%"))
++                if ($field->GetVar() eq "nick");
++    
++            push(@commands,"email LIKE ".$dbh->quote($likeSpeed.$field->GetValue()."%"))
++                if ($field->GetVar() eq "email");            
+         }
+     }
+     else
+     {
+ 
+-        push(@commands,"first LIKE ".$dbh->quote("%".$query->GetFirst()."%"))
++        push(@commands,"`n-given` LIKE ".$dbh->quote("%".$query->GetFirst()."%"))
+             if ($query->DefinedFirst() && ($query->GetFirst() ne ""));
+ 
+-        push(@commands,"last LIKE ".$dbh->quote("%".$query->GetLast()."%"))
++        push(@commands,"`n-family` LIKE ".$dbh->quote("%".$query->GetLast()."%"))
+             if ($query->DefinedLast() && ($query->GetLast() ne ""));
+ 
+-        push(@commands,"nick LIKE ".$dbh->quote("%".$query->GetNick()."%"))
++        push(@commands,"nickname LIKE ".$dbh->quote("%".$query->GetNick()."%"))
+             if ($query->DefinedNick() && ($query->GetNick() ne ""));
+ 
+         push(@commands,"email LIKE ".$dbh->quote("%".$query->GetEmail()."%"))
+@@ -397,7 +417,7 @@
+     }
+     else
+     {
+-        my $command = "SELECT * FROM jud WHERE ".join(" AND ",@commands)." order by last";
++        my $command = "SELECT * FROM vcard WHERE ".join(" AND ",@commands)." order by `n-family`";
+         $command .= " limit $config{mysql}->{limit}"
+             if ($config{mysql}->{limit} ne "");
+         $command .= ";";
+@@ -431,23 +451,23 @@
+         {
+             if ($hasForm == 0)
+             {
+-                $iqReplyQuery->AddItem(jid=>$ref->{jid},
+-                                       first=>$ref->{first},
+-                                       last=>$ref->{last},
+-                                       nick=>$ref->{nick},
++                $iqReplyQuery->AddItem(jid=>$ref->{'collection-owner'},
++                                       first=>$ref->{'n-given'},
++                                       last=>$ref->{'n-family'},
++                                       nick=>$ref->{nickname},
+                                        email=>$ref->{email});
+             }
+             else
+             {
+                 my $item = $resultsReport->AddItem();
+                 $item->AddField(var=>"jid",
+-                                value=>$ref->{jid});
++                                value=>$ref->{'collection-owner'});
+                 $item->AddField(var=>"first",
+-                                value=>$ref->{first});
++                                value=>$ref->{'n-given'});
+                 $item->AddField(var=>"last",
+-                                value=>$ref->{last});
++                                value=>$ref->{'n-family'});
+                 $item->AddField(var=>"nick",
+-                                value=>$ref->{nick});
++                                value=>$ref->{nickname});
+                 $item->AddField(var=>"email",
+                                 value=>$ref->{email});
+             }
