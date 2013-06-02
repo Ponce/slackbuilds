@@ -3,7 +3,7 @@
 # Slackware build script for nvidia-driver
 
 # Copyright 2007-2011 Heinz Wiesinger, Amsterdam, The Netherlands
-# Copyright 2011-2012 Edward W. koenig, Vancouver, WA, USA
+# Copyright 2011-2013 Edward W. Koenig, Vancouver, WA, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -39,13 +39,15 @@
 # 2.1	25-AUG-2012	new version -Long Lived Branch, fixed symlinks (per Das email)
 # 2.2	22-NOV-2012	new version -Long Lived Branch. Updates: libs, apps
 # 2.3	15-FEB-2013	new version -Long Lived Branch.
+# 2.4	19-MAY-2013	new version -Long Lived Branch.
 
 PRGNAM=nvidia-driver
-VERSION=310.32
-MVERS=310
+VERSION=319.17
+MVERS=319
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 CPROXY=${CPROXY:-no}
+OPTAPPS=${OPTAPPS:-no}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -92,6 +94,10 @@ rm -rf nvidia-settings-$VERSION
 tar xvf $CWD/nvidia-settings-$VERSION.tar.bz2
 rm -rf nvidia-xconfig-$VERSION
 tar xvf $CWD/nvidia-xconfig-$VERSION.tar.bz2
+rm -rf nvidia-modprobe-$VERSION.tar.bz2
+tar xvf $CWD/nvidia-modprobe-$VERSION.tar.bz2
+rm -rf nvidia-persistenced-$VERSION.tar.bz2
+tar xvf $CWD/nvidia-persistenced-$VERSION.tar.bz2
 rm -rf $SRCNAM
 sh $CWD/$SRCNAM.run --extract-only
 cd $SRCNAM
@@ -124,23 +130,22 @@ install -m 755 libnvidia-wfb.so.$VERSION $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/
 
 # Don't forget separate libvdpau package on SBo.
 install -m 755 libvdpau_nvidia.so.$VERSION $PKG/usr/lib$LIBDIRSUFFIX/
+install -m 755 libvdpau_trace.so.$VERSION $PKG/usr/lib$LIBDIRSUFFIX/
 
 install -m 644 nvidia.icd $PKG/etc/OpenCL/vendors/
-
 
 # Add optional 32-bit support
 if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
   mkdir -p $PKG/usr/lib/tls
 
   install -m 755 32/libcuda.so.$VERSION $PKG/usr/lib/
-  install -m 755 32/libGL.so.$VERSION $PKG/usr/lib/
+  install -m 755 32/libGL.so.$VERSION $PKG/usr/lib/libGL.so.$VERSION-nvidia
   install -m 755 32/libGL.la $PKG/usr/lib/
   install -m 755 32/libnvcuvid.so.$VERSION $PKG/usr/lib/
   install -m 755 32/libnvidia-compiler.so.$VERSION $PKG/usr/lib/
   install -m 755 32/libnvidia-encode.so.$VERSION $PKG/usr/lib/
   install -m 755 32/libnvidia-glcore.so.$VERSION $PKG/usr/lib/
   install -m 755 32/libnvidia-opencl.so.$VERSION $PKG/usr/lib/
-  install -m 755 32/libcuda.so.$VERSION $PKG/usr/lib/
   install -m 755 32/tls/libnvidia-tls.so.$VERSION $PKG/usr/lib/tls/
   install -m 755 32/libOpenCL.so.1.0.0 $PKG/usr/lib/
   install -m 755 32/libvdpau_nvidia.so.$VERSION $PKG/usr/lib/
@@ -164,8 +169,6 @@ cd -
 # symlinks for optional 32-bit support
 if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
   cd $PKG/usr/lib
-    ln -sf libGL.so.$VERSION libGL.so.$MVERS
-    ln -sf libGL.so.$MVERS libGL.so
     ln -sf libcuda.so.$VERSION libcuda.so.$MVERS
     ln -sf libcuda.so.$MVERS libcuda.so
     ln -sf libOpenCL.so.1.0.0 libOpenCL.so.1.0
@@ -188,19 +191,18 @@ install -m 644 nvidia-smi.1.gz $PKG/usr/man/man1/
 # New CUDA proxy server for 64-bit Linux only, and requires a device that supports
 # Unified Virtual Address (UVA) and CUDA 4.0+.
 if [ "$ARCH" = "x86_64" -a "${CPROXY}" = "yes" ]; then
-   install -m 755 nvidia-cuda-proxy-control $PKG/usr/bin/
-   install -m 755 nvidia-cuda-proxy-server $PKG/usr/bin/
-   install -m 644 nvidia-cuda-proxy-control.1.gz $PKG/usr/man/man1/
+   install -m 755 nvidia-cuda-mps-control $PKG/usr/bin/
+   install -m 755 nvidia-cuda-mps-server $PKG/usr/bin/
+   install -m 644 nvidia-cuda-mps-control.1.gz $PKG/usr/man/man1/
 fi
 
 # Compiling nvidia-installer from source
+# Not really needed for this SBo package
 cd $TMP/nvidia-installer-$VERSION
   chown -R root:root .
   chmod -R u+w,go+r-w,a-s .
 
-  CFLAGS="$SLKCFLAGS" \
-  LDFLAGS="-lz" \
-  make
+  CFLAGS="$SLKCFLAGS" LDFLAGS="-lz" make
 
   install -m 755 _out/Linux_$TARGET/nvidia-installer $PKG/usr/bin/
   install -m 644 _out/Linux_$TARGET/nvidia-installer.1.gz $PKG/usr/man/man1/
@@ -238,14 +240,44 @@ cd $TMP/nvidia-xconfig-$VERSION
   install -m 644 _out/Linux_$TARGET/nvidia-xconfig.1.gz $PKG/usr/man/man1/
 cd -
 
+# Some new optional "useless" utilities. FIXME: Needs cleanup at a later date.
+if [ "${OPTAPPS}" = "yes" ]; then
+
+# Compiling nvidia-xconfig from source
+  cd $TMP/nvidia-modprobe-$VERSION
+    chown -R root:root .
+    chmod -R u+w,go+r-w,a-s .
+
+    CFLAGS="$SLKCFLAGS" make
+
+    install -m 755 _out/Linux_$TARGET/nvidia-modprobe $PKG/usr/bin/
+    install -m 644 _out/Linux_$TARGET/nvidia-modprobe.1.gz $PKG/usr/man/man1/
+  cd -
+# Compiling nvidia-persistenced from source
+  cd $TMP/nvidia-persistenced-$VERSION
+    chown -R root:root .
+    chmod -R u+w,go+r-w,a-s .
+
+    CFLAGS="$SLKCFLAGS" make
+#FIXME: need rc.nvidia-persistenced script
+    install -m 755 _out/Linux_$TARGET/nvidia-persistenced $PKG/usr/bin/
+    install -m 644 _out/Linux_$TARGET/nvidia-persistenced.1.gz $PKG/usr/man/man1/
+  cd -
+fi
+
 # Bash script to cleanly install (in doinst.sh) and uninstall the nvidia files
 # so we don't stomp on the overlapping xorg files. 
 # Note: switching "on the fly" is no longer supported. 
 install -m 0755 $CWD/nvidia-switch $PKG/usr/sbin/
 sed -i s/PKGVERSION/$VERSION/g $PKG/usr/sbin/nvidia-switch
 sed -i s/LIBDIRSUFFIX/$LIBDIRSUFFIX/g $PKG/usr/sbin/nvidia-switch
+if [ ${COMPAT32} = "yes" ]; then
+  sed -i s/LIB32FLAG/yes/g $PKG/usr/sbin/nvidia-switch
+else
+  sed -i s/LIB32FLAG/no/g $PKG/usr/sbin/nvidia-switch
+fi
 
-# These correct wrong paths
+# These update placeholders and correct wrong paths
 sed -i "s|__LIBGL_PATH__|/usr/lib$LIBDIRSUFFIX/|" $PKG/usr/lib$LIBDIRSUFFIX/libGL.la
 sed -i "s|/usr/X11R6/lib|/usr/lib$LIBDIRSUFFIX/|" $PKG/usr/lib$LIBDIRSUFFIX/libGL.la
 sed -i "s|__UTILS_PATH__|/usr/bin|" \
@@ -254,9 +286,10 @@ sed -i "s|__PIXMAP_PATH__|/usr/share/pixmaps|" \
   $PKG/usr/share/applications/nvidia-settings.desktop
 sed -i "s|__NVIDIA_SETTINGS_DESKTOP_CATEGORIES__|Application;Settings;|" \
   $PKG/usr/share/applications/nvidia-settings.desktop
-
+  
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cd $TMP/$SRCNAM
+
 cp -a LICENSE NVIDIA_Changelog README.txt html $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.Slackware
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
