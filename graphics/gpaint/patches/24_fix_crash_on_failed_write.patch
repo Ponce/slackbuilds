@@ -1,0 +1,105 @@
+Author: Goedson Teixeira Paixao <goedson@debian.org>
+Description: Fix crash when saving in unsupported format
+ Check if the format chosen by the user is supported before trying to save.
+Bug-Ubuntu: https://bugs.edge.launchpad.net/ubuntu/+source/gpaint/+bug/386234
+Bug: https://savannah.gnu.org/bugs/?25334
+Forwarded: https://savannah.gnu.org/patch/?7052
+
+Index: b/src/drawing.c
+===================================================================
+--- a/src/drawing.c	2009-12-19 17:12:11.000000000 -0200
++++ b/src/drawing.c	2009-12-19 17:12:12.000000000 -0200
+@@ -262,7 +262,7 @@
+                          (error && error->message) ? error->message : "");
+         gtk_dialog_run(GTK_DIALOG(dialog));
+         gtk_widget_destroy(GTK_WIDGET(dialog)); 
+-        g_free(error);  /* allocated by gdk-pixbuf library */
++        g_error_free(error);  /* allocated by gdk-pixbuf library */
+     }
+     return saved;
+ }
+Index: b/src/image.c
+===================================================================
+--- a/src/image.c	2009-12-19 17:12:11.000000000 -0200
++++ b/src/image.c	2009-12-19 17:12:12.000000000 -0200
+@@ -32,6 +32,7 @@
+ #include <gdk/gdkx.h>  /* for gdk_root_parent */
+ #include <gdk-pixbuf/gdk-pixbuf.h>
+ 
++#define _(String) gettext (String)
+ 
+ static int cmp_int(const void *a, const void *b);
+ static void fill_polygon(
+@@ -191,13 +192,48 @@
+     return image;
+ }
+ 
++
++gboolean
++is_writable (GSList *formats, gchar *type)
++{
++    gboolean writable = FALSE;
++
++    while (!writable && formats != NULL)
++    {
++        gchar** extensions = gdk_pixbuf_format_get_extensions((GdkPixbufFormat *)(formats->data));
++        gchar** e = NULL;
++        for (e = extensions; *e; ++e)
++        {
++            if (!strcmp(*e, type))
++            {
++                writable = TRUE;
++                break;
++            }
++        }
++        g_strfreev (extensions);
++        formats = g_slist_next (formats);
++    }
++    return writable;
++}
++
++void add_if_writable (GdkPixbufFormat *data, GSList **list)
++{
++  if (gdk_pixbuf_format_is_writable (data))
++    *list = g_slist_prepend (*list, data);
++}
++
+ int
+ image_write(gpaint_image* image, const gchar* filename, GError **perror)
+ {
+     gboolean saved = FALSE;
+     gchar *ext = NULL;
+     gchar *type = NULL;
+-    
++
++    GSList *formats = gdk_pixbuf_get_formats ();
++    GSList *writable_formats = NULL;
++    g_slist_foreach (formats, add_if_writable, &writable_formats);
++    g_slist_free (formats);
++
+     ext = g_strrstr(filename, ".");
+     if (!ext)
+     {
+@@ -214,13 +250,20 @@
+     {
+         type = g_ascii_strdown(ext+1,-1);
+         debug1("type=[%s]",type);
+-        saved = gdk_pixbuf_save(image->pixbuf, filename, type, perror, NULL);
++        if (is_writable (writable_formats, type))
++        {
++            saved = gdk_pixbuf_save(image->pixbuf, filename, type, perror, NULL);
++        } else {
++            saved = FALSE;
++            *perror = g_error_new (GDK_PIXBUF_ERROR, GDK_PIXBUF_ERROR_BAD_OPTION, _("Saving in the '%s' format is not supported by gdk_pixbuf"), type);
++        }
+         g_free(type);
+     }
+     if (!saved && *perror)
+     {
+         g_warning("Could not save image %s: %s\n", filename, (*perror)->message);
+-    }      
++    }
++	g_slist_free (writable_formats);
+     return saved;
+ }
+ 
