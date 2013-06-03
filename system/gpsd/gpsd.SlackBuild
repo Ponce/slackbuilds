@@ -1,6 +1,7 @@
 #!/bin/sh
 
 # Slackware build script for gpsd
+
 # Copyright 2011 David Spencer, Baildon, West Yorkshire, U.K.
 # All rights reserved.
 #
@@ -22,8 +23,8 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=gpsd
-VERSION=${VERSION:-2.95}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-3.9}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -59,14 +60,21 @@ ENABLELIST=""
 set -- $(echo $ENABLE | sed 's/,/ /g')
 while [ "$1" != "" ]
 do
-  ENABLELIST+=" --enable-$1"
+  case "$1" in
+  *=* )
+    ENABLELIST+=" $1"
+    ;;
+  * )
+    ENABLELIST+=" $1=yes"
+    ;;
+  esac
   shift
 done
 DISABLELIST=""
 set -- $(echo $DISABLE | sed 's/,/ /g')
 while [ "$1" != "" ]
 do
-  DISABLELIST+=" --disable-$1"
+  DISABLELIST+=" $1=no"
   shift
 done
 
@@ -79,29 +87,20 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
 
-# Fixup the pkgconfig file templates
-# (force "pkg-config --libs libgps[d]" to return -L/usr/lib64 on x86_64)
-patch -p1 < $CWD/gpsd-pkgconfig_templates.patch
-
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --disable-static \
-  --enable-dbus \
-  --build=$ARCH-slackware-linux \
+CFLAGS=$SLKCFLAGS \
+scons \
+  prefix=/usr \
+  libdir=/usr/lib${LIBDIRSUFFIX} \
+  pkgconfigdir=/usr/lib${LIBDIRSUFFIX}/pkgconfig \
+  mandir=/usr/man \
+  chrpath=no \
   $ENABLELIST \
   $DISABLELIST
 
-make
-
-# --no-print-directory prevents crazy gps-2.94-py2.6.egg-info install path
-# (thanks again Niels Horn!)
-make --no-print-directory install-strip DESTDIR=$PKG
+DESTDIR=$PKG \
+scons \
+  --implicit-deps-unchanged \
+ install
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $(find $PKG/usr/man -type l) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
@@ -113,12 +112,14 @@ install -D -m 0644 $CWD/xgpsspeed.desktop \
 install -D -m 0644 packaging/X11/gpsd-logo.png \
   $PKG/usr/share/pixmaps/gpsd-logo.png
 
-# Use hotplug scripts from gpsd-3.0 instead of 2.95 -- they work ;-)
-install -D -m 0755 $CWD/gpsd.hotplug \
+# Get hotplug config from /etc/rc.d/rc.gpsd.conf not /etc/default/gpsd
+sed -i 's;/etc/default/gpsd;/etc/rc.d/rc.gpsd.conf;' gpsd.hotplug
+install -D -m 0755 gpsd.hotplug \
   $PKG/lib/udev/gpsd.hotplug
-install -D -m 0755 $CWD/gpsd.hotplug.wrapper \
-  $PKG/lib/udev/gpsd.hotplug.wrapper
 mkdir -p $PKG/lib/udev/rules.d
+
+# Comment out all udev rules: the user is expected to enable only the
+# rules required (see README)
 cat gpsd.rules | \
   sed 's/^ATTRS/#&/' \
   >$PKG/lib/udev/rules.d/97-gpsd.rules
