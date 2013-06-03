@@ -1,0 +1,181 @@
+#!/bin/sh
+
+# Slackware build script for FreeSWITCH
+
+# Copyright 2013, mario <mario@slackverse.org>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=freeswitch
+VERSION=${VERSION:-20130414}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+# Allow building with Python support
+PYTHON=${PYTHON:-yes}
+case "$PYTHON" in
+  yes) PYTHON="yes" ;;
+    *) PYTHON="no" ;;
+esac
+
+# Allow building with PostgreSQL support
+PGSQL=${PGSQL:-no}
+case "$PGSQL" in
+  yes) PGSQL="--with-pgsql --enable-core-pgsql-support" ;;
+    *) PGSQL="--without-pgsql --disable-core-pgsql-support" ;;
+esac
+
+set -e
+
+# Bail if user or group isn't valid on your system
+if ! grep ^freeswitch: /etc/passwd 2>&1 > /dev/null; then
+
+cat << EOF
+
+  You must have a freeswitch user to run this script
+
+  # groupadd -g 269 freeswitch
+  # useradd -u 269 -d /opt/freeswitch -s /bin/bash -g freeswitch freeswitch
+
+EOF
+
+  exit
+elif ! grep ^freeswitch: /etc/group 2>&1 > /dev/null; then
+
+cat << EOF
+
+  You must have a freeswitch group to run this script
+
+  # groupadd -g 269 freeswitch
+
+EOF
+
+  exit
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+# Prepare some things
+./bootstrap.sh
+
+# Disable Cluecon registration annoyance
+touch noreg
+
+# Enable Python module if needed
+if [ "$PYTHON" == "yes" ]; then
+  sed -i 's:#\(languages/mod_python\):\1:' modules.conf
+fi
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/opt/freeswitch \
+  --exec-prefix=/opt/freeswitch \
+  --libdir=/opt/freeswitch/lib${LIBDIRSUFFIX} \
+  --localstatedir=/var \
+  $PGSQL \
+  --build=$ARCH-slackware-linux
+
+make
+make install DESTDIR=$PKG
+make samples DESTDIR=$PKG
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Installing additional sounds can be done with:
+#  make cd-sounds-install DESTDIR=$PKG; make cd-moh-install DESTDIR=$PKG
+# Since we preffer pre-downloaded tarballs, versions can be checked with:
+#  cat build/{sounds_version.txt,moh_version.txt}
+mkdir -p $PKG/opt/freeswitch/sounds
+for i in $CWD/freeswitch-sounds-*; do
+  echo "Installing sounds from: ${i##*\/}"
+  tar -C $PKG/opt/freeswitch/sounds -xf $i
+done
+
+# Don't clobber configuration
+find $PKG/opt/freeswitch/conf -type f -exec mv {} {}.new \;
+
+# Copy init script
+install -D -m0755 -oroot -groot $CWD/rc.freeswitch $PKG/etc/rc.d/rc.freeswitch.new
+
+# Logrotate script
+mkdir -p $PKG/etc/logrotate.d
+install -m 0644 $CWD/logrotate.freeswitch $PKG/etc/logrotate.d/freeswitch.new
+
+# Put docs into opt aswell, symlink later
+mkdir -p $PKG/opt/freeswitch/doc/$PRGNAM-$VERSION
+cp -a \
+  AUTHORS COPYING ChangeLog INSTALL \
+  $PKG/opt/freeswitch/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/opt/freeswitch/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Change ownership for some dirs
+chown -R freeswitch:freeswitch $PKG/var/log/freeswitch $PKG/var/run/freeswitch \
+  $PKG/opt/freeswitch
+
+# Symlink some stuff back to the system
+mkdir -p $PKG/usr/{bin,doc}
+( cd $PKG/usr/doc ; ln -s /opt/freeswitch/doc/$PRGNAM-$VERSION )
+( cd $PKG/usr/bin ; ln -s /opt/freeswitch/bin/fs_cli )
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
