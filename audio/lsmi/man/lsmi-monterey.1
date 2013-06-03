@@ -1,0 +1,172 @@
+.\"                                      Hey, EMACS: -*- nroff -*-
+.\" First parameter, NAME, should be all caps
+.\" Second parameter, SECTION, should be 1-8, maybe w/ subsection
+.\" other parameters are allowed: see man(7), man(1)
+.TH LSMI-MONTEREY 1 "May 15, 2012"
+.\" Please adjust this date whenever revising the manpage.
+.\"
+.\" Some roff macros, for reference:
+.\" .nh        disable hyphenation
+.\" .hy        enable hyphenation
+.\" .ad l      left justify
+.\" .ad b      justify to both left and right margins
+.\" .nf        disable filling
+.\" .fi        enable filling
+.\" .br        insert line break
+.\" .sp <n>    insert n+1 empty lines
+.\" for manpage-specific macros, see man(7)
+.SH NAME
+
+lsmi-monterey \- Linux Pseudo MIDI Input -- Monterey
+.SH SYNOPSIS
+.B lsmi-monterey
+.RI [ options ] " files" ...
+.SH DESCRIPTION
+
+Monterey is a userspace driver for Monterey
+International MK-9500 / K617W reversible keyboard.
+
+This device consists of a 104 QWERTY AT computer keyboard on one side and a
+37 key, velocity sensitive musical keyboard on the other. In addition to
+flipping the unit over, one must flip a switch on the right side in order to
+change the mode.
+
+The keyboard interface is standard, except that the musical side sends
+two-scancode packets for each piano key press and release ('make' codes
+only). The first scancode indicates the note, the second the velocity: 7
+being the lowest, 1 the highest, and 0 representing a release (or sometimes
+a very very light keypress). The musical side also has buttons for keys F1
+through F9, left and right arrow keys, and return--all generating 'make'
+codes only with no way to register release.
+
+This driver creates an ALSA Sequencer port and attempts to fill it with
+realtime MIDI data representing input from the musical side of the keyboard,
+while passing regular textual data through the uinput interface and on to
+Linux console or X Window System. There is no need to load a special
+application or even run X in order to generate MIDI events: simply flip the
+keyboard over and go nuts. The driver doesn't interfere at all with
+multiple/international layouts. You can even use it along
+side another (merged input) keyboard (ie. plugged into a laptop) and the
+driver should be able to sort everything out (provided that you refrain from
+typing on both keyboards simultaneously).
+
+.SH FUNCTION KEYS
+
+There's no reliable way to distinguish the function keys on the musical
+side from those on the QWERTY side in order to map them to channel,
+program change and so on. One solution is to interpret any function key
+(including arrows and return) pressed within two seconds of the 'quaver'
+key (F9) as a MIDI event. 
+
+.TP
+.B Program Change
+The first four keys (I-IV) function as patch pages, each page able to
+address 32 patches. To change to program number 2 (GM Bright Acoustic
+Piano), first press QUAVER, then function key I, then press the second
+piano key from the left (the first black key).
+
+.TP
+.B Bank Change
+Keys V-VIII work similarly to program change, but alter current bank
+instead. Note that you won't see any effect until you change patches as
+well.
+
+.TP
+.B Channel Change and Octave Change
+The arrow keys are used to change channel or octave. To lower or raise
+the octave (from that of middle C) the octave, press QUAVER followed by
+the appropriate arrow key. QUAVER may be ommitted between subsequent
+arrow presses, if they occur within 2 seconds of each other. To change
+the channel, press QUAVER followed by 'R' (return), then an arrow key.
+
+All of these heuristics are timing critical and might fail to operate under
+heavy system loads. To ensure proper performance, use a high realtime
+priority, like 99 (and it wouldn't hurt to do the same for your keyboard
+controller's IRQ).
+
+.SH KNOWN ISSUES
+
+.TP
+.B Events
+For some reason the kernel event layer drops KEY events, mostly when
+switching between a piano key and its associated text key. I believe this
+is a due to a bug in the repeat state tracking code, exposed here because
+the keyboard generates only 'make' scancodes on the musical side.  The
+driver works around this by tracking the MSC_SCAN events instead, but it's
+kind of a hack and requires massaging the events more than I'm comfortable
+with (might not work with PS2->USB adaptors, etc.)
+
+.TP
+.B Repeat Rate
+To prevent frustrating "stuck" repeats in X (the console doesn't appear to
+suffer from this problem) the driver converts all REPEAT events it passes
+to PRESSes.
+
+.TP
+.B LEDs
+The LEDs don't work. This little driver is the only example of a real
+uinput filter I've seen.  I'm not sure the kernel developers anticipated
+the problem of managing the LEDs. Ideally it would be transparent. As it
+is, it would probably take a large amount of code to get the keyboard LEDs
+working again--which seems silly.
+
+.SH PREREQUISITES
+
+2.6 series kernel with evdev and uinput modules loaded.
+ALSA Sequencer drivers and library.
+
+An MK-9500 or K617W keyboard...
+
+.SH USAGE
+
+Distribution specific init scripts are not included. The drivers may be
+started from init, your .bashrc, by qjackctl, etc. In order to be run by a
+non-root user the drivers must have access to the device files in /dev/input.
+This may be accomplished by adding a group 'input', adding desired users to
+this group, and configuring udev to assign the appropriate ownership to files
+in /dev/input. It should be perfectly safe to run the drivers as root,
+however.
+
+For realtime scheduling (the \-R option), either use set_rlimits, or set the
+appropriate POSIX capabilities on the executable:
+.P
+/sbin/setcap cap_ipc_lock,cap_sys_nice=ep /usr/bin/lsmi-joystick
+.P
+The lsmi.SlackBuild script already includes RT scheduling support.
+
+.SH OPTIONS
+.TP
+.B \-h, \-\-help
+Show summary of options.
+.TP
+.B \-d, \-\-device specialfile
+Event device to use (instead of event0).
+.TP
+.B \-v, \-\-verbose
+Be verbose (show note events).
+.TP
+.B \-p, \-\-port client:port
+Connect to ALSA Sequencer client on startup.
+.TP
+.B \-R, \-\-realtime rtprio 
+Use realtime priority 'rtprio' (requires privs).
+.TP
+.B \-n, \-\-no-velocity
+Ignore velocity information from keyboard.
+.TP
+.B \-c, \-\-channel n 
+Initial MIDI channel.
+.TP
+.B \-z, \-\-daemon
+Fork and don't print anything to stdout.
+.SH SEE ALSO
+.BR lsmi-joystick (1),
+.BR lsmi-keyhack (1),
+.BR lsmi-mouse (1).
+.br
+.SH AUTHOR
+lsmi was written by Jonathan Moore Liles.
+.PP
+This manual page was written by Ariel Errera <ariel@musix.org.ar>,
+for the Debian project (but may be used by others). It was then modified
+by B. Watson for the SlackBuilds.org project.
