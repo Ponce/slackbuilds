@@ -4,7 +4,7 @@
 
 # Written by B. Watson (yalhcru@gmail.com)
 
-# Licensed under the WTFPL. See http://sam.zoy.org/wtfpl/ for details.
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
 # I am *not* going to create separate packages for each of the individual
 # tools, as some distros do. They're small enough that it's worth the
@@ -14,7 +14,7 @@
 # *** I agree.  --rworkman   :-)
 
 PRGNAM=alsa-tools
-VERSION=${VERSION:-1.0.26.1}
+VERSION=${VERSION:-1.0.27}
 BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
@@ -48,7 +48,7 @@ fi
 set -e
 
 FIRMWARE=alsa-firmware
-FIRMVER=1.0.25
+FIRMVER=1.0.27
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -68,24 +68,41 @@ find . \
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 
+# allow disabling all the GUI apps
+if [ "${GUI:-yes}" != "yes" ]; then
+  QT3=no
+  FLTK=no
+  rm -rf echomixer envy24control hdajackretask rmedigicontrol
+fi
+
 # qlo10k1 depends on Qt3, which no longer ships with Slackware.
 # This supports the SBo qt3 build. It's not enough to source qt.sh,
 # the qt3 bin directories need to come first in $PATH too.
 # If you got your Qt3 from some other source, you may have to
 # fiddle with QTDIR and PATH yourself.
-if [ "${QT3:-no}" = "yes" ]; then
+if [ -e /opt/kde3/lib$LIBDIRSUFFIX/qt3 -a "${QT3:-yes}" = "yes" ]; then
   source /etc/profile.d/qt.sh
-  export PATH=/opt/kde3/lib/qt3/bin:/opt/kde3/bin:$PATH
+  export PATH=/opt/kde3/lib$LIBDIRSUFFIX/qt3/bin:/opt/kde3/bin:$PATH
 else
   rm -rf qlo10k1
 fi
 
-# one loop to build them all
+# hdspconf and hdspmixer depend on fltk. Don't build them if disabled or
+# not installed.
+if [ -e /usr/bin/fltk-config -a "${FLTK:-yes}" = "yes" ]; then
+  : do nothing
+else
+  rm -rf hdspconf hdspmixer
+fi
+
+# one loop to build them all. The -include stddef.h fixes qlo10k1 'ptrdiff_t doesn't
+# name a type' errors, and doesn't hurt anything else.
 for subdir in $( find . -name configure | sed -e 's,^\./,,' -e 's,/configure,,' ); do
   cd $subdir
 
+  LDFLAGS="-L/usr/lib$LIBDIRSUFFIX" \
   CFLAGS="$SLKCFLAGS" \
-  CXXFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS -include stddef.h" \
   ./configure \
     --prefix=/usr \
     --libdir=/usr/lib${LIBDIRSUFFIX} \
@@ -130,7 +147,12 @@ CXXFLAGS="$SLKCFLAGS" \
 make
 make install-strip DESTDIR=$PKG
 
-# remove the hotplug scripts, since Slackware 13.37 doesn't use hotplug.
+# Niels Horn pointed out that some of the firmware shipped with this
+# package conflicts with Slackware's kernel-firmware package. The files
+# are identical, so just leave them out of this build.
+( cd $PKG/lib/firmware ; rm -rf ess korg sb16 yamaha )
+
+# remove the hotplug scripts, since Slackware 13.37 & up doesn't use hotplug.
 # Instead, they've been converted to udev rules.
 rm -rf $PKG/etc/hotplug
 
