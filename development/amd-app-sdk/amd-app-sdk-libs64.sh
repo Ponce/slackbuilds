@@ -1,0 +1,3 @@
+#!/bin/sh
+
+export LD_LIBRARY_PATH=${AMDAPPSDKROOT}/lib/x86_64:${LD_LIBRARY_PATH}

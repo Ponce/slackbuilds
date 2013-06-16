@@ -28,12 +28,14 @@
 #
 # Initial release.
 # 20121220 - Updated for version 2.6: incompatible packaging with 2.4- versions
+# 20130530 - Updated for version 2.8 and made samples optional
 
 PRGNAM=amd-app-sdk
 INT_NAME=AMD-APP-SDK
-VERSION=${VERSION:-2.6}
+VERSION=${VERSION:-2.8}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+SAMPLES=${SAMPLES:-no}
 
 # Automatically determine the architecture we're building on or use supplied ARCH
 # (only x86 and x86_64 are supported)
@@ -51,7 +53,7 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 ARCHIVE_NAME="AMD-APP-SDK-v$VERSION-lnx${BITNESS}"
-INT_ARCHIVE_NAME="AMD-APP-SDK-v$VERSION-RC3-lnx${BITNESS}"
+INT_ARCHIVE_NAME=AMD-APP-SDK-v$VERSION-RC*-lnx${BITNESS}
 
 set -e
 
@@ -60,17 +62,27 @@ mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $INT_ARCHIVE_NAME
 tar xvf $CWD/$ARCHIVE_NAME.tgz
-tar xvf $INT_ARCHIVE_NAME.tgz
-cd $INT_ARCHIVE_NAME
 
-# If we're packaging a 64 bit package, let's remove all 32 bit parts first (no multilib).
-# RFC: should all these files really be removed, given that the user already downloaded them in the
-# source tarball, which comes multilib by itself?
+# Keep out the samples from being extracted in the first place, if they're not
+# desired.
+
+if [ "$SAMPLES" == "no" ]
+then
+	EXCLUDES="--exclude $INT_ARCHIVE_NAME/samples"
+fi
+
+# If we're packaging a 64 bit package, let's exclude the 32 bit parts from the
+# extraction (no multilib).
 
 if [ ${ARCH} = x86_64 ]
 then
-	find . -type d -name x86 -depth -exec rm -r {} \;
+	EXCLUDES+=" --exclude $INT_ARCHIVE_NAME/samples/opencl/bin/x86"
+	EXCLUDES+=" --exclude $INT_ARCHIVE_NAME/lib/x86"
+	EXCLUDES+=" --exclude $INT_ARCHIVE_NAME/bin/x86"
 fi
+
+tar xvf $INT_ARCHIVE_NAME.tgz $EXCLUDES
+cd $INT_ARCHIVE_NAME
 
 chown -R root:root .
 find . \
@@ -92,15 +104,20 @@ mv * $PKG/opt/$PRGNAM
 
 ( cd $PKG && tar xf $TMP/icd-registration.tgz )
 
-# Copy the profile scripts in their final location...
+# Copy the main profile scripts in their final location...
+
+install -m0755 $CWD/amd-app-sdk.sh $PKG/etc/profile.d
+install -m0755 $CWD/amd-app-sdk.csh $PKG/etc/profile.d
+
+# ...and then the libs-related ones.
 
 if [ ${ARCH} = x86 ]
 then
-	install -m0755 $CWD/amd-app-sdk32.sh $PKG/etc/profile.d
-	install -m0755 $CWD/amd-app-sdk32.csh $PKG/etc/profile.d
+	install -m0644 $CWD/amd-app-sdk-libs32.sh $PKG/etc/profile.d
+	install -m0644 $CWD/amd-app-sdk-libs32.csh $PKG/etc/profile.d
 else
-        install -m0755 $CWD/amd-app-sdk64.sh $PKG/etc/profile.d
-        install -m0755 $CWD/amd-app-sdk64.csh $PKG/etc/profile.d
+        install -m0644 $CWD/amd-app-sdk-libs64.sh $PKG/etc/profile.d
+        install -m0644 $CWD/amd-app-sdk-libs64.csh $PKG/etc/profile.d
 fi
 
 chown -R root:root $PKG/etc
@@ -109,8 +126,14 @@ mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 
 # Link documentation and samples from /opt
 ln -sf /opt/$PRGNAM/docs/opencl $PKG/usr/doc/$PRGNAM-$VERSION
-ln -sf /opt/$PRGNAM/samples $PKG/usr/doc/$PRGNAM-$VERSION
+
+if [  "$SAMPLES" != "no" ]
+then
+	ln -sf /opt/$PRGNAM/samples $PKG/usr/doc/$PRGNAM-$VERSION
+fi
+
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
