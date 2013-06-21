@@ -8,4 +8,5 @@ config() {
   fi
 }
 
+config var/spool/cron/root.new
 config etc/cron.deny.new
