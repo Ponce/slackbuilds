@@ -1,0 +1,89 @@
+#!/bin/sh
+
+# RC script for cwiid's wminput daemon, part of the SBo cwiid package.
+
+# Where's the config file for this script? This is the only variable that can't
+# be overridden in the config file.
+RC_CONF=/etc/rc.d/rc.cwiid.conf
+
+####
+# Override this stuff in $RC_CONF if you see a need to:
+
+# Default config file for wminput instances
+WMINPUT_DEFAULT_CONF=default
+
+# full path to wminput binary:
+WMINPUT_BIN=/usr/bin/wminput
+
+# probably nobody will ever need to increase this:
+MAX_WIIMOTES=9
+
+####
+
+start_cwiid() {
+	local cwiid_conf
+	local cwiid_addr
+	local cmd
+	local daemons
+
+	echo "Starting cwiid wminput daemon(s)..."
+
+	# Guarantee the uinput module gets loaded, don't complain if not
+	# (it may not be modular in the running kernel)
+	/sbin/modprobe uinput &>/dev/null
+
+	# WIIMOTE is a bash array, will be populated by config file or default conf
+	unset WIIMOTE
+
+	if [ -r "$RC_CONF" ]; then
+		source $RC_CONF
+	else
+		echo -e "$RC_CONF missing, using defaults:\\n\\tWIIMOTE[0]='auto'\\n\\tWIIMOTE_CONF[0]='$WMINPUT_DEFAULT_CONF'" 1>&2
+		WIIMOTE[0]=auto
+	fi
+
+	i=0
+	daemons=0
+	while [ $i -le $MAX_WIIMOTES ]; do
+		if [ -n "${WIIMOTE[$i]}" ]; then
+			cwiid_conf="${WIIMOTE_CONF[$i]:-$WMINPUT_DEFAULT_CONF}"
+			cwiid_addr=${WIIMOTE[$i]}
+
+			if [ "$cwiid_addr" = "auto" ]; then
+				cwiid_addr=""
+			fi
+
+			cmd="$WMINPUT_BIN -d -c $cwiid_conf $cwiid_addr"
+			echo "  Starting daemon: $cmd"
+			$cmd &
+
+			daemons=$((daemons+1))
+		fi
+
+		i=$((i+1))
+	done
+	echo "cwiid startup done, $daemons daemons started"
+}
+
+stop_cwiid() {
+	echo -n "Stopping cwiid wminput daemon(s)..."
+	killall wminput &>/dev/null
+	sleep 2
+	killall -9 wminput &>/dev/null
+	echo "done"
+}
+
+case "$1" in
+	start) start_cwiid ;;
+	stop) stop_cwiid ;;
+	restart)
+		stop_cwiid
+		sleep 1
+		start_cwiid
+		;;
+	*)
+		echo "Usage: $0 start|stop|restart" 1>&2
+		exit 1
+		;;
+esac
+exit 0

@@ -1,13 +1,22 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for cwiid
 
 # Written by B. Watson (yalhcru@gmail.com)
 
-# Licensed under the WTFPL. See http://sam.zoy.org/wtfpl/ for details.
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20130318 bkw:
+# - Upgraded from 0.6.00 to 0.6.00+svn201
+# - Added init script
+# - Added lswm man page
+# - Added .desktop and icon
+# - Removed bluez4 API patch (no longer needed)
+# - Fixed permissions of config files and header
+# - Added ir_fps and nunchuk_kb plugins
 
 PRGNAM=cwiid
-VERSION=${VERSION:-0.6.00}
+VERSION=${VERSION:-0.6.00+svn201}
 BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
 
@@ -44,7 +53,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG/usr $PKG/etc $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tgz
+tar xvf $CWD/${PRGNAM}_$VERSION.orig.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find . \
@@ -53,9 +62,16 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-# Patch against newer bluez
-patch -p1 < $CWD/bluez_4_api_changes.patch
+# Underlinking fix (add -lbluetooth)
 patch -p1 < $CWD/bluetooth-linker.patch
+
+# Add ir_fps and nunchuk_kb plugins (patch comes from Debian)
+patch -p1 < $CWD/"add_other_plugins_#487498.patch"
+
+autoreconf -if
+
+# ./configure --help documents this option, but it's not actually recognized:
+# --disable-ldconfig
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -65,14 +81,17 @@ CXXFLAGS="$SLKCFLAGS" \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --disable-ldconfig \
   --mandir=/usr/man \
   --build=$ARCH-slackware-linux
 
 make
 make install DESTDIR=$PKG
 
-# Remove static library.
+# Config and include files get installed +x, fix
+find $PKG/etc/cwiid/wminput/ -maxdepth 1 -a -type f | xargs chmod 644
+chmod 644 $PKG/usr/include/*.h
+
+# Remove static library, configure doesn't accept --disable-static
 rm -f $PKG/usr/lib$LIBDIRSUFFIX/libcwiid.a
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
@@ -80,12 +99,29 @@ find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 
+# lswm man page borrowed from Debian
+gzip -9c $CWD/lswm.1 > $PKG/usr/man/man1/lswm.1.gz
+
+# icon borrowed from Debian
+mkdir -p $PKG/usr/share/pixmaps
+cat $CWD/wmgui.xpm > $PKG/usr/share/pixmaps/wmgui.xpm
+
+# .desktop borrowed from Debian and fixed so it validates
+mkdir -p $PKG/usr/share/applications
+cat $CWD/wmgui.desktop > $PKG/usr/share/applications/wmgui.desktop
+
+# init script written for this build
+mkdir -p $PKG/etc/rc.d/
+cat $CWD/rc.cwiid.new > $PKG/etc/rc.d/rc.cwiid.new
+cat $CWD/rc.cwiid.conf.new > $PKG/etc/rc.d/rc.cwiid.conf.new
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a AUTHORS COPYING ChangeLog NEWS README $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
