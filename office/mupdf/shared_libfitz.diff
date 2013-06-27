@@ -1,0 +1,109 @@
+diff -Naur mupdf-1.2-source/Makefile mupdf-1.2-source.patched/Makefile
+--- mupdf-1.2-source/Makefile	2013-02-13 09:25:07.000000000 -0500
++++ mupdf-1.2-source.patched/Makefile	2013-06-19 00:18:06.000000000 -0400
+@@ -12,7 +12,7 @@
+ # Do not specify CFLAGS or LIBS on the make invocation line - specify
+ # XCFLAGS or XLIBS instead. Make ignores any lines in the makefile that
+ # set a variable that was set on the command line.
+-CFLAGS += $(XCFLAGS) -Ifitz -Ipdf -Ixps -Icbz -Iscripts
++CFLAGS += $(XCFLAGS) -fPIC -Ifitz -Ipdf -Ixps -Icbz -Iscripts
+ LIBS += $(XLIBS) -lfreetype -ljbig2dec -ljpeg -lopenjpeg -lz -lm
+ LIBS_V8 = $(LIBS) $(V8LIBS)
+ 
+@@ -37,6 +37,7 @@
+ CC_CMD = $(QUIET_CC) $(CC) $(CFLAGS) -o $@ -c $<
+ CXX_CMD = $(QUIET_CXX) $(CXX) $(CFLAGS) -o $@ -c $<
+ AR_CMD = $(QUIET_AR) $(AR) cr $@ $^
++SO_CMD = $(QUIET_LINK) $(CC) -fPIC --shared -Wl,-soname -Wl,`basename $@ | sed 's,\.[^.]*$$,,'` $^ -o $@
+ LINK_CMD = $(QUIET_LINK) $(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
+ LINK_V8_CMD = $(QUIET_LINK) $(CXX) $(LDFLAGS) -o $@ $^ $(LIBS_V8)
+ MKDIR_CMD = $(QUIET_MKDIR) mkdir -p $@
+@@ -79,7 +80,9 @@
+ 
+ # --- Fitz, MuPDF, MuXPS and MuCBZ library ---
+ 
+-FITZ_LIB := $(OUT)/libfitz.a
++FITZ_LIB_A := $(OUT)/libfitz.a
++FITZ_LIB_SO := $(OUT)/libfitz.so.1.0
++FITZ_LIB_SO1 := $(OUT)/libfitz.so.1
+ FITZ_V8_LIB := $(OUT)/libfitzv8.a
+ 
+ FITZ_SRC := $(notdir $(wildcard fitz/*.c draw/*.c))
+@@ -91,10 +94,10 @@
+ MUXPS_SRC := $(notdir $(wildcard xps/*.c))
+ MUCBZ_SRC := $(notdir $(wildcard cbz/*.c))
+ 
+-$(FITZ_LIB) : $(addprefix $(OUT)/, $(FITZ_SRC:%.c=%.o))
+-$(FITZ_LIB) : $(addprefix $(OUT)/, $(MUPDF_SRC:%.c=%.o))
+-$(FITZ_LIB) : $(addprefix $(OUT)/, $(MUXPS_SRC:%.c=%.o))
+-$(FITZ_LIB) : $(addprefix $(OUT)/, $(MUCBZ_SRC:%.c=%.o))
++FITZ_OBJECT_FILES := $(addprefix $(OUT)/, $(FITZ_SRC:%.c=%.o)) \
++                     $(addprefix $(OUT)/, $(MUPDF_SRC:%.c=%.o)) \
++                     $(addprefix $(OUT)/, $(MUXPS_SRC:%.c=%.o)) \
++                     $(addprefix $(OUT)/, $(MUCBZ_SRC:%.c=%.o))
+ 
+ $(FITZ_V8_LIB) : $(addprefix $(OUT)/, $(FITZ_SRC:%.c=%.o))
+ $(FITZ_V8_LIB) : $(addprefix $(OUT)/, $(MUPDF_V8_SRC:%.c=%.o))
+@@ -102,9 +105,19 @@
+ $(FITZ_V8_LIB) : $(addprefix $(OUT)/, $(MUXPS_SRC:%.c=%.o))
+ $(FITZ_V8_LIB) : $(addprefix $(OUT)/, $(MUCBZ_SRC:%.c=%.o))
+ 
+-libs: $(FITZ_LIB) $(THIRD_LIBS)
+ libs_v8: libs $(FITZ_V8_LIB)
+ 
++$(FITZ_LIB_A) : $(FITZ_OBJECT_FILES)
++$(FITZ_LIB_SO) : $(FITZ_OBJECT_FILES)
++
++libs: $(FITZ_LIB_A) $(FITZ_LIB_SO1) $(THIRD_LIBS)
++
++$(FITZ_LIB_SO) :
++	$(SO_CMD)
++
++$(FITZ_LIB_SO1) : $(FITZ_LIB_SO)
++	@cd $(OUT) && ln -s `basename $(FITZ_LIB_SO)` libfitz.so.1
++
+ # --- Generated CMAP, FONT and JAVASCRIPT files ---
+ 
+ CMAPDUMP := $(OUT)/cmapdump
+@@ -162,14 +175,14 @@
+ # --- Tools and Apps ---
+ 
+ MUDRAW := $(addprefix $(OUT)/, mudraw)
+-$(MUDRAW) : $(FITZ_LIB) $(THIRD_LIBS)
++$(MUDRAW) : $(FITZ_LIB_SO1) $(THIRD_LIBS)
+ 
+ MUTOOL := $(addprefix $(OUT)/, mutool)
+-$(MUTOOL) : $(addprefix $(OUT)/, pdfclean.o pdfextract.o pdfinfo.o pdfposter.o pdfshow.o) $(FITZ_LIB) $(THIRD_LIBS)
++$(MUTOOL) : $(addprefix $(OUT)/, pdfclean.o pdfextract.o pdfinfo.o pdfposter.o pdfshow.o) $(FITZ_LIB_SO1) $(THIRD_LIBS)
+ 
+ ifeq "$(NOX11)" ""
+ MUVIEW := $(OUT)/mupdf
+-$(MUVIEW) : $(FITZ_LIB) $(THIRD_LIBS)
++$(MUVIEW) : $(FITZ_LIB_SO1) $(THIRD_LIBS)
+ $(MUVIEW) : $(addprefix $(OUT)/, x11_main.o x11_image.o pdfapp.o)
+ 	$(LINK_CMD) $(X11_LIBS)
+ 
+@@ -208,18 +221,19 @@
+ incdir ?= $(prefix)/include
+ mandir ?= $(prefix)/share/man
+ 
+-install: $(FITZ_LIB) $(MUVIEW) $(MUDRAW) $(MUTOOL)
++install: $(FITZ_LIB_SO) $(MUVIEW) $(MUDRAW) $(MUTOOL)
+ 	install -d $(DESTDIR)$(bindir) $(DESTDIR)$(libdir) $(DESTDIR)$(incdir) $(DESTDIR)$(mandir)/man1
+-	install $(FITZ_LIB) $(DESTDIR)$(libdir)
++	install $(FITZ_LIB_SO) $(DESTDIR)$(libdir)
++	ln -s `basename $(FITZ_LIB_SO)` $(DESTDIR)$(libdir)/libfitz.so
+ 	install fitz/memento.h fitz/fitz.h pdf/mupdf.h xps/muxps.h cbz/mucbz.h $(DESTDIR)$(incdir)
+-	install $(MUVIEW) $(MUDRAW) $(MUBUSY) $(DESTDIR)$(bindir)
++	install $(MUVIEW) $(MUDRAW) $(MUTOOL) $(MUBUSY) $(DESTDIR)$(bindir)
+ 	install $(wildcard apps/man/*.1) $(DESTDIR)$(mandir)/man1
+ 
+ # --- Clean and Default ---
+ 
+ all: all-nojs $(JSTARGETS)
+ 
+-all-nojs: $(THIRD_LIBS) $(FITZ_LIB) $(MUVIEW) $(MUDRAW) $(MUTOOL)
++all-nojs: $(THIRD_LIBS) $(FITZ_LIB_SO) $(MUVIEW) $(MUDRAW) $(MUTOOL)
+ 
+ third: $(THIRD_LIBS)
+ 

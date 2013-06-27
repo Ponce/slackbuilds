@@ -4,9 +4,22 @@
 
 # Written by Hubert Hesse (slackbuilds@hubertscorner.de)
 
+# Modified 20130618 by B. Watson (yalhcru@gmail.com):
+# - Took over maintenance
+# - Updated for mupdf 1.2
+# - Build library shared, not static
+# - Build with system zlib, libjpeg, openjpeg, jbig2dec, libtiff, libpng,
+#   liblcms2 instead of bundled sources (which made the lib + exes *huge*).
+#   Also, the included libjpeg is too new (it broke zathura-pdf-mupdf).
+# - Include mutool in package (instead of just its man page)
+# - Add CHANGES CONTRIBUTORS doc/* to /usr/doc
+# - Use DESTDIR libdir mandir instead of patching makefile
+# - Updated README & slack-desc to mention XPS and CBZ
+# - Fix the man pages slightly
+
 PRGNAM=mupdf
-VERSION=${VERSION:-1.1}
-BUILD=${BUILD:-4}
+VERSION=${VERSION:-1.2}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -41,7 +54,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION-source
-tar xvf $CWD/$PRGNAM-$VERSION-source.tar.gz
+unzip $CWD/$PRGNAM-$VERSION-source.zip
 cd $PRGNAM-$VERSION-source
 chown -R root:root .
 find . \
@@ -50,23 +63,40 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-sed -i "s,(prefix)/lib,(prefix)/lib$LIBDIRSUFFIX," Makefile
+# We want a shared library, not static.
+# This patch based on http://bugs.ghostscript.com/show_bug.cgi?id=693009
+# with the following changes:
+# - actually applies to mupdf-1.2
+# - links the applications dynamically
+# - doesn't even build/install the static lib by default
+# - adds mutool to list of stuff installed to $prefix/bin
+patch -p1 < $CWD/shared_libfitz.diff
 
-CFLAGS="$SLKCFLAGS" make build=release prefix=/usr
-make build=release prefix=$PKG/usr install
+# 'see also' mentions nonexistent stuff (mupdfclean, mupdfshow), also
+# the -b option to mupdf was missing.
+patch -p1 < $CWD/man_page.diff
+
+# Build against system libs instead of shipped ones
+sed -i 's,libopenjpeg,libopenjpeg1,' Makerules
+rm -rf thirdparty
+
+make build=release prefix=/usr XCFLAGS="$SLKCFLAGS"
+make \
+  build=release \
+  prefix=/usr \
+  libdir=/usr/lib$LIBDIRSUFFIX \
+  mandir=/usr/man \
+  DESTDIR=$PKG \
+  install
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-mkdir -p $PKG/usr/man
-mv $PKG/usr/share/man/man1 $PKG/usr/man/man1
-rm -rf $PKG/usr/share
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a README COPYING $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README COPYING CHANGES CONTRIBUTORS doc/* $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
