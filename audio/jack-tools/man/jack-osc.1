@@ -1,0 +1,172 @@
+'\" t
+.\"     Title: jack-osc
+.\"    Author: Rohan Drape <rd@slavepianos.org>
+.\" Generator: DocBook XSL Stylesheets v1.76.1 <http://docbook.sf.net/>
+.\"      Date: 06/16/2013
+.\"    Manual: \ \&
+.\"    Source: \ \&
+.\"  Language: English
+.\"
+.TH "JACK\-OSC" "1" "06/16/2013" "\ \&" "\ \&"
+.\" -----------------------------------------------------------------
+.\" * Define some portability stuff
+.\" -----------------------------------------------------------------
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.\" http://bugs.debian.org/507673
+.\" http://lists.gnu.org/archive/html/groff/2009-02/msg00013.html
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.ie \n(.g .ds Aq \(aq
+.el       .ds Aq '
+.\" -----------------------------------------------------------------
+.\" * set default formatting
+.\" -----------------------------------------------------------------
+.\" disable hyphenation
+.nh
+.\" disable justification (adjust text to left margin only)
+.ad l
+.\" -----------------------------------------------------------------
+.\" * MAIN CONTENT STARTS HERE *
+.\" -----------------------------------------------------------------
+.SH "NAME"
+jack-osc \- JACK Transport Publication Daemon
+.SH "SYNOPSIS"
+.sp
+jack\-osc [options]
+.SH "OPTIONS"
+.TP
+\fB\-c\fR
+Set the drift correction interval in periods (default=64)\&.
+.TP
+\fB\-p\fR
+Set the port number (default=57130)\&.
+.SH "DESCRIPTION"
+.sp
+jack\-osc publishes the transport state of the local JACK server as OSC packets over a UDP connection\&. jack\-osc allows any OSC enabled application to act as a JACK transport client, receiving sample accurate pulse stream timing data, and monitoring and initiating transport state change\&.
+.sp
+Clients request to receive timing and change notification packets by sending a "request notification" packet, \fI/receive\fR, to the jack\-osc server\&. This packet has the form
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+/receive category
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+where category is a bit mask that indicates what categories of notification packets are requested\&. The bit locations are:
+.sp
+Category Mask
+.br
+REQUEST_TICK 0x0000001
+.br
+REQUEST_PULSE 0x0000002
+.br
+REQUEST_CORRECTION 0x0000004
+.br
+REQUEST_TRANSPORT 0x0000008
+.br
+REQUEST_ALL 0xFFFFFFF
+.sp
+Clients request notification messages to be sent to an address that is not that of the packet that requests the notification by sending a "request notification at" packet, \fI/receive_at\fR\&. This packet has the form
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+/receive_at category port\-number host\-name
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+where category is as for \fI/receive\fR and where port\-number and host\-name give the address that notification should be sent to\&.
+.sp
+Once a client is registered subsequent \fI/receive\fR and \fI/receive_at\fR messages edit the category value for that client\&. To delete the client from the register send a request with a category value of negative one\&.
+.sp
+After requesting notification the client will receive all relevant timing packets sent by the server\&. All jack\-osc timing packets are sent at the start of a JACK period as OSC message and have the same shape:
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+tag ntp utc frm arg\&.\&.\&.
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+where tag is the command name, and ntp, utc and frm are time stamps that indicate the same time point, the start of the JACK period when the packet was sent\&. ntp is an unsigned 64bit integer NTP value\&. utc is a double precision real valued representation of the UTC time\&. frm is a signed 64bit integer frame counter the absolute value of which is not defined but which increments synchronously with the ntp and utc time stamps\&. arg\&... is the set of tag specific arguments\&.
+.sp
+The timing packets sent by jack\-osc are:
+.sp
+/pulse ntp utc frm p\-ntp p\-utc p\-frm pulse : Pulse Location\&. This packet indicates that the nearest frame to the integer pulse pulse occurs at the time given by the time stamps p\-ntp, p\-utc and p\-frm\&. The pulse number is one based\&. This packet is sent at the start of the JACK period in which the integer pulse will occur\&. This packet is not sent if the transport is stopped\&. This packet is sent before the \fI/tick\fR packet for the same period\&.
+.sp
+/tick ntp utc frm frame pulse : Period Tick\&. This packet is sent once per JACK period\&. The integer value frame is the transport location in frames, the double precision real value pulse is the transport location in pulses\&. The pulse value is read from an accumulator and is approximate only, the accumulator is corrected at each integer pulse location\&.
+.sp
+/drift ntp utc frm ntp\-dif utc\-dif : Drift Correction\&. This packet is sent whenever the clock drift correction is run\&. The frequency of this is set by the \fB\-c\fR option to the jack\-osc server\&. The integer value ntp\-dif is the NTP form of the corrected drift value and utc\-dif the UTC form\&. Since JACK is a sample clock there is no frame drift value\&.
+.sp
+The state change packets sent by jack\-osc are:
+.sp
+/transport ntp utc frm fps ppm ppc pt state : Transport state change\&. This packet is sent whenever the JACK transport changes\&. The double precision real value fps is the sample rate in frames per second\&. The double precision real value ppm is the tempo in pulses per minute\&. The double precision real value ppc is the measure length in pulses per cycle\&. The double precision real value pt is the pulse type\&. The integer value state is zero if the transport has stopped and one if it has started\&. See also the \fI/status\fR message described below\&.
+.sp
+Clients can request the current frame and pulse values by sending a \fI/current\fR packet, which requires no argument\&. The replies with a \fI/current\&.reply\fR packet, which has the same form as a \fI/tick\fR packet\&. The precise interpretation of packets acquired in this manner is problematic\&.
+.sp
+Clients request a status packet by sending a "request status" packet, \fI/status\fR, which requires no argument\&. The server replies immediately with a status reply packet, \fI/status\&.reply\fR\&. The status packet is an OSC message and is not timestamped\&. It has the shape:
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+/status\&.reply fps ppm ppc pt state
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+where the argument values are as described for the \fI/transport\fR message\&. It is intended that a client will request a single status packet before requesting notification for all subsequent state changes\&.
+.sp
+Clients initiate a change in transport roll state by sending a "request transport operation" packet, \fI/start\fR or \fI/stop\fR to the jack\-osc server\&. Neither requires an argument\&.
+.sp
+Clients initiate a change in transport location by sending a "request locate operation" packet, \fI/locate\fR, to the jack\-osc server\&. It has the shape:
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+/locate location
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+where the single precision real value location is the requested transport location in seconds\&.
+.sp
+Clients can connect and disconnect ports by sending \fI/connect\fR and \fI/disconnect\fR messages to the jack\-osc server\&. Both have the shape:
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+/[dis]connect left right
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+jack\-osc implements only a subset of the OSC protocol\&. In particular it does not implement the patten matching rules and does not implement a scheduler for incoming messages\&.
+.sp
+jack\-osc drops all unrecognized incoming packets\&.
+.SH "AUTHOR"
+.sp
+Rohan Drape http://rd\&.slavepianos\&.org/
+.SH "SEE ALSO"
+.sp
+jackd(1), OSC(7) http://opensoundcontrol\&.org/
+.SH "AUTHOR"
+.PP
+\fBRohan Drape\fR <\&rd@slavepianos\&.org\&>
+.RS 4
+Author.
+.RE
