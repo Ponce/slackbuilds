@@ -1,14 +1,6 @@
-From 9db67dd1aa1a4326821f17ddddfc73c198aa3f52 Mon Sep 17 00:00:00 2001
-From: Groboclown <matt@groboclown.net>
-Date: Thu, 27 Jun 2013 14:15:59 -0500
-Subject: [PATCH 1/2] Add new feature to the audio file processor which allows
- for resuming playback of the sample on a new note from where the last note
- played.
-
----
 diff -Nur lmms-0.4.15/include/sample_buffer.h lmms-0.4.15.new/include/sample_buffer.h
---- lmms-0.4.15/include/sample_buffer.h	2013-06-11 20:57:16.000000000 +0000
-+++ lmms-0.4.15.new/include/sample_buffer.h	2013-06-29 22:41:39.322810181 +0000
+--- lmms-0.4.15/include/sample_buffer.h	2013-07-02 13:44:59.699599386 +0000
++++ lmms-0.4.15.new/include/sample_buffer.h	2013-07-02 02:13:32.000000000 +0000
 @@ -51,6 +51,15 @@
  	public:
  		handleState( bool _varying_pitch = false );
@@ -26,8 +18,8 @@ diff -Nur lmms-0.4.15/include/sample_buffer.h lmms-0.4.15.new/include/sample_buf
  
  	private:
 diff -Nur lmms-0.4.15/plugins/audio_file_processor/audio_file_processor.cpp lmms-0.4.15.new/plugins/audio_file_processor/audio_file_processor.cpp
---- lmms-0.4.15/plugins/audio_file_processor/audio_file_processor.cpp	2013-06-11 20:57:16.000000000 +0000
-+++ lmms-0.4.15.new/plugins/audio_file_processor/audio_file_processor.cpp	2013-06-29 22:41:39.322810181 +0000
+--- lmms-0.4.15/plugins/audio_file_processor/audio_file_processor.cpp	2013-07-02 13:44:59.686266104 +0000
++++ lmms-0.4.15.new/plugins/audio_file_processor/audio_file_processor.cpp	2013-07-02 02:13:40.000000000 +0000
 @@ -75,7 +75,9 @@
  	m_startPointModel( 0, 0, 1, 0.0000001f, this, tr( "Start of sample") ),
  	m_endPointModel( 1, 0, 1, 0.0000001f, this, tr( "End of sample" ) ),
@@ -76,7 +68,23 @@ diff -Nur lmms-0.4.15/plugins/audio_file_processor/audio_file_processor.cpp lmms
  
  	if( m_sampleBuffer.play( _working_buffer,
  					(handleState *)_n->m_pluginData,
-@@ -121,6 +142,10 @@
+@@ -115,12 +136,25 @@
+ 		applyRelease( _working_buffer, _n );
+ 		instrumentTrack()->processAudioBuffer( _working_buffer,
+ 								frames,_n );
+-		emit isPlaying( _n->totalFramesPlayed() * _n->frequency() / m_sampleBuffer.frequency() );
++		int framesPosition;
++		if( m_stutterModel.value() == true )
++		{
++			framesPosition = m_nextPlayStartPoint;
++		}
++		else
++		{
++			framesPosition = _n->totalFramesPlayed() * _n->frequency() / m_sampleBuffer.frequency();
++		}
++		emit isPlaying( framesPosition );
+ 	}
+ 	else
  	{
  		emit isPlaying( 0 );
  	}
@@ -87,7 +95,7 @@ diff -Nur lmms-0.4.15/plugins/audio_file_processor/audio_file_processor.cpp lmms
  }
  
  
-@@ -249,6 +274,10 @@
+@@ -249,6 +283,10 @@
  }
  
  
@@ -98,7 +106,7 @@ diff -Nur lmms-0.4.15/plugins/audio_file_processor/audio_file_processor.cpp lmms
  
  
  void audioFileProcessor::loopPointChanged( void )
-@@ -257,6 +286,7 @@
+@@ -257,6 +295,7 @@
  						( m_sampleBuffer.frames()-1 ) );
  	const f_cnt_t f2 = static_cast<f_cnt_t>( m_endPointModel.value() *
  						( m_sampleBuffer.frames()-1 ) );
@@ -106,7 +114,7 @@ diff -Nur lmms-0.4.15/plugins/audio_file_processor/audio_file_processor.cpp lmms
  	m_sampleBuffer.setStartFrame( qMin<f_cnt_t>( f1, f2 ) );
  	m_sampleBuffer.setEndFrame( qMax<f_cnt_t>( f1, f2 ) );
  	emit dataChanged();
-@@ -298,7 +328,7 @@
+@@ -298,7 +337,7 @@
  
  	m_reverseButton = new pixmapButton( this );
  	m_reverseButton->setCheckable( TRUE );
@@ -115,7 +123,7 @@ diff -Nur lmms-0.4.15/plugins/audio_file_processor/audio_file_processor.cpp lmms
  	m_reverseButton->setActiveGraphic( PLUGIN_NAME::getIconPixmap(
  							"reverse_on" ) );
  	m_reverseButton->setInactiveGraphic( PLUGIN_NAME::getIconPixmap(
-@@ -311,7 +341,7 @@
+@@ -311,7 +350,7 @@
  
  	m_loopButton = new pixmapButton( this );
  	m_loopButton->setCheckable( TRUE );
@@ -124,7 +132,7 @@ diff -Nur lmms-0.4.15/plugins/audio_file_processor/audio_file_processor.cpp lmms
  	m_loopButton->setActiveGraphic( PLUGIN_NAME::getIconPixmap(
  								"loop_on" ) );
  	m_loopButton->setInactiveGraphic( PLUGIN_NAME::getIconPixmap(
-@@ -325,6 +355,23 @@
+@@ -325,6 +364,23 @@
  			"This is useful for things like string and choir "
  			"samples." ) );
  
@@ -148,7 +156,7 @@ diff -Nur lmms-0.4.15/plugins/audio_file_processor/audio_file_processor.cpp lmms
  	m_ampKnob = new knob( knobStyled, this );
  	m_ampKnob->setVolumeKnob( TRUE );
  	m_ampKnob->move( 17, 108 );
-@@ -504,6 +551,7 @@
+@@ -504,6 +560,7 @@
  	m_endKnob->setModel( &a->m_endPointModel );
  	m_reverseButton->setModel( &a->m_reverseModel );
  	m_loopButton->setModel( &a->m_loopModel );
@@ -156,9 +164,57 @@ diff -Nur lmms-0.4.15/plugins/audio_file_processor/audio_file_processor.cpp lmms
  	sampleUpdated();
  }
  
+@@ -522,8 +579,7 @@
+ 	m_endKnob( 0 ),
+ 	m_isDragging( false ),
+ 	m_reversed( false ),
+-	m_framesPlayed( 0 ),
+-	m_animation(configManager::inst()->value("ui", "animateafp").toInt())
++	m_framesPlayed( 0 )
+ {
+ 	setFixedSize( _w, _h );
+ 	setMouseTracking( true );
+@@ -546,11 +602,13 @@
+ 	const f_cnt_t nb_frames = m_sampleBuffer.endFrame() - m_sampleBuffer.startFrame();
+ 	if( nb_frames < 1 )
+ 	{
++/* MCA */printf("reset framesPlayed to 0\n");
+ 		m_framesPlayed = 0;
+ 	}
+ 	else
+ 	{
+ 		m_framesPlayed = _frames_played % nb_frames;
++/* MCA */printf("isPlaying: framesPlayed = %d\n", m_framesPlayed);
+ 	}
+ 	update();
+ }
+@@ -702,7 +760,7 @@
+ 			QColor( 255, 255, 0, 70 )
+ 		);
+ 
+-		if( m_framesPlayed && m_animation)
++		if( m_framesPlayed )
+ 		{
+ 			const int played_width_px = m_framesPlayed
+ 				/ double( m_sampleBuffer.endFrame() - m_sampleBuffer.startFrame() )
+@@ -933,12 +991,8 @@
+ 		return;
+ 	}
+ 	const double v = double( _frames ) / m_sampleBuffer.frames();
+-	if(m_startKnob) {
+-		m_startKnob->slideBy( v, false );
+-	}
+-	if(m_endKnob) {
+-		m_endKnob->slideBy( v, false );
+-	}
++	m_startKnob->slideBy( v, false );
++	m_endKnob->slideBy( v, false );
+ }
+ 
+ 
 diff -Nur lmms-0.4.15/plugins/audio_file_processor/audio_file_processor.h lmms-0.4.15.new/plugins/audio_file_processor/audio_file_processor.h
---- lmms-0.4.15/plugins/audio_file_processor/audio_file_processor.h	2013-06-11 20:57:16.000000000 +0000
-+++ lmms-0.4.15.new/plugins/audio_file_processor/audio_file_processor.h	2013-06-29 22:41:39.322810181 +0000
+--- lmms-0.4.15/plugins/audio_file_processor/audio_file_processor.h	2013-07-02 13:44:59.686266104 +0000
++++ lmms-0.4.15.new/plugins/audio_file_processor/audio_file_processor.h	2013-07-02 02:13:44.000000000 +0000
 @@ -74,6 +74,7 @@
  	void reverseModelChanged();
  	void ampModelChanged();
@@ -167,17 +223,18 @@ diff -Nur lmms-0.4.15/plugins/audio_file_processor/audio_file_processor.h lmms-0
  
  
  signals:
-@@ -90,6 +91,9 @@
+@@ -90,6 +91,10 @@
  	FloatModel m_endPointModel;
  	BoolModel m_reverseModel;
  	BoolModel m_loopModel;
 +	BoolModel m_stutterModel;
 +
 +	f_cnt_t m_nextPlayStartPoint;
++
  
  	friend class AudioFileProcessorView;
  
-@@ -131,6 +135,7 @@
+@@ -131,6 +136,7 @@
  	pixmapButton * m_openAudioFileButton;
  	pixmapButton * m_reverseButton;
  	pixmapButton * m_loopButton;
@@ -185,3 +242,12 @@ diff -Nur lmms-0.4.15/plugins/audio_file_processor/audio_file_processor.h lmms-0
  
  } ;
  
+@@ -234,7 +240,7 @@
+ 	draggingType m_draggingType;
+ 	bool m_reversed;
+ 	f_cnt_t m_framesPlayed;
+-	bool m_animation;
++
+ 
+ public:
+ 	AudioFileProcessorWaveView( QWidget * _parent, int _w, int _h, sampleBuffer & _buf );
