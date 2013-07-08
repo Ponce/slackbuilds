@@ -1,0 +1,229 @@
+#!/bin/sh
+
+# Slackware build script for nvidia-legacy96-driver
+
+# Copyright 2008-2011 Heinz Wiesinger, Amsterdam, The Netherlands
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+# Maintainer: Edward Koenig, <kingbeowulf[at]gmail.com>
+
+
+PRGNAM=nvidia-legacy96-driver
+VERSION=96.43.23
+APPVER=96.43.20
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+NVPKG="pkg1"
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  TARGET="x86"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  TARGET="x86"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  TARGET="x86_64"
+  LIBDIRSUFFIX="64"
+  NVPKG="pkg2"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+SRCNAM=NVIDIA-Linux-$TARGET-$VERSION-$NVPKG
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf nvidia-installer-1.0.7
+tar xvf $CWD/nvidia-installer-$APPVER.tar.gz
+rm -rf nvidia-settings-1.0
+tar xvf $CWD/nvidia-settings-$APPVER.tar.gz
+rm -rf nvidia-xconfig-1.0
+tar xvf $CWD/nvidia-xconfig-$APPVER.tar.gz
+rm -rf $SRCNAM
+sh $CWD/$SRCNAM.run --extract-only
+cd $SRCNAM
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+mkdir -p $PKG/usr/{bin,share,lib$LIBDIRSUFFIX,sbin} $PKG/usr/include/GL \
+  $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/{drivers,extensions} \
+  $PKG/usr/man/man1
+
+# Start with the libraries
+cd usr/lib
+  #remove duplicate libnvidia-tls
+  rm libnvidia-tls.so.$VERSION
+  cp -a * $PKG/usr/lib$LIBDIRSUFFIX
+  #Rename those files which would overwrite xorg's original files
+  for i in libGL.so.$VERSION libGLcore.so.$VERSION; do
+    mv $PKG/usr/lib$LIBDIRSUFFIX/$i $PKG/usr/lib$LIBDIRSUFFIX/$i-nvidia ;
+  done
+cd -
+
+# This is the driver itself
+cd usr/X11R6/lib
+  cp -a * $PKG/usr/lib$LIBDIRSUFFIX/xorg/
+  for i in libXvMCNVIDIA.a libXvMCNVIDIA.so.$VERSION; do
+    mv $PKG/usr/lib$LIBDIRSUFFIX/xorg/$i $PKG/usr/lib$LIBDIRSUFFIX/ ;
+  done
+
+  # Rename those files which would overwrite xorg's original files
+  mv $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/extensions/libglx.so.$VERSION \
+    $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/extensions/libglx.so.$VERSION-nvidia
+cd -
+
+# These are the includes
+cd usr/include/GL
+  for i in glxext.h glext.h gl.h glx.h; do
+    cp -a $i $PKG/usr/include/GL/$i-nvidia
+  done
+cd -
+
+# Next come the apps
+cp -a usr/bin/nvidia-bug-report.sh $PKG/usr/bin/
+
+# symlinks
+cd $PKG/usr/lib$LIBDIRSUFFIX
+  ln -sf libnvidia-cfg.so.$VERSION libnvidia-cfg.so.1
+  ln -sf libnvidia-cfg.so.1 libnvidia-cfg.so
+  ln -sf tls/libnvidia-tls.so.$VERSION libnvidia-tls.so.1
+  ln -sf libXvMCNVIDIA.so.$VERSION libXvMCNVIDIA_dynamic.so.1
+cd -
+
+cd $PKG/usr/lib$LIBDIRSUFFIX/tls
+  ln -sf libnvidia-tls.so.$VERSION libnvidia-tls.so.1
+cd -
+
+cd $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules
+  ln -sf libnvidia-wfb.so.$VERSION libnvidia-wfb.so.1
+cd -
+
+# XDG stuff
+cd usr/share
+  for i in applications pixmaps; do
+    cp -a $i $PKG/usr/share/
+  done
+cd -
+
+# Compiling nvidia-installer from source
+cd $TMP/nvidia-installer-1.0.7
+  chown -R root:root .
+  chmod -R u+w,go+r-w,a-s .
+
+  CFLAGS="$SLKCFLAGS" \
+  LDFLAGS="-lz" \
+  make
+
+  install -m 755 nvidia-installer $PKG/usr/bin/
+  install -m 644 nvidia-installer.1 $PKG/usr/man/man1/
+cd -
+
+# Compiling nvidia-settings from source
+cd $TMP/nvidia-settings-1.0
+  chown -R root:root .
+  chmod -R u+w,go+r-w,a-s .
+
+  # Fix missing include necessary for newer version of libXxf86vm
+  patch -p1 -i $CWD/NvCtrlAttributesVidMode.diff
+
+  # Slackware doesn't ship a static libXxf86vm, so we link against the shared one
+  sed -i "s|-Wl,-Bstatic -lXxf86vm -Wl,-Bdynamic|-Wl,-Bdynamic -lXxf86vm|" \
+    Makefile
+
+  cd src/libXNVCtrl
+    rm libXNVCtrl.a
+    cp $CWD/Makefile-libXNVCtrl ./Makefile
+    CFLAGS="$SLKCFLAGS" \
+    make
+  cd ../../
+
+  CFLAGS="$SLKCFLAGS" \
+  NV_CFLAGS="$SLKCFLAGS" \
+  X11_LIB_DIRS="-L/usr/lib$LIBDIRSUFFIX -ldl" \
+  make
+
+  install -m 755 nvidia-settings $PKG/usr/bin/
+  install -m 644 doc/nvidia-settings.1 $PKG/usr/man/man1/
+cd ../
+
+# Compiling nvidia-xconfig from source
+cd $TMP/nvidia-xconfig-1.0
+  chown -R root:root .
+  chmod -R u+w,go+r-w,a-s .
+
+  NV_CFLAGS="$SLKCFLAGS" \
+  make
+
+  install -m 755 nvidia-xconfig $PKG/usr/bin/
+  install -m 644 nvidia-xconfig.1 $PKG/usr/man/man1/
+cd -
+
+# Self written bash script which I use to switch between nvidia and nv.
+# It is now also used by doinst.sh to switch to the nvidia-driver right
+# after installation.
+install -m 0755 $CWD/nvidia-switch $PKG/usr/sbin/
+sed -i s/PKGVERSION/$VERSION/g $PKG/usr/sbin/nvidia-switch
+sed -i s/LIBDIRSUFFIX/$LIBDIRSUFFIX/g $PKG/usr/sbin/nvidia-switch
+
+# Compress man-pages
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+
+# These correct wrong paths
+sed -i "s|__LIBGL_PATH__|/usr/lib$LIBDIRSUFFIX/|" $PKG/usr/lib$LIBDIRSUFFIX/libGL.la
+sed -i "s|/usr/X11R6/lib|/usr/lib$LIBDIRSUFFIX/|" $PKG/usr/lib$LIBDIRSUFFIX/libGL.la
+sed -i "s|__UTILS_PATH__|/usr/bin|" \
+  $PKG/usr/share/applications/nvidia-settings.desktop
+sed -i "s|__PIXMAP_PATH__|/usr/share/pixmaps|" \
+  $PKG/usr/share/applications/nvidia-settings.desktop
+
+cd $TMP/$SRCNAM
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE pkg-history.txt ./usr/share/doc* $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.Slackware
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+sed "s/PKGVERSION/$VERSION/g" $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$TARGET-$BUILD$TAG.${PKGTYPE:-tgz}
+
