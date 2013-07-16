@@ -11,10 +11,15 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/pekwm/config.new
-config etc/pekwm/start.new
 config etc/pekwm/autoproperties.new
-config etc/pekwm/mouse.new
-config etc/pekwm/vars.new
-config etc/pekwm/menu.new
+config etc/pekwm/autoproperties_typerules.new
+config etc/pekwm/config.new
+config etc/pekwm/config_system.new
 config etc/pekwm/keys.new
+config etc/pekwm/menu.new
+config etc/pekwm/mouse.new
+config etc/pekwm/mouse_click.new
+config etc/pekwm/mouse_sloppy.new
+config etc/pekwm/mouse_system.new
+config etc/pekwm/start.new
+config etc/pekwm/vars.new
