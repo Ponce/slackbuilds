@@ -13,4 +13,3 @@ config() {
 
 config etc/ansible/ansible.cfg.new
 config etc/ansible/hosts.new
-
