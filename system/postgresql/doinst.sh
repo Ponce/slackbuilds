@@ -24,3 +24,17 @@ preserve_perms() {
 preserve_perms etc/rc.d/rc.postgresql.new
 config etc/logrotate.d/postgresql.new
 
+# Create default program symlinks in /usr/bin
+(
+  cd usr/bin
+  for pg_binary in ../lib@LIBDIRSUFFIX@/postgresql/@PG_VERSION@/bin/*; do
+    pg_prog=$(basename $pg_binary)
+    if [ -L $pg_prog ]; then
+      ln -sf $pg_binary
+    elif [ ! -e $pg_prog ]; then
+      # make sure we don't overwrite actual binaries
+      ln -s $pg_binary
+    fi
+  done
+)
+
