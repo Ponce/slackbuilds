@@ -28,6 +28,7 @@ preserve_perms etc/rc.d/rc.clamav.new
 config etc/freshclam.conf.new
 config etc/clamd.conf.new
 config etc/clamav-milter.conf.new
+config etc/logrotate.d/clamav.new
 # Remove new log if one is already present
 config var/log/clamav/clamd.log.new ; rm -f var/log/clamav/clamd.log.new
 config var/log/clamav/freshclam.log.new ; rm -f var/log/clamav/freshclam.log.new
