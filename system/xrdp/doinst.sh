@@ -23,4 +23,9 @@ config etc/xrdp/xrdp-xinitrc.new
 config etc/xrdp/rsakeys.ini.new
 config etc/xrdp/sesman.ini.new
 config etc/xrdp/xrdp.ini.new
-
+config etc/xrdp/km-0407.ini.new
+config etc/xrdp/km-0409.ini.new
+config etc/xrdp/km-040c.ini.new
+config etc/xrdp/km-0410.ini.new
+config etc/xrdp/km-0419.ini.new
+config etc/xrdp/km-041d.ini.new

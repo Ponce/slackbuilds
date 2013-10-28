@@ -4,7 +4,7 @@
 # Written by Phillip Warner <pc_warner@yahoo.com>
 
 PRGNAM=xrdp
-VERSION=0.4.2
+VERSION=0.6.0
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -44,71 +44,72 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+rm -rf $PRGNAM-v$VERSION
+tar xvf $CWD/$PRGNAM-v$VERSION.tar.gz
+cd $PRGNAM-v$VERSION
 chown -R root:root .
 chmod -R a-s,u+rw,go-w .
 
-if [ ! "$USE_PAM" = "NO" ]; then
-  patch < $CWD/patches/Makefile.PAM.diff
-  make
+# uses autoreconf now
+autoreconf -vfi
+
+if [ "$USE_PAM" = "NO" ]; then
+    NOPAM_OPT="--enable-nopam"
 else
-  patch < $CWD/patches/Makefile.NOPAM.diff
-  make nopam
+    NOPAM_OPT=""
 fi
 
-# Fix path in what will become the init script
-sed -i "s/XRDP_DIR=\/usr\/local\/xrdp\//XRDP_DIR=\/usr\/lib${LIBDIRSUFFIX}\/xrdp\//" instfiles/xrdp_control.sh
+# Optional config options if built with FreeRDP:
+#  --enable-freerdp        Build freerdp module (default: no)
+#  --enable-freerdp1       Build freerdp1 module (default: no)
+CFLAGS="$SLKCFLAGS" \
+CPPFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --build=$ARCH-slackware-linux \
+  $NOPAM_OPT
 
-# Set LogFile at /var/log/sesman.log
+# Fix path in what will become the init script
+sed -i "s/SBINDIR=\/usr\/local\/sbin/SBINDIR=\/usr\/sbin/" instfiles/xrdp.sh
+
+# Change xinit script name to xrdp-xinitrc
+sed -i "s/startwm.sh/xrdp-xinitrc/" instfiles/xrdp.sh
+
 # Change LogLevel to INFO instead of DEBUG
 # Disable Root logins by default
 # Set user-specific RDP session script to ~/.xrdp-xinitrc
-patch -d sesman/ < $CWD/patches/sesman.ini.diff
+# Set default RDP session xinit script to /etc/xrdp/xrdp-xinitrc
+# Note:  LogFile now at /var/log/xrdp-sesman.log
+patch -d sesman/ -p2 < $CWD/sesman.ini.patch
 
-make install \
-  PKGDIR=$PKG \
-  DESTDIR=$PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM \
-  CFGDIR=$PKG/etc/$PRGNAM \
-  PIDDIR=$PKG/var/run \
-  MANDIR=$PKG/usr/man \
-  DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION
+# Build fails if a copy of config.{c,h} is not in sesman/tools/
+cp -v sesman/config.{c,h} sesman/tools/
 
-# Install routines for man pages missing from Makefile
-mkdir -p $PKG/usr/man/man5 $PKG/usr/man/man8
-cp -a docs/man/*.5 $PKG/usr/man/man5
-cp -a docs/man/*.8 $PKG/usr/man/man8
+make
+make install DESTDIR=$PKG
 
 # Make sure log directory is there
 mkdir -p $PKG/var/log
 
-# Fix permissions from install
-chmod a-x $PKG/etc/$PRGNAM/*
-if [ -e $PKG/etc/pam.d/ ]; then
-  chmod a-x $PKG/etc/pam.d/sesman
-fi
-chmod a-x $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/{Tahoma-10.fv1,*.bmp,*.cur}
-
 # Let's make the xrdp_control.sh script the init script
 mkdir -p $PKG/etc/rc.d
-mv $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/xrdp_control.sh $PKG/etc/rc.d/rc.$PRGNAM.new
+mv $PKG/etc/$PRGNAM/xrdp.sh $PKG/etc/rc.d/rc.$PRGNAM.new
 
-# Move startwm.sh to a more sane location with a name that makes more sense
-mv $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/startwm.sh $PKG/etc/$PRGNAM/xrdp-xinitrc.new
-
-# Unfortunately, sesman.ini seems to ignore absolute paths for 
-# startwm.sh, so we need to leave a link where it expects to find 
-# the file under the program directory.
-( cd $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM
-  ln -s /etc/$PRGNAM/xrdp-xinitrc startwm.sh
-)
+# Change startwm.sh name for more consistency with previous SlackBuild
+# and corresponding user file name
+mv $PKG/etc/$PRGNAM/startwm.sh  $PKG/etc/$PRGNAM/xrdp-xinitrc.new
 
 # Let's not clobber existing configs
 ( cd $PKG/etc/$PRGNAM
   mv rsakeys.ini rsakeys.ini.new
   mv sesman.ini sesman.ini.new
   mv xrdp.ini xrdp.ini.new
+  rename ini ini.new  km-????.ini
 )
 
 # Install the xrdp-xwmconfig utility
@@ -121,7 +122,7 @@ find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a COPYING design.txt install.txt readme.txt $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a COPYING design.txt install.txt readme.txt faq-*.txt $PKG/usr/doc/$PRGNAM-$VERSION
 # Keep a backup copy of startwm.sh in the docs
 cat sesman/startwm.sh > $PKG/usr/doc/$PRGNAM-$VERSION/startwm.sh-example
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
