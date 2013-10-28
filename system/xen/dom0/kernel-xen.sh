@@ -6,7 +6,7 @@
 # Updated by mario <mario@slackverse.org>, 2010-2013
 
 KERNEL=${KERNEL:-3.2.45}
-XEN=${XEN:-4.2.2}
+XEN=${XEN:-4.3.0}
 BOOTLOADER=${BOOTLOADER:-lilo}
 
 ROOTMOD=${ROOTMOD:-ext4}
