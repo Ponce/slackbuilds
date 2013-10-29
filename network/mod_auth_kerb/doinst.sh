@@ -12,5 +12,3 @@ config() {
 }
 
 config etc/httpd/extra/mod_auth_kerb.conf.new
-
-
