@@ -1,0 +1,445 @@
+Workaround for Samsung Smart TV 2012 :
+ - URI patch made by swiergot http://sourceforge.net/tracker/index.php?func=detail&aid=3532724&group_id=129766&atid=715782
+ - per device content-type engine : change video/x-matroska with video/x-mkv for Samsung devices only
+
+--- a/tombupnp/upnp/src/genlib/miniserver/miniserver.c
++++ b/tombupnp/upnp/src/genlib/miniserver/miniserver.c
+@@ -842,6 +842,8 @@
+         return UPNP_E_INTERNAL_ERROR;   // miniserver running
+     }
+ 
++    ssdpdevices_init(&GlobalSsdpDevices);
++
+     miniSocket =
+         ( MiniServerSockArray * ) malloc( sizeof( MiniServerSockArray ) );
+     if( miniSocket == NULL )
+@@ -963,5 +965,8 @@
+     }
+     shutdown( sock, SD_BOTH );
+     UpnpCloseSocket( sock );
++
++    ssdpdevices_destroy(&GlobalSsdpDevices);
++
+     return 0;
+ }
+--- a/tombupnp/upnp/src/genlib/net/http/webserver.c
++++ b/tombupnp/upnp/src/genlib/net/http/webserver.c
+@@ -1211,6 +1211,7 @@
+ *																		
+ * Parameters:															
+ *	IN http_message_t *req ; HTTP Request message												
++*       IN SOCKINFO *info       ; Socket info (fd with remote ip & port)
+ *	OUT enum resp_type *rtype ; Tpye of response											
+ *	OUT membuffer *headers ; 												
+ *	OUT membuffer *filename ; Get filename from request document
+@@ -1230,6 +1231,7 @@
+ ************************************************************************/
+ static int
+ process_request( IN http_message_t * req,
++                 IN SOCKINFO *info,
+                  OUT enum resp_type *rtype,
+                  OUT membuffer * headers,
+                  OUT membuffer * filename,
+@@ -1473,6 +1475,19 @@
+         goto error_handler;
+     }
+ 
++    //  change "x-matroska" by "x-mkv", for samsung devices only
++    char *newtype;
++    if((strcmp(finfo.content_type, "video/x-matroska")==0)) {
++        if(ssdpdevice_servermatch(&GlobalSsdpDevices, info->foreign_ip_addr.s_addr, "samsung")) {
++//           printf("Req from Samsung device : %s\n", finfo.content_type);
++           // change is made in two steps : free the previous string, malloc a new one
++           if((newtype= (char *) strdup("video/x-mkv"))) {
++               free(finfo.content_type);
++               finfo.content_type = newtype;
++           }
++        }
++    }
++
+     if( RespInstr->IsRangeActive && RespInstr->IsChunkActive ) {
+                 //Content-Range: bytes 222-3333/4000  HTTP_PARTIAL_CONTENT
+         //Transfer-Encoding: chunked
+@@ -1800,7 +1815,7 @@
+     //Process request should create the different kind of header depending on the
+     //the type of request.
+     ret =
+-        process_request( req, &rtype, &headers, &filename, &xmldoc,
++        process_request( req, info, &rtype, &headers, &filename, &xmldoc,
+                          &RespInstr, &Fp);
+     if( ret != UPNP_E_SUCCESS ) {
+         // send error code
+--- a/tombupnp/upnp/src/genlib/net/uri/uri.c
++++ b/tombupnp/upnp/src/genlib/net/uri/uri.c
+@@ -1042,7 +1042,8 @@
+         out->path_type = REL_PATH;
+     }
+ 
+-    if( ( ( begin_hostport + 1 ) < max ) && ( in[begin_hostport] == '/' )
++    //parse hostport only if scheme was found
++    if( ( begin_hostport > 0 ) && ( ( begin_hostport + 1 ) < max ) && ( in[begin_hostport] == '/' )
+         && ( in[begin_hostport + 1] == '/' ) ) {
+         begin_hostport += 2;
+ 
+@@ -1059,6 +1060,12 @@
+         out->hostport.text.size = 0;
+         out->hostport.text.buff = 0;
+         begin_path = begin_hostport;
++
++        //remove excessive leading slashes (fix for Samsung Smart TV 2012)
++        while( ( ( begin_path + 1 ) < max ) && ( in[begin_path] == '/' ) && ( in[begin_path + 1] == '/') ) {
++            begin_path++;
++        }
++
+     }
+ 
+     begin_fragment =
+--- a/tombupnp/upnp/src/inc/ssdplib.h
++++ b/tombupnp/upnp/src/inc/ssdplib.h
+@@ -161,9 +161,22 @@
+   struct sockaddr_in dest_addr;
+ } ssdp_thread_data;
+ 
++typedef struct
++{
++  ithread_mutex_t mutex;
++  LinkedList deviceslist;
++} ssdpdevices_t;
++
++typedef struct
++{
++  uint32_t s_addr;
++  char *serverdesc;
++} ssdp_device_t;
+ 
+ /* globals */
+ 
++extern ssdpdevices_t GlobalSsdpDevices;
++
+ CLIENTONLY(extern SOCKET gSsdpReqSocket;);
+ 
+ typedef int (*ParserFun)(char *, Event *);
+@@ -174,6 +187,64 @@
+ //int AnalyzeCommand(char * szCommand, Event * Evt);
+ 
+ /************************************************************************
++*       Function :      ssdpdevices_free
++*
++*       Parameters :
++*               void *d ;
++*
++*       Description :   Free memory allocated for each SSDP Device
++*
++*       Return : void ;
++*
++*       Note :
++************************************************************************/
++void ssdpdevice_free( void *d );
++
++/************************************************************************
++*       Function :      ssdpdevice_compare
++*
++*       Parameters :
++*               void* param1 ;
++*               void* param2 ;
++*
++*       Description :   Compare two SSDP devices by their ip address
++*
++*       Return : int ;
++*
++*       Note :
++************************************************************************/
++int ssdpdevice_compare( void *param1, void *param2 );
++
++/************************************************************************
++*       Function :      ssdpdevices_init
++*
++*       Parameters :
++*               INOUT ssdpdevices_t* s ;     Array of SSDP Devices
++*
++*       Description :   Initialize and allocate memory for the array of SSDP devices
++*
++*       Return : void ;
++*
++*       Note :
++************************************************************************/
++
++void ssdpdevices_init(ssdpdevices_t* s);
++
++/************************************************************************
++*       Function :      ssdpdevices_destroy
++*
++*       Parameters :
++*               INOUT ssdpdevices_t* msg ;     Array of SSDP Devices
++*
++*       Description :   Free memory allocated for the Array of SSDP Devices
++*
++*       Return : void ;
++*
++*       Note :
++************************************************************************/
++void ssdpdevices_destroy( ssdpdevices_t *s );
++
++/************************************************************************
+ * Function : Make_Socket_NoBlocking									
+ *																	
+ * Parameters:														
+--- a/tombupnp/upnp/src/ssdp/ssdp_server.c
++++ b/tombupnp/upnp/src/ssdp/ssdp_server.c
+@@ -52,8 +52,231 @@
+  #include "unixutil.h"
+ #endif
+ 
++#include <regex.h>
++
+ #define MAX_TIME_TOREAD  45
+ 
++// global containing the array of devices
++ssdpdevices_t GlobalSsdpDevices;
++
++/************************************************************************
++*       Function :      ssdpdevices_free
++*
++*       Parameters :
++*               void *msg ;
++*
++*       Description :   Free memory allocated for each SSDP Device
++*
++*       Return : void ;
++*
++*       Note :
++************************************************************************/
++void
++ssdpdevice_free( void *d )
++{
++    ssdp_device_t *sd = ( ssdp_device_t * ) d;
++
++    free(sd->serverdesc);
++
++    free( sd );
++}
++
++/************************************************************************
++*       Function :      ssdpdevice_compare
++*
++*       Parameters :
++*               void* param1 ;
++*               void* param2 ;
++*
++*       Description :   Compare two SSDP devices by their ip address 
++*
++*       Return : int ;
++*
++*       Note :
++************************************************************************/
++int
++ssdpdevice_compare( void *param1,
++                    void *param2 )
++{
++    assert( param1 != NULL );
++    assert( param2 != NULL );
++
++    return ( ( ssdp_device_t * ) param1 )->s_addr ==
++           ( ( ssdp_device_t * ) param2 )->s_addr;
++}
++
++/************************************************************************
++*       Function :      ssdpdevices_init
++*
++*       Parameters :
++*               INOUT ssdpdevices_t* s ;     Array of SSDP Devices
++*
++*       Description :   Initialize and allocate memory for the array of SSDP devices
++*
++*       Return : void ;
++*
++*       Note :
++************************************************************************/
++
++void ssdpdevices_init(ssdpdevices_t* s) {
++    ithread_mutex_init( &s->mutex, NULL );
++    ListInit( &s->deviceslist, ssdpdevice_compare, ssdpdevice_free );
++}
++
++/************************************************************************
++*       Function :      ssdpdevices_destroy
++*
++*       Parameters :
++*               INOUT ssdpdevices_t* s ;     Array of SSDP Devices
++*
++*       Description :   Free memory allocated for the Array of SSDP Devices
++*
++*       Return : void ;
++*
++*       Note :
++************************************************************************/
++void
++ssdpdevices_destroy( ssdpdevices_t *s )
++{
++    int ret;
++
++    assert( s != NULL );
++
++    ithread_mutex_lock( &s->mutex );
++    ListDestroy( &s->deviceslist, 1 );
++    ithread_mutex_unlock( &s->mutex );
++
++    ret = ithread_mutex_destroy( &s->mutex );
++    assert( ret == 0 );
++    
++}
++
++/************************************************************************
++*       Function :      create_device_node
++*
++*       Parameters :
++*               IN    uint32_t  *ip4addr;    IP Address
++*               IN    membuffer *mbuf;       Server descripton
++*
++*       Description :   Create a device structure and fill it with ip & description
++*
++*       Return : ssdp_device_t *
++*
++*       Note :
++************************************************************************/
++
++ssdp_device_t *create_device(uint32_t ipaddr, membuffer *mbuf) {
++    ssdp_device_t *newd;
++    if( (newd = (ssdp_device_t *) malloc(sizeof(ssdp_device_t)))) {
++        if( ( newd->serverdesc = str_alloc ( mbuf->buf, mbuf->length) ) ) {
++            newd->s_addr = ipaddr;
++            return(newd);
++        }
++        free(newd);
++    }
++    return(NULL);
++}
++ 
++
++/************************************************************************
++*       Function :      ssdpdevices_updatelist
++*
++*       Parameters :
++*               INOUT ssdpdevices_t* s ;     Array of SSDP Devices
++*               IN    uint32_t  *ip4addr;    IP Address
++*               IN    char *serverstr;       Server descripton
++*
++*       Description :   Insert or update the list with given device
++*
++*       Return : void ;
++*
++*       Note :
++************************************************************************/
++void
++ssdpdevices_updatelist( ssdpdevices_t *s, uint32_t ip4addr, membuffer *serverstr)
++{
++    assert( s         != NULL );
++    assert( ip4addr   != 0    );
++    assert( serverstr != NULL );
++
++    int found = 0;
++
++    // Loop through each existing device
++    ithread_mutex_lock( &s->mutex );
++    LinkedList *l = &s->deviceslist;
++    ListNode *temp = NULL;
++    ssdp_device_t *d,*newd;
++    for (temp = ListHead(l);temp!=NULL;temp = ListNext(l,temp))
++    {
++       d=(ssdp_device_t *)temp->item;
++       if(d->s_addr == ip4addr) {
++           found = 1;
++           break;
++       }
++    }
++    
++    // Add the entry if necessary
++    if(!found) {
++        if( ( newd = create_device(ip4addr, serverstr))) {
++            ListAddTail( l, newd);
++        }
++    }
++    ithread_mutex_unlock( &s->mutex );
++
++}
++
++/************************************************************************
++*       Function :      ssdpdevice_descmatch
++*
++*       Parameters :
++*               IN ssdpdevices_t* s ;     Array of SSDP Devices
++*               IN uint32_t ipaddr;       Ip addres to check
++*               IN char *regexp;          Regex to match
++*
++*       Description :   Check whether the device's description matches the given regex
++*
++*       Return : int (1 = match, else no match)
++*
++*       Note :
++************************************************************************/
++int
++ssdpdevice_servermatch( ssdpdevices_t *s, uint32_t ip4addr, char *regex)
++{
++    assert( s        != NULL );
++    assert( ip4addr  != 0    );
++    assert( regex    != NULL );
++
++    int ret = 0;
++    regex_t reg;
++
++    if( regcomp(&reg, regex, REG_EXTENDED | REG_NOSUB | REG_ICASE) != 0) {
++         printf("Invalid regex : %s\n", regex);
++         return(0);
++    }
++
++    // Loop through each existing device
++    ithread_mutex_lock( &s->mutex );
++    LinkedList *l = &s->deviceslist;
++    ListNode *temp = NULL;
++    ssdp_device_t *d;
++    for (temp = ListHead(l);temp!=NULL;temp = ListNext(l,temp))
++    {
++       d=(ssdp_device_t *)temp->item;
++       if(d->s_addr == ip4addr) {
++           // We found the ip addr, let's check if the desc contains the searched string
++           if(regexec(&reg, d->serverdesc, 0, NULL, 0) == 0) {
++               ret=1;
++           }
++           break;
++       }
++    }
++    
++    ithread_mutex_unlock( &s->mutex );
++    return(ret);
++}
++
++
++
+ CLIENTONLY( SOCKET gSsdpReqSocket = 0;
+      )
+ 
+@@ -756,6 +979,24 @@
+     if( !valid_ssdp_msg( &parser->msg ) ) {
+         goto error_handler;
+     }
++
++    //  update liste of devices for each NOTIFY received
++
++    if ( parser->msg.method == HTTPMETHOD_NOTIFY ) {
++//        printf( "SSDP recvd code NOTIFY = %d from %s\n", parser->msg.method, inet_ntoa(data->dest_addr.sin_addr));
++        LinkedList *g=&parser->msg.headers;
++        ListNode *temp = NULL;
++        http_header_t *h;
++        for (temp = ListHead(g);temp!=NULL;temp = ListNext(g,temp))
++        {
++           h=(http_header_t *)temp->item;
++           if(strncasecmp(h->name.buf, "SERVER", h->name.length) == 0) {
++                ssdpdevices_updatelist(&GlobalSsdpDevices, data->dest_addr.sin_addr.s_addr, &h->value);
++           }
++        }
++
++    }
++
+     return 0;                   //////// done; thread will free 'data'
+ 
+   error_handler:
