@@ -12,6 +12,7 @@ config() {
 }
 
 config etc/xdg/lxsession/LXDE/desktop.conf.new
+config etc/xdg/lxsession/LXDE/autostart.new
 config etc/xdg/pcmanfm/LXDE/pcmanfm.conf.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
