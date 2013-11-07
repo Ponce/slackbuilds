@@ -11,7 +11,10 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/etter.conf.new
+config etc/ettercap/etter.conf.new
+config etc/ettercap/etter.dns.new
+config etc/ettercap/etter.mdns.new
+config etc/ettercap/etter.nbns.new
 
 if [ -x usr/bin/update-desktop-database ]; then
   usr/bin/update-desktop-database -q usr/share/applications
