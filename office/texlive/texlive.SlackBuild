@@ -2,7 +2,7 @@
 
 # TeXLive build script for Slackware
 
-# Copyright 2009-2012  Robby Workman, Northport, AL, USA
+# Copyright 2009-2013  Robby Workman, Northport, AL, USA
 # Copyright 2009  Patrick J. Volkerding, Sebeka, MN, USA
 # All rights reserved.
 #
@@ -23,17 +23,16 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# URL: ftp://tug.org/historic/systems/texlive/2012/
+# URL: ftp://tug.org/historic/systems/texlive/2013/
 
 PRGNAM=texlive
-VERSION=20120701
-BUILD=${BUILD:-4}
+VERSION=20130530
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 SOURCE_VERS=$VERSION
 TEXMF_VERS=$VERSION
-
-TEXI2HTML=5.0		# texi2html version - http://www.nongnu.org/texi2html/
+EXTRA_VERS=$VERSION
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -78,18 +77,20 @@ find . \
   \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
   -exec chmod 644 {} \;
 
+# Apply patches from branch2013
+for file in $CWD/branch2013/*.diff ; do patch -p2 < $file ; done
+
+# Apply patches from debian
+for file in $CWD/debian/* ; do patch -p1 < $file ; done
+
 # Fix up some paths
 patch -p1 < $CWD/patches/source-fixup_texmf-local_tree_in_texmf_cnf.diff
 
-# Add some perl modules, at least one of which is required by updmap
-mkdir -p $PKG/usr/share/perl5
-cp -a utils/biber/TeXLive $PKG/usr/share/perl5
-
 unset TEXMFCNF ; export TEXMFCNF
 LANG=C ; export LANG
-GNUMAKE=$(which make) ; export GNUMAKE
 KPATHSEA_WARNING=0 ; export KPATHSEA_WARNING
 
+# --with-system-harfbuzz requires graphite2 (and harfbuzz linked to it)
 mkdir build ; cd build
   CFLAGS="$SLKCFLAGS" \
   CXXFLAGS="$SLKCFLAGS" \
@@ -98,25 +99,29 @@ mkdir build ; cd build
     --libdir=/usr/lib${LIBDIRSUFFIX} \
     --mandir=/usr/man \
     --infodir=/usr/info \
-    --with-banner-add='TeX Live 2012/Slackware (SlackBuilds.org)' \
+    --with-banner-add='TeX Live 2013/Slackware (SlackBuilds.org)' \
     --disable-native-texlive-build \
     --enable-largefile \
-    --disable-missing \
-    --with-xdvi-x-toolkit=xaw \
+    --with-xdvi-x-toolkit=xaw3d \
     --enable-shared \
     --disable-static \
+    --disable-missing \
     --with-x \
     --without-etex \
     --enable-xindy \
     --with-clisp-runtime=system \
     --with-system-poppler \
     --with-system-xpdf \
-    --with-system-ncurses \
     --with-system-zlib \
     --with-system-libpng \
     --with-system-t1lib \
     --with-system-gd \
     --with-system-freetype2 \
+    --with-system-libgs \
+    --with-system-icu \
+    --with-system-pixman \
+    --with-system-cairo \
+    --without-system-harfbuzz \
     --build=$ARCH-slackware-linux
   make
   make install DESTDIR=$PKG
@@ -124,18 +129,30 @@ cd ..
 
 # Create symlinks
 PATH="$PATH:$PKG/usr/bin" LD_LIBRARY_PATH+=$PKG/usr/lib${LIBDIRSUFFIX} \
-  texlinks -f $PKG/usr/share/texmf/web2c/fmtutil.cnf $PKG/usr/bin
+  texlinks -f $PKG/usr/share/texmf-dist/web2c/fmtutil.cnf $PKG/usr/bin
 
 # Install the docs while we're still here
 mkdir -p $PKG/usr/doc/texlive-$VERSION
 cp -a ChangeLog README* $PKG/usr/doc/texlive-$VERSION
-cat $CWD/README.tlpkg > $PKG/usr/doc/texlive-$VERSION/README.tlpkg
+
+# We won't make tlmgr easily available; it's still there, but 
+# we'll make it harder to void the warranty :-)
+rm -f $PKG/usr/bin/tlmgr
+cat $CWD/README.tlpkg > $PKG/usr/doc/$PRGNAM-$VERSION/README.tlpkg
+
+# Add some perl modules, at least one of which is required by updmap
+mkdir -p $PKG/usr/share/perl5
+cp -a utils/biber/TeXLive $PKG/usr/share/perl5
+tar xvf $CWD/texlive-$EXTRA_VERS-extra.tar.xz \
+  --strip-components 2 \
+  -C $PKG/usr/share/perl5 \
+  texlive-20130530-extra/tlpkg/TeXLive/
 
 # and now we'll install the texmf stuff
 cd $TMP
-rm -rf texlive-$TEXMF_VERS-texmf
-tar xvf $CWD/texlive-$TEXMF_VERS-texmf.tar.xz
-cd texlive-$TEXMF_VERS-texmf
+rm -rf texlive-texmf-$TEXMF_VERS
+tar xvf $CWD/texlive-texmf-$TEXMF_VERS.tar.xz -C $PKG/usr/share
+cd $PKG/usr/share
 chown -R root:root .
 chmod -R a-s .
 find . \
@@ -147,47 +164,19 @@ find . \
 # Fix up some paths
 patch -p1 < $CWD/patches/texmf-fixup_texmf-local_tree_in_texmf_cnf.diff
 
-mkdir -p $PKG/usr/share
-cp -a texmf texmf-dist $PKG/usr/share
-
 # Move manual pages to the correct place
 # There's some duplicates of stuff that's already present in /usr/man
 # from the texlive source we just compiled above, but I'm going to 
 # work from the assumption that they're identical - I just don't have
 # the requisite number of fucks to give in order to ensure that.
-mv $PKG/usr/share/texmf/doc/man/man1/*.1 $PKG/usr/man/man1
-mv $PKG/usr/share/texmf/doc/man/man5/*.5 $PKG/usr/man/man5
+mv $PKG/usr/share/texmf-dist/doc/man/man1/*.1 $PKG/usr/man/man1
 # No, we don't care about the pdf versions of the manual pages
-rm -rf $PKG/usr/share/texmf/doc/man
+rm -rf $PKG/usr/share/texmf-dist/doc/man
 
-# All of these are already in the right place:
-rm -rf $PKG/usr/share/texmf/doc/info
-
-# Now let's add texi2hmtl - http://www.nongnu.org/texi2html/
-cd $TMP
-rm -rf texi2html-$TEXI2HTML
-tar xvf $CWD/texi2html-$TEXI2HTML.tar.bz2
-cd texi2html-$TEXI2HTML
-chown -R root:root .
-chmod -R a-s .
-find . \
-  \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
-  -exec chmod 755 {} \; -o \
-  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
-  -exec chmod 644 {} \;
-CFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --bindir=/usr/bin \
-  --mandir=/usr/man \
-  --infodir=/usr/info \
-  --build=$ARCH-slackware-linux
-make
-make install DESTDIR=$PKG
-mkdir -p $PKG/usr/doc/texlive-$VERSION/texi2html-$TEXI2HTML
-cp -a \
-  AUTHORS COPYING ChangeLog NEWS README TODO \
-    $PKG/usr/doc/texlive-$VERSION/texi2html-$TEXI2HTML
+# We're going to put docs in our standard location (with a compat link)
+mv $PKG/usr/share/texmf-dist/doc/* $PKG/usr/doc/$PRGNAM-$VERSION
+rmdir $PKG/usr/share/texmf-dist/doc/
+ln -s ../../doc/$PRGNAM-$VERSION/doc $PKG/usr/share/texmf-dist/doc
 
 # Handle the man pages
 find $PKG/usr/man -type f -exec gzip -9 {} \;
