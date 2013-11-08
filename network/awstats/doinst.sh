@@ -13,7 +13,7 @@ config() {
 
 # Keep same perms:
 if [ -e etc/httpd/extra/httpd-awstats.conf.new ]; then
-  cp -a etc/httpd/extra/httpd-awstats.conf.new etc/httpd/extra/httpd-awstats.conf.new.incoming
+  cp -a etc/httpd/extra/httpd-awstats.conf etc/httpd/extra/httpd-awstats.conf.new.incoming
   cat etc/httpd/extra/httpd-awstats.conf.new > etc/httpd/extra/httpd-awstats.conf.new.incoming
   mv etc/httpd/extra/httpd-awstats.conf.new.incoming etc/httpd/extra/httpd-awstats.conf.new
 fi
