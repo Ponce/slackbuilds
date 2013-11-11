@@ -3,11 +3,11 @@
 # Although it might work correctly, this script is intended as a template, so
 # simplicity is the priority here.
 # Written by Chris Abela <chris.abela@maltats.com>, 20100308
-# Updated by mario <mario@slackverse.org>, 2010-2012
+# Modified by Mario Preksavec <mario@slackware.hr>
 
 set -e
 
-KERNEL=${KERNEL:-3.2.29}
+KERNEL=${KERNEL:-3.10.17}
 
 # Build an image for the root file system and another for the swap
 # Default values : 8GB and 500MB resepectively.
