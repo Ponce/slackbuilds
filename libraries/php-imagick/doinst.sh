@@ -13,3 +13,5 @@ config() {
 
 config etc/php/imagick.ini.new
 
+/usr/bin/pecl install --nodeps --soft --force --register-only --nobuild \
+  usr/libLIBDIRSUFFIX/php/.pkgxml/imagick.xml > /dev/null
