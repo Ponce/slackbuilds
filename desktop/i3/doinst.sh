@@ -12,9 +12,7 @@ config() {
 }
 
 config etc/i3/config.new
-config etc/i3/welcome.new
 config etc/i3/config.keycodes.new
-config etc/X11/xinit/xinitrc.i3.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
