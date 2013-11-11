@@ -427,6 +427,14 @@ WITH_CONTENT_SCAN=yes
 
 
 #------------------------------------------------------------------------------
+# By default, Exim has support for checking the AD bit in a DNS response, to
+# determine if DNSSEC validation was successful.  If your system libraries
+# do not support that bit, then set DISABLE_DNSSEC to "yes"
+
+# DISABLE_DNSSEC=yes
+
+
+#------------------------------------------------------------------------------
 # Compiling Exim with experimental features. These are documented in
 # experimental-spec.txt. "Experimental" means that the way these features are
 # implemented may still change. Backward compatibility is not guaranteed.
@@ -467,6 +475,25 @@ WITH_CONTENT_SCAN=yes
 
 # EXPERIMENTAL_OCSP=yes
 
+# Uncomment the following line to add DMARC checking capability, implemented
+# using libopendmarc libraries.
+# EXPERIMENTAL_DMARC=yes
+# CFLAGS += -I/usr/local/include
+# LDFLAGS += -lopendmarc
+
+# Uncomment the following line to add Per-Recipient-Data-Response support.
+# EXPERIMENTAL_PRDR=yes
+
+# Uncomment the following line to support Transport post-delivery actions,
+# eg. for logging to a database.
+# EXPERIMENTAL_TPDA=yes
+
+# Uncomment the following line to add Redis lookup support
+# You need to have hiredis installed on your system (https://github.com/redis/hiredis).
+# Depending on where it is installed you may have to edit the CFLAGS and LDFLAGS lines.
+# EXPERIMENTAL_REDIS=yes
+# CFLAGS += -I/usr/local/include
+# LDFLAGS += -lhiredis
 
 
 ###############################################################################
@@ -1011,7 +1038,7 @@ USE_READLINE=yes
 #------------------------------------------------------------------------------
 # Uncomment this setting to include IPv6 support.
 
-# HAVE_IPV6=yes
+HAVE_IPV6=yes
 
 ###############################################################################
 #              THINGS YOU ALMOST NEVER NEED TO MENTION                        #
