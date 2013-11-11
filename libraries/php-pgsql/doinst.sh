@@ -12,4 +12,5 @@ config() {
 }
 
 config etc/php/pgsql.ini.new
+config etc/php/pdo_pgsql.ini.new
 
