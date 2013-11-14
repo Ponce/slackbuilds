@@ -24,7 +24,7 @@
 
 PRGNAM=xbmc
 VERSION=${VERSION:-12.2}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -62,7 +62,6 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
-tar xvf $CWD/taglib-1.8.tar.gz
 tar xvf $CWD/$PRGNAM-pvr-addons-12.0-Frodo.tar.gz || tar xvf $CWD/12.0-Frodo.tar.gz
 chown -R root:root .
 find . \
@@ -84,6 +83,9 @@ sed -i 's|^#ifdef GIT_REV|#ifndef GIT_REV|' $PRGNAM/GUIInfoManager.cpp
 # http://slaxbmc.blogspot.com/2011/03/23-install-xbmc-from-source.html
 patch -p1 < $CWD/patches/xbmc-rtmpdump-build.patch
 
+# Patch for Samba 4.0.
+patch -p1 < $CWD/patches/samba-4.0.patch
+
 # Hack for using afpfs-ng.
 cat lib/afpfs-ng/fix_afpfs-ng_includes.patch | head -1336 | tail -1172 | patch -p1
 AFPFS_NGFLAGS="-I$PWD/include"
@@ -92,6 +94,9 @@ AFPFS_NGFLAGS="-I$PWD/include"
 if [ "${FFMPEG:-no}" == "yes" ]; then
   OPT_DEPS="--enable-external-ffmpeg"
   OPT_DEPS_ADDONS="--enable-external-ffmpeg"
+  # Patches for newer ffmpeg > 2.0.
+  patch -p1 < $CWD/patches/xbmc-12.2-ffmpeg-2.0.patch
+  patch -p0 < $CWD/patches/xbmc-pvr-addons-ffmpeg-2.0.patch
 else
   OPT_DEPS="--disable-external-ffmpeg"
   OPT_DEPS_ADDONS="--disable-external-ffmpeg"
@@ -108,23 +113,6 @@ fi
 if [ "${PULSE:-no}" == "yes" ]; then
   OPT_DEPS="$OPT_DEPS --enable-pulse"
 fi
-
-# XBMC requires taglib >= 1.8. Slackware 14.0 comes with taglib 1.7.2.
-# We are going to build a static version of taglib for XBMC.
-cd taglib-1.8
-  cmake -G "Unix Makefiles" \
-    -DCMAKE_INSTALL_PREFIX:PATH=/usr \
-    -DENABLE_STATIC=ON \
-    -DLIB_SUFFIX="${LIBDIRSUFFIX}" \
-    -DWITH_MP4=ON \
-    -DWITH_ASF=ON \
-    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_BUILD_TYPE=Release .
-
-  make VERBOSE=1
-  make install DESTDIR=$PWD
-cd ..
 
 # Build the pvr addons.
 cd $PRGNAM-pvr-addons-12.0-Frodo
@@ -143,9 +131,6 @@ cd $PRGNAM-pvr-addons-12.0-Frodo
     make
 cd ..
 
-TAGLIB_CFLAGS="-I$PWD/taglib-1.8/usr/include" \
-TAGLIB_LIBS="-L$PWD/taglib-1.8/usr/lib${LIBDIRSUFFIX} -ltag" \
-LDFLAGS="-L$PWD/taglib-1.8/usr/lib${LIBDIRSUFFIX} -ltag" \
 CFLAGS="$SLKCFLAGS $AFPFS_NGFLAGS" \
 CXXFLAGS="$SLKCFLAGS $AFPFS_NGFLAGS" \
 ./configure \
@@ -169,10 +154,6 @@ make
 
 # Wii controller usage. Default is no.
 if ! [ "${WII:-no}" = "no" ]; then
-  # SBO comes with latest release version of CWIID, which is 5 years old.
-  # Two options have been deactivated because they are not available in
-  # release version of cwiid.
-  patch -p1 < $CWD/patches/cwiid-old-api.patch
   make eventclients DESTDIR=$PKG WII_EXTRA_OPTS="-DCWIID_OLD"
   find $PKG/usr/lib${LIBDIRSUFFIX}/python* -iname "*\.py" -exec chmod 0644 '{}' \;
 fi
