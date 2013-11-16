@@ -11,7 +11,7 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/dosemu.conf.new
-config etc/global.conf.new
-config etc/dosemu.users.new
+config etc/dosemu/dosemu.conf.new
+config etc/dosemu/global.conf.new
+config etc/dosemu/dosemu.users.new
 
