@@ -13,6 +13,3 @@ config() {
 
 config etc/csync/csync_exclude.conf.new
 config etc/csync/csync.conf.new
-config etc/csync/csync_log.conf.new
-
-
