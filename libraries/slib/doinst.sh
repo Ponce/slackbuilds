@@ -1,1 +1,1 @@
-chroot . /usr/bin/guile -q -s /usr/doc/@PRGNAM@-@VERSION@/guile-slibcat.script
+chroot . /usr/bin/guile1.8 -q -s /usr/libexec/slib/guile-slibcat.script

@@ -23,8 +23,8 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=slib
-VERSION=3b2
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-3b4}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -69,40 +69,50 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-sed -i 's%/usr/local%/usr%g' Makefile
-make libdir=/usr/lib${LIBDIRSUFFIX}/
-make infoz DESTDIR=$PKG
-make libdir=/usr/lib${LIBDIRSUFFIX}/ install DESTDIR=$PKG
+# We don't have ginstall-info
+sed -i s,ginstall-info,install-info,g Makefile
+
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/share \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --infodir=/usr/info \
+  --docdir=/usr/doc/$PRGNAM-$VERISON
+
+# https://lists.gnu.org/archive/html/slib-discuss/2011-02/msg00005.html
+touch collectx.scm
+
+SCHEME=guile1.8 \
+TEXI2HTML="$(which texi2html) -split -verbose" \
+  make install DESTDIR=$PKG
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+# https://www.gnu.org/software/guile/manual/html_node/SLIB-installation.html
+mkdir -p $PKG/usr/share/guile/1.8/
+ln -s ../../slib $PKG/usr/share/guile/1.8/
 
-# The Makefile is braindead
-sed -i "s%$PKG%%g" $PKG/usr/bin/slib
+# somewhat perculiar quirk that only seems to be an issue on slackware
+ln -s mklibcat.scm $PKG/usr/share/slib/mklibcat 
 
-# guile is suppose to look to /usr/share/slib by default
-mkdir -p $PKG/usr/share/guile
-( cd $PKG/usr/share/ ; ln -s ../lib${LIBDIRSUFFIX}/slib . )
-( cd $PKG/usr/share/guile/ ; ln -s ../../lib${LIBDIRSUFFIX}/slib . )
+# This will be invoked during postinstall to generate the guile catalog file
+mkdir -p $PKG/usr/libexec/slib
+cat $CWD/guile-slibcat.script > $PKG/usr/libexec/slib/guile-slibcat.script
+chmod 0755 $PKG/usr/libexec/slib/guile-slibcat.script
 
-# a somewhat perculiar quirk that only seems to be an issue on slackware
-( cd $PKG/usr/lib${LIBDIRSUFFIX}/slib ; ln -s mklibcat.scm mklibcat )
-
+gzip -9 $PKG/usr/man/man1/*.1
 rm -f $PKG/usr/info/dir
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  ANNOUNCE FAQ COPYING ChangeLog README \
-    $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a ANNOUNCE ChangeLog COPYING FAQ README $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-cat $CWD/guile-slibcat.script > $PKG/usr/doc/$PRGNAM-$VERSION/guile-slibcat.script
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-sed -e s/@PRGNAM@/$PRGNAM/ -e s/@VERSION@/$VERSION/ $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
  
 cd $PKG
 /sbin/makepkg -p -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
