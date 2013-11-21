@@ -3,7 +3,7 @@
 # Slackware build script for LDView:
 # a program to visualize LDraw files
 
-# Copyright 2009-2010, 2012 Niels Horn, Rio de Janeiro, Brazil
+# Copyright 2009-2010, 2012-2013 Niels Horn, Rio de Janeiro, Brazil
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,15 +23,12 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# revision date 2012/09/13
+# revision date 2013/11/20
 
 PRGNAM=LDView
-SRCNAM=ldview
-VERSION=${VERSION:-4.2_beta1}
-BUILD=${BUILD:-1}
+VERSION=4.1
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
-
-SRCVERSION=$(echo $VERSION | tr _ -)
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -43,50 +40,101 @@ fi
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i486" ]; then
-  DEBARCH="i386"
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+  LDVDEV64=""
 elif [ "$ARCH" = "i686" ]; then
-  DEBARCH="i386"
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+  LDVDEV64=""
 elif [ "$ARCH" = "x86_64" ]; then
-  DEBARCH="x64"
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+  LDVDEV64=YES
 else
-  DEBARCH="i386"
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+  LDVDEV64=""
 fi
 
 set -e
 
-rm -rf $TMP/$PRGNAM/
-mkdir -p $TMP $OUTPUT
+rm -rf $TMP/$PRGNAM-$VERSION $PKG
+mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-mkdir -p $PRGNAM
-cd $PRGNAM
-ar p $CWD/$SRCNAM-${SRCVERSION}.${DEBARCH}.deb data.tar.gz | tar xzv
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+chmod -R u+w,go+r-w,a-s .
+
+# Patch for a bug in QT, solves problems on NVIDIA cards
+patch -p1 < $CWD/opengl.patch
+
+# Patch for gcc-4.7
+patch -p1 < $CWD/LDView_gcc47.patch
+
+# Patch for boost-1.50
+#  see https://svn.boost.org/trac/boost/ticket/6940
+patch -p1 < $CWD/LDView_boost15.patch
+
+# Patch for GL problems
+patch -p1 < $CWD/LDView_GL.patch
+
+# the 'makeall' script is in the QT directory
+cd QT
+
+# Fix LDView.pro for gcc-4.7
+sed -e 's/-ljpeg/-ljpeg -lpng14 -lz -lboost_system -lGLU/' -i LDView.pro
+
+export LDVDEV64
+QTDIR=$QT4DIR TESTING="$SLKCFLAGS" ./makeall
+
+# Install manually
+mkdir -p $PKG/usr/bin
+cp -a $PRGNAM $PKG/usr/bin/${PRGNAM}_bin
+strip --strip-unneeded $PKG/usr/bin/${PRGNAM}_bin
+cat $CWD/$PRGNAM.sh > $PKG/usr/bin/$PRGNAM
+chmod 0755 $PKG/usr/bin/$PRGNAM
+cd ..
+
+# Sample files, font, translations
+mkdir -p $PKG/usr/share/$PRGNAM
+cp 8464.mpd m6459.ldr Textures/SansSerif.fnt \
+   $PKG/usr/share/$PRGNAM/
+cp Translations/Czech/LDViewMessages.ini \
+   $PKG/usr/share/$PRGNAM/LDViewMessages_cz.ini
+cp Translations/EnglishUS/LDViewMessages.ini \
+   $PKG/usr/share/$PRGNAM/LDViewMessages_en_US.ini
+cp Translations/German/LDViewMessages.ini \
+   $PKG/usr/share/$PRGNAM/LDViewMessages_de.ini
+cp Translations/Hungarian/LDViewMessages.ini \
+   $PKG/usr/share/$PRGNAM/LDViewMessages_hu.ini
+cp Translations/Italian/LDViewMessages.ini \
+   $PKG/usr/share/$PRGNAM/LDViewMessages_it.ini
+cat LDViewMessages.ini LDExporter/LDExportMessages.ini \
+   > $PKG/usr/share/$PRGNAM/LDViewMessages.ini
+
+# Copy icon & desktop file to package
+mkdir -p $PKG/usr/share/{applications,mime/packages,pixmaps}
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+convert Icons/LDViewIcon.gif $PKG/usr/share/pixmaps/$PRGNAM.png
+cat QT/desktop/ldraw.xml > $PKG/usr/share/mime/packages/ldraw.xml
 
 # Documentation
-mkdir -p $TMP/$PRGNAM/usr/doc/$PRGNAM-$VERSION/
-mv $TMP/$PRGNAM/usr/share/doc/ldview/copyright $TMP/$PRGNAM/usr/doc/$PRGNAM-$VERSION/copyright
-mv $TMP/$PRGNAM/usr/share/doc/ldview/changelog.gz $TMP/$PRGNAM/usr/doc/$PRGNAM-$VERSION/changelog.gz
-mv $TMP/$PRGNAM/usr/share/ldview/ChangeHistory.html $TMP/$PRGNAM/usr/doc/$PRGNAM-$VERSION/ChangeHistory.html
-mv $TMP/$PRGNAM/usr/share/ldview/Help.html $TMP/$PRGNAM/usr/doc/$PRGNAM-$VERSION/Help.html
-mv $TMP/$PRGNAM/usr/share/ldview/Readme.txt $TMP/$PRGNAM/usr/doc/$PRGNAM-$VERSION/Readme.txt
-cat $CWD/$PRGNAM.SlackBuild > $TMP/$PRGNAM/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-rm -rf $TMP/$PRGNAM/usr/share/doc/
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/html
+cp -a license.txt install.txt Readme.txt QT/todo.txt \
+      $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a ChangeHistory.html Help.html $PKG/usr/doc/$PRGNAM-$VERSION/html/
+find $PKG/usr/doc/$PRGNAM-$VERSION/ -type f -exec chmod 644 {} \;
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
-mkdir -p $TMP/$PRGNAM/etc/gconf/schemas
-mv $TMP/$PRGNAM/usr/share/gconf/schemas/ldraw.schemas $TMP/$PRGNAM/etc/gconf/schemas/ldraw.schemas
-rm -rf $TMP/$PRGNAM/usr/share/gconf/
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
-mkdir -p $TMP/$PRGNAM/install
-cat $CWD/slack-desc > $TMP/$PRGNAM/install/slack-desc
-cat $CWD/doinst.sh > $TMP/$PRGNAM/install/doinst.sh
-
-cd $TMP/$PRGNAM
+cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
