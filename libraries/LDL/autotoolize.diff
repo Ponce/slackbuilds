@@ -2,8 +2,8 @@ diff --git a/Demo/Makefile.am b/Demo/Makefile.am
 new file mode 100644
 --- /dev/null
 +++ b/Demo/Makefile.am
-@@ -0,0 +1,60 @@
-+AM_CPPFLAGS = -I$(top_srcdir)/Include $(AMD_CFLAGS) $(UFCONFIG_CFLAGS)
+@@ -0,0 +1,57 @@
++AM_CPPFLAGS = -I$(top_srcdir)/Include $(AMD_CFLAGS) $(SUITESPARSECONFIG_CFLAGS)
 +LDADD = $(top_builddir)/Source/libldl.la
 +
 +EXTRA_DIST = \
@@ -19,12 +19,15 @@ new file mode 100644
 +%.out: %
 +
 +check_PROGRAMS = \
-+	ldlamd \
-+	ldllamd \
 +	ldlmain \
 +	ldllmain \
 +	ldlsimple \
 +	ldllsimple
++
++if AMD
++check_PROGRAMS += \
++	ldlamd \
++	ldllamd
 +
 +ldlamd_SOURCES = ldlmain.c
 +ldlamd_CPPFLAGS =  $(AM_CPPFLAGS) -DUSE_AMD
@@ -33,6 +36,7 @@ new file mode 100644
 +ldllamd_SOURCES = ldlmain.c
 +ldllamd_CPPFLAGS =  $(AM_CPPFLAGS) -DUSE_AMD -DLDL_LONG
 +ldllamd_LDADD = $(LDADD) $(AMD_LIBS)
++endif
 +
 +ldlmain_SOURCES = ldlmain.c
 +
@@ -44,49 +48,51 @@ new file mode 100644
 +ldllsimple_SOURCES = ldlsimple.c
 +ldllsimple_CPPFLAGS = $(AM_CPPFLAGS) -DLDL_LONG
 +
-+ldllmain.out: ldlmain.out
-+	$(LN_S) -f $< $@
-+
-+ldllsimple.out: ldlsimple.out
-+	$(LN_S) -f $< $@
-+
 +check-local: $(check_PROGRAMS) $(check_PROGRAMS:=.out)
 +	@for i in $(check_PROGRAMS); do \
 +		echo "Testing $$i"; \
-+		./$$i$(EXEEXT) > my_$$i.out; \
-+		if diff -u $$i.out my_$$i.out; then \
++		(cd $(srcdir) && $(abs_builddir)/$$i$(EXEEXT)) > my_$$i.out; \
++		if diff -u $(srcdir)/$$i.out my_$$i.out; then \
 +			echo "Test $$i PASSED."; \
 +		else \
 +			echo "Test $$i FAILED."; \
 +		fi; \
 +	done
 +
-+clean-local:
-+	-$(RM) my_*.out
++CLEANFILES = my_*.out
 diff --git a/Doc/Makefile.am b/Doc/Makefile.am
 new file mode 100644
 --- /dev/null
 +++ b/Doc/Makefile.am
-@@ -0,0 +1,13 @@
+@@ -0,0 +1,23 @@
 +EXTRA_DIST = ChangeLog lesser.txt
 +
 +dist_noinst_DATA = ldl_userguide.tex ldl.bib
-+pdf_DATA = ldl_userguide.pdf
++dist_pdf_DATA = ldl_userguide.pdf
 +
-+ldl_userguide.pdf: ldl_userguide.tex ldl.bib
-+	pdflatex ldl_userguide
-+	bibtex ldl_userguide
-+	pdflatex ldl_userguide
-+	pdflatex ldl_userguide
++.INTERMEDIATE: ldl_userguide.bib
++ldl_userguide.bib: ldl.bib
++	$(LN_S) -f $< $@
 +
-+clean-local:
-+	-$(RM) *.aux *.bbl *.blg *.log *.toc
++TEX = TEXINPUTS="$(srcdir):" pdflatex -interaction nonstopmode -file-line-error
++BIB = BIBINPUTS="$(srcdir):" bibtex
++%.pdf: %.tex %.bbl
++	$(TEX) $*
++	while grep -q "Rerun to get cross-references right" $*.log; do \
++		$(TEX) $*; \
++	done
++%.bbl: %.aux %.bib
++	$(BIB) $*
++%.aux: %.tex
++	$(TEX) $*
++
++CLEANFILES = *.aux *.bbl *.blg *.log *.toc
++MAINTAINERCLEANFILES = $(dist_pdf_DATA)
 diff --git a/Include/Makefile.am b/Include/Makefile.am
 new file mode 100644
 --- /dev/null
 +++ b/Include/Makefile.am
-@@ -0,0 +1,2 @@
-+pkgincludedir = $(includedir)/ldl
+@@ -0,0 +1 @@
 +pkginclude_HEADERS = ldl.h
 diff --git a/Makefile.am b/Makefile.am
 new file mode 100644
@@ -112,7 +118,7 @@ new file mode 100644
 --- /dev/null
 +++ b/Source/Makefile.am
 @@ -0,0 +1,16 @@
-+AM_CPPFLAGS = -I$(top_srcdir)/Include $(UFCONFIG_CFLAGS)
++AM_CPPFLAGS = -I$(top_srcdir)/Include $(SUITESPARSECONFIG_CFLAGS)
 +
 +LDLSRC = \
 +	ldl.c
@@ -127,38 +133,52 @@ new file mode 100644
 +
 +libldl_la_SOURCES =
 +libldl_la_LIBADD = libldli.la libldll.la
-+libldl_la_LDFLAGS = -no-undefined -version-info 2:3:0
++libldl_la_LDFLAGS = -no-undefined -version-number 2:1:0
 diff --git a/configure.ac b/configure.ac
 new file mode 100644
 --- /dev/null
 +++ b/configure.ac
-@@ -0,0 +1,36 @@
-+AC_PREREQ([2.68])
-+AC_INIT([LDL],[2.0.3],[davis@cise.ufl.edu])
+@@ -0,0 +1,50 @@
++#                                               -*- Autoconf -*-
++# Process this file with autoconf to produce a configure script.
++
++AC_PREREQ([2.69])
++AC_INIT([LDL],[2.1.0],[DrTimothyAldenDavis@gmail.com],[ldl],[http://www.suitesparse.com/])
 +AC_CONFIG_SRCDIR([Source/ldl.c])
-+AC_CONFIG_HEADER([config.h])
++AC_CONFIG_HEADERS([config.h])
 +AM_INIT_AUTOMAKE([foreign])
 +LT_INIT
 +
++# Checks for programs.
 +AC_PROG_INSTALL
 +AC_PROG_CC
 +AC_PROG_LN_S
 +
 +LIBS_SAVED=$LIBS
 +
++# Checks for libraries.
++PKG_PROG_PKG_CONFIG
++PKG_CHECK_MODULES([SUITESPARSECONFIG],[suitesparseconfig],
++	[],
++	[AC_MSG_ERROR([cannot find suitesparseconfig])])
++PKG_CHECK_MODULES([AMD],[amd],
++	[amd="yes"],
++	[amd="no"])
++if test "x$amd" != "xyes"; then
++	AC_MSG_WARN([cannot find amd, disabling some functionality])
++fi
++
++# Checks for header files.
 +AC_CHECK_HEADERS([stdlib.h])
 +
-+PKG_PROG_PKG_CONFIG
-+PKG_CHECK_MODULES([UFCONFIG],[ufconfig],
-+	[],
-+	[AC_MSG_ERROR([cannot find ufconfig])])
-+PKG_CHECK_MODULES([AMD],[amd],
-+	[],
-+	[AC_MSG_ERROR([cannot find amd])])
++# Checks for typedefs, structures, and compiler characteristics.
 +
++# Checks for library functions.
 +AC_FUNC_MALLOC
 +
 +LIBS=$LIBS_SAVED
++
++AM_CONDITIONAL([AMD], [test "x$amd" = "xyes"])
 +
 +AC_CONFIG_FILES([
 +	ldl.pc
@@ -173,7 +193,7 @@ diff --git a/ldl.pc.in b/ldl.pc.in
 new file mode 100644
 --- /dev/null
 +++ b/ldl.pc.in
-@@ -0,0 +1,11 @@
+@@ -0,0 +1,12 @@
 +prefix=@prefix@
 +exec_prefix=@exec_prefix@
 +libdir=@libdir@
@@ -182,6 +202,7 @@ new file mode 100644
 +Name: @PACKAGE_NAME@
 +Description: A simple LDL^T factorization
 +Version: @PACKAGE_VERSION@
-+Requires.private: ufconfig
++URL: @PACKAGE_URL@
++Requires.private: suitesparseconfig
 +Libs: -L${libdir} -lldl
 +Cflags: -I${includedir}/ldl
