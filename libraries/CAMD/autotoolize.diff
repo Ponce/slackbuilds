@@ -2,8 +2,8 @@ diff --git a/Demo/Makefile.am b/Demo/Makefile.am
 new file mode 100644
 --- /dev/null
 +++ b/Demo/Makefile.am
-@@ -0,0 +1,37 @@
-+AM_CPPFLAGS = -I$(top_srcdir)/Include $(UFCONFIG_CFLAGS)
+@@ -0,0 +1,36 @@
++AM_CPPFLAGS = -I$(top_srcdir)/Include $(SUITESPARSECONFIG_CFLAGS)
 +LDADD = $(top_builddir)/Source/libcamd.la
 +
 +EXTRA_DIST = \
@@ -31,41 +31,54 @@ new file mode 100644
 +	@for i in $(check_PROGRAMS); do \
 +		echo "Testing $$i"; \
 +		./$$i$(EXEEXT) > my_$$i.out; \
-+		if diff -u $$i.out my_$$i.out; then \
++		if diff -u $(srcdir)/$$i.out my_$$i.out; then \
 +			echo "Test $$i PASSED."; \
 +		else \
 +			echo "Test $$i FAILED."; \
 +		fi; \
 +	done
 +
-+clean-local:
-+	-$(RM) my_*.out
++CLEANFILES = my_*.out
 diff --git a/Doc/Makefile.am b/Doc/Makefile.am
 new file mode 100644
 --- /dev/null
 +++ b/Doc/Makefile.am
-@@ -0,0 +1,14 @@
+@@ -0,0 +1,28 @@
 +EXTRA_DIST = ChangeLog License lesser.txt
 +
 +dist_noinst_SCRIPTS = cdiff docdiff
 +dist_noinst_DATA = CAMD_UserGuide.tex CAMD_UserGuide.bib camd.sed
-+pdf_DATA = CAMD_UserGuide.pdf
++dist_pdf_DATA = CAMD_UserGuide.pdf
 +
-+%.pdf: %.tex %.bib
-+	pdflatex $*
-+	bibtex $*
-+	pdflatex $*
-+	pdflatex $*
++CAMD_UserGuide.pdf CAMD_UserGuide.aux: camd_h.tex
++.INTERMEDIATE: CAMD_UserGuide.aux camd_h.tex
 +
-+clean-local:
-+	-$(RM) *.aux *.bbl *.blg *.log *.toc
++%_h.tex: $(top_srcdir)/Include/%.h
++	echo '\begin{verbatim}' > $@
++	expand -8 $< >> $@
++	echo '\end{verbatim}' >> $@
++
++TEX = TEXINPUTS="$(srcdir):" pdflatex -interaction nonstopmode -file-line-error
++BIB = BIBINPUTS="$(srcdir):" bibtex
++%.pdf: %.tex %.bbl
++	$(TEX) $*
++	while grep -q "Rerun to get cross-references right" $*.log; do \
++		$(TEX) $*; \
++	done
++%.bbl: %.aux %.bib
++	$(BIB) $*
++%.aux: %.tex
++	$(TEX) $*
++
++CLEANFILES = *.aux *.bbl *.blg *.log *.toc *_h.tex
++MAINTAINERCLEANFILES = $(dist_pdf_DATA)
 diff --git a/Include/Makefile.am b/Include/Makefile.am
 new file mode 100644
 --- /dev/null
 +++ b/Include/Makefile.am
 @@ -0,0 +1,2 @@
-+pkgincludedir = $(includedir)/camd
-+pkginclude_HEADERS = camd.h camd_internal.h
++pkginclude_HEADERS = camd.h
++noinst_HEADERS = camd_internal.h
 diff --git a/Makefile.am b/Makefile.am
 new file mode 100644
 --- /dev/null
@@ -81,7 +94,7 @@ new file mode 100644
 --- /dev/null
 +++ b/Source/Makefile.am
 @@ -0,0 +1,29 @@
-+AM_CPPFLAGS = -I$(top_srcdir)/Include $(UFCONFIG_CFLAGS)
++AM_CPPFLAGS = -I$(top_srcdir)/Include $(SUITESPARSECONFIG_CFLAGS)
 +
 +CAMDSRC = \
 +	camd_1.c \
@@ -109,12 +122,12 @@ new file mode 100644
 +
 +libcamd_la_SOURCES = camd_global.c
 +libcamd_la_LIBADD = libcamdl.la libcamdi.la
-+libcamd_la_LDFLAGS = -no-undefined -version-info 4:2:2
++libcamd_la_LDFLAGS = -no-undefined -version-number 2:3:1
 diff --git a/camd.pc.in b/camd.pc.in
 new file mode 100644
 --- /dev/null
 +++ b/camd.pc.in
-@@ -0,0 +1,12 @@
+@@ -0,0 +1,13 @@
 +prefix=@prefix@
 +exec_prefix=@exec_prefix@
 +libdir=@libdir@
@@ -123,7 +136,8 @@ new file mode 100644
 +Name: @PACKAGE_NAME@
 +Description: Constrained approximate minimum degree ordering
 +Version: @PACKAGE_VERSION@
-+Requires.private: ufconfig
++URL: @PACKAGE_URL@
++Requires.private: suitesparseconfig
 +Libs: -L${libdir} -lcamd
 +Libs.private: -lm
 +Cflags: -I${includedir}/camd
@@ -131,30 +145,38 @@ diff --git a/configure.ac b/configure.ac
 new file mode 100644
 --- /dev/null
 +++ b/configure.ac
-@@ -0,0 +1,35 @@
-+AC_PREREQ([2.68])
-+AC_INIT([CAMD],[2.2.2],[davis@cise.ufl.edu])
+@@ -0,0 +1,43 @@
++#                                               -*- Autoconf -*-
++# Process this file with autoconf to produce a configure script.
++
++AC_PREREQ([2.69])
++AC_INIT([CAMD],[2.3.1],[DrTimothyAldenDavis@gmail.com],[camd],[http://www.suitesparse.com/])
 +AC_CONFIG_SRCDIR([Source/camd_global.c])
-+AC_CONFIG_HEADER([config.h])
++AC_CONFIG_HEADERS([config.h])
 +AM_INIT_AUTOMAKE([foreign])
 +LT_INIT
 +
++# Checks for programs.
 +AC_PROG_INSTALL
 +AC_PROG_CC
 +
 +LIBS_SAVED=$LIBS
 +
++# Checks for libraries.
 +AC_CHECK_LIB([m], [sqrt])
 +
++PKG_PROG_PKG_CONFIG
++PKG_CHECK_MODULES([SUITESPARSECONFIG],[suitesparseconfig],
++	[],
++	[AC_MSG_ERROR([cannot find suitesparseconfig])])
++
++# Checks for header files.
 +AC_CHECK_HEADERS([limits.h stddef.h stdlib.h])
 +
-+PKG_PROG_PKG_CONFIG
-+PKG_CHECK_MODULES([UFCONFIG],[ufconfig],
-+	[],
-+	[AC_MSG_ERROR([cannot find ufconfig])])
-+
++# Checks for typedefs, structures, and compiler characteristics.
 +AC_TYPE_SIZE_T
 +
++# Checks for library functions.
 +AC_CHECK_FUNCS([sqrt])
 +
 +LIBS=$LIBS_SAVED
