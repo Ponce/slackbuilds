@@ -12,4 +12,3 @@ config() {
 
 config etc/ipsec.conf.new
 config etc/strongswan.conf.new
-
