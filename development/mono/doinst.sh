@@ -23,4 +23,7 @@ config etc/mono/4.0/DefaultWsdlHelpGenerator.aspx.new
 config etc/mono/4.0/machine.config.new
 config etc/mono/4.0/settings.map.new
 config etc/mono/4.0/web.config.new
-
+config etc/mono/4.5/DefaultWsdlHelpGenerator.aspx.new
+config etc/mono/4.5/machine.config.new
+config etc/mono/4.5/settings.map.new
+config etc/mono/4.5/web.config.new
