@@ -129,12 +129,12 @@ GENERAL NOTES
 
 A short summary of the file layout:
 
-code/			   		Quake III Arena source code ( renderer, game code, OS layer etc. )
-code/bspc				bot routes compiler source code
-lcc/					the retargetable C compiler ( produces assembly to be turned into qvm bytecode by q3asm )
-q3asm/					assembly to qvm bytecode compiler
-q3map/					map compiler ( .map -> .bsp ) - this is the version that comes with Q3Radiant 200f
-q3radiant/				Q3Radiant map editor build 200f ( common/ and libs/ are support dirs for radiant )
+code/		Quake III Arena source code ( renderer, game code, OS layer etc. )
+code/bspc	bot routes compiler source code
+lcc/		the retargetable C compiler ( produces assembly to be turned into qvm bytecode by q3asm )
+q3asm/		assembly to qvm bytecode compiler
+q3map/		map compiler ( .map -> .bsp ) - this is the version that comes with Q3Radiant 200f
+q3radiant/	Q3Radiant map editor build 200f ( common/ and libs/ are support dirs for radiant )
 
 While we made sure we were still able to compile the game on Windows, GNU/Linux
 and Mac, this build didn't get any kind of extensive testing so it may not work
