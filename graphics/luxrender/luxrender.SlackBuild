@@ -1,0 +1,181 @@
+#!/bin/sh
+
+# Slackware build script for luxrender
+
+# Copyright 2013  Giorgio Peron Campodarsego, PD, Italy giorgio.peron@gmail.com
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=luxrender
+VERSION=${VERSION:-1.3.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+SRCVERSION=lux-d0b0e20c47cc
+LUXRAYSRCVERSION=luxrays-7459cd8a9583
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e 
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+rm -rf $LUXRAYSRCVERSION
+rm -rf $SRCVERSION
+tar xvjf $CWD/$SRCVERSION.tar.bz2
+tar xvjf $CWD/$LUXRAYSRCVERSION.tar.bz2
+
+cd $TMP/$LUXRAYSRCVERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+ -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+ -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# fix some make files
+sed -i \
+  -e "/project(LuxRays)/ a\
+SET(BUILD_LUXMARK on)" \
+  -e "/project(LuxRays)/ a\
+set(OPENGL_INCLUDE_DIR /usr/include/GL)" \
+  CMakeLists.txt
+sed -i \
+  -e "/# Lookup user provide path first/ a\
+SET(OPENCL_ROOT /usr/share)" \
+  -e "s:PATHS \$ENV{ATISTREAMSDKROOT}:PATHS \${OPENCL_ROOT} \$ENV{ATISTREAMSDKROOT}:" \
+  cmake/Packages/FindOpenCL.cmake
+
+# luxmark moc files
+cd samples/luxmark
+moc aboutdialog.h -o moc_aboutdialog.cxx
+moc hardwaretree.h -o moc_hardwaretree.cxx
+moc luxmarkapp.h -o moc_luxmarkapp.cxx
+moc mainwindow.h -o moc_mainwindow.cxx
+moc resultdialog.h -o moc_resultdialog.cxx
+moc submitdialog.h -o moc_submitdialog.cxx
+cd -
+
+cmake \
+  -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+  -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+  -DCMAKE_BUILD_TYPE=Release .
+
+# compile luxrays
+make luxrays
+make slg4
+make luxmark
+
+# manual installation
+mkdir -p $PKG/usr/share/$PRGNAM/resources $PKG/usr/share/$PRGNAM/scenes
+cp bin/* $PKG/usr/share/$PRGNAM
+cp -r samples/luxmark/resources $PKG/usr/share/$PRGNAM
+cp -r scenes $PKG/usr/share/$PRGNAM
+cp -r samples/luxmark/scenes $PKG/usr/share/$PRGNAM
+
+mkdir -p $PKG/usr/bin
+cat > $PKG/usr/bin/luxmark << EOF
+#!/bin/sh
+cd /usr/share/luxrender
+./luxmark >/dev/null 2>&1
+EOF
+chmod +x $PKG/usr/bin/luxmark
+cat > $PKG/usr/bin/slg4 << EOF
+#!/bin/sh
+cd /usr/share/luxrender
+./slg4 >/dev/null 2>&1
+EOF
+chmod +x $PKG/usr/bin/slg4
+
+cd $TMP/$SRCVERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+ -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+ -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# # fix some make files
+sed -i \
+  -e "/##########################      Find LuxRays       ##########################/ a\
+SET(LuxRays_HOME $TMP/$LUXRAYSRCVERSION)" \
+  -e "s:PATHS ../luxrays/include:PATHS \${LuxRays_HOME}/include:" \
+  -e "s:/usr/src/opencl-sdk:/usr/share/cuda:" \
+  cmake/Dependencies.cmake
+sed -i \
+  -e "s:-Wall -fPIC -DHAVE_PTHREAD_H:-Wall -fPIC -DHAVE_PTHREAD_H -l png14:" \
+  -e "s:E} -fvisibility=hidden -fvisibility-inlines-hidden:E} -fvisibility=hidden -fvisibility-inlines-hidden -lpthread:" \
+  -e "s:#SET(CMAKE_VERBOSE_MAKEFILE:SET(CMAKE_VERBOSE_MAKEFILE:g" \
+  -e "/SET(CMAKE_VERBOSE_MAKEFILE true)/ a\
+SET(CMAKE_CXX_FLAGS_RELEASE \"-lpthread\")" \
+  CMakeLists.txt
+
+cmake .
+
+# compile luxrender
+make luxrender
+make install DESTDIR=$PKG 
+
+# /usr/local? no, thanks
+cp -r $PKG/usr/local/* $PKG/usr  
+rm -rf $PKG/usr/local
+
+# copy pylux.so
+cp pylux.so $PKG/usr/lib$LIBDIRSUFFIX/
+
+# Strip binaries and libraries.
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS.txt COPYING.txt $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
