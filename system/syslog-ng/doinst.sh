@@ -23,7 +23,6 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.syslog-ng.new
-config etc/syslog-ng/modules.conf.new
 config etc/syslog-ng/scl.conf.new
 config etc/syslog-ng/syslog-ng.conf.new
 config etc/logrotate.d/syslog-ng.new
