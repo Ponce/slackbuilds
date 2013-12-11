@@ -23,7 +23,7 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=opensmtpd
-VERSION=${VERSION:-5.3.3p1}
+VERSION=${VERSION:-5.4.1p1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -55,22 +55,22 @@ else
 fi
 
 bailout() {
-  printf "\nYou must have smtpd, smtpf, smtpl, and smtpq users on the system \n"
+  printf "\nYou must have smtpd and smtpq users and groups on the system \n"
   printf "for privilege separation - something like this should suffice: \n"
-  printf "\tuseradd -u 270 -g 0 -r -s /bin/false -d /var/empty smtpd \n"
-  printf "\tuseradd -u 271 -g 0 -r -s /bin/false -d /var/empty smtpf \n"
-  printf "\tuseradd -u 272 -g 0 -r -s /bin/false -d /var/empty smtpl \n"
-  printf "\tuseradd -u 273 -g 0 -r -s /bin/false -d /var/empty smtpq \n\n"
+  printf "\tgroupadd -g 270 smtpd \n"
+  printf "\tuseradd -u 270 -g 270 -r -s /bin/false -d /var/empty smtpd \n"
+  printf "\tgroupadd -g 271 smtpq \n"
+  printf "\tuseradd -u 271 -g 271 -r -s /bin/false -d /var/empty smtpq \n\n"
   exit 1
 }
 
-if ! getent passwd smtpd 1>/dev/null 2>/dev/null ; then
+if ! getent group smtpd 1>/dev/null 2>/dev/null ; then
   bailout
-elif ! getent passwd smtpf 1>/dev/null 2>/dev/null ; then
-  bailout
-elif ! getent passwd smtpl 1>/dev/null 2>/dev/null ; then
+elif ! getent passwd smtpd 1>/dev/null 2>/dev/null ; then
   bailout
 elif ! getent passwd smtpq 1>/dev/null 2>/dev/null ; then
+  bailout
+elif ! getent group smtpq 1>/dev/null 2>/dev/null ; then
   bailout
 fi
 
@@ -89,8 +89,6 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-./bootstrap
-
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -102,15 +100,11 @@ CXXFLAGS="$SLKCFLAGS" \
   --mandir=/usr/man \
   --with-mantype=doc \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --without-rpath \
   --with-maildir=/var/spool/mail \
   --with-privsep-user=smtpd \
-  --with-filter-user=smtpf \
   --with-queue-user=smtpq \
-  --with-lookup-user=smtpl \
   --build=$ARCH-slackware-linux
-
-# the "smtpl" user won't actually be used until 5.4, but it's harmless
-# to go ahead and have it present - I'm less likely to forget later :)
 
 make
 make install DESTDIR=$PKG
@@ -118,20 +112,22 @@ make install DESTDIR=$PKG
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | \
   grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-# Create a nice compat symlink for sendmail
+# Create nice compat symlinks for sendmail
+rm -f $PKG/usr/bin/sendmail $PKG/usr/sbin/sendmail
 ln -s smtpctl $PKG/usr/sbin/sendmail
+ln -s ../sbin/sendmail $PKG/usr/bin/sendmail
 
-# Replace some hardlinks with symlinks
-rm -f $PKG/usr/bin/{newaliases,mailq} $PKG/usr/libexec/opensmtpd/makemap
-ln -s ../sbin/makemap $PKG/usr/bin/newaliases
-ln -s ../sbin/smtpctl $PKG/usr/bin/mailq
-ln -s ../../sbin/makemap $PKG/usr/libexec/opensmtpd/makemap
+rm -f $PKG/usr/sbin/mailq $PKG/usr/sbin/newaliases
+ln -s makemap $PKG/usr/sbin/newaliases
+ln -s smtpctl $PKG/usr/sbin/mailq
 
 mkdir -p $PKG/etc/rc.d
 cat $CWD/rc.opensmtpd > $PKG/etc/rc.d/rc.opensmtpd.new
 
 # Don't clobber the config file
 mv $PKG/etc/opensmtpd/smtpd.conf $PKG/etc/opensmtpd/smtpd.conf.new
+# and reflect the correct path to aliases file
+sed -i "s,/etc/mail/,/etc/opensmtpd/,g" $PKG/etc/opensmtpd/smtpd.conf.new
 
 # Create (but don't clobber) the aliases file
 cat $CWD/aliases > $PKG/etc/opensmtpd/aliases.new
