@@ -1,0 +1,141 @@
+#!/bin/sh
+
+# Slackware build script for samtools
+
+# Copyright 2013 Petar Petrov, petar.petrov@student.oulu.fi
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# With help about the install paths from Arch Linux AUR:
+# https://aur.archlinux.org/packages/sa/samtools/PKGBUILD
+
+PRGNAM=samtools	
+VERSION=${VERSION:-0.1.19}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+ -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Use our CFLAGS/CXXFLAGS
+sed -i "/^C.*.*FLAGS/s/=/+=/" Makefile
+
+CFLAGS="$SLKCFLAGS" \
+make
+make razip
+
+# Install samtools, razip and bam library
+install -D -m755 samtools $PKG/usr/bin/samtools
+install -D -m755 razip	  $PKG/usr/bin/razip
+install -D -m644 libbam.a $PKG/usr/lib${LIBDIRSUFFIX}/libbam.a
+
+# Install bcftools its library and vsfutils
+cd bcftools
+install -D -m755 bcftools $PKG/usr/bin/bcftools
+install -D -m644 libbcf.a $PKG/usr/lib${LIBDIRSUFFIX}/libbcf.a
+install -D -m755 vcfutils.pl $PKG/usr/bin/vcfutils.pl
+
+# Include additional executables
+cd ../misc
+install -D -m755 ace2sam	$PKG/usr/libexec/$PRGNAM/ace2sam
+install -D -m755 bamcheck	$PKG/usr/libexec/$PRGNAM/bamcheck
+install -D -m755 maq2sam-long	$PKG/usr/libexec/$PRGNAM/maq2sam-long
+install -D -m755 maq2sam-short	$PKG/usr/libexec/$PRGNAM/maq2sam-short
+install -D -m755 md5fa		$PKG/usr/libexec/$PRGNAM/md5fa
+install -D -m755 md5sum-lite	$PKG/usr/libexec/$PRGNAM/md5sum-lite
+install -D -m755 wgsim		$PKG/usr/libexec/$PRGNAM/wgsim
+
+# Include some scripts
+mkdir -p $PKG/usr/share/$PRGNAM
+cp -a \
+  *.pl *.lua *.py plot-bamcheck \
+  $PKG/usr/share/$PRGNAM
+
+# Include bam header files
+cd ..
+mkdir -p  $PKG/usr/include/bam
+ for f in *.h ; do
+   install -m644 $f "$PKG/usr/include/bam"
+ done
+
+# Install manpage
+install -D -m644 $PRGNAM.1 $PKG/usr/man/man1/$PRGNAM.1
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  AUTHORS COPYING INSTALL NEWS \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/References > $PKG/usr/doc/$PRGNAM-$VERSION/References
+
+# Fix permissions in the package...
+find $PKG/usr/{doc,include,share} \
+-type d -exec chmod 755 {} \; -o \
+-type f -exec chmod 644 {} \;
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
