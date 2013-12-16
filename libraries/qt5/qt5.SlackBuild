@@ -1,0 +1,265 @@
+#!/bin/sh
+
+# Slackware build script for qt5
+
+# Copyright 2013 Larry Hajali <larryhaja[at]gmail[dot]com>
+# Copyright 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013  Patrick J. Volkerding, Sebeka, MN, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Merged some ideas from Alex Sarmardzic's script for qt4 at SlackBuilds.org
+# ^^ Modified by Robby Workman <rworkman@slackware.com> for QT4 & KDE4
+
+# We're using qt-copy instead of a released qt version, as this git release
+# has at least one bugfix strongly recommended by the kde developers.
+
+# Obtained from:
+# git clone git://gitorious.org/+kde-developers/qt/kde-qt.git
+# git checkout origin/4.5.3-patched
+# git checkout origin/4.6.0-stable-patched
+# git checkout origin/4.6.1-patched
+# git checkout origin/4.7.0-patched
+#
+# Alternate method (we don't use this):
+# wget http://qt.gitorious.org/qt/kde-qt/archive-tarball/4.6.2-patched
+#
+# Modifications 2010, 2011, 2012  Eric Hameleers, Eindhoven, NL
+# qt 4.7.3, 4.7.4, 4.8.0, 4.8.1, 4.8.2, 4.8.4 are built from original nokia sources.
+
+# This is the highly modified version qt.SlackBuild found in Slackware
+# tailored to Qt 5. Modified by Larry Hajali.
+
+PRGNAM=qt5
+VERSION=${VERSION:-5.2.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+elif [ "$ARCH" = "armv7hl" ]; then
+  # To prevent "qatomic_armv6.h error: output number 2 not directly addressable"
+  # More permanent solution is to patch gcc:
+  # http://bazaar.launchpad.net/~linaro-toolchain-dev/gcc-linaro/4.6/revision/106731
+  SLKCFLAGS="-O2 -march=armv7-a -mfpu=vfpv3-d16 -fno-strict-volatile-bitfields"
+  LIBDIRSUFFIX=""
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf ${PRGNAM/5/}-everywhere-opensource-src-$VERSION
+tar xvf $CWD/${PRGNAM/5/}-everywhere-opensource-src-$VERSION.tar.xz
+cd ${PRGNAM/5/}-everywhere-opensource-src-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+ -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+ -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Slackware patch to build against MySQL/MariaDB.
+patch -p1 < $CWD/patches/qt5.mysql.h.diff
+
+# Install path fix for libplatformplugin.so.
+# https://bugs.webkit.org/show_bug.cgi?id=117077
+patch -p1 < $CWD/patches/platformplugin-install-path-fix.patch
+
+# fix build with -system-harfbuzz
+patch -p1 -d qtbase < $CWD/patches/qtbase-opensource-src-5.2.0-alpha-harfbuzz.patch
+
+if echo "$ARCH" | grep -q "i.86" 2>/dev/null; then
+  sed -i "/^QMAKE_CFLAGS_RELEASE/ s|+=.*|+= $SLKCFLAGS|" qtbase/mkspecs/common/gcc-base.conf
+fi
+
+export CFLAGS="$SLKCFLAGS"
+export CXXFLAGS="$SLKCFLAGS"
+export OPENSOURCE_CXXFLAGS="$SLKCFLAGS"
+./configure -v \
+  -confirm-license \
+  -opensource \
+  -prefix "/usr/lib${LIBDIRSUFFIX}/$PRGNAM" \
+  -sysconfdir "/etc/xdg" \
+  -docdir "/usr/doc/$PRGNAM-$VERSION" \
+  -system-libpng \
+  -system-libjpeg \
+  -system-zlib \
+  -system-sqlite \
+  -system-pcre \
+  -plugin-sql-sqlite \
+  -icu \
+  -openssl \
+  -verbose \
+  -optimized-qmake \
+  -dbus-linked \
+  -reduce-relocations \
+  -qpa xcb \
+  -xcb \
+  -glib \
+  -accessibility \
+  -javascript-jit \
+  -system-harfbuzz \
+  -nomake examples \
+  -no-separate-debug-info \
+  -no-pch \
+  -no-rpath \
+  -no-strip \
+  -release
+
+make
+make install INSTALL_ROOT=$PKG
+
+ln -s $PRGNAM $PKG/usr/lib${LIBDIRSUFFIX}/qt-$VERSION
+
+mkdir -p $PKG/usr/bin
+for BIN in $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/bin/*; do
+  TMP_FILE=$(echo $BIN | sed -e "s|$PKG||")
+  case $(basename $BIN) in
+    syncqt.pl)
+      ln -s $TMP_FILE $PKG/usr/bin/$(basename $BIN)
+      ;;
+    *)
+      ln -s $TMP_FILE $PKG/usr/bin/$(basename $BIN)-$PRGNAM
+      ;;
+  esac
+done
+
+for LIBS in $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/lib/*so*; do
+  TMP_FILE=$(echo $LIBS | sed -e "s|$PKG||")
+  ln -s $TMP_FILE $PKG/usr/lib${LIBDIRSUFFIX}/$(basename $LIBS)
+done
+
+# Create Environment variables
+mkdir -p $PKG/etc/profile.d
+sed -e "s|@LIBDIRSUFFIX@|${LIBDIRSUFFIX}|g" $CWD/profile.d/$PRGNAM.sh \
+  > $PKG/etc/profile.d/$PRGNAM.sh
+sed -e "s|@LIBDIRSUFFIX@|${LIBDIRSUFFIX}|g" $CWD/profile.d/$PRGNAM.csh \
+  > $PKG/etc/profile.d/$PRGNAM.csh
+chmod 0755 $PKG/etc/profile.d/*
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+cat > $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/lib/pkgconfig/Qt5.pc << EOF
+prefix=/usr/lib${LIBDIRSUFFIX}/$PRGNAM
+bindir=\${prefix}/bin
+datadir=\${prefix}
+docdir=/usr/doc/$PRGNAM-$VERSION
+archdatadir=\${prefix}
+examplesdir=\${prefix}/examples
+headerdir=\${prefix}/include
+importdir=\${prefix}/imports
+qmldir=\${prefix}/qml
+libdir=\${prefix}/lib
+libexec=\${prefix}/libexec
+moc=\${bindir}/moc
+plugindir=\${prefix}/plugins
+qmake=\${bindir}/qmake
+sysconfdir=/etc/xdg
+translationdir=\${prefix}/translations
+
+Name: Qt5
+Description: Qt5 Configuration
+Version: $VERSION
+EOF
+
+# Fix internal linking for Qt5WebKit.pc.
+sed -i \
+  -e "s|-Wl,-whole-archive -lWebKit1 -Wl,-no-whole-archive -L${PWD}/qtwebkit/Source/WebKit[^ ]* ||" \
+  -e "s|-Wl,-whole-archive -lWebKit2 -Wl,-no-whole-archive -L${PWD}/qtwebkit/Source/WebKit2[^ ]* ||" \
+  -e "s|-Wl,-whole-archive -lWebCore -Wl,-no-whole-archive -L${PWD}/qtwebkit/Source/WebCore[^ ]* ||" \
+  -e "s|-Wl,-whole-archive -lANGLE -Wl,-no-whole-archive -L${PWD}/qtwebkit/Source/ThirdParty/ANGLE[^ ]* ||" \
+  -e "s|-Wl,-whole-archive -lJavaScriptCore -Wl,-no-whole-archive -L${PWD}/qtwebkit/Source/JavaScriptCore[^ ]* ||" \
+  -e "s|-Wl,-whole-archive -lWTF -Wl,-no-whole-archive -L${PWD}/qtwebkit/Source/WTF[^ ]* ||" \
+  $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/lib/pkgconfig/Qt5WebKit.pc
+
+# While we are at it, there isn't any reason to keep references to $PKG in the *.prl files.
+for PRL in $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/lib/*.prl; do
+  sed -i '/^QMAKE_PRL_BUILD_DIR/d' $PRL
+done
+
+# One more for the road.
+sed -i "s|$PWD/qtbase|/usr/lib${LIBDIRSUFFIX}/$PRGNAM|" \
+  $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/mkspecs/modules/qt_lib_bootstrap_private.pri
+
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig
+for PKGCONFIG in $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/lib/pkgconfig/*.pc; do
+  TMP_FILE=$(echo $PKGCONFIG | sed -e "s|$PKG||")
+  ln -s $TMP_FILE $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/$(basename $PKGCONFIG)
+done
+
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/cmake
+for CMAKE in $(find $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/lib/cmake -maxdepth 1); do
+  TMP_FILE=$(echo $CMAKE | sed -e "s|$PKG||")
+  ln -s $TMP_FILE $PKG/usr/lib${LIBDIRSUFFIX}/cmake/$(basename $CMAKE)
+done
+
+for i in $CWD/desktop/*.desktop; do
+  install -D -m 0644 $i $PKG/usr/share/applications/$(basename $i)
+done
+sed -i "s|@LIBDIR@|$LIBDIRSUFFIX|" $PKG/usr/share/applications/*
+
+for i in $(find . -name "assistant.ico" -o -name "designer.ico" \
+  -o -name "linguist.ico" -o -name "qdbusviewer.ico"); do
+  for j in 16 24 32 48 64 96 128; do
+    convert $i -resize ${j}x${j}! $(basename $i)-$j.png
+    install -D -m 0644 $(basename $i)-$j-0.png \
+      $PKG/usr/share/icons/hicolor/${j}x${j}/apps/$PRGNAM-$(basename $i | sed 's|.ico||').png
+  done
+done
+
+# Remove executable bits from files.
+find $PKG \( -name "*.qml" -o -name "*.app" \) -perm 755 -exec chmod 644 '{}' \;
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  README qtbase/{header*,LGPL_EXCEPTION.txt,LICENSE.*L} \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
