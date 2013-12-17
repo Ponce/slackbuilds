@@ -1,0 +1,1617 @@
+diff --git a/Makefile b/Makefile
+index 3aa582e..e263b0d 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,7 +1,7 @@
+ VERSION = 0.8.7
+ 
+ CC      ?= gcc
+-LIBS     = -lm -lxcb -lxcb-icccm -lxcb-ewmh -lxcb-randr
++LIBS     = -lm -lxcb -lxcb-icccm -lxcb-ewmh -lxcb-randr -lxcb-xinerama
+ CFLAGS  += -std=c99 -pedantic -Wall -Wextra -I$(PREFIX)/include
+ CFLAGS  += -D_POSIX_C_SOURCE=200112L -DVERSION=\"$(VERSION)\"
+ LDFLAGS += -L$(PREFIX)/lib
+diff --git a/Sourcedeps b/Sourcedeps
+index 754d0ba..d22d6cf 100644
+--- a/Sourcedeps
++++ b/Sourcedeps
+@@ -1,7 +1,7 @@
+ bspc.o: bspc.c helpers.h common.h
+ bspwm.o: bspwm.c types.h helpers.h desktop.h monitor.h settings.h \
+  messages.h subscribe.h events.h common.h window.h history.h stack.h \
+- ewmh.h bspwm.h
++ ewmh.h rule.h bspwm.h
+ desktop.o: desktop.c bspwm.h types.h helpers.h ewmh.h history.h monitor.h \
+  query.h tree.h window.h desktop.h
+ events.o: events.c bspwm.h types.h helpers.h ewmh.h monitor.h query.h \
+@@ -10,7 +10,7 @@ ewmh.o: ewmh.c bspwm.h types.h helpers.h settings.h tree.h ewmh.h
+ helpers.o: helpers.c bspwm.h types.h helpers.h
+ history.o: history.c bspwm.h types.h helpers.h query.h
+ messages.o: messages.c bspwm.h types.h helpers.h desktop.h ewmh.h \
+- history.h monitor.h pointer.h query.h restore.h settings.h tree.h \
++ history.h monitor.h pointer.h query.h rule.h restore.h settings.h tree.h \
+  window.h messages.h
+ monitor.o: monitor.c bspwm.h types.h helpers.h desktop.h ewmh.h history.h \
+  query.h settings.h tree.h window.h monitor.h
+diff --git a/bspwm.c b/bspwm.c
+index ef4c7de..86daa52 100644
+--- a/bspwm.c
++++ b/bspwm.c
+@@ -34,6 +34,7 @@
+ #include <sys/un.h>
+ #include <signal.h>
+ #include <unistd.h>
++#include <xcb/xinerama.h>
+ #include "types.h"
+ #include "desktop.h"
+ #include "monitor.h"
+@@ -193,6 +194,7 @@ void init(void)
+     monitor_uid = desktop_uid = 0;
+     mon = mon_head = mon_tail = pri_mon = NULL;
+     history_head = history_tail = history_needle = NULL;
++    rule_head = rule_tail = NULL;
+     stack_head = stack_tail = NULL;
+     subscribe_head = subscribe_tail = NULL;
+     pending_rule_head = pending_rule_tail = NULL;
+@@ -261,9 +263,32 @@ void setup(void)
+     } else {
+         randr = false;
+         warn("Couldn't retrieve monitors via RandR.\n");
+-        xcb_rectangle_t rect = (xcb_rectangle_t) {0, 0, screen_width, screen_height};
+-        monitor_t *m = add_monitor(rect);
+-        add_desktop(m, make_desktop(NULL));
++        bool xinerama_is_active = false;
++        if (xcb_get_extension_data(dpy, &xcb_xinerama_id)->present) {
++            xcb_xinerama_is_active_reply_t *xia = xcb_xinerama_is_active_reply(dpy, xcb_xinerama_is_active(dpy), NULL);
++            if (xia != NULL) {
++                xinerama_is_active = xia->state;
++                free(xia);
++            }
++        }
++
++        if (xinerama_is_active) {
++            xcb_xinerama_query_screens_reply_t *xsq = xcb_xinerama_query_screens_reply(dpy, xcb_xinerama_query_screens(dpy), NULL);
++            xcb_xinerama_screen_info_t *xsi = xcb_xinerama_query_screens_screen_info(xsq);
++            int n = xcb_xinerama_query_screens_screen_info_length(xsq);
++            for (int i = 0; i < n; i++) {
++                xcb_xinerama_screen_info_t info = xsi[i];
++                xcb_rectangle_t rect = (xcb_rectangle_t) {info.x_org, info.y_org, info.width, info.height};
++                monitor_t *m = add_monitor(rect);
++                add_desktop(m, make_desktop(NULL));
++            }
++            free(xsq);
++        } else {
++            warn("Xinerama is inactive.\n");
++            xcb_rectangle_t rect = (xcb_rectangle_t) {0, 0, screen_width, screen_height};
++            monitor_t *m = add_monitor(rect);
++            add_desktop(m, make_desktop(NULL));
++        }
+     }
+ 
+     ewmh_update_number_of_desktops();
+@@ -295,6 +320,8 @@ void cleanup(void)
+ {
+     while (mon_head != NULL)
+         remove_monitor(mon_head);
++    while (rule_head != NULL)
++        remove_rule(rule_head);
+     while (stack_head != NULL)
+         remove_stack(stack_head);
+     while (subscribe_head != NULL)
+diff --git a/bspwm.h b/bspwm.h
+index f65bbeb..ba50f65 100644
+--- a/bspwm.h
++++ b/bspwm.h
+@@ -49,6 +49,8 @@ monitor_t *pri_mon;
+ history_t *history_head;
+ history_t *history_tail;
+ history_t *history_needle;
++rule_t *rule_head;
++rule_t *rule_tail;
+ stacking_list_t *stack_head;
+ stacking_list_t *stack_tail;
+ subscriber_list_t *subscribe_head;
+diff --git a/contrib/bash_completion b/contrib/bash_completion
+index 0ca1d47..0f3e301 100644
+--- a/contrib/bash_completion
++++ b/contrib/bash_completion
+@@ -1,7 +1,7 @@
+ _bspc() {
+-    local commands='window desktop monitor query pointer restore control config quit'
++    local commands='window desktop monitor query pointer rule restore control config quit'
+ 
+-    local settings='rule_command status_prefix focused_border_color active_border_color normal_border_color presel_border_color focused_locked_border_color active_locked_border_color normal_locked_border_color focused_sticky_border_color normal_sticky_border_color focused_private_border_color active_private_border_color normal_private_border_color urgent_border_color focused_frame_opacity active_frame_opacity normal_frame_opacity border_width window_gap top_padding right_padding bottom_padding left_padding split_ratio growth_factor borderless_monocle gapless_monocle focus_follows_pointer pointer_follows_monitor apply_floating_atom auto_alternate auto_cancel history_aware_focus ignore_ewmh_focus remove_disabled_monitor'
++    local settings='external_rules_command status_prefix focused_border_color active_border_color normal_border_color presel_border_color focused_locked_border_color active_locked_border_color normal_locked_border_color focused_sticky_border_color normal_sticky_border_color focused_private_border_color active_private_border_color normal_private_border_color urgent_border_color focused_frame_opacity active_frame_opacity normal_frame_opacity border_width window_gap top_padding right_padding bottom_padding left_padding split_ratio growth_factor borderless_monocle gapless_monocle focus_follows_pointer pointer_follows_monitor apply_floating_atom auto_alternate auto_cancel history_aware_focus ignore_ewmh_focus remove_disabled_monitor'
+ 
+     COMPREPLY=()
+ 
+diff --git a/contrib/zsh_completion b/contrib/zsh_completion
+index 0feeeca..e48fa8d 100644
+--- a/contrib/zsh_completion
++++ b/contrib/zsh_completion
+@@ -2,8 +2,8 @@
+ 
+ _bspc() {
+     local -a commands settings
+-    commands=('window' 'desktop' 'monitor' 'query' 'pointer' 'restore' 'control' 'config' 'quit')
+-    settings=('rule_command' 'status_prefix' 'focused_border_color' 'active_border_color' 'normal_border_color' 'presel_border_color' 'focused_locked_border_color' 'active_locked_border_color' 'normal_locked_border_color' 'focused_sticky_border_color' 'normal_sticky_border_color' 'focused_private_border_color' 'active_private_border_color' 'normal_private_border_color' 'urgent_border_color' 'focused_frame_opacity' 'active_frame_opacity' 'normal_frame_opacity' 'border_width' 'window_gap' 'top_padding' 'right_padding' 'bottom_padding' 'left_padding' 'split_ratio' 'growth_factor' 'borderless_monocle' 'gapless_monocle' 'focus_follows_pointer' 'pointer_follows_monitor' 'apply_floating_atom' 'auto_alternate' 'auto_cancel' 'history_aware_focus' 'ignore_ewmh_focus' 'remove_disabled_monitor')
++    commands=('window' 'desktop' 'monitor' 'query' 'pointer' 'rule' 'restore' 'control' 'config' 'quit')
++    settings=('external_rules_command' 'status_prefix' 'focused_border_color' 'active_border_color' 'normal_border_color' 'presel_border_color' 'focused_locked_border_color' 'active_locked_border_color' 'normal_locked_border_color' 'focused_sticky_border_color' 'normal_sticky_border_color' 'focused_private_border_color' 'active_private_border_color' 'normal_private_border_color' 'urgent_border_color' 'focused_frame_opacity' 'active_frame_opacity' 'normal_frame_opacity' 'border_width' 'window_gap' 'top_padding' 'right_padding' 'bottom_padding' 'left_padding' 'split_ratio' 'growth_factor' 'borderless_monocle' 'gapless_monocle' 'focus_follows_pointer' 'pointer_follows_monitor' 'apply_floating_atom' 'auto_alternate' 'auto_cancel' 'history_aware_focus' 'ignore_ewmh_focus' 'remove_disabled_monitor')
+     if (( CURRENT == 2 )) ; then
+         _values 'command' "$commands[@]"
+     elif (( CURRENT == 3 )) ; then
+diff --git a/doc/bspwm.1 b/doc/bspwm.1
+index 8ef7eb5..0b6ce2b 100644
+--- a/doc/bspwm.1
++++ b/doc/bspwm.1
+@@ -2,12 +2,12 @@
+ .\"     Title: bspwm
+ .\"    Author: [see the "Author" section]
+ .\" Generator: DocBook XSL Stylesheets v1.78.1 <http://docbook.sf.net/>
+-.\"      Date: 12/05/2013
++.\"      Date: 12/16/2013
+ .\"    Manual: Bspwm Manual
+ .\"    Source: Bspwm 0.8.7
+ .\"  Language: English
+ .\"
+-.TH "BSPWM" "1" "12/05/2013" "Bspwm 0\&.8\&.7" "Bspwm Manual"
++.TH "BSPWM" "1" "12/16/2013" "Bspwm 0\&.8\&.7" "Bspwm Manual"
+ .\" -----------------------------------------------------------------
+ .\" * Define some portability stuff
+ .\" -----------------------------------------------------------------
+@@ -437,6 +437,34 @@ free
+ Only consider monitors where the focused desktop is free\&.
+ .RE
+ .RE
++.SH "WINDOW STATES"
++.PP
++floating
++.RS 4
++Is above any tiled window and can be moved/resized freely\&. Although it doesn\(cqt occupy any tiling space, it is still part of the window tree\&.
++.RE
++.PP
++fullscreen
++.RS 4
++Fills its monitor rectangle, is above all the other windows and has no borders\&.
++.RE
++.PP
++locked
++.RS 4
++Ignores the
++\fBclose\fR
++message\&.
++.RE
++.PP
++sticky
++.RS 4
++Stays in the focused desktop of its monitor\&.
++.RE
++.PP
++private
++.RS 4
++Tries to keep the same tiling position/size\&.
++.RE
+ .SH "COMMANDS"
+ .SS "Window"
+ .sp
+@@ -496,9 +524,9 @@ Set the splitting ratio of the selected window (0 <
+ < 1)\&.
+ .RE
+ .PP
+-\fB\-e\fR, \fB\-\-edge\fR \fIDIR\fR \fIRATIO\fR|pull|push
++\fB\-e\fR, \fB\-\-edge\fR \fIDIR\fR \fIRATIO\fR|\(+-\fIPIXELS\fR|pull|push
+ .RS 4
+-Set the splitting ratio (or pull, or push) the edge located in the given direction in relation to the selected window\&.
++Set and change the splitting ratio of (or pull, or push) the edge located in the given direction in relation to the selected window\&.
+ .RE
+ .PP
+ \fB\-R\fR, \fB\-\-rotate\fR \fIDIR\fR \fI90|270|180\fR
+@@ -827,6 +855,42 @@ Pass the pointer root coordinates for the current pointer action\&.
+ Terminate the current pointer action\&.
+ .RE
+ .RE
++.SS "Rule"
++.sp
++.it 1 an-trap
++.nr an-no-space-flag 1
++.nr an-break-flag 1
++.br
++.ps +1
++\fBGeneral Syntax\fR
++.RS 4
++.sp
++rule \fIOPTIONS\fR
++.RE
++.sp
++.it 1 an-trap
++.nr an-no-space-flag 1
++.nr an-break-flag 1
++.br
++.ps +1
++\fBOptions\fR
++.RS 4
++.PP
++\fB\-a\fR, \fB\-\-add\fR <class_name>|<instance_name>|* [\fB\-o\fR|\fB\-\-one\-shot\fR] [desktop=DESKTOP_SEL|monitor=MONITOR_SEL] [(floating|fullscreen|locked|sticky|private|frame|center|lower|follow|manage|focus)=(true|false)]
++.RS 4
++Create a new rule\&.
++.RE
++.PP
++\fB\-r\fR, \fB\-\-remove\fR ^<n>|head|tail|<class_name>|<instance_name>|*\&...
++.RS 4
++Remove the given rules\&.
++.RE
++.PP
++\fB\-l\fR, \fB\-\-list\fR [<class_name>|<instance_name>|*]
++.RS 4
++List the rules\&.
++.RE
++.RE
+ .SS "Config"
+ .sp
+ .it 1 an-trap
+@@ -864,33 +928,6 @@ Colors are either X color names or \fI#RRGGBB\fR, booleans are \fItrue\fR or \fI
+ All the boolean settings are \fIfalse\fR by default\&.
+ .SS "Global Settings"
+ .PP
+-\fIrule_command\fR
+-.RS 4
+-External command used to retrieve rule consequences\&. The command will receive the the ID of the window being processed as its first argument\&. The output of that command must have the following format:
+-\fBkey1=value1 key2=value2 \&...\fR, where
+-\fBkeyN\fR
+-is one of
+-\fIfloating\fR,
+-\fIfullscreen\fR,
+-\fIlocked\fR,
+-\fIsticky\fR,
+-\fIprivate\fR,
+-\fIframe\fR,
+-\fIcenter\fR,
+-\fIlower\fR,
+-\fIfollow\fR,
+-\fImanage\fR,
+-\fIfocus\fR,
+-\fIdesktop\fR
+-or
+-\fImonitor\fR\&.
+-.RE
+-.PP
+-\fIstatus_prefix\fR
+-.RS 4
+-Prefix prepended to each of the status lines\&.
+-.RE
+-.PP
+ \fIfocused_border_color\fR
+ .RS 4
+ Color of the border of a focused window of a focused monitor\&.
+@@ -988,6 +1025,20 @@ Default split ratio\&.
+ Intensity of the growth involved in pulling or pushing an edge\&.
+ .RE
+ .PP
++\fIstatus_prefix\fR
++.RS 4
++Prefix prepended to each of the status lines\&.
++.RE
++.PP
++\fIexternal_rules_command\fR
++.RS 4
++External command used to retrieve rule consequences\&. The command will receive the the ID of the window being processed as its first argument and the class and instance names as second and third arguments\&. The output of that command must have the following format:
++\fBkey1=value1 key2=value2 \&...\fR
++(the valid key/value pairs are given in the description of the
++\fIrule\fR
++command)\&.
++.RE
++.PP
+ \fIhistory_aware_focus\fR
+ .RS 4
+ Give priority to the focus history when focusing nodes\&.
+diff --git a/doc/bspwm.1.txt b/doc/bspwm.1.txt
+index 4f0480f..d241ddb 100644
+--- a/doc/bspwm.1.txt
++++ b/doc/bspwm.1.txt
+@@ -287,6 +287,25 @@ free::
+     Only consider monitors where the focused desktop is free.
+ 
+ 
++Window States
++-------------
++
++floating::
++    Is above any tiled window and can be moved/resized freely. Although it doesn't occupy any tiling space, it is still part of the window tree.
++
++fullscreen::
++    Fills its monitor rectangle, is above all the other windows and has no borders.
++
++locked::
++    Ignores the *close* message.
++
++sticky::
++    Stays in the focused desktop of its monitor.
++
++private::
++    Tries to keep the same tiling position/size.
++
++
+ Commands
+ --------
+ 
+@@ -321,8 +340,8 @@ Options
+ *-r*, *--ratio* 'RATIO'::
+     Set the splitting ratio of the selected window (0 < 'RATIO' < 1).
+ 
+-*-e*, *--edge* 'DIR' 'RATIO'|pull|push::
+-    Set the splitting ratio (or pull, or push) the edge located in the given direction in relation to the selected window.
++*-e*, *--edge* 'DIR' 'RATIO'|±'PIXELS'|pull|push::
++    Set and change the splitting ratio of (or pull, or push) the edge located in the given direction in relation to the selected window.
+ 
+ *-R*, *--rotate* 'DIR' '90|270|180'::
+     Rotate the tree holding the edge located in the given direction in relation to the selected window.
+@@ -508,6 +527,26 @@ Options
+ *-u*, *--ungrab*::
+     Terminate the current pointer action.
+ 
++Rule
++~~~~
++
++General Syntax
++^^^^^^^^^^^^^^
++
++rule 'OPTIONS'
++
++Options
++^^^^^^^
++
++*-a*, *--add* <class_name>|<instance_name>|* [*-o*|*--one-shot*] [desktop=DESKTOP_SEL|monitor=MONITOR_SEL] [(floating|fullscreen|locked|sticky|private|frame|center|lower|follow|manage|focus)=(true|false)]::
++    Create a new rule.
++
++*-r*, *--remove* ^<n>|head|tail|<class_name>|<instance_name>|*...::
++    Remove the given rules.
++
++*-l*, *--list* [<class_name>|<instance_name>|*]::
++    List the rules.
++
+ Config
+ ~~~~~~
+ 
+@@ -535,12 +574,6 @@ All the boolean settings are 'false' by default.
+ Global Settings
+ ~~~~~~~~~~~~~~~
+ 
+-'rule_command'::
+-    External command used to retrieve rule consequences. The command will receive the the ID of the window being processed as its first argument. The output of that command must have the following format: *key1=value1 key2=value2 ...*, where *keyN* is one of 'floating', 'fullscreen', 'locked', 'sticky', 'private', 'frame', 'center', 'lower', 'follow', 'manage', 'focus', 'desktop' or 'monitor'.
+-
+-'status_prefix'::
+-    Prefix prepended to each of the status lines.
+-
+ 'focused_border_color'::
+     Color of the border of a focused window of a focused monitor.
+ 
+@@ -598,6 +631,12 @@ Global Settings
+ 'growth_factor'::
+     Intensity of the growth involved in pulling or pushing an edge.
+ 
++'status_prefix'::
++    Prefix prepended to each of the status lines.
++
++'external_rules_command'::
++    External command used to retrieve rule consequences. The command will receive the the ID of the window being processed as its first argument and the class and instance names as second and third arguments. The output of that command must have the following format: *key1=value1 key2=value2 ...* (the valid key/value pairs are given in the description of the 'rule' command).
++
+ 'history_aware_focus'::
+     Give priority to the focus history when focusing nodes.
+ 
+diff --git a/examples/bspwmrc b/examples/bspwmrc
+index 36500b2..e50baae 100755
+--- a/examples/bspwmrc
++++ b/examples/bspwmrc
+@@ -7,3 +7,9 @@ bspc config window_gap          12
+ bspc config split_ratio         0.52
+ bspc config borderless_monocle  true
+ bspc config gapless_monocle     true
++
++bspc rule -a Gimp desktop=^8 follow=on floating=on
++bspc rule -a Chromium desktop=^2
++bspc rule -a mplayer2 floating=on
++bspc rule -a Kupfer.py focus=on
++bspc rule -a Screenkey manage=off
+diff --git a/examples/external_rules/README.asciidoc b/examples/external_rules/README.asciidoc
+deleted file mode 100644
+index 17ae1cf..0000000
+--- a/examples/external_rules/README.asciidoc
++++ /dev/null
+@@ -1,42 +0,0 @@
+-Synopsis
+---------
+-
+-Server
+-~~~~~~
+-
+-*ruld* [*-h*|*-p* 'PORT']
+-
+-Client
+-~~~~~~
+-
+-*rulc* [*-h*|*-p* 'PORT'|*-a*|*-r*|*-l*|*-t*|*-q*] 'DATA' ...
+-
+-Options
+--------
+-
+-Shared
+-~~~~~~
+-
+-*-h*::
+-    Print the synopsis and exit.
+-
+-*-p* 'PORT'::
+-    Set the socket port.
+-
+-Client
+-~~~~~~
+-
+-*-a* 'HYPOT' 'CONSEQ' ['[duration=DURATION][,delay=DELAY]']::
+-    Create a new rule. 'HYPOT' is a Lua expression that represent the rule hypothesis and involves the following strings: 'class', 'instance', 'title', 'type' and 'state'.
+-
+-*-r* 'STRING'|head|tail::
+-    Remove the rules containing 'STRING' in their hypothesis or remove the first or last rule.
+-
+-*-l*::
+-    List the rules.
+-
+-*-t* 'CLASS' 'INSTANCE' 'TITLE' 'TYPE' 'STATE'::
+-    Test the rules for the given window informations.
+-
+-*-q*::
+-    Kill the server.
+diff --git a/examples/external_rules/bspwm_rules b/examples/external_rules/bspwm_rules
+deleted file mode 100755
+index 6e91732..0000000
+--- a/examples/external_rules/bspwm_rules
++++ /dev/null
+@@ -1,16 +0,0 @@
+-#! /bin/sh
+-
+-if ! rulc -l > /dev/null ; then
+-    (setsid ruld &)
+-    while ! rulc -l > /dev/null ; do
+-        sleep 0.1
+-    done
+-fi
+-rules=$(rulc -l)
+-if [ -z "$rules" ] ; then
+-    rulc -a 'class=="Gimp"' 'desktop=^8, follow=on, floating=on'
+-    rulc -a 'class=="Chromium"' 'desktop=^2'
+-    rulc -a 'instance=="mpv"' 'floating=on'
+-    rulc -a 'class=="Kupfer.py"' 'focus=on'
+-    rulc -a 'class=="Screenkey"' 'manage=off'
+-fi
+diff --git a/examples/external_rules/bspwmrc b/examples/external_rules/bspwmrc
+index 5ce0369..9454e77 100755
+--- a/examples/external_rules/bspwmrc
++++ b/examples/external_rules/bspwmrc
+@@ -1,4 +1,3 @@
+ #! /bin/sh
+ 
+-bspc config rule_command "$(which rule_command)"
+-bspwm_rules
++bspc config external_rules_command "$(which external_rules)"
+diff --git a/examples/external_rules/external_rules b/examples/external_rules/external_rules
+new file mode 100755
+index 0000000..c3efb78
+--- /dev/null
++++ b/examples/external_rules/external_rules
+@@ -0,0 +1,14 @@
++#! /bin/sh
++
++wid=$1
++class=$2
++instance=$3
++
++if [ "$instance" = fontforge ] ; then
++    title=$(xtitle "$wid")
++    case "$title" in
++        Layers|Tools|Warning)
++            echo "focus = off"
++            ;;
++    esac
++fi
+diff --git a/examples/external_rules/lua/README.asciidoc b/examples/external_rules/lua/README.asciidoc
+new file mode 100644
+index 0000000..17ae1cf
+--- /dev/null
++++ b/examples/external_rules/lua/README.asciidoc
+@@ -0,0 +1,42 @@
++Synopsis
++--------
++
++Server
++~~~~~~
++
++*ruld* [*-h*|*-p* 'PORT']
++
++Client
++~~~~~~
++
++*rulc* [*-h*|*-p* 'PORT'|*-a*|*-r*|*-l*|*-t*|*-q*] 'DATA' ...
++
++Options
++-------
++
++Shared
++~~~~~~
++
++*-h*::
++    Print the synopsis and exit.
++
++*-p* 'PORT'::
++    Set the socket port.
++
++Client
++~~~~~~
++
++*-a* 'HYPOT' 'CONSEQ' ['[duration=DURATION][,delay=DELAY]']::
++    Create a new rule. 'HYPOT' is a Lua expression that represent the rule hypothesis and involves the following strings: 'class', 'instance', 'title', 'type' and 'state'.
++
++*-r* 'STRING'|head|tail::
++    Remove the rules containing 'STRING' in their hypothesis or remove the first or last rule.
++
++*-l*::
++    List the rules.
++
++*-t* 'CLASS' 'INSTANCE' 'TITLE' 'TYPE' 'STATE'::
++    Test the rules for the given window informations.
++
++*-q*::
++    Kill the server.
+diff --git a/examples/external_rules/lua/bspwm_rules b/examples/external_rules/lua/bspwm_rules
+new file mode 100755
+index 0000000..6e91732
+--- /dev/null
++++ b/examples/external_rules/lua/bspwm_rules
+@@ -0,0 +1,16 @@
++#! /bin/sh
++
++if ! rulc -l > /dev/null ; then
++    (setsid ruld &)
++    while ! rulc -l > /dev/null ; do
++        sleep 0.1
++    done
++fi
++rules=$(rulc -l)
++if [ -z "$rules" ] ; then
++    rulc -a 'class=="Gimp"' 'desktop=^8, follow=on, floating=on'
++    rulc -a 'class=="Chromium"' 'desktop=^2'
++    rulc -a 'instance=="mpv"' 'floating=on'
++    rulc -a 'class=="Kupfer.py"' 'focus=on'
++    rulc -a 'class=="Screenkey"' 'manage=off'
++fi
+diff --git a/examples/external_rules/lua/bspwmrc b/examples/external_rules/lua/bspwmrc
+new file mode 100755
+index 0000000..35206a5
+--- /dev/null
++++ b/examples/external_rules/lua/bspwmrc
+@@ -0,0 +1,4 @@
++#! /bin/sh
++
++bspc config external_rules_command "$(which external_rules)"
++bspwm_rules
+diff --git a/examples/external_rules/lua/external_rules b/examples/external_rules/lua/external_rules
+new file mode 100755
+index 0000000..c1318cb
+--- /dev/null
++++ b/examples/external_rules/lua/external_rules
+@@ -0,0 +1,3 @@
++#! /bin/sh
++
++xwinfo -cints $1 | xargs -d '\n' rulc -t
+diff --git a/examples/external_rules/lua/rulc b/examples/external_rules/lua/rulc
+new file mode 100755
+index 0000000..f0cd633
+--- /dev/null
++++ b/examples/external_rules/lua/rulc
+@@ -0,0 +1,68 @@
++#! /usr/bin/env lua
++
++local p = require "posix"
++local port = 54321
++
++local short = "hp:arltq"
++local long = {
++    {"help", "none", 'h'},
++    {"port", "required", 'p'},
++    {"add", "none", 'a'},
++    {"remove", "none", 'r'},
++    {"list", "none", 'l'},
++    {"test", "none", 't'},
++    {"quit", "none", 'q'}
++}
++
++local cmd_assoc = {
++    a = "add",
++    r = "remove",
++    l = "list",
++    t = "test",
++    q = "quit"
++}
++
++local cmd
++local data_idx = 1
++for opt, optarg, optind, longind in p.getopt(arg, short, long) do
++    if opt == '?' then
++        print("Unrecognized option")
++        os.exit(1)
++    elseif opt == 'h' then
++        print("Usage: rulc [-h|-p PORT|-a|-r|-l|-t|-q] DATA ...")
++        os.exit(0)
++    elseif opt == 'p' then
++        port = optarg
++    else
++        cmd = cmd_assoc[opt]
++    end
++    data_idx = optind
++end
++
++if not cmd then
++    os.exit(1)
++end
++
++local msg = cmd
++if cmd == "test" then
++    msg = string.format("%s {class=%q, instance=%q, title=%q, type=%q, state=%q}", msg, arg[data_idx], arg[data_idx+1], arg[data_idx+2], arg[data_idx+3], arg[data_idx+4])
++elseif cmd == "add" then
++    msg = string.format("%s {%q, %q, %s}", msg, arg[data_idx], arg[data_idx+1], arg[data_idx+2] and string.format("{%s}", arg[data_idx+2]) or "")
++elseif cmd == "remove" then
++    msg = string.format("%s %s", msg, arg[data_idx])
++end
++
++local fd = p.socket(p.AF_INET, p.SOCK_STREAM, 0)
++local s = p.connect(fd, {family=p.AF_INET, addr="127.0.0.1", port=port})
++if not s then
++    p.close(fd)
++    os.exit(1)
++end
++p.send(fd, msg)
++rsp = p.recv(fd, p.BUFSIZ)
++
++if rsp and #rsp > 0 then
++    print(rsp)
++end
++
++p.close(fd)
+diff --git a/examples/external_rules/lua/ruld b/examples/external_rules/lua/ruld
+new file mode 100755
+index 0000000..e4a8674
+--- /dev/null
++++ b/examples/external_rules/lua/ruld
+@@ -0,0 +1,135 @@
++#! /usr/bin/env lua
++
++local p = require("posix")
++local port = 54321
++
++local short = "hp:"
++local long = {
++    {"help", "none", 'h'},
++    {"port", "required", 'p'},
++}
++
++local rules = {}
++
++for opt, optarg, optind, longind in p.getopt(arg, short, long) do
++    if opt == '?' then
++        print("Unrecognized option")
++        os.exit(1)
++    elseif opt == 'h' then
++        print("Usage: ruld [-h|-p PORT]")
++        os.exit(0)
++    elseif opt == 'p' then
++        port = optarg
++    end
++end
++
++function eval(exp, env)
++    local f
++    local value = "return " .. exp
++    if env then
++        f = load(value, nil, nil, env)
++    else
++        f = load(value)
++    end
++    return f and f()
++end
++
++function test(env)
++    local rsp = ""
++    for index = #rules, 1, -1 do
++        local entry = rules[index]
++        if eval(entry[1], env) then
++            local delay, duration
++            if entry[3] then
++                delay = entry[3].delay
++                duration = entry[3].duration
++                if delay and delay > 0 then
++                    entry[3].delay = delay - 1
++                end
++                if ((not delay) or delay == 0) and duration and duration > 0 then
++                    entry[3].duration = duration - 1
++                end
++            end
++            if (((not delay) or delay == 0) and ((not duration) or duration > 0)) then
++                if #rsp > 0 then
++                    rsp = rsp .. " " .. entry[2]
++                else
++                    rsp = entry[2]
++                end
++            end
++            if duration and duration <= 1 then
++                table.remove(rules, index)
++            end
++        end
++    end
++    return rsp
++end
++
++local fd = p.socket(p.AF_INET, p.SOCK_STREAM, 0)
++p.setsockopt(fd, p.SOL_SOCKET, p.SO_REUSEADDR, 1)
++p.bind(fd, {family=p.AF_INET, addr="127.0.0.1", port=port})
++p.listen(fd, p.SOMAXCONN)
++local running = true
++
++while running do
++    ret_fd = p.accept(fd)
++    if ret_fd then
++        local msg = p.recv(ret_fd, p.BUFSIZ)
++        if msg then
++            local cmd, data = nil
++            sep = msg:find(" ")
++            if sep then
++                cmd = msg:sub(1, sep - 1)
++                data = msg:sub(sep + 1)
++            else
++                cmd = msg
++            end
++            if cmd == "test" then
++                local env = eval(data)
++                if env then
++                    rsp = test(env)
++                    p.send(ret_fd, rsp)
++                end
++            elseif cmd == "add" then
++                local value = eval(data)
++                if value then
++                    table.insert(rules, value)
++                end
++            elseif cmd == "remove" then
++                if data == "tail" then
++                    table.remove(rules, #rules)
++                elseif data == "head" then
++                    table.remove(rules, 1)
++                else
++                    for index = #rules, 1, -1 do
++                        if rules[index][1]:find(data) then
++                            table.remove(rules, index)
++                        end
++                    end
++                end
++            elseif cmd == "quit" then
++                running = false
++            elseif cmd == "list" then
++                local rsp = ""
++                for index, entry in pairs(rules) do
++                    rsp = rsp .. string.format("%s => %s", entry[1], entry[2])
++                    if entry[3] then
++                        if entry[3].delay then
++                            rsp = rsp .. string.format(" @%i", entry[3].delay)
++                        end
++                        if entry[3].duration then
++                            rsp = rsp .. string.format(" +%i", entry[3].duration)
++                        end
++                    end
++                    if index < #rules then
++                        rsp = rsp .. "\n"
++                    end
++                end
++                p.send(ret_fd, rsp)
++            end
++        end
++        p.close(ret_fd)
++    end
++end
++
++p.close(fd)
+diff --git a/examples/external_rules/rulc b/examples/external_rules/rulc
+deleted file mode 100755
+index f0cd633..0000000
+--- a/examples/external_rules/rulc
++++ /dev/null
+@@ -1,68 +0,0 @@
+-#! /usr/bin/env lua
+-
+-local p = require "posix"
+-local port = 54321
+-
+-local short = "hp:arltq"
+-local long = {
+-    {"help", "none", 'h'},
+-    {"port", "required", 'p'},
+-    {"add", "none", 'a'},
+-    {"remove", "none", 'r'},
+-    {"list", "none", 'l'},
+-    {"test", "none", 't'},
+-    {"quit", "none", 'q'}
+-}
+-
+-local cmd_assoc = {
+-    a = "add",
+-    r = "remove",
+-    l = "list",
+-    t = "test",
+-    q = "quit"
+-}
+-
+-local cmd
+-local data_idx = 1
+-for opt, optarg, optind, longind in p.getopt(arg, short, long) do
+-    if opt == '?' then
+-        print("Unrecognized option")
+-        os.exit(1)
+-    elseif opt == 'h' then
+-        print("Usage: rulc [-h|-p PORT|-a|-r|-l|-t|-q] DATA ...")
+-        os.exit(0)
+-    elseif opt == 'p' then
+-        port = optarg
+-    else
+-        cmd = cmd_assoc[opt]
+-    end
+-    data_idx = optind
+-end
+-
+-if not cmd then
+-    os.exit(1)
+-end
+-
+-local msg = cmd
+-if cmd == "test" then
+-    msg = string.format("%s {class=%q, instance=%q, title=%q, type=%q, state=%q}", msg, arg[data_idx], arg[data_idx+1], arg[data_idx+2], arg[data_idx+3], arg[data_idx+4])
+-elseif cmd == "add" then
+-    msg = string.format("%s {%q, %q, %s}", msg, arg[data_idx], arg[data_idx+1], arg[data_idx+2] and string.format("{%s}", arg[data_idx+2]) or "")
+-elseif cmd == "remove" then
+-    msg = string.format("%s %s", msg, arg[data_idx])
+-end
+-
+-local fd = p.socket(p.AF_INET, p.SOCK_STREAM, 0)
+-local s = p.connect(fd, {family=p.AF_INET, addr="127.0.0.1", port=port})
+-if not s then
+-    p.close(fd)
+-    os.exit(1)
+-end
+-p.send(fd, msg)
+-rsp = p.recv(fd, p.BUFSIZ)
+-
+-if rsp and #rsp > 0 then
+-    print(rsp)
+-end
+-
+-p.close(fd)
+diff --git a/examples/external_rules/ruld b/examples/external_rules/ruld
+deleted file mode 100755
+index e4a8674..0000000
+--- a/examples/external_rules/ruld
++++ /dev/null
+@@ -1,135 +0,0 @@
+-#! /usr/bin/env lua
+-
+-local p = require("posix")
+-local port = 54321
+-
+-local short = "hp:"
+-local long = {
+-    {"help", "none", 'h'},
+-    {"port", "required", 'p'},
+-}
+-
+-local rules = {}
+-
+-for opt, optarg, optind, longind in p.getopt(arg, short, long) do
+-    if opt == '?' then
+-        print("Unrecognized option")
+-        os.exit(1)
+-    elseif opt == 'h' then
+-        print("Usage: ruld [-h|-p PORT]")
+-        os.exit(0)
+-    elseif opt == 'p' then
+-        port = optarg
+-    end
+-end
+-
+-function eval(exp, env)
+-    local f
+-    local value = "return " .. exp
+-    if env then
+-        f = load(value, nil, nil, env)
+-    else
+-        f = load(value)
+-    end
+-    return f and f()
+-end
+-
+-function test(env)
+-    local rsp = ""
+-    for index = #rules, 1, -1 do
+-        local entry = rules[index]
+-        if eval(entry[1], env) then
+-            local delay, duration
+-            if entry[3] then
+-                delay = entry[3].delay
+-                duration = entry[3].duration
+-                if delay and delay > 0 then
+-                    entry[3].delay = delay - 1
+-                end
+-                if ((not delay) or delay == 0) and duration and duration > 0 then
+-                    entry[3].duration = duration - 1
+-                end
+-            end
+-            if (((not delay) or delay == 0) and ((not duration) or duration > 0)) then
+-                if #rsp > 0 then
+-                    rsp = rsp .. " " .. entry[2]
+-                else
+-                    rsp = entry[2]
+-                end
+-            end
+-            if duration and duration <= 1 then
+-                table.remove(rules, index)
+-            end
+-        end
+-    end
+-    return rsp
+-end
+-
+-local fd = p.socket(p.AF_INET, p.SOCK_STREAM, 0)
+-p.setsockopt(fd, p.SOL_SOCKET, p.SO_REUSEADDR, 1)
+-p.bind(fd, {family=p.AF_INET, addr="127.0.0.1", port=port})
+-p.listen(fd, p.SOMAXCONN)
+-local running = true
+-
+-while running do
+-    ret_fd = p.accept(fd)
+-    if ret_fd then
+-        local msg = p.recv(ret_fd, p.BUFSIZ)
+-        if msg then
+-            local cmd, data = nil
+-            sep = msg:find(" ")
+-            if sep then
+-                cmd = msg:sub(1, sep - 1)
+-                data = msg:sub(sep + 1)
+-            else
+-                cmd = msg
+-            end
+-            if cmd == "test" then
+-                local env = eval(data)
+-                if env then
+-                    rsp = test(env)
+-                    p.send(ret_fd, rsp)
+-                end
+-            elseif cmd == "add" then
+-                local value = eval(data)
+-                if value then
+-                    table.insert(rules, value)
+-                end
+-            elseif cmd == "remove" then
+-                if data == "tail" then
+-                    table.remove(rules, #rules)
+-                elseif data == "head" then
+-                    table.remove(rules, 1)
+-                else
+-                    for index = #rules, 1, -1 do
+-                        if rules[index][1]:find(data) then
+-                            table.remove(rules, index)
+-                        end
+-                    end
+-                end
+-            elseif cmd == "quit" then
+-                running = false
+-            elseif cmd == "list" then
+-                local rsp = ""
+-                for index, entry in pairs(rules) do
+-                    rsp = rsp .. string.format("%s => %s", entry[1], entry[2])
+-                    if entry[3] then
+-                        if entry[3].delay then
+-                            rsp = rsp .. string.format(" @%i", entry[3].delay)
+-                        end
+-                        if entry[3].duration then
+-                            rsp = rsp .. string.format(" +%i", entry[3].duration)
+-                        end
+-                    end
+-                    if index < #rules then
+-                        rsp = rsp .. "\n"
+-                    end
+-                end
+-                p.send(ret_fd, rsp)
+-            end
+-        end
+-        p.close(ret_fd)
+-    end
+-end
+-
+-p.close(fd)
+diff --git a/examples/external_rules/rule_command b/examples/external_rules/rule_command
+deleted file mode 100755
+index c1318cb..0000000
+--- a/examples/external_rules/rule_command
++++ /dev/null
+@@ -1,3 +0,0 @@
+-#! /bin/sh
+-
+-xwinfo -cints $1 | xargs -d '\n' rulc -t
+diff --git a/messages.c b/messages.c
+index f598bc7..10428b2 100644
+--- a/messages.c
++++ b/messages.c
+@@ -33,6 +33,7 @@
+ #include "monitor.h"
+ #include "pointer.h"
+ #include "query.h"
++#include "rule.h"
+ #include "restore.h"
+ #include "settings.h"
+ #include "tree.h"
+@@ -89,6 +90,8 @@ bool process_message(char **args, int num, char *rsp)
+         return cmd_restore(++args, --num);
+     } else if (streq("control", *args)) {
+         return cmd_control(++args, --num, rsp);
++    } else if (streq("rule", *args)) {
++        return cmd_rule(++args, --num, rsp);
+     } else if (streq("pointer", *args)) {
+         return cmd_pointer(++args, --num);
+     } else if (streq("config", *args)) {
+@@ -108,7 +111,7 @@ bool cmd_window(char **args, int num)
+     coordinates_t ref = {mon, mon->desk, mon->desk->focus};
+     coordinates_t trg = ref;
+ 
+-    if (*args[0] != OPT_CHR) {
++    if ((*args)[0] != OPT_CHR) {
+         if (node_from_desc(*args, &ref, &trg))
+             num--, args++;
+         else
+@@ -258,11 +261,25 @@ bool cmd_window(char **args, int num)
+             if (parse_fence_move(*args, &fmo)) {
+                 move_fence(n, dir, fmo);
+             } else {
+-                double rat;
+-                if (sscanf(*args, "%lf", &rat) == 1 && rat > 0 && rat < 1)
+-                    n->split_ratio = rat;
+-                else
+-                    return false;
++                if ((*args)[0] == '+' || (*args)[0] == '-') {
++                    int pix;
++                    if (sscanf(*args, "%i", &pix) == 1) {
++                        int max = (n->split_type == TYPE_HORIZONTAL ? n->rectangle.height : n->rectangle.width);
++                        double rat = ((max * n->split_ratio) + pix) / max;
++                        if (rat > 0 && rat < 1)
++                            n->split_ratio = rat;
++                        else
++                            return false;
++                    } else {
++                        return false;
++                    }
++                } else {
++                    double rat;
++                    if (sscanf(*args, "%lf", &rat) == 1 && rat > 0 && rat < 1)
++                        n->split_ratio = rat;
++                    else
++                        return false;
++                }
+             }
+             dirty = true;
+         } else if (streq("-r", *args) || streq("--ratio", *args)) {
+@@ -324,7 +341,7 @@ bool cmd_desktop(char **args, int num)
+     coordinates_t ref = {mon, mon->desk, NULL};
+     coordinates_t trg = ref;
+ 
+-    if (*args[0] != OPT_CHR) {
++    if ((*args)[0] != OPT_CHR) {
+         if (desktop_from_desc(*args, &ref, &trg))
+             num--, args++;
+         else
+@@ -474,7 +491,7 @@ bool cmd_monitor(char **args, int num)
+     coordinates_t ref = {mon, NULL, NULL};
+     coordinates_t trg = ref;
+ 
+-    if (*args[0] != OPT_CHR) {
++    if ((*args)[0] != OPT_CHR) {
+         if (monitor_from_desc(*args, &ref, &trg))
+             num--, args++;
+         else
+@@ -643,6 +660,60 @@ bool cmd_query(char **args, int num, char *rsp)
+     return true;
+ }
+ 
++bool cmd_rule(char **args, int num, char *rsp)
++{
++    if (num < 1)
++        return false;
++    while (num > 0) {
++        if (streq("-a", *args) || streq("--add", *args)) {
++            num--, args++;
++            if (num < 2)
++                return false;
++            rule_t *rule = make_rule();
++            snprintf(rule->cause, sizeof(rule->cause), "%s", *args);
++            num--, args++;
++            size_t i = 0;
++            while (num > 0) {
++                if (streq("-o", *args) || streq("--one-shot", *args)) {
++                    rule->one_shot = true;
++                } else {
++                    for (size_t j = 0; i < sizeof(rule->effect) && j < strlen(*args); i++, j++)
++                        rule->effect[i] = (*args)[j];
++                    if (num > 1 && i < sizeof(rule->effect))
++                        rule->effect[i++] = ' ';
++                }
++                num--, args++;
++            }
++            rule->effect[MIN(i, sizeof(rule->effect) - 1)] = '\0';
++            add_rule(rule);
++        } else if (streq("-r", *args) || streq("--remove", *args)) {
++            num--, args++;
++            if (num < 1)
++                return false;
++            int idx;
++            while (num > 0) {
++                if (parse_index(*args, &idx))
++                    remove_rule_by_index(idx - 1);
++                else if (streq("tail", *args))
++                    remove_rule(rule_tail);
++                else if (streq("head", *args))
++                    remove_rule(rule_head);
++                else
++                    remove_rule_by_cause(*args);
++                num--, args++;
++            }
++        } else if (streq("-l", *args) || streq("--list", *args)) {
++            num--, args++;
++            list_rules(num > 0 ? *args : NULL, rsp);
++        } else {
++            return false;
++        }
++        num--, args++;
++    }
++
++    return true;
++}
++
+ bool cmd_pointer(char **args, int num)
+ {
+     if (num < 1)
+@@ -743,7 +814,7 @@ bool cmd_config(char **args, int num, char *rsp)
+         return false;
+     coordinates_t ref = {mon, mon->desk, mon->desk->focus};
+     coordinates_t trg = {NULL, NULL, NULL};
+-    if (*args[0] == OPT_CHR) {
++    if ((*args)[0] == OPT_CHR) {
+         if (streq("-d", *args) || streq("--desktop", *args)) {
+             num--, args++;
+             if (num < 1)
+@@ -818,7 +889,7 @@ bool set_setting(coordinates_t loc, char *name, char *value)
+ #define SETSTR(s) \
+     } else if (streq(#s, name)) { \
+         return snprintf(s, sizeof(s), "%s", value) >= 0;
+-    SETSTR(rule_command)
++    SETSTR(external_rules_command)
+     SETSTR(status_prefix)
+ #undef SETSTR
+     } else if (streq("split_ratio", name)) {
+@@ -928,8 +999,8 @@ bool get_setting(coordinates_t loc, char *name, char* rsp)
+             return false;
+         else
+             snprintf(rsp, BUFSIZ, "%u", loc.desktop->border_width);
+-    else if (streq("rule_command", name))
+-        snprintf(rsp, BUFSIZ, "%s", rule_command);
++    else if (streq("external_rules_command", name))
++        snprintf(rsp, BUFSIZ, "%s", external_rules_command);
+     else if (streq("status_prefix", name))
+         snprintf(rsp, BUFSIZ, "%s", status_prefix);
+ #define MONGET(k) \
+diff --git a/messages.h b/messages.h
+index 7da3ed5..0dee489 100644
+--- a/messages.h
++++ b/messages.h
+@@ -39,6 +39,7 @@ bool cmd_window(char **args, int num);
+ bool cmd_desktop(char **args, int num);
+ bool cmd_monitor(char **args, int num);
+ bool cmd_query(char **args, int num, char *rsp);
++bool cmd_rule(char **args, int num, char *rsp);
+ bool cmd_pointer(char **args, int num);
+ bool cmd_restore(char **args, int num);
+ bool cmd_control(char **args, int num, char *rsp);
+diff --git a/query.c b/query.c
+index e29bd88..b35e50d 100644
+--- a/query.c
++++ b/query.c
+@@ -92,7 +92,7 @@ void query_tree(desktop_t *d, node_t *n, char *rsp, unsigned int depth)
+         client_t *c = n->client;
+         snprintf(line, sizeof(line), "%c %s 0x%X %u %ux%u%+i%+i %c %c%c%c%c%c%c%c%c%c", (n->birth_rotation == 90 ? 'a' : (n->birth_rotation == 270 ? 'c' : 'm')), c->class_name, c->window, c->border_width, c->floating_rectangle.width, c->floating_rectangle.height, c->floating_rectangle.x, c->floating_rectangle.y, (n->split_dir == DIR_UP ? 'U' : (n->split_dir == DIR_RIGHT ? 'R' : (n->split_dir == DIR_DOWN ? 'D' : 'L'))), (c->floating ? 'f' : '-'), (c->transient ? 't' : '-'), (c->fullscreen ? 'F' : '-'), (c->urgent ? 'u' : '-'), (c->locked ? 'l' : '-'), (c->sticky ? 's' : '-'), (c->frame ? 'e' : '-'), (c->private ? 'i' : '-'), (n->split_mode ? 'p' : '-'));
+     } else {
+-        snprintf(line, sizeof(line), "%c %c %.2f", (n->split_type == TYPE_HORIZONTAL ? 'H' : 'V'), (n->birth_rotation == 90 ? 'a' : (n->birth_rotation == 270 ? 'c' : 'm')), n->split_ratio);
++        snprintf(line, sizeof(line), "%c %c %lf", (n->split_type == TYPE_HORIZONTAL ? 'H' : 'V'), (n->birth_rotation == 90 ? 'a' : (n->birth_rotation == 270 ? 'c' : 'm')), n->split_ratio);
+     }
+ 
+     strncat(rsp, line, REMLEN(rsp));
+diff --git a/rule.c b/rule.c
+index 78f2e25..e7ca0b1 100644
+--- a/rule.c
++++ b/rule.c
+@@ -33,6 +33,64 @@
+ #include "query.h"
+ #include "rule.h"
+ 
++rule_t *make_rule(void)
++{
++    rule_t *r = malloc(sizeof(rule_t));
++    r->cause[0] = r->effect[0] = '\0';
++    r->next = r->prev = NULL;
++    r->one_shot = false;
++    return r;
++}
++
++void add_rule(rule_t *r)
++ {
++    if (rule_head == NULL) {
++        rule_head = rule_tail = r;
++    } else {
++        rule_tail->next = r;
++        r->prev = rule_tail;
++        rule_tail = r;
++    }
++}
++
++void remove_rule(rule_t *r)
++{
++    if (r == NULL)
++        return;
++    rule_t *prev = r->prev;
++    rule_t *next = r->next;
++    if (prev != NULL)
++        prev->next = next;
++    if (next != NULL)
++        next->prev = prev;
++    if (r == rule_head)
++        rule_head = next;
++    if (r == rule_tail)
++        rule_tail = prev;
++    free(r);
++}
++
++void remove_rule_by_cause(char *cause)
++{
++    rule_t *r = rule_head;
++    while (r != NULL) {
++        rule_t *next = r->next;
++        if (streq(r->cause, cause))
++            remove_rule(r);
++        r = next;
++    }
++}
++
++bool remove_rule_by_index(int idx)
++{
++    for (rule_t *r = rule_head; r != NULL; r = r->next, idx--)
++        if (idx == 0) {
++            remove_rule(r);
++            return true;
++        }
++    return false;
++}
++
+ rule_consequence_t *make_rule_conquence(void)
+ {
+     rule_consequence_t *rc = calloc(1, sizeof(rule_consequence_t));
+@@ -130,10 +188,40 @@ void apply_rules(xcb_window_t win, rule_consequence_t *csq)
+     xcb_icccm_get_wm_transient_for_reply(dpy, xcb_icccm_get_wm_transient_for(dpy, win), &transient_for, NULL);
+     if (transient_for != XCB_NONE)
+         csq->transient = csq->floating = true;
++
++    xcb_icccm_get_wm_class_reply_t reply;
++    if (xcb_icccm_get_wm_class_reply(dpy, xcb_icccm_get_wm_class(dpy, win), &reply, NULL) == 1) {
++        snprintf(csq->class_name, sizeof(csq->class_name), "%s", reply.class_name);
++        snprintf(csq->instance_name, sizeof(csq->instance_name), "%s", reply.instance_name);
++        xcb_icccm_get_wm_class_reply_wipe(&reply);
++    }
++
++    rule_t *rule = rule_head;
++    while (rule != NULL) {
++        rule_t *next = rule->next;
++        if (streq(rule->cause, MATCH_ANY)
++                || streq(rule->cause, csq->class_name)
++                || streq(rule->cause, csq->instance_name)) {
++            char effect[MAXLEN];
++            snprintf(effect, sizeof(effect), "%s", rule->effect);
++            char *key = strtok(effect, CSQ_BLK);
++            char *value = strtok(NULL, CSQ_BLK);
++            while (key != NULL && value != NULL) {
++                parse_key_value(key, value, csq);
++                key = strtok(NULL, CSQ_BLK);
++                value = strtok(NULL, CSQ_BLK);
++            }
++            if (rule->one_shot)
++                remove_rule(rule);
++        }
++        rule = next;
++    }
+ }
+ 
+ bool schedule_rules(xcb_window_t win, rule_consequence_t *csq)
+ {
++    if (external_rules_command[0] == '\0')
++        return false;
+     int fds[2];
+     if (pipe(fds) == -1)
+         return false;
+@@ -146,7 +234,7 @@ bool schedule_rules(xcb_window_t win, rule_consequence_t *csq)
+         char wid[SMALEN];
+         snprintf(wid, sizeof(wid), "%i", win);
+         setsid();
+-        execl(rule_command, rule_command, wid, NULL);
++        execl(external_rules_command, external_rules_command, wid, csq->class_name, csq->instance_name, NULL);
+         err("Couldn't spawn rule command.\n");
+     } else if (pid > 0) {
+         close(fds[1]);
+@@ -156,59 +244,59 @@ bool schedule_rules(xcb_window_t win, rule_consequence_t *csq)
+     return (pid != -1);
+ }
+ 
+-void parse_rule_consequence(int fd, rule_consequence_t *csq, monitor_t **m, desktop_t **d)
++void parse_rule_consequence(int fd, rule_consequence_t *csq)
+ {
+     if (fd == -1)
+         return;
+     char data[BUFSIZ];
+     int nb;
+-    bool v;
+     while ((nb = read(fd, data, sizeof(data))) > 0) {
+         int end = MIN(nb, (int) sizeof(data) - 1);
+         data[end] = '\0';
+         char *key = strtok(data, CSQ_BLK);
+         char *value = strtok(NULL, CSQ_BLK);
+         while (key != NULL && value != NULL) {
+-            PRINTF("%s = %s\n", key, value);
+-            if (streq("desktop", key)) {
+-                coordinates_t ref = {mon, mon->desk, NULL};
+-                coordinates_t trg = {NULL, NULL, NULL};
+-                if (desktop_from_desc(value, &ref, &trg)) {
+-                    *m = trg.monitor;
+-                    *d = trg.desktop;
+-                }
+-            } else if (streq("monitor", key)) {
+-                coordinates_t ref = {mon, NULL, NULL};
+-                coordinates_t trg = {NULL, NULL, NULL};
+-                if (monitor_from_desc(value, &ref, &trg)) {
+-                    *m = trg.monitor;
+-                    *d = trg.monitor->desk;
+-                }
+-            } else if (parse_bool(value, &v)) {
+-                if (streq("floating", key))
+-                    csq->floating = v;
+-#define SETCSQ(name) \
+-                else if (streq(#name, key)) \
+-                    csq->name = v;
+-                SETCSQ(fullscreen)
+-                SETCSQ(locked)
+-                SETCSQ(sticky)
+-                SETCSQ(private)
+-                SETCSQ(frame)
+-                SETCSQ(center)
+-                SETCSQ(lower)
+-                SETCSQ(follow)
+-                SETCSQ(manage)
+-                SETCSQ(focus)
+-#undef SETCSQ
+-
+-            }
++            parse_key_value(key, value, csq);
+             key = strtok(NULL, CSQ_BLK);
+             value = strtok(NULL, CSQ_BLK);
+         }
+     }
+-    if (csq->sticky) {
+-        *m = mon;
+-        *d = mon->desk;
++}
++
++void parse_key_value(char *key, char *value, rule_consequence_t *csq)
++{
++    bool v;
++    if (streq("desktop", key)) {
++        snprintf(csq->desktop_desc, sizeof(csq->desktop_desc), "%s", value);
++    } else if (streq("monitor", key)) {
++        snprintf(csq->monitor_desc, sizeof(csq->monitor_desc), "%s", value);
++    } else if (parse_bool(value, &v)) {
++        if (streq("floating", key))
++            csq->floating = v;
++#define SETCSQ(name) \
++        else if (streq(#name, key)) \
++            csq->name = v;
++        SETCSQ(fullscreen)
++        SETCSQ(locked)
++        SETCSQ(sticky)
++        SETCSQ(private)
++        SETCSQ(frame)
++        SETCSQ(center)
++        SETCSQ(lower)
++        SETCSQ(follow)
++        SETCSQ(manage)
++        SETCSQ(focus)
++#undef SETCSQ
++    }
++}
++
++void list_rules(char *pattern, char *rsp)
++{
++    char line[MAXLEN];
++    for (rule_t *r = rule_head; r != NULL; r = r->next) {
++        if (pattern != NULL && !streq(pattern, r->cause))
++            continue;
++        snprintf(line, sizeof(line), "%s => %s\n", r->cause, r->effect);
++        strncat(rsp, line, REMLEN(rsp));
+     }
+ }
+diff --git a/rule.h b/rule.h
+index fd2bfb2..6467aaf 100644
+--- a/rule.h
++++ b/rule.h
+@@ -25,14 +25,22 @@
+ #ifndef BSPWM_RULE_H
+ #define BSPWM_RULE_H
+ 
+-#define CSQ_BLK  " =,\n"
++#define MATCH_ANY  "*"
++#define CSQ_BLK    " =,\n"
+ 
++rule_t *make_rule(void);
++void add_rule(rule_t *r);
++void remove_rule(rule_t *r);
++void remove_rule_by_cause(char *cause);
++bool remove_rule_by_index(int idx);
+ rule_consequence_t *make_rule_conquence(void);
+ pending_rule_t *make_pending_rule(int fd, xcb_window_t win, rule_consequence_t *csq);
+ void add_pending_rule(pending_rule_t *pr);
+ void remove_pending_rule(pending_rule_t *pr);
+ void apply_rules(xcb_window_t win, rule_consequence_t *csq);
+ bool schedule_rules(xcb_window_t win, rule_consequence_t *csq);
+-void parse_rule_consequence(int fd, rule_consequence_t *csq, monitor_t **m, desktop_t **d);
++void parse_rule_consequence(int fd, rule_consequence_t *csq);
++void parse_key_value(char *key, char *value, rule_consequence_t *csq);
++void list_rules(char *pattern, char *rsp);
+ 
+ #endif
+diff --git a/settings.c b/settings.c
+index 1cfaadf..7dcaa94 100644
+--- a/settings.c
++++ b/settings.c
+@@ -39,7 +39,7 @@ void run_config(void)
+ 
+ void load_settings(void)
+ {
+-    snprintf(rule_command, sizeof(rule_command), "%s", RULE_COMMAND);
++    snprintf(external_rules_command, sizeof(external_rules_command), "%s", EXTERNAL_RULES_COMMAND);
+     snprintf(status_prefix, sizeof(status_prefix), "%s", STATUS_PREFIX);
+ 
+     snprintf(normal_border_color, sizeof(normal_border_color), "%s", NORMAL_BORDER_COLOR);
+diff --git a/settings.h b/settings.h
+index 4b68e90..e747547 100644
+--- a/settings.h
++++ b/settings.h
+@@ -27,11 +27,11 @@
+ 
+ #include "types.h"
+ 
+-#define WM_NAME             "bspwm"
+-#define CONFIG_NAME         WM_NAME "rc"
+-#define CONFIG_HOME_ENV     "XDG_CONFIG_HOME"
+-#define RULE_COMMAND        "/bin/true"
+-#define STATUS_PREFIX       "W"
++#define WM_NAME                 "bspwm"
++#define CONFIG_NAME             WM_NAME "rc"
++#define CONFIG_HOME_ENV         "XDG_CONFIG_HOME"
++#define EXTERNAL_RULES_COMMAND  ""
++#define STATUS_PREFIX           "W"
+ 
+ #define FOCUSED_BORDER_COLOR          "#7E7F89"
+ #define ACTIVE_BORDER_COLOR           "#545350"
+@@ -66,7 +66,7 @@
+ #define IGNORE_EWMH_FOCUS        false
+ #define REMOVE_DISABLED_MONITOR  false
+ 
+-char rule_command[MAXLEN];
++char external_rules_command[MAXLEN];
+ char status_prefix[MAXLEN];
+ 
+ char focused_border_color[MAXLEN];
+diff --git a/types.h b/types.h
+index e3a8bcf..37e6516 100644
+--- a/types.h
++++ b/types.h
+@@ -247,7 +247,18 @@ struct subscriber_list_t {
+     subscriber_list_t *next;
+ };
+ 
++typedef struct rule_t rule_t;
++struct rule_t {
++    char cause[MAXLEN];
++    char effect[MAXLEN];
++    bool one_shot;
++    rule_t *prev;
++    rule_t *next;
++};
++
+ typedef struct {
++    char class_name[SMALEN];
++    char instance_name[SMALEN];
+     char desktop_desc[MAXLEN];
+     char monitor_desc[MAXLEN];
+     bool floating;
+diff --git a/window.c b/window.c
+index f1a581c..038bd43 100644
+--- a/window.c
++++ b/window.c
+@@ -48,11 +48,10 @@ void schedule_window(xcb_window_t win)
+     if (override_redirect || locate_window(win, &loc))
+         return;
+ 
+-    /* Ignore pending windows */
+-    for (pending_rule_t *pr = pending_rule_head; pr != NULL; pr = pr->next) {
++    /* ignore pending windows */
++    for (pending_rule_t *pr = pending_rule_head; pr != NULL; pr = pr->next)
+         if (pr->win == win)
+             return;
+-    }
+ 
+     rule_consequence_t *csq = make_rule_conquence();
+     apply_rules(win, csq);
+@@ -67,7 +66,7 @@ void manage_window(xcb_window_t win, rule_consequence_t *csq, int fd)
+     monitor_t *m = mon;
+     desktop_t *d = mon->desk;
+ 
+-    parse_rule_consequence(fd, csq, &m, &d);
++    parse_rule_consequence(fd, csq);
+ 
+     if (csq->lower)
+         window_lower(win);
+@@ -80,6 +79,27 @@ void manage_window(xcb_window_t win, rule_consequence_t *csq, int fd)
+ 
+     PRINTF("manage %X\n", win);
+ 
++    if (csq->desktop_desc[0] != '\0') {
++        coordinates_t ref = {m, d, NULL};
++        coordinates_t trg = {NULL, NULL, NULL};
++        if (desktop_from_desc(csq->desktop_desc, &ref, &trg)) {
++            m = trg.monitor;
++            d = trg.desktop;
++        }
++    } else if (csq->monitor_desc[0] != '\0') {
++        coordinates_t ref = {m, NULL, NULL};
++        coordinates_t trg = {NULL, NULL, NULL};
++        if (monitor_from_desc(csq->monitor_desc, &ref, &trg)) {
++            m = trg.monitor;
++            d = trg.monitor->desk;
++        }
++    }
++
++    if (csq->sticky) {
++        m = mon;
++        d = mon->desk;
++    }
++
+     client_t *c = make_client(win);
+     update_floating_rectangle(c);
+     monitor_t *mm = monitor_from_client(c);
+@@ -89,11 +109,7 @@ void manage_window(xcb_window_t win, rule_consequence_t *csq, int fd)
+         window_center(m, c);
+     c->frame = csq->frame;
+ 
+-    xcb_icccm_get_wm_class_reply_t reply;
+-    if (xcb_icccm_get_wm_class_reply(dpy, xcb_icccm_get_wm_class(dpy, win), &reply, NULL) == 1) {
+-        snprintf(c->class_name, sizeof(c->class_name), "%s", reply.class_name);
+-        xcb_icccm_get_wm_class_reply_wipe(&reply);
+-    }
++    snprintf(c->class_name, sizeof(c->class_name), "%s", csq->class_name);
+ 
+     csq->floating = csq->floating || d->floating;
+ 
