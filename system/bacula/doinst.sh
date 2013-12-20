@@ -22,10 +22,11 @@ preserve_perms() {
   config $NEW
 }
 
+
 preserve_perms etc/rc.d/rc.bacula.new
-config etc/bacula/bacula-dir.conf.new
-config etc/bacula/bacula-fd.conf.new
-config etc/bacula/bacula-sd.conf.new
-config etc/bacula/bconsole.conf.new
+config %sysconfdir%/bacula-dir.conf.new
+config %sysconfdir%/bacula-fd.conf.new
+config %sysconfdir%/bacula-sd.conf.new
+config %sysconfdir%/bconsole.conf.new
 config etc/logrotate.d/bacula.new
 
