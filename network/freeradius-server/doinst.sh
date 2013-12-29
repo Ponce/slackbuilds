@@ -32,4 +32,5 @@ config etc/raddb/radiusd.conf.new
 config etc/raddb/sql.conf.new
 config etc/raddb/sqlippool.conf.new
 config etc/raddb/templates.conf.new
+config etc/raddb/users.new
 
