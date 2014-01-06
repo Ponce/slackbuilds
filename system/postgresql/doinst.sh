@@ -27,7 +27,7 @@ config etc/logrotate.d/postgresql.new
 # Create default program symlinks in /usr/bin
 (
   cd usr/bin
-  for pg_binary in ../lib@LIBDIRSUFFIX@/postgresql/@PG_VERSION@/bin/*; do
+  for pg_binary in ../lib@LIBDIRSUFFIX@/@PRGNAM@/@PG_VERSION@/bin/*; do
     pg_prog=$(basename $pg_binary)
     if [ -L $pg_prog ]; then
       ln -sf $pg_binary
