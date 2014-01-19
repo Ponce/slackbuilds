@@ -2,14 +2,34 @@
 
 # Slackware build script for tDOM
 
-# Written by Richard Ellis <rellis@dp100.com>
-
-# Released to the public domain, January 2011
+# Copyright 2013-2014 by Richard Ellis (USA)
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=tDOM
 VERSION=${VERSION:-0.8.3}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
+
+# set these to false to omit building each as part of tDOM build
+BUILD_TNC=${BUILD_TNC:-true}           ; # build tnc XML validator module
+BUILD_TDOMHTML=${BUILD_TDOMHTML:-true} ; # build tdomhtml html generation module
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -56,19 +76,54 @@ find -L . \
 # Upstream patch
 # https://github.com/tDOM/tdom/commit/3dd529139d2f44bb9ecfdcddd27b3d6a8df5ff41#diff-0
 patch -p1 < $CWD/tDOM-tcl8.6-compat.patch
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --build=$ARCH-slackware-linux
 
-make
-make test
-make install DESTDIR=$PKG
+set -x
+# since we are building up to three different packages, reuse the build process
+function build {
+  case $1 in
+    tnc|tdomhtml)
+      local EXTRA="--with-tdom=$PKG/usr/lib${LIBDIRSUFFIX}"
+      local LINK="-L$PKG/usr/lib${LIBDIRSUFFIX}/tdom0.8.3/" ;;
+    *)
+      local EXTRA=""
+      local LINK="" ;;
+  esac
+  LDFLAGS="$LINK" \
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  ./configure \
+    --prefix=/usr \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    $EXTRA \
+    --build=$ARCH-slackware-linux
+
+  make
+  if [[ $1 == "tdom" ]] ; then
+    make test ; # tests are broken for tnc - bug reported to upstream
+                # tests do not exist for tdomhtml
+  fi
+  make install DESTDIR=$PKG
+}
+
+build tdom ; # always build tDOM
+
+if [[ $BUILD_TNC == "true" ]] ; then
+  pushd extensions/tnc
+  build tnc
+  popd
+fi
+
+if [[ $BUILD_TDOMHTML == "true" ]] ; then
+  pushd extensions/tdomhtml
+  build tdomhtml
+  popd
+  rm $PKG/usr/man/mann/tdomhtml.n ; # this is an empty file in the src tarball - bug reported to upstream
+fi
+
+set +x
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -82,6 +137,7 @@ cp -a \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
+# Copy the slack-desc (and a custom doinst.sh if necessary) into ./install
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
