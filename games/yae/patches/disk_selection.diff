@@ -1,0 +1,74 @@
+diff -Naur yae-0.7/x_window.c yae-0.7.patched/x_window.c
+--- yae-0.7/x_window.c	2007-04-03 17:47:59.000000000 -0400
++++ yae-0.7.patched/x_window.c	2013-08-30 13:36:15.000000000 -0400
+@@ -29,6 +29,8 @@
+ #include <stdio.h>
+ #include <ctype.h>
+ #include <string.h>
++#include <sys/types.h>
++#include <sys/wait.h>
+ #include <X11/Xlib.h>
+ #include <X11/Xutil.h>
+ #include <X11/keysym.h>
+@@ -238,13 +240,27 @@
+ 	XCloseDisplay( dc->display );
+ }
+ 
++static int kdialog_select_file(char *buffer) {
++	void *i;
++	int s;
++   FILE *kdialog = popen(
++         "kdialog --title 'YAE - Select Disk Image' --getopenfilename . '*.dsk'", "r");
++   if(!kdialog) return -1; /* can't fork() or malloc() probably */
++	i = fgets(buffer, 4096, kdialog);
++	s = WEXITSTATUS(pclose(kdialog));
++	if(s == 127) return -2; /* shell returns this if kdialog not found */
++   return i != NULL; /* returns 0 if user hit cancel, 1 if filename OK */
++}
++
+ void	X_check_and_handle_event( void *arg )
+ {
+ 	DisplayContext	*dc;
+ 	XEvent		event;
+-	int		count;
++	int		count, kdresult;
+ 	BYTE		key, Apple_Key();
+-	char		buffer[256];
++	char		buffer[4096] = "\0", *p;
++
++	static int diskname_freeable = 0;
+ 
+ 	dc = (DisplayContext*)arg;
+ 
+@@ -266,15 +282,24 @@
+ 	               /* Should ask which drive, and should
+ 		        * free the existing string if possible - wkt
+ 	                */
+-	               puts( "Mount new disk\n" );
+-	               buffer[0] = '\0';
+-	               fgets( buffer, 256, stdin );
+-	               if (buffer[0]) 
+-	                  buffer[strlen( buffer ) - 1 ] = '\0';
++						kdresult = kdialog_select_file(buffer);
++						if(kdresult == 0) {
++							break; /* don't do anything if cancelled */
++						} else if(kdresult < 0) {
++							/* only use stdin if kdialog not found */
++	               	puts( "Mount new disk\n" );
++	               	buffer[0] = '\0';
++	               	fgets( buffer, 256, stdin );
++						}
++						/* remove trailing \n */
++						for(p = buffer; *p; p++)
++							if(*p == '\n') *p = '\0';
++						if(buffer[0] == '\0') break; /* don't use empty filename */
+ 	               /* ctkwan: free previosly allocated string */
+-	               if( disk_name[6][0]!=NULL)
++	               if( diskname_freeable && disk_name[6][0]!=NULL)
+ 	                  free( disk_name[6][0] );   
+-		       disk_name[6][0]= strdup(buffer);
++						disk_name[6][0]= strdup(buffer);
++						diskname_freeable = 1;
+ 	               mount_disk(6,0);
+ 	            }
+ 	         break;

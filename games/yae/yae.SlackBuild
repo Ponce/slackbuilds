@@ -1,0 +1,149 @@
+#!/bin/sh
+
+# Slackware build script for yae
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+PRGNAM=yae
+VERSION=${VERSION:-0.7}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+else
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tgz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+
+# Diverging from standard boilerplate here due to annoying permissions in
+# upstream tarball. SBo admins, please don't "fix" this, it's for a reason.
+find . \
+ -type d \
+ -exec chmod 755 {} \; -o \
+ -type f \
+ -exec chmod 644 {} \;
+
+# This is old code with lots of bugs, sorry about all the patches.
+
+# Fix the -2 option so it actually starts apple II emulation.
+patch -p1 < $CWD/patches/fix2option.diff
+
+# Allow 'MachineType II' in .yaerc
+patch -p1 < $CWD/patches/confile_apple2.diff
+
+# Use kdialog for disk selection.
+# Also stop trying to free() the disk name passed in argv.
+patch -p1 < $CWD/patches/disk_selection.diff
+
+# If no disk images given on command line, use Master.dsk. This is because
+# the emulator has a bug where it hangs if disk boot fails. Actually it
+# isn't a bug: it's taking forever to time out, the same way a real Apple
+# would, if you booted from disk with no disk in the drive.
+patch -p1 < $CWD/patches/defaultmasterdisk.diff
+
+# If ROMs not found either in current dir or .yaerc configured location,
+# fall back to /usr/share/yae/*.ROM. This allows us to include ROMs in
+# this package, which Just Work instead of requiring user configuration.
+patch -p1 < $CWD/patches/defaultromlocation.diff
+
+# Try to make 64-bit work. This seems OK, the scanline code seems to
+# assume sizeof(long)==4, which is wrong on x86_64. Using int (which
+# is still 4 bytes) fixes the display issues. There still might be
+# other less-obvious problems with 64-bit, please let me know if
+# you find any.
+if [ "$LIBDIRSUFFIX" = "64" ]; then
+  patch -p1 < $CWD/patches/64.diff
+  sed -i 's,unsigned *long,unsigned int,g' scanline*.c
+fi
+
+# distributed configure script is too darn old
+rm -f config.sub config.guess configure
+cp /usr/share/libtool/config/config.sub .
+autoreconf -if
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --build=$ARCH-slackware-linux
+
+make
+
+# no install target
+mkdir -p $PKG/usr/bin
+install -s -m0755 apple2 $PKG/usr/bin/$PRGNAM
+
+# man page written for this build. If you want to modify it, use yae.pod,
+# don't edit yae.1 directly.
+mkdir -p $PKG/usr/man/man1
+gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+
+# ROMs. Master.dsk is the same as what's distributed with linapple.
+# The others are renamed copies of stuff from asimov. Probably not legal
+# to distribute for copyright reasons, but ftp.asimov.net has had this stuff
+# available for maybe 15 years and nobody's complained yet.
+tar xvf $CWD/$PRGNAM-roms.tar.gz
+mkdir -p $PKG/usr/share/$PRGNAM
+install -m0644 -oroot -groot \
+  $PRGNAM-roms/*.ROM $PRGNAM-roms/*.dsk \
+  $PKG/usr/share/$PRGNAM
+
+# Sample config file, created for this build (upstream's docs say there's
+# one included with the src, but there isn't).
+cat $CWD/${PRGNAM}rc.sample > $PKG/usr/share/$PRGNAM/${PRGNAM}rc.sample
+
+# .desktop created for this build
+mkdir -p $PKG/usr/share/applications
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+# icon created for this build, based on
+# http://www.callapple.org/soft/images/icons/apple.gif
+mkdir -p $PKG/usr/share/pixmaps
+cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cat $PRGNAM-roms/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.roms
+cp -a README* Readme* ChangeLog *.txt $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
