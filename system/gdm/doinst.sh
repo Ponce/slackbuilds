@@ -11,11 +11,17 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/X11/gdm/custom.conf.new
-config etc/X11/gdm/Xsession.new
-config etc/X11/gdm/Init/Default.new
-config etc/X11/gdm/PreSession/Default.new
-config etc/X11/gdm/PostSession/Default.new
+config etc/gdm/Xsession.new
+config etc/gdm/Init/Default.new
+config etc/gdm/PreSession/Default.new
+config etc/gdm/PostSession/Default.new
+config etc/gdm/XKeepsCrashing.new
+config etc/gdm/custom.conf.new
+config etc/gdm/locale.alias.new
+config etc/gdm/modules/factory-AccessDwellMouseEvents.new
+config etc/gdm/modules/AccessDwellMouseEvents.new
+config etc/gdm/modules/factory-AccessKeyMouseEvents.new
+config etc/gdm/modules/AccessKeyMouseEvents.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
