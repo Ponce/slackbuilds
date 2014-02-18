@@ -7,10 +7,8 @@ config() {
   elif [ "$(cat $OLD | md5sum)" = "$(cat $NEW | md5sum)" ]; then
     # toss the redundant copy
     rm $NEW
-  else
-  # Otherwise, we leave the .new copy for the admin to consider...
-  echo -e "New configuration file /etc/asbt/asbt.conf.new created.\nYou may need to merge changes."
   fi
+  # Otherwise, we leave the .new copy for the admin to consider...
 }
 
 config etc/asbt/asbt.conf.new
