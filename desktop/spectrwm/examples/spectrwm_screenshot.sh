@@ -18,6 +18,6 @@ case "$1" in
 		"${CAPTURE_TOOL}" png:"${CAPTURE_PATH}"
 	;;
 	*)
-		echo "$0: $0 <-full | -window>" >&2
+		echo "$0: $0 <full | window>" >&2
 	;;
 esac
