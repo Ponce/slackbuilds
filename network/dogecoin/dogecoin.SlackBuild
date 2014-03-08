@@ -1,0 +1,148 @@
+#!/bin/sh
+
+# Slackware build script for dogecoin
+
+# Written by Pedro Guimaraes <moisespedro15@gmail.com>
+
+#This program is free software; you can redistribute it and/or
+#modify it under the terms of the GNU General Public License
+#as published by the Free Software Foundation; either version 2
+#of the License, or (at your option) any later version.
+
+#This program is distributed in the hope that it will be useful,
+#but WITHOUT ANY WARRANTY; without even the implied warranty of
+#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#GNU General Public License for more details.
+
+#You should have received a copy of the GNU General Public License
+#along with this program; if not, write to the Free Software
+#Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+
+PRGNAM=dogecoin
+VERSION=${VERSION:-1.5.2}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+MARCH=$( uname -m )
+if [ -z "$ARCH" ]; then
+  case "$MARCH" in
+    i?86)    export ARCH=i486 ;;
+    armv7hl) export ARCH=$MARCH ;;
+    armv6hl) export ARCH=$MARCH ;;
+    arm*)    export ARCH=arm ;;
+    *)       export ARCH=$MARCH ;;
+  esac
+fi
+
+case "$ARCH" in
+  i486)    SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+           SLKLDFLAGS=""; LIBDIRSUFFIX=""
+           ;;
+  x86_64)  SLKCFLAGS="-O2 -fPIC"
+           SLKLDFLAGS="-L/usr/lib64"; LIBDIRSUFFIX="64"
+           ;;
+  armv7hl) SLKCFLAGS="-O2 -march=armv7-a -mfpu=vfpv3-d16"
+           SLKLDFLAGS=""; LIBDIRSUFFIX=""
+           ;;
+  armv6hl) SLKCFLAGS="-O2 -march=armv6 -mfpu=vfp -mfloat-abi=hard"
+           SLKLDFLAGS=""; LIBDIRSUFFIX=""
+           ;;
+  *)       SLKCFLAGS="-O2"
+           SLKLDFLAGS=""; LIBDIRSUFFIX=""
+           ;;
+esac
+
+case "$ARCH" in
+    arm*)    TARGET=$ARCH-slackware-linux-gnueabi ;;
+    *)       TARGET=$ARCH-slackware-linux ;;
+esac
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz || tar xvf $CWD/$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+ -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+LDFLAGS="$SLKLDFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+CFLAGS="$SLKCFLAGS" \
+
+# Detect miniupnpc
+if [ -x /usr/bin/upnpc ]; then UPNP=1; else UPNP="-"; fi
+
+# Detect qrencode
+if [ -x /usr/bin/qrencode ]; then QRCODE=1; else QRCODE=0; fi
+
+# Build dogecoin-qt
+echo Building dogecoin-qt ...
+qmake \
+  QMAKE_CFLAGS+="$SLKCFLAGS" \
+  QMAKE_CXXFLAGS+="$SLKCFLAGS" \
+  "USE_UPNP=$UPNP" \
+  USE_QRCODE=$QRCODE \
+  USE_SSL=1
+
+make
+
+# Build dogecoind
+cd src
+
+  if [ "$UPNP" = "-" ]; then
+    # disable UPNP
+    sed -i 's/USE_UPNP:=0/USE_UPNP:=/g' makefile.unix
+  fi
+
+  # disable static linking, not supported by boost in slackware
+  sed -i 's/Bstatic/Bdynamic/g' makefile.unix
+
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  make -f makefile.unix \
+    dogecoind \
+    USE_SSL=1
+cd -
+
+mkdir -p $PKG/usr/{bin,man/man{1,5}}
+mkdir -p $PKG/usr/share/{applications,kde4/services,pixmaps}
+
+install -m 0755 dogecoin-qt $PKG/usr/bin/
+install -m 0755 src/dogecoind $PKG/usr/bin/
+
+install -m 0644 contrib/debian/manpages/dogecoin-qt.1 $PKG/usr/man/man1/
+install -m 0644 contrib/debian/manpages/dogecoind.1 $PKG/usr/man/man1/
+install -m 0644 contrib/debian/manpages/dogecoin.conf.5 $PKG/usr/man/man5/
+
+install -m 0644 -T share/pixmaps/bitcoin128.png $PKG/usr/share/pixmaps/dogecoin128.png
+install -m 0644 contrib/debian/dogecoin-qt.desktop $PKG/usr/share/applications/
+install -m 0644 contrib/debian/dogecoin-qt.protocol $PKG/usr/share/kde4/services/
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a doc/README.md COPYING LICENSE $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
