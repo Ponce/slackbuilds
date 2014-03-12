@@ -1,0 +1,126 @@
+#!/bin/sh
+
+# Slackware build script for arno-iptables-firewall
+
+# Copyright 2013-2014 Philip Lacroix <philnx at bluebottle dot com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Thanks to Matteo Bernardini and Robby Workman for their valuable remarks.
+
+PRGNAM=arno-iptables-firewall
+VERSION=${VERSION:-2.0.1d}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=${PKG:-$TMP/package-$PRGNAM}
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM\_$VERSION
+tar xvf $CWD/$PRGNAM\_$VERSION.tar.gz
+
+cd $PRGNAM\_$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 \
+  -o -perm 400 \) -exec chmod 644 {} \;
+
+PRGBIN=$PKG/usr/sbin
+PRGETC=$PKG/etc/$PRGNAM
+PRGSHR=$PKG/usr/share/$PRGNAM
+PRGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+PRGMAN=$PKG/usr/man
+
+# Copy firewall, log filter and configuration executables
+mkdir -p $PRGBIN
+cp -a ./bin/$PRGNAM $PRGBIN/
+cp -a ./configure.sh $PRGBIN/$PRGNAM-configure
+cp -a ./bin/arno-fwfilter $PRGBIN/
+
+# Patch the configuration script. We need this in order to be able to
+# run the script from outside the source directory as well. We're going
+# to (1) change from relative to absolute the path to the environment
+# file and firewall executable; (2) rename and change the path to the
+# startup script (this is for better consistency with Slackware's init
+# system); (3) change the path to the unmodified copy of the config
+# file, needed to check for existing custom setups. We will NOT create
+# a Slackware-compliant /etc/rc.d/rc.firewall symlink to the startup
+# script, as this should be done manually by the sysadmin. We won't 
+# create any SystemV-style symlinks either. Finally (4) we append the
+# note, picked from the original installation script and slightly
+# enhanced, that will be shown to the user when configuration is done
+# (this is to inform that an rc.firewall symlink has to be created in
+# order to start up the firewall at boot-time in a proper way).
+patch $PRGBIN/$PRGNAM-configure < $CWD/patch-configuration-script.diff
+
+# Copy and compress man pages
+mkdir -p $PRGMAN
+cp -a ./share/man/* $PRGMAN/
+find $PRGMAN -type f -exec gzip -9 {} \;
+
+# Copy and rename configuration files; apply patch to main config file
+# in order to fix paths; set permissions.
+mkdir -p $PRGETC/conf.d
+cp -a ./etc/$PRGNAM/* $PRGETC/
+cat $CWD/conf.d.readme > $PRGETC/conf.d/README
+patch $PRGETC/firewall.conf < $CWD/patch-configuration-file.diff
+for conf in $( find $PRGETC -type f -not -name README ); do
+  mv ${conf} ${conf}.new
+  chmod 600 ${conf}.new
+done
+
+# Copy shared data; include a clean copy of the configuration file, as
+# expected by the configuration script for comparison purposes; create
+# link to plugin as in the original script.
+mkdir -p $PRGSHR
+cp -a ./share/$PRGNAM/* $PRGSHR/
+cp -a $PRGETC/firewall.conf.new $PRGSHR/firewall.conf.orig
+ln -sv /usr/share/$PRGNAM/plugins/traffic-accounting-show $PRGBIN/
+
+# Install startup script and set permissions; apply patch to fix path
+# to the executable file and make comments more consistent with the
+# Slackware system.
+mkdir -p $PKG/etc/rc.d/
+install -m 0644 ./etc/init.d/$PRGNAM $PKG/etc/rc.d/rc.$PRGNAM
+patch $PKG/etc/rc.d/rc.$PRGNAM < $CWD/patch-startup-script.diff
+
+# Copy documentation, include third-party sample files.
+mkdir -p $PRGDOC/contrib $PKG/usr/doc
+for doc in README CHANGELOG gpl_license.txt ; do
+  cp -a ./${doc} $PRGDOC/
+done
+cp -a ./contrib/adsl-failover $PRGDOC/contrib/
+cp -a ./contrib/Slackware/syslog.conf $PRGDOC/contrib/
+cat $CWD/$PRGNAM.SlackBuild > $PRGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-noarch-$BUILD$TAG.${PKGTYPE:-tgz}
