@@ -1,21 +1,16 @@
 config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
-  # If there's no config file by that name, mv it over:
   if [ ! -r $OLD ]; then
     mv $NEW $OLD
   elif [ "$(cat $OLD | md5sum)" = "$(cat $NEW | md5sum)" ]; then
-    # toss the redundant copy
     rm $NEW
   fi
-  # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-CONFIG=${CONFIG:-/opt/fgo/data/config}
-for lang in de en es fr it pl ; do
-  config $CONFIG/config_${lang}.new
+for conf in /opt/fgo/data/config/* ; do
+  config ${conf}
 done
-config $CONFIG/presets.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
