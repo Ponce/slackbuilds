@@ -6,13 +6,12 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-# Tarball gotten like so:
-# wget -O youtube-viewer-$(date +%Y%m%d).tar.gz http://trizen.googlecode.com/files/youtube-viewer.tar.gz
-# (the URL is always updated to the latest version, which is why I
-# mirrored a version on my site)
+# 20140318 bkw:
+# - Updated for 3.0.9 release
+# - Added support for gtk-youtube-viewer
 
 PRGNAM=youtube-viewer
-VERSION=${VERSION:-20130203}
+VERSION=${VERSION:-3.0.9}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -50,9 +49,9 @@ DIRNAME=WWW-YoutubeViewer
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $DIRNAME
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $DIRNAME
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$VERSION.tar.gz || tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION/$DIRNAME
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
@@ -60,7 +59,23 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-perl Build.PL prefix=/usr installdirs=vendor --destdir="$PKG"
+# perl-gtk2 is a runtime dep, we can build with GTK=yes even if it's not
+# installed... but don't do that by default.
+GTK="${GTK:-auto}"
+
+case "$GTK" in
+  no)  BUILD_GTK="no"  ;;
+  yes) BUILD_GTK="yes" ;;
+  *)   perl -MGtk2 -MFile::ShareDir -e 0 2>/dev/null \
+         && BUILD_GTK="yes" \
+         || BUILD_GTK="no" ;;
+esac
+
+[ "$BUILD_GTK" = "yes" ] && GTKOPT="--gtk-youtube-viewer"
+
+echo "===  HAVE_GTK=$HAVE_GTK  BUILD_GTK=$BUILD_GTK"
+
+perl Build.PL $GTKOPT prefix=/usr installdirs=vendor --destdir="$PKG"
 ./Build
 ./Build test
 ./Build install --install_path script=/usr/bin
@@ -68,9 +83,22 @@ perl Build.PL prefix=/usr installdirs=vendor --destdir="$PKG"
 # I couldn't figure out what to pass to Build.PL or Build to install
 # man pages correctly, so:
 mv $PKG/usr/share/man $PKG/usr/man
+gzip $PKG/usr/man/man?/*.?
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+if [ "$BUILD_GTK" = "yes" ]; then
+  # link .desktop and icon to standard locations
+  mkdir -p $PKG/usr/share/applications $PKG/usr/share/pixmaps
+  LNPATH="../perl5/vendor_perl/auto/share/dist/WWW-YoutubeViewer"
+  ln -s $LNPATH/gtk-youtube-viewer.desktop \
+    $PKG/usr/share/applications/gtk-youtube-viewer.desktop
+  ln -s $LNPATH/gtk-youtube-viewer.png \
+    $PKG/usr/share/pixmaps/gtk-youtube-viewer.png
+
+  # support TERMINAL option for user's preferred terminal.
+  if [ "$TERMINAL" != "" ]; then
+    sed -i "s/'gnome-terminal'/'$TERMINAL', &/" $PKG/usr/bin/gtk-$PRGNAM
+  fi
+fi
 
 find $PKG -name perllocal.pod \
   -o -name ".packlist" \
@@ -85,6 +113,7 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
