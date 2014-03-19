@@ -23,7 +23,7 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=bitcoin
-VERSION=${VERSION:-0.8.6}
+VERSION=${VERSION:-0.9.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -55,19 +55,20 @@ else
 fi
 
 # Detect miniupnpc
-if [ -x /usr/bin/upnpc ]; then UPNP=1; else UPNP="-"; fi
+if [ -x /usr/bin/upnpc ]; then UPNP="--enable-upnp-default"; else UPNP=""; fi
 
 # Detect qrencode
-if [ -x /usr/bin/qrencode ]; then QRCODE=1; else QRCODE=0; fi
+if [ -x /usr/bin/qrencode ]; then QRCODE="--with-qrencode"; else QRCODE=""; fi
 
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION-linux
-tar xvf $CWD/${PRGNAM}-$VERSION-linux.tar.gz
-cd $PRGNAM-$VERSION-linux
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz || tar xvf $CWD/v$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -75,41 +76,26 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-cd src
-
-# build bitcoin-qt
-qmake \
-  QMAKE_CFLAGS+="$SLKCFLAGS" \
-  QMAKE_CXXFLAGS+="$SLKCFLAGS" \
-  "USE_UPNP=$UPNP" \
-  USE_QRCODE=$QRCODE \
-  USE_SSL=1
+# build bitcoin-core
+[ -f autogen.sh ] && sh autogen.sh
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LBIDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --mandir=/usr/man \
+  $UPNP	\
+  $QRCODE \
+  --with-gui=qt4 \
+  --build=$ARCH-slackware-linux \
+  --host=$ARCH-slackware-linux
 
 make
-
-# build bitcoind
-cd src
-
-  if [ "$UPNP" = "-" ]; then
-    # disable UPNP
-    sed -i 's/USE_UPNP:=0/USE_UPNP:=/g' makefile.unix
-  fi
-
-  # disable static linking, not supported by boost in slackware
-  sed -i 's/Bstatic/Bdynamic/g' makefile.unix
-
-  CFLAGS="$SLKCFLAGS" \
-  CXXFLAGS="$SLKCFLAGS" \
-  make -f makefile.unix \
-    bitcoind \
-    USE_SSL=1
-cd -
+make install DESTDIR=$PKG
 
 mkdir -p $PKG/usr/{bin,man/man{1,5}}
 mkdir -p $PKG/usr/share/{applications,kde4/services,pixmaps}
-
-install -m 0755 bitcoin-qt $PKG/usr/bin/
-install -m 0755 src/bitcoind $PKG/usr/bin/
 
 install -m 0644 contrib/debian/manpages/bitcoin-qt.1 $PKG/usr/man/man1/
 install -m 0644 contrib/debian/manpages/bitcoind.1 $PKG/usr/man/man1/
@@ -136,4 +122,3 @@ cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
-
