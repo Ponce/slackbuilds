@@ -23,4 +23,7 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.mailman.new
+config opt/mailman/Mailman/mm_cfg.py.new
 
+# Ensure the private archive doesn't have o+w
+chmod o-x  /opt/mailman/var/mailman/archives/private
