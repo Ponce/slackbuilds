@@ -1,7 +1,7 @@
 #!/bin/bash
 
 PRGNAM=ds-models
-VERSION=14
+VERSION=15
 REPO=http://ds-models.googlecode.com/svn/trunk/
 
 rm -rf $PRGNAM-r$VERSION
