@@ -1,0 +1,132 @@
+diff -Naur orig/src/io/file.cpp patched/src/io/file.cpp
+--- orig/src/io/file.cpp	2014-02-15 22:14:10.000000000 -0500
++++ patched/src/io/file.cpp	2014-03-27 01:48:27.000000000 -0400
+@@ -32,6 +32,7 @@
+ #include "io/gfx/video.h"
+ #include "util.h"
+ 
++#include <stdlib.h>
+ #include <string.h>
+ #include <zlib.h>
+ 
+@@ -43,6 +44,16 @@
+  * @param write Whether or not the file can be written to
+  */
+ File::File (const char* name, bool write) {
++#ifdef HOMEDIR
++	if(write) {
++		char *writepath = createString(getenv("HOME"), "/.openjazz/");
++		bool ok = open(writepath, name, write);
++		delete [] writepath;
++		if(ok) return;
++		log("Could not open file for writing in $HOME", name);
++		throw E_FILE;
++	}
++#endif
+ 
+ 	Path* path;
+ 
+@@ -55,7 +66,7 @@
+ 
+ 	}
+ 
+-	log("Could not open file", name);
++	log("Could not find file in path", name);
+ 
+ 	throw E_FILE;
+ 
+@@ -69,9 +80,7 @@
+ 
+ 	fclose(file);
+ 
+-#ifdef VERBOSE
+ 	log("Closed file", filePath);
+-#endif
+ 
+ 	delete[] filePath;
+ 
+@@ -117,13 +126,13 @@
+ 
+ 	if (file) {
+ 
+-#ifdef VERBOSE
+ 		log("Opened file", filePath);
+-#endif
+ 
+ 		return true;
+ 
+-	}
++	} else {
++	log("Could not open file", filePath);
++	}
+ 
+ 	delete[] filePath;
+ 
+diff -Naur orig/src/io/sound.cpp patched/src/io/sound.cpp
+--- orig/src/io/sound.cpp	2013-11-23 11:54:26.000000000 -0500
++++ patched/src/io/sound.cpp	2014-03-27 01:47:03.000000000 -0400
+@@ -27,6 +27,8 @@
+  */
+ 
+ 
++#include <ctype.h>
++#include <string.h>
+ #include "file.h"
+ #include "sound.h"
+ 
+@@ -203,7 +205,15 @@
+ 
+ 	} catch (int e) {
+ 
+-		return;
++		char *upperName = strdup(fileName);
++		for(char *ch = upperName; *ch; ++ch)
++			*ch = toupper(*ch);
++		try {
++			file = new File(upperName, false);
++			free(upperName);
++		} catch(int e) {
++			return;
++		}
+ 
+ 	}
+ 
+diff -Naur orig/src/main.cpp patched/src/main.cpp
+--- orig/src/main.cpp	2014-02-16 10:59:02.000000000 -0500
++++ patched/src/main.cpp	2014-03-27 01:51:17.000000000 -0400
+@@ -47,6 +47,8 @@
+ #include "setup.h"
+ #include "util.h"
+ 
++#include <sys/stat.h>
++#include <sys/types.h>
+ #include <string.h>
+ 
+ #if defined(CAANOO) || defined(WIZ) || defined(GP2X)
+@@ -174,7 +176,9 @@
+ 	#ifdef WIN32
+ 	firstPath = new Path(firstPath, createString(getenv("HOME"), "\\"));
+ 	#else
+-	firstPath = new Path(firstPath, createString(getenv("HOME"), "/."));
++	char *homeSubDir = createString(getenv("HOME"), "/.openjazz/");
++	mkdir(homeSubDir, 0700); /* ignore errors */
++	firstPath = new Path(firstPath, homeSubDir);
+ 	#endif
+ #endif
+ 
+diff -Naur orig/src/menu/mainmenu.cpp patched/src/menu/mainmenu.cpp
+--- orig/src/menu/mainmenu.cpp	2013-07-20 11:46:16.000000000 -0400
++++ patched/src/menu/mainmenu.cpp	2014-03-27 01:47:03.000000000 -0400
+@@ -58,7 +58,11 @@
+ 
+ 	} catch (int e) {
+ 
+-		throw e;
++		try {
++			file = new File("/usr/share/openjazz/" LOGO_FILE, false);
++		} catch(int e) {
++			throw e;
++		}
+ 
+ 	}
+ 
