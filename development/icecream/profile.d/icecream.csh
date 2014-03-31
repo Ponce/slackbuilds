@@ -1,2 +1,2 @@
 #!/bin/csh
-setenv PATH /opt/icecream/bin:${PATH}
+setenv PATH /usr/libexec/icecc/bin:${PATH}

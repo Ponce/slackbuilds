@@ -1,2 +1,2 @@
 #!/bin/sh
-export PATH=/opt/icecream/bin:$PATH
+export PATH=/usr/libexec/icecc/bin:$PATH
