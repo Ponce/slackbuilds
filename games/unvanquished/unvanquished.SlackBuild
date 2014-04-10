@@ -22,8 +22,9 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-PRGNAM=unvanquished
-VERSION=${VERSION:-0.25.0}
+SRCNAM=Unvanquished
+PRGNAM=$(echo ${SRCNAM,,})
+VERSION=${VERSION:-0.26.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -59,9 +60,9 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
-cd $PRGNAM-$VERSION
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz || tar xvf $CWD/v$VERSION.tar.gz
+cd $SRCNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -69,35 +70,72 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
+if [ "$ARCH" = "x86_64" ]; then
+   sed -i -e 's/Unvanquished/unvanquished/g' -e \
+             's/\/lib/\/lib64/g' -e 's/share\//share\/games\//g' archlinux/unvanquished.sh
+   sed -i -e 's/\/lib/\/lib64/g' -e 's/share\//share\/games\//g' archlinux/unvanquished-tty.sh
+   sed -i -e 's/\/usr\/lib/\/usr\/lib64/g' -e \
+             's/share\//share\/games\//g' archlinux/unvanquished.conf
+   sed -i -e 's/\/lib/\/lib64/g' -e 's/conf.d\///g' archlinux/unvanquished.service
+else
+   sed -i -e 's/Unvanquished/unvanquished/g' -e \
+             's/share\//share\/games\//g' archlinux/unvanquished.sh
+   sed -i 's/share\//share\/games\//g' archlinux/unvanquished-tty.sh
+   sed -i 's/share\//share\/games\//g' archlinux/unvanquished.conf
+   sed -i 's/conf.d\///g' archlinux/unvanquished.service
+fi
+
 mkdir -p build
 cd build
   cmake \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
+    -D BUILD_GAME_QVM=OFF \
+    -D BUILD_TTY_CLIENT=ON \
     -DCMAKE_BUILD_TYPE=Release ..
 make
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-mkdir -p $PKG/usr/share/games/$PRGNAM-$VERSION
-cp -rf * $PKG/usr/share/games/$PRGNAM-$VERSION
-rm -rf $PKG/usr/share/games/$PRGNAM-$VERSION/*.cmake
-rm -rf $PKG/usr/share/games/$PRGNAM-$VERSION/Makefile
-rm -rf $PKG/usr/share/games/$PRGNAM-$VERSION/lcc/*.cmake
-rm -rf $PKG/usr/share/games/$PRGNAM-$VERSION/lcc/Makefile
-rm -rf $PKG/usr/share/games/$PRGNAM-$VERSION/lcc/CMakeFiles
-rm -rf $PKG/usr/share/games/$PRGNAM-$VERSION/CMakeFiles
-mkdir -p $PKG/usr/share/games/$PRGNAM-$VERSION/pkg
-cp $CWD/unvanquished_0.25.0.pk3 $PKG/usr/share/games/$PRGNAM-$VERSION/pkg
+mkdir -p $PKG/usr/bin \
+         $PKG/etc/$PRGNAM/config \
+         $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM \
+         $PKG/usr/lib${LIBDIRSUFFIX}/systemd/system \
+         $PKG/usr/share/games/$PRGNAM/pkg \
+         $PKG/var/lib/unvanquished-server/config
+
+# Install content
+install -D -m0644 *.so $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM
+install -D -m0755 daemon* $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM
 cd ..
+install -D -m0644 debian/configfiles/server.cfg $PKG/etc/$PRGNAM/config/server.cfg
+install -D -m0644 debian/configfiles/maprotation.cfg $PKG/etc/$PRGNAM/config/maprotation.cfg
+
+# Install starters
+install -D -m0755 archlinux/$PRGNAM.sh $PKG/usr/bin/$PRGNAM
+install -D -m0755 archlinux/$PRGNAM-tty.sh $PKG/usr/bin/$PRGNAM-tty
+install -D -m0644 archlinux/$PRGNAM.conf $PKG/etc/$PRGNAM.conf.new
+install -D -m0644 archlinux/$PRGNAM.service \
+                  $PKG/usr/lib${LIBDIRSUFFIX}/systemd/system/$PRGNAM.service
+
+# Setup server home directory
+ln -sf $PKG/etc/$PRGNAM/config/server.cfg \
+       $PKG/var/lib/$PRGNAM-server/config/server.cfg
+ln -sf $PKG/etc/$PRGNAM/config/maprotation.cfg \
+       $PKG/var/lib/$PRGNAM-server/config/maprotation.cfg
+
+# Copy the data-game
+mkdir -p $PKG/usr/share/games/$PRGNAM/pkg
+cp -a $CWD/$PRGNAM\_0.25.0.pk3 $PKG/usr/share/games/$PRGNAM/pkg
+cp -a $CWD/$PRGNAM\_$VERSION.pk3 $PKG/usr/share/games/$PRGNAM/pkg
 
 mkdir -p $PKG/usr/share/applications
 install -D -m644 $CWD/$PRGNAM.desktop $PKG/usr/share/applications/$PRGNAM.desktop
 
 mkdir -p $PKG/usr/share/pixmaps/
-install -D -m644 debian/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.svg
+install -D -m644 debian/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a GPL.txt README.md COPYING.txt $PKG/usr/doc/$PRGNAM-$VERSION
