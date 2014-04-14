@@ -5,6 +5,7 @@
 # Copyright 2008 Cherife Li <cherife-#-dotimes.com>
 # Copyright 2011 Diogo Leal <diogo@diogoleal.com>
 # Copyright 2012-13 Francisco Ambrozio <sbo@franciscoambrozio.com>
+# Copyright 2014 Larry Hajali <larryhaja[at]gmail[dot]com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -27,7 +28,7 @@
 # Special thanks to Thomas Morper for some configuration adjustments tips
 
 PRGNAM=nginx
-VERSION=${VERSION:-1.4.1}
+VERSION=${VERSION:-1.4.7}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -43,10 +44,6 @@ CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
-
-USE_SPDY=${USE_SPDY:-no}
-
-eval $(perl '-V:installvendorlib')
 
 if [ "$ARCH" = "i486" ]; then
    SLKCFLAGS="-O2 -march=i486 -mtune=i686"
@@ -77,10 +74,21 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-if [ "$USE_SPDY" == "yes" ]; then
-    SPDY_MOD=" --with-http_spdy_module "
+# Fix the nginx.conf file for html and virtual server directory.
+sed -i \
+  -e '/root[ ]*html/s|html;|/var/www/&|' \
+  -e '$s|.*|    include /etc/nginx/conf.d/\*.conf;\n&|' conf/$PRGNAM.conf
+
+if [ "${USE_SPDY:-no}" == "yes" ]; then
+    SPDY_MOD="--with-http_spdy_module"
 else
     SPDY_MOD=""
+fi
+
+if [ "${USE_GEOIP:-no}" == "yes" ]; then
+  GEOIP_MOD="--with-http_geoip_module"
+else
+  GEOIP_MOD=""
 fi
 
 CFLAGS="$SLKCFLAGS" \
@@ -90,11 +98,12 @@ CXXFLAGS="$SLKCFLAGS" \
   --sbin-path=/usr/sbin/nginx \
   --conf-path=/etc/nginx/nginx.conf \
   --pid-path=/var/run/nginx.pid \
-  --lock-path=/var/lock/nginx \
+  --lock-path=/var/lock/subsys \
   --user=${NGINXUSER:=nobody} \
   --group=${NGINXGROUP:=nogroup} \
   --error-log-path=/var/log/nginx/error.log \
   --http-log-path=/var/log/nginx/access.log \
+  --with-file-aio \
   --with-ipv6 \
   --with-select_module \
   --with-poll_module \
@@ -105,30 +114,48 @@ CXXFLAGS="$SLKCFLAGS" \
   --with-http_sub_module \
   --with-http_dav_module \
   --with-http_flv_module \
+  --with-http_mp4_module \
+  --with-http_gunzip_module \
   --with-http_gzip_static_module \
   --with-http_random_index_module \
   --with-http_secure_link_module \
+  --with-http_degradation_module \
   --with-http_stub_status_module \
   --with-http_perl_module \
-  $SPDY_MOD \
-  --with-perl_modules_path=$installvendorlib \
+  --with-mail \
+  --with-mail_ssl_module \
   --without-mail_pop3_module \
   --without-mail_imap_module \
-  --without-mail_smtp_module
+  --without-mail_smtp_module \
+  $SPDY_MOD \
+  $GEOIP_MOD
 
 make
-make install DESTDIR=$PKG
+make install \
+  DESTDIR=$PKG \
+  INSTALLDIRS=vendor \
+  INSTALLVENDORMAN3DIR=/usr/man/man3
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | \
   grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-find $PKG -name perllocal.pod -o -name ".packlist" -o -name "*.bs" | \
+
+mkdir -p $PKG/usr/man/man8
+install -m 0644 objs/$PRGNAM.8 $PKG/usr/man/man8
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+find $PKG -name perllocal.pod \
+  -o -name ".packlist" \
+  -o -name "*.bs" | \
   xargs rm -f 2> /dev/null
+
 find $PKG -perm 444 -exec chmod 0644 {} \;
 find $PKG -perm 555 -exec chmod 0755 {} \;
 
-# Remove some other empty and/or unnecessary directories from the package
-eval $(perl '-V:archlib')
-rm -rf $PKG/$archlib $PKG/usr/html $PKG/var
+# Move html directory
+mkdir $PKG/var/www
+mv $PKG/usr/html $PKG/var/www
 
 # Add an init script
 mkdir -p $PKG/etc/rc.d
@@ -139,15 +166,16 @@ sed -e "s,@USER@,$NGINXUSER," -e "s,@GROUP@,$NGINXGROUP," $CWD/nginx.logrotate \
   > $PKG/etc/logrotate.d/nginx.new
 
 # Don't clobber config files
-for file in fastcgi_params fastcgi.conf mime.types nginx.conf \
-            koi-utf koi-win scgi_params uwsgi_params win-utf ; do
-            mv $PKG/etc/nginx/$file $PKG/etc/nginx/$file.new ;
+for i in $(find $PKG/etc/$PRGNAM -type f ! -name "*\.default"); do
+  mv "$i" "$i".new
 done
 
-# Create the log dir and set the permissions
-mkdir -p $PKG/var/log/nginx
-chown $NGINXUSER $PKG/var/log/nginx
-chmod 750 $PKG/var/log/nginx
+# Set the permissions for the log directory.
+chown $NGINXUSER $PKG/var/log/$PRGNAM
+chmod 750 $PKG/var/log/$PRGNAM
+
+# Create sub-directory for virtual servers.
+mkdir $PKG/etc/$PRGNAM/conf.d
 
 mkdir -p $PKG/usr/doc/nginx-$VERSION
 cp -a CHANGES* LICENSE README $PKG/usr/doc/nginx-$VERSION
