@@ -23,6 +23,3 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.cassandra.new
-preserve_perms etc/apache-cassandra/storage-conf.xml.new
-preserve_perms etc/apache-cassandra/cassandra.in.sh.new
-
