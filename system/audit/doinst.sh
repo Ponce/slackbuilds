@@ -24,7 +24,7 @@ preserve_perms() {
 
 preserve_perms etc/rc.d/rc.auditd.new
 preserve_perms etc/rc.d/rc.auditd.conf.new
-config etc/audit/audit.rules.new
+config etc/audit/rules.d/audit.rules.new
 config etc/audit/auditd.conf.new
 config etc/audisp/audispd.conf.new
 config etc/audisp/zos-remote.conf.new
