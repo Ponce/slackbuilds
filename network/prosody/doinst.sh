@@ -8,9 +8,13 @@ config() {
   fi
 }
 
-config etc/prosody/migrator.cfg.lua.new
 config etc/prosody/prosody.cfg.lua.new
-config etc/prosody/certs/localhost.key.new
-config etc/prosody/certs/localhost.cert.new
-config etc/prosody/certs/Makefile.new
+config etc/prosody/migrator.cfg.lua.new
 config etc/prosody/certs/openssl.cnf.new
+config etc/prosody/certs/localhost.key.new
+config etc/prosody/certs/example.com.key.new
+config etc/prosody/certs/example.com.crt.new
+config etc/prosody/certs/Makefile.new
+config etc/prosody/certs/localhost.cnf.new
+config etc/prosody/certs/example.com.cnf.new
+config etc/prosody/certs/localhost.crt.new
