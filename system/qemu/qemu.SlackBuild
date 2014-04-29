@@ -3,7 +3,7 @@
 # Slackware build script for qemu
 
 # Copyright 2009, 2010  Andrew Brouwers <abrouwers@gmail.com>
-# Copyright 2013  Edward Koenig, Vancouver, USA <kingbeowulf@gmail.com>
+# Copyright 2013, 2014  Edward Koenig, Vancouver, USA <kingbeowulf@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -31,11 +31,17 @@
 #			add missing --libdir (patched in qemu-trivial upstream)
 # 1.2   22-SEP-2013     updated to 1.6
 # 1.3   03-NOV-2013     updated to 1.6.1
+# 1.4   28-APR-2014     updated to 2.0.0 (thanks Callum Davies <calrogman@gmail.com>), added useful options,
+#                       clean ups, libusb version check.
 
 PRGNAM=qemu
-VERSION=${VERSION:-1.6.1}
+VERSION=${VERSION:-2.0.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+
+KVMGROUP=${KVMGROUP:-users}
+TARGETS=${TARGETS:-some}
+$VNC_ENABLE=${VNC_ENABLE:-no}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -67,16 +73,6 @@ else
   LIBDIRSUFFIX=""
 fi
 
-# Enable only x86* and arm emulation for qemu: if you want to build
-# all the targets available use TARGETS=all
-if [ "${TARGETS:-}" = "all" ]; then
-  targets=""
-else
-  targets="--target-list=i386-softmmu,x86_64-softmmu,i386-linux-user,x86_64-linux-user,arm-softmmu,arm-linux-user,armeb-linux-user"
-fi
-
-KVMGROUP=${KVMGROUP:-users}
-
 # Needed to build man pages if built after plain "su"
 export PATH=$PATH:/usr/share/texmf/bin
 
@@ -96,7 +92,30 @@ find -L . \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 # Remove double CFLAGS
-sed -i "s|^\ \ CFLAGS=\"-O2\ |  CFLAGS=\"|" configure || exit 1
+sed -i "s|^\ \ CFLAGS=\"-O2\ |  CFLAGS=\"|" configure
+
+# Enable only x86* and arm emulation for qemu: if you want to build
+# all the targets available use TARGETS=all
+if [ "$TARGETS" = "all" ]; then
+  targets=""
+else
+  targets="--target-list=i386-softmmu,x86_64-softmmu,i386-linux-user,x86_64-linux-user,arm-softmmu,arm-linux-user,armeb-linux-user"
+fi
+
+# Optional VNC support for those who want it (adjust options as needed); use VNC_ENABLE=yes
+if [ "$VNC_ENABLE" = "yes" ]; then
+  with_vnc="--enable-vnc --enable-vnc-tls --enable-vnc-jpeg"
+else
+  with_vnc="--disable-vnc"
+fi
+
+# Slackware-14.1 ships with an ancient libusb. Check for updates to enable.
+if pkg-config --atleast-version=1.0.13 libusb-1.0 ; then
+  with_libusb="--enable-libusb"
+  echo
+else
+  with_libusb="--disable-libusb"
+fi
 
 # check if spice is there
 if pkg-config --exists spice-server ; then
@@ -112,12 +131,11 @@ else
   with_usbredir="--disable-usb-redir"
 fi
 
-# check if device-tree-compiler is installed
+# check if device-tree-compiler is installed. Some targets need this so consider installing it from SBo.
 if ls /var/log/packages/device-tree-compiler-* 1>/dev/null 2>/dev/null ; then
   with_fdt="--enable-fdt"
 fi
 
-# --libdir is recognized but not advertised in --help
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -131,11 +149,22 @@ CXXFLAGS="$SLKCFLAGS" \
   --enable-system \
   --enable-kvm \
   --disable-debug-info \
+  --enable-virtfs \
+  --enable-sdl \
   --audio-drv-list=alsa,oss,sdl,esd \
+  $with_libusb \
+  $with_vnc \
   $targets \
   $with_spice \
   $with_usbredir \
   $with_fdt
+
+#usb passthrough may fail since Slackware's libusb is too old.
+# other useful options:
+# --enable-vde             enable support for vde network
+# --enable-libnfs          enable nfs support
+# --enable-vde             enable support for vde network
+# --enable-bluez           enable bluez stack connectivity
 
 make V=1 OS_CFLAGS="$SLKCFLAGS"
 
