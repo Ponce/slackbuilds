@@ -1,0 +1,96 @@
+From 2ff095ea0b0c05fbf6cc332eeadf26cfeb9e69f7 Mon Sep 17 00:00:00 2001
+From: Colin Watson <cjwatson@ubuntu.com>
+Date: Tue, 24 Dec 2013 22:19:02 +0000
+Subject: build: Avoid clash between gi/types.py and stdlib
+
+Use non-recursive make for the Python modules in gi/ to work around a
+clash between gi/types.py and the standard library's types module when
+running py-compile.
+
+https://bugzilla.gnome.org/show_bug.cgi?id=721025
+
+Signed-off-by: Martin Pitt <martinpitt@gnome.org>
+
+diff --git a/Makefile.am b/Makefile.am
+index 5051b54..58d720f 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -1,6 +1,9 @@
+ ACLOCAL_AMFLAGS = -I m4 ${ACLOCAL_FLAGS}
+ AUTOMAKE_OPTIONS = 1.7
+ 
++# Part of the gi subdirectory is handled with non-recursive make to avoid
++# py-compile getting confused between gi/types.py and Python's standard
++# types module.
+ SUBDIRS = examples gi tests pygtkcompat
+ 
+ PLATFORM_VERSION = 3.0
+@@ -49,6 +52,27 @@ MAINTAINERCLEANFILES = \
+ BUILT_EXTRA_DIST = 		\
+ 	ChangeLog
+ 
++nobase_pyexec_PYTHON = \
++	gi/__init__.py \
++	gi/types.py \
++	gi/module.py \
++	gi/importer.py \
++	gi/pygtkcompat.py \
++	gi/docstring.py
++
++# if we build in a separate tree, we need to symlink the *.py files from the
++# source tree; Python does not accept the extensions and modules in different
++# paths
++build_pylinks:
++	for f in $(nobase_pyexec_PYTHON); do \
++		[ -e $(builddir)/$$f ] || \
++			$(LN_S) $(abs_srcdir)/$$f $(builddir)/$$f; \
++	done
++
++all-local: build_pylinks
++
++check-local: build_pylinks
++
+ # pkg-config files
+ pkgconfigdir = $(libdir)/pkgconfig
+ pkgconfig_DATA = pygobject-$(PLATFORM_VERSION).pc
+diff --git a/gi/Makefile.am b/gi/Makefile.am
+index fc11ff8..aa91a46 100644
+--- a/gi/Makefile.am
++++ b/gi/Makefile.am
+@@ -26,14 +26,6 @@ endif
+ 
+ pygidir = $(pyexecdir)/gi
+ 
+-pygi_PYTHON = \
+-	__init__.py \
+-	types.py \
+-	module.py \
+-	importer.py \
+-	pygtkcompat.py \
+-	docstring.py
+-
+ pygi_LTLIBRARIES = _gi.la
+ 
+ _gi_la_SOURCES = \
+@@ -118,16 +110,8 @@ _gi_cairo_la_LDFLAGS = \
+ %$(PYTHON_SO): %.la
+ 	$(LN_S) -f .libs/$@ $@
+ 
+-# if we build in a separate tree, we need to symlink the *.py files from the
+-# source tree; Python does not accept the extensions and modules in different
+-# paths
+-build_pylinks:
+-	for f in $(pygi_PYTHON); do \
+-	    [ -e $(builddir)/$$f ] || $(LN_S) $(srcdir)/$$f $(builddir)/$$f; \
+-	done
+-
+-all-local: $(LTLIBRARIES:.la=$(PYTHON_SO)) build_pylinks
++all-local: $(LTLIBRARIES:.la=$(PYTHON_SO))
+ 
+-check-local: $(LTLIBRARIES:.la=$(PYTHON_SO)) build_pylinks
++check-local: $(LTLIBRARIES:.la=$(PYTHON_SO))
+ clean-local:
+ 	rm -f $(LTLIBRARIES:.la=$(PYTHON_SO))
+-- 
+cgit v0.10.1
+
