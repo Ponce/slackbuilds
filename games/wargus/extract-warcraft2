@@ -1,0 +1,129 @@
+#!/bin/sh
+
+DEFAULTDEST="/usr/share/games/stratagus/wargus"
+
+SOURCE="$1"
+DEST="${2:-$DEFAULTDEST}"
+WARTOOL="${WARTOOL:-wartool}"
+
+SELF="$( basename "$0" )"
+if [ -z "$SOURCE" ]; then
+  cat <<EOF
+$SELF - extract game data files from Warcraft II
+
+Usage: $SELF [source] <dest>
+
+source is one of:
+
+- A block device node or symlink to one (e.g. /dev/cdrom). The
+  device must contain a Warcraft II CD-ROM.
+
+- An ISO image of the Warcraft II CD-ROM.
+
+- A directory containing an installed copy of Warcraft II.
+
+- A zip, rar, 7z, or tar.(gz|xz|bz2) archive containing either the
+  contents of the Warcraft II CD-ROM or an installed copy of the game
+  (but NOT an archive containing an ISO image).
+
+By "Warcraft II", we mean the original DOS version (or the expansion
+pack for the DOS version), *not* the Battle.net edition. The expansion
+is probably preferable (has more maps), but either one will work.
+
+Filename case inside archives is ignored.
+
+dest is the optional directory to output extracted data to. If not
+given, $DEFAULTDEST is used.
+
+Since this script wants to do things like mount CDs and write to
+/usr/share, it generally needs to be run as root.
+
+For extracting 7z or rar archives, you will need p7zip or unrar.
+
+This script was written by B. Watson for the SlackBuilds.org
+project and is released under the terms of the WTFPL. See
+http://www.wtfpl.net/txt/copying/ for details.
+EOF
+  exit 0
+fi
+
+# try to figure out what $SOURCE is. It can be the CD-ROM, an ISO
+# image, an installed directory, or a zip/rar/7z/tar/etc archive
+# of an installed dir or the contents of the CD.
+
+# NOT supported: archives containing the .iso image.
+
+SOURCE=$( readlink -q -n -f "$SOURCE" )
+TYPE=$( file "$SOURCE" )
+
+SRCDIR=$( mktemp -d -t extract-warcraft2.XXXXXX )
+
+case "$TYPE" in
+  *directory*) rm -rf "$SRCDIR" ; SRCDIR="$SOURCE" ; KEEPSRC="yes" ;;
+
+  *block*special*)
+    mount "$SOURCE" "$SRCDIR"
+    MOUNTED="$SRCDIR"
+	 ROPT="-r"
+  ;;
+
+  *ISO*9660*data*)
+    mount -o loop "$SOURCE" "$SRCDIR"
+    MOUNTED="$SRCDIR"
+  ;;
+
+  *7-zip*)
+    ( cd "$SRCDIR" && 7za x "$SOURCE" )
+  ;;
+
+  *RAR*arch*)
+    ( cd "$SRCDIR" && unrar x "$SOURCE" )
+  ;;
+
+  *Zip*arch*)
+    ( cd "$SRCDIR" && unzip "$SOURCE" )
+  ;;
+
+  *gzip*|*bzip2*|*XZ*)
+    ( cd "$SRCDIR" && tar xvf "$SOURCE" )
+  ;;
+
+  *)
+    echo "Can't figure out what '$SOURCE' is, aborting" 1>&2
+    exit 1
+  ;;
+esac
+
+# now find the data dir, if it exists
+DATADIR="$SRCDIR"
+for i in data DATA Data; do
+  if [ -d "$SRCDIR/$i" ]; then
+    DATADIR="$SRCDIR/$i"
+  fi
+done
+
+# sanity check the data dir we think we found
+for i in REZDAT rezdat Rezdat; do
+  if [ -e "$DATADIR/$i.war" ] ||
+     [ -e "$DATADIR/$i.WAR" ] ||
+     [ -e "$DATADIR/$i.War" ]
+  then
+    FOUND=yes
+  fi
+done
+
+if [ "$FOUND" != "yes" ]; then
+  echo "Can't find rezdat.war in $DATADIR, aborting" 1>&2 &&
+  exit 1
+fi
+
+mkdir -p $DEST
+"$WARTOOL" -m -v $ROPT "$DATADIR" "$DEST"
+
+if [ "$MOUNTED" != "" ]; then
+  umount "$MOUNTED"
+fi
+
+if [ "$KEEPSRC" != "yes" ]; then
+  rm -rf "$SRCDIR"
+fi
