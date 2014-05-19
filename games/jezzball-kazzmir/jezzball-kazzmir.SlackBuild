@@ -1,0 +1,126 @@
+#!/bin/sh
+
+# Slackware build script for jezzball-kazzmir
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Source is mirrored on my site only because the "cloud" download link isn't
+# stable (random-looking hostnames). Homepage is the allegro.cc game depot
+# entry for this game, since the original homepage is defunct.
+
+PRGNAM=jezzball-kazzmir
+VERSION=${VERSION:-1.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+SRCNAM=jezzball
+
+# load game data from here, rather than current dir
+DATADIR=/usr/share/games/$PRGNAM/
+
+# save high scores here, rather than current dir
+SCOREDIR=/var/games/$PRGNAM
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+ -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+sed -i 's,\./data\|data/,'"$DATADIR"',' src/main.cpp
+sed -i 's,score\.jzb,'$SCOREDIR'/&,' src/score.cpp
+
+# link fix, plus use our cflags
+sed -i -e "s,-O2,$SLKCFLAGS," -e 's,jpgal,jpgalleg,' SConstruct
+
+# fix globbing
+sed -i 's,FA_ARCH,FA_ALL,' src/main.cpp
+
+# NULL not defined
+sed -i '1i#include <string.h>' src/region.cpp
+
+# Don't spew cute quotations constantly. Game should only insult you
+# when you *die*. I know the Slackware philosophy is not to change anything
+# unless absolutely required to make the software functional, but to me
+# the unpatched game *is* nonfunctional because it's too annoying to play.
+patch -p1 < $CWD/insults.diff
+
+scons
+
+# manual install
+mkdir -p $PKG/usr/games $PKG/$DATADIR
+install -s -m0755 $SRCNAM $PKG/usr/games/$PRGNAM
+cp -a data/* $PKG/$DATADIR
+
+# Just for fun, we'll include some Slack-themed playfields. If you
+# really wanted to, you could include your own PNG playfields in
+# the pics/ dir. The game will scale them down if they're too
+# large, but won't scale them up if they're tiny, so make sure
+# they're not too small (or the game becomes unplayable).
+tar xvf $CWD/jezzball-kazzmir-extra-backgrounds.tar.gz
+install -oroot -groot -m0644 pics/*.png $PKG/$DATADIR/pics
+
+# world-writable scorefile. The dir it's in is only writable by root,
+# the game can't create the scorefile if it's missing, so we have to
+# include the stock one in the package (which the game can and will
+# modify as needed).
+mkdir -p $PKG/$SCOREDIR
+zcat $CWD/score.jzb.gz > $PKG/$SCOREDIR/score.jzb
+chmod 666 $PKG/$SCOREDIR/score.jzb
+
+# icon made with the gimp, from a screenshot of the game
+mkdir -p $PKG/usr/share/pixmaps
+cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# .desktop file written for this build
+mkdir -p $PKG/usr/share/applications
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/README_Slackware.txt > $PKG/usr/doc/$PRGNAM-$VERSION/README_Slackware.txt
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
