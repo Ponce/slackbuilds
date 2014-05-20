@@ -2,7 +2,7 @@
 
 # Slackware build script for XBMC
 
-# Copyright 2009-2013 Larry Hajali <larryhaja[at]gmail[dot]com>
+# Copyright 2009-2014 Larry Hajali <larryhaja[at]gmail[dot]com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,7 +23,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=xbmc
-VERSION=${VERSION:-12.3}
+VERSION=${VERSION:-13.0_r2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -64,7 +64,7 @@ cd $TMP
 rm -rf $DIRNAME
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $DIRNAME
-tar xvf $CWD/$PRGNAM-pvr-addons-12.0-Frodo.tar.gz || tar xvf $CWD/12.0-Frodo.tar.gz
+tar xvf $CWD/$PRGNAM-pvr-addons-13.0-Gotham.tar.gz || tar xvf $CWD/13.0-Gotham.tar.gz
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -78,30 +78,28 @@ if grep 'sse2' /proc/cpuinfo 2>&1 > /dev/null; then
 fi
 
 # No need to show Git: "Version" in a release build.
-sed -i 's|^#ifdef GIT_REV|#ifndef GIT_REV|' $PRGNAM/GUIInfoManager.cpp
+sed -i '/GetXbmcGitRevision/,/else/d' $PRGNAM/GUIInfoManager.cpp
 
 # Patch for building against rtmpdump. Only needed if xbmc fails to build
 # w/rtmpdump.  See the following link for a rather obtuse explanation.
 # http://slaxbmc.blogspot.com/2011/03/23-install-xbmc-from-source.html
-patch -p1 < $CWD/patches/xbmc-rtmpdump-build.patch
+patch -p1 < $CWD/patches/xbmc-Gotham-rtmpdump-build.patch
 
 # Patch for Samba 4.0.
-patch -p1 < $CWD/patches/samba-4.0.patch
+patch -p1 < $CWD/patches/xbmc-Gotham-samba-4.0.patch
 
 # Hack for using afpfs-ng.
 cat lib/afpfs-ng/fix_afpfs-ng_includes.patch | head -1336 | tail -1172 | patch -p1
 AFPFS_NGFLAGS="-I$PWD/include"
 
-# Build external ffmpeg.
 if [ "${FFMPEG:-no}" == "yes" ]; then
   OPT_DEPS="--enable-external-ffmpeg"
-  OPT_DEPS_ADDONS="--enable-external-ffmpeg"
-  # Patches for newer ffmpeg > 2.0.
-  patch -p1 < $CWD/patches/xbmc-12.2-ffmpeg-2.0.patch
-  patch -p0 < $CWD/patches/xbmc-pvr-addons-ffmpeg-2.0.patch
+  # Renable external ffmpeg. Patches from fedora.
+  patch -p1 < $CWD/patches/0001-Revert-drop-support-for-external-ffmpeg.patch
+  patch -p1 < $CWD/patches/0002-Revert-linux-link-ffmpeg-statically.patch
+  patch -p1 < $CWD/patches/0003-makefile-include.patch
 else
-  OPT_DEPS="--disable-external-ffmpeg"
-  OPT_DEPS_ADDONS="--disable-external-ffmpeg"
+  OPT_DEPS=""
 fi
 
 # Build webserver. Requires libmicrohttpd.
@@ -117,14 +115,13 @@ if [ "${PULSE:-no}" == "yes" ]; then
 fi
 
 # Build the pvr addons.
-cd $PRGNAM-pvr-addons-12.0-Frodo
+cd $PRGNAM-pvr-addons-13.0-Gotham
   ./bootstrap
   CFLAGS="$SLKCFLAGS $AFPFS_NGFLAGS" \
   CXXFLAGS="$SLKCFLAGS $AFPFS_NGFLAGS" \
   ./configure \
     --prefix=/usr \
     --libdir=/usr/lib${LIBDIRSUFFIX}/xbmc/addons \
-    $OPT_DEPS_ADDONS \
     --enable-release \
     --enable-addons-with-dependencies=yes \
     --docdir=/usr/doc/$PRGNAM-$VERSION \
@@ -150,6 +147,7 @@ CXXFLAGS="$SLKCFLAGS $AFPFS_NGFLAGS" \
   --enable-ffmpeg-libvorbis \
   --enable-alsa \
   --disable-asap-codec \
+  --enable-texturepacker \
   $OPT_DEPS \
   --enable-external-libraries \
   --build=$ARCH-slackware-linux
@@ -164,8 +162,7 @@ fi
 
 make install DESTDIR=$PKG
 
-# Remove *.in files from the pvr addons.
-find $PKG -name "*\.in" -exec rm -f '{}' \;
+install -m 0755 tools/TexturePacker/TexturePacker $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -186,10 +183,13 @@ fi
 gzip -9 $PKG/usr/man/man?/*.?
 
 cp -a \
-  tools/EventClients/README.txt $PRGNAM-pvr-addons-12.0-Frodo/COPYING \
+  tools/EventClients/README.txt $PRGNAM-pvr-addons-13.0-Gotham/COPYING \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Final clean up.
 rm -f $PKG/usr/share/xbmc/{README.linux,LICENSE.GPL,*.txt}
+find $PKG \( -name "Makefile*" -o -name "*cmake*" -o -name "*\.in" \) -exec rm -f '{}' \;
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
