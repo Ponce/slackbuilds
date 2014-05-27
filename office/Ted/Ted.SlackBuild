@@ -1,10 +1,9 @@
 #!/bin/sh
 
 # Slackware build script for Ted
-# and edited by Hannes Worst <hannesworst@gmail.com>.
-# Copyright by Hannes Worst
-#--
-# Last edited: 01-05-2012
+# Originally written by Hannes Worst <hannesworst@gmail.com>.
+# Copyright 2014 Willy Sudiarto Raharjo <willysr@slackbuilds.org>
+# All right reserved
 #
 # Redistribution and use of this script, with or without modification, is
 # permitted provided that the following conditions are met:
@@ -12,7 +11,7 @@
 # 1. Redistributions of this script must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 #
-#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR `AS IS'' AND ANY EXPRESS OR IMPLIED
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
 #  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
 #  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
 #  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
@@ -23,11 +22,8 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# Very heavily edited by the SlackBuilds.org project.  --michiel
-# DocSectProperies Bug-fix provided bij Mark de Does, developer of Ted
-
 PRGNAM=Ted
-VERSION=${VERSION:-2.22}
+VERSION=${VERSION:-2.23}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -44,18 +40,20 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-TOOLKIT=${TOOLKIT:-GTK}
 SRCNAM=$(echo $PRGNAM | tr T t)
 
 if [ "$ARCH" = "i486" ]; then
    SLKCFLAGS="-O2 -march=i486 -mtune=i686"
    LIBDIRSUFFIX=""
+   MARCH=i386
 elif [ "$ARCH" = "i686" ]; then
    SLKCFLAGS="-O2 -march=i686 -mtune=i686"
    LIBDIRSUFFIX=""
+   MARCH=i386
 elif [ "$ARCH" = "x86_64" ]; then
    SLKCFLAGS="-O2 -fPIC"
    LIBDIRSUFFIX="64"
+   MARCH=amd64
 fi
 
 set -e
@@ -65,18 +63,13 @@ mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$SRCNAM-$VERSION.src.tar.gz
-cp $CWD/docSectProperties.c $PRGNAM-$VERSION/docBase/docSectProperties.c
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
-
-# Let's edit Ted's Makefile, so this allows us to package Ted quite properly without
-# actually having to need /usr/local/.
-sed -i 's#./configure#./configure --prefix=/usr/share#g' $TMP/$PRGNAM-$VERSION/Makefile
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+ -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 # Set the right ARCH
 sed \
@@ -86,27 +79,36 @@ sed \
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
-make
-make package.shared DESTDIR=$PKG CONFIGURE_OPTIONS="--with-$TOOLKIT \
-  --prefix=/usr/share/$PRGNAM  --bindir=/usr/bin \
-  --build=$ARCH-slackware-linux"
-
-mkdir -p $PKG/usr/
-tar -xvf $TMP/$PRGNAM-$VERSION/${SRCNAM}Package/$SRCNAM-$VERSION-linux-*$LIBDIRSUFFIX.tar.gz -C $PKG/usr/
-mv $PKG/usr/Ted $PKG/usr/share
-mv $PKG/usr/share/$PRGNAM/{rtf2pdf,rtf2ps}.sh $PKG/usr/bin/
-cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+make -j1
+make -j1 package
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-mkdir -p $PKG/usr/man/man1
-mv $PKG/usr/share/$PRGNAM/{rtf2pdf,rtf2ps,$PRGNAM}.1 $PKG/usr/man/man1
+# Extract the created package by make package
+tar -xvf $TMP/$PRGNAM-$VERSION/${SRCNAM}Package/$SRCNAM-$VERSION-linux-$MARCH.tar.gz -C $PKG/
+
+mkdir -p $PKG/usr/man/man1/
+mv $PKG/usr/share/Ted/doc/*.1 $PKG/usr/man/man1/
+rm -rf $PKG/usr/share/Ted/doc/
+
 find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+# This one is already in .gz format
+mv $PKG/usr/share/man/man1/Ted.1.gz $PKG/usr/man/man1/
+rm -rf $PKG/usr/share/man/
+
+# a couple of useful scripts to fix and convert documents
+for F in `ls $PKG/usr/share/Ted/examples/`
+do
+  mv $PKG/usr/share/Ted/examples/$F $PKG/usr/bin/$(basename -s .sh $F)
+done
+rm -rf $PKG/usr/share/Ted/examples
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cat $PKG/usr/share/$PRGNAM/config/$PRGNAM.ad.sample > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.ad.sample
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+mv $PKG/usr/share/Ted/config/ $PKG/usr/doc/$PRGNAM-$VERSION/
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
