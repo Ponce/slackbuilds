@@ -1,0 +1,128 @@
+#!/bin/sh
+
+# Slackware build scripts for OpenJDK
+
+# Copyright 2014 Strahil Yordanov, Sofia, Bulgaria
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=openjdk
+VERSION=${VERSION:-7u55}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+DVER=1.7.0_$(printf $VERSION | cut -du -f2)
+HOTSPOT_SRC=69b542696e5b.tar.gz
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm echo "Unsupported arch" exit 1;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD="$(pwd)"
+TMP=${TMP:-/tmp/SBo}
+BUILD_DIR=$TMP/openjdk
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "x86_64" ]; then
+  LIB_ARCH=amd64
+  LIBDIRSUFFIX="64"
+else
+  LIB_ARCH=i386
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $BUILD_DIR $PKG
+mkdir -p $TMP $BUILD_DIR $PKG $OUTPUT
+cd $BUILD_DIR
+
+tar -xvf $CWD/icedtea-2.4.7.tar.xz
+
+sed "s#cacao /usr/lib/jvm#cacao /usr/lib${LIBDIRSUFFIX}/jvm#" "$CWD/configure.patch" > configure.patch
+patch ./icedtea-2.4.7/configure configure.patch
+
+mkdir icedtea-build
+cd icedtea-build
+
+if pkg-config --atleast-version=0.9.11 libpulse ; then ENABLE_PULSE_JAVA=--enable-pulse-java ; fi
+
+JAVA_HOME=/usr/lib${LIBDIRSUFFIX}/jvm PATH=/usr/lib${LIBDIRSUFFIX}/jvm/bin:$PATH \
+  ../icedtea-2.4.7/configure \
+  --without-rhino \
+  --disable-system-kerberos \
+  --disable-system-lcms \
+  --disable-downloading \
+  --with-openjdk-src-zip="$CWD/13970e76b784.tar.gz" \
+  --with-hotspot-src-zip="$CWD/$HOTSPOT_SRC" \
+  --with-corba-src-zip="$CWD/e6ad5b912691.tar.gz" \
+  --with-jaxp-src-zip="$CWD/94b7e8e0d96f.tar.gz" \
+  --with-jaxws-src-zip="$CWD/bd9a50a78d04.tar.gz" \
+  --with-jdk-src-zip="$CWD/9448fff93286.tar.gz" \
+  --with-langtools-src-zip="$CWD/8c26a3c39128.tar.gz" \
+  $ENABLE_PULSE_JAVA
+JAVA_HOME=/usr/lib${LIBDIRSUFFIX}/jvm PATH=/usr/lib${LIBDIRSUFFIX}/jvm/bin:$PATH make
+
+cd $PKG
+mkdir -p usr/lib${LIBDIRSUFFIX}
+cd usr/lib${LIBDIRSUFFIX}
+cp -av $BUILD_DIR/icedtea-build/openjdk.build/j2sdk-image/ openjdk
+
+if [ -z "$KEYSTORE_NO_IMPORT" ] ; then
+  #copy some trust/security certificates (can be viewed with keytool, -storepass changeit)
+  cp "$CWD/cacerts" ./openjdk/jre/lib/security
+fi
+
+chown -R root.root $PKG
+find -L . \
+   \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+   -o -perm 511 \) -exec chmod 755 {} \; -o \
+   \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+mkdir -p $PKG/etc/profile.d
+for file in $(ls "$CWD/profile.d/${PRGNAM}"*) ; do
+  cat $file | sed -e "s#lib/openjdk#lib${LIBDIRSUFFIX}/openjdk#" \
+    > $PKG/etc/profile.d/$(basename $file)
+done
+chmod 755 $PKG/etc/profile.d/*
+
+( cd $PKG/usr/lib${LIBDIRSUFFIX}
+  ln -sf openjdk ${PRGNAM}${DVER}
+)
+
+cd $PKG/usr/lib${LIBDIRSUFFIX}
+    ln -sf ./openjdk/jre/lib/${LIB_ARCH}/server/libjvm.so .
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+# Java may not expect compressed manpages, so don't compress them.
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a $PKG/usr/lib${LIBDIRSUFFIX}/openjdk/{THIRD_PARTY_README,LICENSE,ASSEMBLY_EXCEPTION} \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
