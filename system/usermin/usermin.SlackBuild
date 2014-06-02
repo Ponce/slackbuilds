@@ -1,0 +1,131 @@
+#!/bin/sh
+
+# Slackware build script for usermin
+
+# Copyright 2014 Willy Sudiarto Raharjo <willysr@slackbuilds.org>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=usermin
+VERSION=${VERSION:-1.600}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+ARCH=noarch
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+ -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+ -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Fix perl path
+(find . -name '*.cgi' ; find . -name '*.pl') | perl perlpath.pl /usr/bin/perl -
+
+sed -i "s|/usr/local/bin/perl|/usr/bin/perl|" miniserv.pl
+sed -i "s|/usr/local/bin/perl|/usr/bin/perl|" acl_security.pl
+sed -i "s|/usr/local/bin/perl|/usr/bin/perl|" config-lib.pl
+sed -i "s|/usr/local/bin/perl|/usr/bin/perl|" copyconfig.pl
+sed -i "s|/usr/local/bin/perl|/usr/bin/perl|" install-module.pl
+sed -i "s|/usr/local/bin/perl|/usr/bin/perl|" javascript-lib.pl
+sed -i "s|/usr/local/bin/perl|/usr/bin/perl|" maketemp.pl
+sed -i "s|/usr/local/bin/perl|/usr/bin/perl|" newmods.pl
+sed -i "s|/usr/local/bin/perl|/usr/bin/perl|" oschooser.pl
+sed -i "s|/usr/local/bin/perl|/usr/bin/perl|" perlpath.pl
+sed -i "s|/usr/local/bin/perl|/usr/bin/perl|" thirdparty.pl
+sed -i "s|/usr/local/bin/perl|/usr/bin/perl|" ui-lib.pl
+sed -i "s|/usr/local/bin/perl|/usr/bin/perl|" web-lib-funcs.pl
+sed -i "s|/usr/local/bin/perl|/usr/bin/perl|" web-lib.pl
+sed -i "s|/usr/local/bin/perl|/usr/bin/perl|" webmin-search-lib.pl
+
+# remove init scripts for other distro
+rm -rf usermin-debian-pam usermin-pam* usermin-daemon
+
+mkdir -p $PKG/opt/usermin $PKG/var/log/usermin $PKG/etc/usermin
+
+cp -rp * $PKG/opt/usermin
+
+tar xvf $CWD/usermin-config.tar.bz2
+cp -rf usermin-config/* $PKG/opt/usermin
+
+# define parameters for setup.sh
+config_dir=$PKG/etc/usermin
+var_dir=$PKG/var/log/usermin
+perl=/usr/bin/perl
+autoos=1
+port=20000
+login=root
+ssl=0
+atboot=0
+nostart=1
+nochown=1
+autothird=1
+nouninstall=1
+noperlpath=1
+atbootyn=n
+tempdir="$PKG/tmp"
+export config_dir var_dir perl autoos port tempdir ssl nochown autothird nouninstall nostart noperlpath atbootyn login
+
+# Fix setup.sh
+sed -i -e "s:read atbootyn::g" -e "s:exit 13::g" $PKG/opt/usermin/setup.sh
+$PKG/opt/usermin/setup.sh
+
+# Fixup the config files to use their real locations
+sed -i "s:^pidfile=.*$:pidfile=/var/run/usermin.pid:" $PKG/etc/usermin/miniserv.conf
+find $PKG/etc/usermin -type f -exec sed -i "s:$PKG::g" {} \; 
+
+# make it only accessible by localhost
+echo 'allow=127.0.0.1' >> $PKG/etc/usermin/miniserv.conf
+
+CONFIG="postgresql telnet file fetchmail usermount forward schedule language filter theme cron \
+          ssh proc tunnel spam gnupg plan man commands chfn shell htaccess at mailcap mailbox \
+          htaccess-htpasswd changepass procmail cshrc mysql quota updown"
+for L in $CONFIG
+do
+mv $PKG/etc/usermin/$L/config $PKG/etc/usermin/$L/config.new ;
+done
+mv $PKG/etc/usermin/config $PKG/etc/usermin/config.new
+mv $PKG/etc/usermin/miniserv.conf $PKG/etc/usermin/miniserv.conf.new
+mv $PKG/etc/usermin/miniserv.users $PKG/etc/usermin/miniserv.users.new
+rm -rf $PKG/tmp
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENCE README $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
