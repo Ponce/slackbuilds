@@ -22,5 +22,4 @@ preserve_perms() {
   config $NEW
 }
 
-preserve_perms etc/rc.d/init.d/rxstack.new
-
+preserve_perms etc/rc.d/rc.rxstack.new
