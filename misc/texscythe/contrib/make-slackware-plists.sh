@@ -1,19 +1,25 @@
 #!/bin/sh
 
-# This only requires the big texlive-$VERSION-extra.tar.xz and
+# This only requires the big texlive-$VERSION-texmf.tar.xz and
 # texlive-$VERSION-extra.tar.xz tarballs to be present in $CWD
 
-# If texlive.tlpdb is not present, it will have to be obtained from 
+# If texlive.tlpdb is not present, it will have to be obtained from
 # subversion (based on the # release date), e.g.
-# svn co -r {20130530} svn://tug.org/texlive/trunk/Master/tlpkg
+# svn co -r {20140525} svn://tug.org/texlive/trunk/Master/tlpkg
 # You can then copy tlpkg/texlive.tlpdb to $CWD
 
 set -eu
 
-VERSION=20130530
+VERSION=20140525
 
 CWD=$(pwd)
 TMF="$CWD/texlive-$VERSION-texmf";
+
+if [ ! -e $CWD/texlive.tlpdb ] ; then
+  printf "\nYou need texlive.tlpdb in $CWD - get it here:\n"
+  printf "http://ftp.ctex.org/mirrors/CTAN/systems/texlive/tlnet/tlpkg/texlive.tlpdb\n\n"
+  exit 1
+fi
 
 rm -rf tmplists ; mkdir tmplists
 
@@ -22,6 +28,7 @@ texscyther --initdb
 
 # Build a packaging list for all of the texmf stuff, but exclude docs and src
 texscyther \
+  --tlpdb $CWD/texlive.tlpdb \
   --nodirs \
   --subset \
     --include scheme-full \
@@ -30,6 +37,7 @@ texscyther \
 
 # Build a packaging list for the docs (bibarts is for DOS)
 texscyther \
+  --tlpdb $CWD/texlive.tlpdb \
   --nodirs \
   --subset \
     --include scheme-full:doc \
@@ -38,9 +46,11 @@ texscyther \
 
 # Build a packaging list for the texmf sources
 texscyther \
+  --tlpdb $CWD/texlive.tlpdb \
   --nodirs \
   --subset \
     --include scheme-full:src \
+    --exclude bibarts \
   --output-plist tmplists/src
 
 # These next bits could probably be done using the --regex option passed to
@@ -61,7 +71,8 @@ cat tmplists/docs | \
   > docs-packlist
 
 # No filtering (for now) of src stuff
-cat $CWD/tmplists/src > $CWD/src-packlist
+cat $CWD/tmplists/src | \
+  > $CWD/src-packlist
 
 printf "Generating tarballs - please be patient...\n"
 
@@ -93,4 +104,7 @@ tar cf \
 
 printf "Compressing tarballs - please be MOAR patient...\n"
 xz -9 tarballs/*.tar
+
+# Cleanup the leftovers
+rm -rf tmplists $TMF {full,docs,src}-packlist *.db
 
