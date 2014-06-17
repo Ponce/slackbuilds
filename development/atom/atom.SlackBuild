@@ -23,12 +23,17 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=atom
-VERSION=${VERSION:-0.99.0}
+VERSION=${VERSION:-0.103.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 #Some variables needed for compile tar version
-GITSHA1='ea0773e8fcc42ab83820f4edf9b58e406514d035'
+GITSHA1='d8d378e0832d52d505bc92367b61a32bc010911a'
 GITBRANCH='master'
+
+#Disable send metrics to Google Analytics module
+DISABLE_METRICS=${DISABLE_METRICS:-no}
+#Clean cache data after building
+DELETE_CACHE=${DELETE_CACHE:-no}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -62,7 +67,7 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION $PRGNAM-build
+rm -rf $PRGNAM-$VERSION
 tar -xvf $CWD/$PRGNAM-$VERSION.tar.gz || tar xvf $CWD/v$VERSION
 cd $PRGNAM-$VERSION
 chown -R root:root .
@@ -72,27 +77,29 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# patch: adding extra parameter for custom build dir.
-patch -p1 < $CWD/customBuild.diff
+if [ "$DISABLE_METRICS" == "yes" ]; then
+    patch -p1 < $CWD/disableMetrics.diff
+fi
 
 echo '*********************************************************************'
 echo '* The installation process will download a lot of modules for atom. *'
 echo '*********************************************************************'
 
-JANKY_SHA1=$GITSHA1 \
-JANKY_BRANCH=$GITBRANCH \
-PYTHON=python2 \
-BUILD_DIR=$TMP \
-./script/build
+mkdir -p destbuild
+BUILD_DIR=$PWD/destbuild
 
-JANKY_SHA1=$GITSHA1 \
-JANKY_BRANCH=$GITBRANCH \
-PYTHON=python2 \
-BUILD_DIR=$TMP \
-INSTALL_PREFIX=$PKG/usr \
-./script/grunt install
+ JANKY_SHA1=$GITSHA1 \
+ JANKY_BRANCH=$GITBRANCH \
+ PYTHON=python2 \
+ ./script/build --build-dir=$BUILD_DIR
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+ JANKY_SHA1=$GITSHA1 \
+ JANKY_BRANCH=$GITBRANCH \
+ PYTHON=python2 \
+ INSTALL_PREFIX=$PKG/usr \
+ ./script/grunt --build-dir=$BUILD_DIR install
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 # remove apm symlink for prevent conflicts with apmd package.
@@ -108,9 +115,12 @@ sed -e "s#<%=.*%>#Hackable text editor#" \
     resources/linux/Atom.desktop.in > \
     $PKG/usr/share/applications/Atom.desktop
 
-# delete temporal data
-#rm -rf /tmp/atom-cached-atom-shells
-#rm -rf ~/.atom/
+
+if [ "$DELETE_CACHE" == "yes" ]; then
+    # delete temporal data
+    rm -rf /tmp/atom-cached-atom-shells
+    rm -rf ~/.atom/
+fi
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -ar LICENSE.md README.md CONTRIBUTING.md docs \
