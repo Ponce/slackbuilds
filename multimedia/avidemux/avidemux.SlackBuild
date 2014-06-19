@@ -24,10 +24,11 @@
 
 # Modified by Niklas "Nille" Åkerström to use cmake since thats what the
 # project will use in the future.   No additional license terms added
+# Modified by the SlackBuilds.org project
 
 PRGNAM=avidemux
-VERSION=${VERSION:-2.5.6}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-2.6.8}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -57,15 +58,19 @@ else
   LIBDIRSUFFIX=""
 fi
 
+# Following upstream, by default the qt4 and the cli versions are built
+if [ "${GTK:-no}" = "no" ]; then gtk="out"; else gtk=""; fi
+if [ "${QT4:-yes}" = "yes" ]; then qt4=""; else qt4="out"; fi
+if [ "${CLI:-yes}" = "yes" ]; then cli=""; else cli="out"; fi
+
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/${PRGNAM}_${VERSION}.tar.gz
-mv ${PRGNAM}_${VERSION} $PRGNAM-$VERSION
-cd $PRGNAM-$VERSION
+rm -rf ${PRGNAM}_$VERSION
+tar xvf $CWD/${PRGNAM}_$VERSION.tar.gz
+cd ${PRGNAM}_$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -73,103 +78,51 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-if [ "$ARCH" = "x86_64" ]; then
-  # Some paths are incorrectly hardcoded to "lib":
-  sed -i -e "s/Dir=\"lib\"/Dir=\"lib${LIBDIRSUFFIX}\"/" $(grep -lr 'Dir="lib"' .)
-fi
-
-# Cut away jobs number from the MAKEFLAGS
+# Cut away jobs number from the MAKEFLAGS and log to stdout
 MAKEFLAGS=$(echo "$MAKEFLAGS" | sed "s/-j[0-999]//g")
+sed -i -e "s|-j\ 2|-j 1|" -e "s|>&.*||" bootStrap.bash
 
-mkdir build
-cd build
+export CFLAGS="$SLKCFLAGS"
+export CXXFLAGS="$SLKCFLAGS"
+bash bootStrap.bash \
+  --with-core \
+  --with-plugins \
+  --with${gtk}-gtk \
+  --with${qt4}-qt4 \
+  --with${cli}-cli
 
-  CFLAGS="$SLKCFLAGS" \
-  CXXFLAGS="$SLKCFLAGS" \
-  cmake . \
-    -DCMAKE_INSTALL_PREFIX:STRING="/usr" \
-    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_VERBOSE_MAKEFILE:BOOL="TRUE" \
-    -DLIB_SUFFIX:STRING="$LIBDIRSUFFIX" ..
-
-# Here are some valid options for cmake to build or not build against a dep
-# (for those who aren't very familiar with cmake)
-# Note that none of them should be needed though, as cmake automatically
-# detects what is and isn't on the system.
-# They're all boolean values, so it uses TRUE 1 YES or FALSE 0 NO
-# (TRUE, 1, and YES all mean the same thing and you should only use one of them)
-#	alsa || -DNO_ALSA:BOOL=
-#	oss || -DNO_OSS:BOOL=
-#	nls || -DNO_NLS:BOOL=
-#	sdl || -DNO_SDL:BOOL=
-#	fontconfig || -DNO_FontConfig:BOOL=
-#	xv || -DNO_Xvideo:BOOL=
-#	esd || -DNO_Esd:BOOL=
-#	jack || -DNO_Jack:BOOL=
-#	aften || -DNO_Aften:BOOL=
-#	libsamplerate || -DNO_libsamplerate:BOOL=
-#	lame || -DNO_Lame:BOOL=
-#	faac -DNO_FAAC:BOOL=
-#	xvid || -DNO_Xvid:BOOL=
-#	amrnb || -DNO_AMRNB:BOOL=
-#	dts || -DNO_libdca:BOOL=
-#	x264 || -DNO_x264:BOOL=
-#	aac || -DNO_FAAD:BOOL=
-#	aac || -DNO_NeAAC:BOOL=
-#	vorbis || -DNO_Vorbis:BOOL=
-#	png || -DNO_libPNG:BOOL=
-#	arts || -DNO_ARTS:BOOL=
-#	truetype || -DNO_FREETYPE:BOOL=
-#	gtk || -DNO_GTK:BOOL=
-#	qt4 || -DNO_QT4:BOOL=
-
-  make -j1
-  make DESTDIR=$PKG install/strip
-cd ..
-
-mkdir -p build_plugins
-cd build_plugins
-  cmake \
-    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DMAN_INSTALL_DIR=/usr/man \
-    -DSYSCONF_INSTALL_DIR=/etc \
-    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
-    -DAVIDEMUX_SOURCE_DIR=$(cd .. ; pwd) \
-    -DAVIDEMUX_CORECONFIG_DIR=$(cd .. ; pwd)/build/config \
-    -DAVIDEMUX_INSTALL_PREFIX=$(cd .. ; pwd)/build \
-    ../plugins
-  make -j1
-  make DESTDIR=$PKG install/strip
-cd -
+mv install/* $PKG/
 
 mkdir -p $PKG/usr/man/man1
 cat man/avidemux.1 | gzip -9c > $PKG/usr/man/man1/avidemux.1.gz
 
-cd $TMP/$PRGNAM-$VERSION
-mkdir -p $PKG/usr/share/{applications,pixmaps}
-mkdir -p $PKG/usr/share/icons/hicolor/{16x16,32x32,48x48,64x64}/apps
-# If the qt4 binary was built, we prefer to use that over the gtk version:
-if [ -x $PKG/usr/bin/avidemux2_qt4 ]; then
-  cat avidemux2.desktop | sed -e 's/_gtk/_qt4/' \
-    > $PKG/usr/share/applications/avidemux2.desktop
-else
-  install -m644 avidemux2.desktop $PKG/usr/share/applications/avidemux2.desktop
+mkdir -p \
+  $PKG/usr/share/applications \
+  $PKG/usr/share/pixmaps \
+  $PKG/usr/share/icons/hicolor/16x16/apps \
+  $PKG/usr/share/icons/hicolor/32x32/apps \
+  $PKG/usr/share/icons/hicolor/48x48/apps \
+  $PKG/usr/share/icons/hicolor/64x64/apps
+if [ -x $PKG/usr/bin/avidemux3_gtk ]; then
+  cat avidemux2.desktop | sed -e "s/2_gtk/3_qt4/" -e "s/avidemux2$/avidemux_qt/" \
+    > $PKG/usr/share/applications/avidemux_qt.desktop
+fi
+if [ -x $PKG/usr/bin/avidemux3_qt4 ]; then
+  cat avidemux2.desktop | sed -e "s/2_gtk/3_gtk/" -e "s/avidemux2$/avidemux_gtk/" \
+    > $PKG/usr/share/applications/avidemux_gtk.desktop
 fi
 install -m644 avidemux_icon.png $PKG/usr/share/pixmaps/avidemux.png
 install -m644 avidemux_icon.png \
-  ${PKG}/usr/share/icons/hicolor/64x64/apps/avidemux.png
+  $PKG/usr/share/icons/hicolor/64x64/apps/avidemux.png
 convert avidemux_icon.png -resize 16x16 \
-  ${PKG}/usr/share/icons/hicolor/16x16/apps/avidemux.png
+  $PKG/usr/share/icons/hicolor/16x16/apps/avidemux.png
 convert avidemux_icon.png -resize 32x32 \
-  ${PKG}/usr/share/icons/hicolor/32x32/apps/avidemux.png
+  $PKG/usr/share/icons/hicolor/32x32/apps/avidemux.png
 convert avidemux_icon.png -resize 48x48 \
-  ${PKG}/usr/share/icons/hicolor/48x48/apps/avidemux.png
+  $PKG/usr/share/icons/hicolor/48x48/apps/avidemux.png
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS COPYING README TODO $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS COPYING README $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
@@ -178,4 +131,3 @@ cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
-
