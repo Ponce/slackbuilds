@@ -425,6 +425,17 @@ WITH_CONTENT_SCAN=yes
 
 # DISABLE_DKIM=yes
 
+#------------------------------------------------------------------------------
+# Uncomment the following line to remove Per-Recipient-Data-Response support.
+
+# DISABLE_PRDR=yes
+
+#------------------------------------------------------------------------------
+# Uncomment the following line to remove OCSP stapling support in TLS,
+# from Exim.  Note it can only be supported when built with
+# GnuTLS 3.1.3 or later, or OpenSSL
+
+# DISABLE_OCSP=yes
 
 #------------------------------------------------------------------------------
 # By default, Exim has support for checking the AD bit in a DNS response, to
@@ -470,19 +481,12 @@ WITH_CONTENT_SCAN=yes
 # CFLAGS  += -I/opt/brightmail/bsdk-6.0/include
 # LDFLAGS += -lxml2_single -lbmiclient_single -L/opt/brightmail/bsdk-6.0/lib
 
-# Uncomment the following line to add OCSP stapling support in TLS, if Exim
-# was built using OpenSSL.
-
-# EXPERIMENTAL_OCSP=yes
-
 # Uncomment the following line to add DMARC checking capability, implemented
 # using libopendmarc libraries.
 # EXPERIMENTAL_DMARC=yes
 # CFLAGS += -I/usr/local/include
 # LDFLAGS += -lopendmarc
 
-# Uncomment the following line to add Per-Recipient-Data-Response support.
-# EXPERIMENTAL_PRDR=yes
 
 # Uncomment the following line to support Transport post-delivery actions,
 # eg. for logging to a database.
@@ -495,6 +499,15 @@ WITH_CONTENT_SCAN=yes
 # CFLAGS += -I/usr/local/include
 # LDFLAGS += -lhiredis
 
+# Uncomment the following line to enable Experimental Proxy Protocol
+# EXPERIMENTAL_PROXY=yes
+
+# Uncomment the following line to enable support for checking certiticate
+# ownership
+# EXPERIMENTAL_CERTNAMES=yes
+
+# Uncomment the following line to add DSN support
+# EXPERIMENTAL_DSN=yes
 
 ###############################################################################
 #                 THESE ARE THINGS YOU MIGHT WANT TO SPECIFY                  #
