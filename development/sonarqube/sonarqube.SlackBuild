@@ -1,0 +1,121 @@
+#!/bin/sh
+# Slackware build script for sonarqube
+
+# Copyright 2014  Giorgio Peron giorgio.peron@gmail.com Campodarsego, PD, Italy 
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=sonarqube
+VERSION=${VERSION:-4.3.2}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+bailout() {
+  printf "\nThis requires a \"sonar\" user and group.\n"
+  printf "\tgroupadd -g 287 sonar\n"
+  printf "\tuseradd -g 287 -u 287 -r -c 'SonarQube user' -s /bin/bash -d /usr/share/sonarqube sonar\n\n"
+  exit 1
+}
+
+if ! getent group sonar 2>/dev/null 1>/dev/null ; then
+  bailout
+elif ! getent passwd sonar 2>/dev/null 1>/dev/null ; then
+  bailout
+fi
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+  BINDIR="linux-x86-32"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+  BINDIR="linux-x86-32"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+  BINDIR="linux-x86-64"
+else
+  SLKCFLAGS="-O2"
+  BINDIR=""
+fi
+
+set -e
+
+rm -rf $PKG $TMP/$PRGNAM-$VERSION
+mkdir -p $PKG $OUTPUT
+cd $TMP
+
+unzip $CWD/$PRGNAM-$VERSION.zip
+
+mkdir -p $PKG/usr/share/$PRGNAM
+mkdir -p $PKG/var/{log,run,tmp}/$PRGNAM
+mkdir -p $PKG/etc/rc.d
+
+mv $TMP/$PRGNAM-$VERSION/* $PKG/usr/share/$PRGNAM/
+
+# expose the configuration file under /etc
+mv $PKG/usr/share/$PRGNAM/conf/sonar.properties{,.new}
+mv $PKG/usr/share/$PRGNAM/conf/wrapper.conf{,.new}
+cd $PKG/etc
+ln -sf ../usr/share/$PRGNAM/conf $PRGNAM
+
+sed -i "s_sonar.jdbc.url=jdbc:h2:_#sonar.jdbc.url=jdbc:h2:_g" $PKG/usr/share/$PRGNAM/conf/sonar.properties.new
+sed -i "s_#sonar.jdbc.url=jdbc:mysql:_sonar.jdbc.url=jdbc:mysql:_g" $PKG/usr/share/$PRGNAM/conf/sonar.properties.new
+sed -i "s_#sonar.web.context=_sonar.web.context=/sonarqube_g" $PKG/usr/share/$PRGNAM/conf/sonar.properties.new
+sed -i "s_wrapper.java.command=java_wrapper.java.command=/usr/lib${LIBDIRSUFFIX}/java/bin/java_g" $PKG/usr/share/$PRGNAM/conf/wrapper.conf.new
+
+chown -R sonar:sonar $PKG/usr/share/$PRGNAM
+chown -R sonar:sonar $PKG/var/{log,run,tmp}/$PRGNAM
+
+rm -rf $PKG/usr/share/$PRGNAM/logs
+rm -rf $PKG/usr/share/$PRGNAM/temp
+cd $PKG/usr/share/$PRGNAM
+ln -fs ../../../var/log/$PRGNAM logs
+ln -fs ../../../var/tmp/$PRGNAM temp
+
+# remove the executables for the others platforms
+cd $PKG/usr/share/$PRGNAM/bin
+find . -type d -not -name ${BINDIR} -not -name "." -not -name "lib" | xargs rm -rf
+
+cat $CWD/rc.$PRGNAM > $PKG/etc/rc.d/rc.$PRGNAM.new
+sed -i "s:WRAPPER_CMD=\"./wrapper\":WRAPPER_CMD=\"/usr/share/sonarqube/bin/${BINDIR}/wrapper\":g" $PKG/etc/rc.d/rc.$PRGNAM.new
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -c n -l y $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
