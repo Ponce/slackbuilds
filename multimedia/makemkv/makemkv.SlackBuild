@@ -23,7 +23,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=makemkv
-VERSION=${VERSION:-1.8.4}
+VERSION=${VERSION:-1.8.11}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -40,17 +40,32 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "x86_64" ]; then
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  ARCHDIR=i386
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  ARCHDIR=i386
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
   ARCHDIR=amd64
   LIBDIRSUFFIX="64"
 else
-  ARCH="i486"
+  SLKCFLAGS="-O2"
   ARCHDIR=i386
   LIBDIRSUFFIX=""
 fi
+
 # Note: MakeMKV now includes a mips32 binary, but since there is no official
 # MIPS Slackware port I'm ignoring it unless someone complains. Still no ARM
 # version.
+
+# Spoof libaacs and libbdplus? (This will override real libaacs.so.0 and
+# libbdplus.so.0 upon package installation if they are present! If you want
+# to spoof this, you should ensure those packages are not installed!)
+FAKELIBS=${FAKELIBS:-no}
 
 set -e
 
@@ -63,14 +78,26 @@ tar xvf $CWD/${PRGNAM}-oss-${VERSION}.tar.gz
 cd ${PRGNAM}-oss-${VERSION}
 chown -R root:root .
 find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# The makefile looks good now, but we'll define LIBDIR...
-make -f makefile.linux
-make -f makefile.linux install LIBDIR="\${PREFIX}/lib${LIBDIRSUFFIX}" DESTDIR=$PKG
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --build=$ARCH-slackware-linux
+
+# MakeMKV devs seem to have difficulty with autotools, so --libdir doesn't
+# actually appear to do anything. So we'll pass it explicitly.
+make
+make install LIBDIR="\${PREFIX}/lib${LIBDIRSUFFIX}" DESTDIR=$PKG
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a License.txt $PKG/usr/doc/$PRGNAM-$VERSION
@@ -82,18 +109,18 @@ tar xvf $CWD/${PRGNAM}-bin-${VERSION}.tar.gz
 cd ${PRGNAM}-bin-${VERSION}
 chown -R root:root .
 find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 # The makefile now supports DESTDIR so it's easier to use it. This is just
 # removing the mandatory interactive EULA agreement which might confuse
 # SlackBuild users (check the README which tells you to read the EULA anyway...)
-sed -i "s/^\(install:\).*/\1/" makefile.linux
+sed -i "s/^\(install:\).*/\1/" Makefile
 
 # We will not leave CPU detection up to the makefile here just in case...
-make -f makefile.linux install ARCH=$ARCHDIR ARCH_OK=1 DESTDIR=$PKG
+make install ARCH=$ARCHDIR ARCH_OK=1 DESTDIR=$PKG
 
 # Remove the 32-bit mmdtsdec binary on 64-bit systems. The author of MakeMKV
 # claims that this will work on 64-bit systems as well -- see here.
@@ -106,12 +133,18 @@ if [ "$ARCH" = "x86_64" ]; then
   rm -f $PKG/usr/bin/mmdtsdec
 fi
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 cp -a src/eula_en_linux.txt $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 cat $CWD/README.issues > $PKG/usr/doc/$PRGNAM-$VERSION/README.issues
+
+if [ "$FAKELIBS" != "no" ]; then
+    cd $PKG/usr/lib${LIBDIRSUFFIX}
+    ln -s libmmbd.so.0 libaacs.so.0
+    ln -s libmmbd.so.0 libbdplus.so.0
+fi
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
