@@ -1,0 +1,121 @@
+#!/bin/sh
+
+# Slackware build script for samsung-mfp-drivers
+
+# Copyright 2014  Robby Workman, Northport, Alabama, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=samsung-mfp-drivers
+VERSION=${VERSION:-1.00.06}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+TARNAM="ULD_Linux"
+SRCNAM="uld"
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i386 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM
+tar xvf $CWD/${TARNAM}_V${VERSION}.tar.gz
+cd $SRCNAM
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+mkdir -p $PKG/usr/bin
+cp -a $ARCH/smfpnetdiscovery $PKG/usr/bin
+
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/cups/filter/
+cp -a $ARCH/libsane-smfp.so* $ARCH/libscmssc.so \
+  $PKG/usr/lib${LIBDIRSUFFIX}
+cp -a $ARCH/pstospl $ARCH/pstosplc $ARCH/rastertospl $ARCH/rastertosplc \
+  $PKG/usr/lib${LIBDIRSUFFIX}/cups/filter/
+
+mkdir -p $PKG/usr/share/cups/model/Samsung
+cp -a noarch/share/locale $PKG/usr/share
+# This will possibly need to be in /usr/share/ppd/ for cups-1.7.x
+cp -a noarch/share/ppd/* $PKG/usr/share/cups/model/Samsung
+
+# Well, this is braindead, but the libsane-smfp library has this directory
+# location compiled into it, so not much we can do about that.
+# Hey Samsung, how about releasing some source code under a sane license so
+# that this and other crap (like below wrt udev rules) isn't necessary?
+mkdir -p $PKG/opt/smfp-common/scanner/share
+cat noarch/libsane-smfp.cfg > $PKG/opt/smfp-common/scanner/share/libsane-smfp.cfg
+cat noarch/pagesize.xml > $PKG/opt/smfp-common/scanner/share/pagesize.xml
+
+# Generate udev rules file with a sane(r) version of that awful mess
+# in their install scripts :/
+mkdir -p $PKG/lib/udev/rules.d
+VID="$(grep "^VID=" "noarch/oem.conf" 2>/dev/null | sed 's/\"//g' | sed "s/VID=\(.*\)/\1/")"
+PIDS="$(grep "^PIDS=" "noarch/oem.conf" 2>/dev/null | sed 's/\"//g' | sed "s/PIDS=\(.*\)/\1/")"
+while read line; do
+  eval echo \"$line\" >> "$PKG/lib/udev/rules.d/60-samsung-smfp.rules"
+done < "noarch/etc/smfp.rules.in"
+
+mkdir -p $PKG/etc/sane.d/
+cat noarch/etc/smfp.conf > $PKG/etc/sane.d/smfp-samsung.conf.new
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a noarch/license/* $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
