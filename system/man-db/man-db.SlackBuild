@@ -1,0 +1,167 @@
+#!/bin/sh
+
+# Slackware build script for man-db
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+PRGNAM=man-db
+VERSION=${VERSION:-2.6.7}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+# By default, install binaries to /opt, so as not to stomp on Slackware's
+# man pkg. We will have to include a /etc/profile.d script to set PATH,
+# MANPATH, etc. Note that only binaries and the man pages for man-db itself
+# go to /opt. Everything else (libpipeline, man-db's shared libs, localized
+# messages, etc) goes to /usr as usual.
+
+# If you want a proper replacement for Slack's man pkg, build with
+# USR="yes", which puts the binaries in the usual places. If your name is
+# Patrick V. and you're finally replacing man with man-db in Slackware,
+# feel free to uncomment the next line:
+#USR="yes"
+
+BINDIR=/opt/$PRGNAM/bin
+[ "${USR:-no}" = "yes" ] && BINDIR=/usr/bin
+MANDIR="${BINDIR/bin/man}"
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+
+# libpipeline is a pretty niche-market library. It used to be bundled
+# in the man-db source, and as far as I can tell, nothing else uses it.
+# Instead of making it a separate build and external dep, we'll just
+# bundle it here.
+LIBNAM=libpipeline
+LIBVER=1.3.0
+
+cd $TMP
+rm -rf $LIBNAM-$LIBVER
+tar xvf $CWD/$LIBNAM-$LIBVER.tar.gz
+cd $LIBNAM-$LIBVER
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION/$LIBNAM-$LIBVER \
+  --build=$ARCH-slackware-linux
+
+make
+make install-strip DESTDIR=$PKG
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/$LIBNAM-$LIBVER
+cp -a COPYING ChangeLog* NEWS README TODO \
+  $PKG/usr/doc/$PRGNAM-$VERSION/$LIBNAM-$LIBVER
+
+# now build man-db itself, using the libpipeline installed in $PKG
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+libpipeline_CFLAGS="-I$PKG/usr/include" \
+libpipeline_LIBS="-L$PKG/usr/lib$LIBDIRSUFFIX -lpipeline" \
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --disable-setuid \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=$MANDIR \
+  --bindir=$BINDIR \
+  --sbindir=${BINDIR/bin/sbin} \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --build=$ARCH-slackware-linux
+
+make
+make install-strip DESTDIR=$PKG
+
+# There will always be man pages here, regardless of USR=yes or no.
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+if [ "${USR:-no}" != "yes" ]; then
+  # separate dir full of man pages and symlinks in /opt
+  find $PKG/$MANDIR -type f -exec gzip -9 {} \;
+  for i in $( find $PKG/$MANDIR -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+  # only need the profile.d stuff if installing to /opt
+  mkdir -p $PKG/etc/profile.d
+  install -m0755 -oroot -groot $CWD/$PRGNAM.sh $CWD/$PRGNAM.csh $PKG/etc/profile.d
+fi
+
+# no special ownership or perms needed here since we --disable-setuid
+mkdir -p $PKG/var/cache/man
+
+# only ship a daily cronjob, don't need a weekly one like Debian has.
+mkdir -p $PKG/etc/cron.daily
+install -m0755 -oroot -groot $CWD/$PRGNAM.cron $PKG/etc/cron.daily/$PRGNAM
+
+# modified default config, customized for Slackware. See the conf file for
+# list of changes.
+zcat $CWD/man_db.conf.new.gz \
+  | sed "s,@LIBDIRSUFFIX@,$LIBDIRSUFFIX,g" \
+  > $PKG/etc/man_db.conf.new
+rm -rf $PKG/etc/man_db.conf
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a ABOUT-NLS Change* FAQ NEWS README docs/* $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+sed "s,@BINDIR@,$BINDIR," < $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+# N.B. the -p option is actually needed here (for libpipeline.so).
+cd $PKG
+/sbin/makepkg -p -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
