@@ -2,22 +2,29 @@
 
 # Slackware build script for mupdf
 
-# Written by Hubert Hesse (slackbuilds@hubertscorner.de)
+# Originally written by Hubert Hesse (slackbuilds@hubertscorner.de).
+# Heavily modified by B. Watson (yalhcru@gmail.com).
 
-# Modified 20130618 by B. Watson (yalhcru@gmail.com):
-# - Took over maintenance
-# - Updated for mupdf 1.2
-# - Build library shared, not static
-# - Build with system zlib, libjpeg, openjpeg, jbig2dec, libtiff, libpng,
-#   liblcms2 instead of bundled sources (which made the lib + exes *huge*).
-#   Also, the included libjpeg is too new (it broke zathura-pdf-mupdf).
-# - Include mutool in package (instead of just its man page)
-# - Add CHANGES CONTRIBUTORS doc/* to /usr/doc
-# - Use DESTDIR libdir mandir instead of patching makefile
-# - Updated README & slack-desc to mention XPS and CBZ
-# - Fix the man pages slightly
+# 20140822 bkw:
+# - Updated for mupdf-1.5.
+# - Hosting the source on my server, so I know it won't get moved
+#   to an archive/ dir when a new release comes out.
+# - Script also tested with 1.4:
+#   DOWNLOAD="http://urchlay.naptime.net/~urchlay/src/mupdf-1.4-source.tar.gz"
+#   MD5SUM="0f6840a7020db0c833b0c090ca1864ec"
+# - Add .desktop, .pc, icon
+# - Got rid of CVE-2014-2013 patch (integrated by upstream in 1.4).
+# - Remove man page patch (not needed for 1.4 and up).
+# - Replace openjpeg dep with newly-submitted openjpeg2.
+# - Small patch to allow building with openjpeg 2.1.0 (rather than 2.0.0).
+# - For now, revert to static libmupdf. Upstream doesn't support
+#   shared libs, they hate it when distro packages create them,
+#   and rolling my own shared libs is more PITA than it's worth.
+# - Upstream renamed the binary to mupdf-x11, add symlinks so scripts
+#   or .desktop files can still run it as mupdf, and "man mupdf" will
+#   still work.
 
-# Modified 20140224 by B. Watson (yalhcru@gmail.com):
+# 20140224 bkw:
 # - backported security fix for CVE-2014-2013. I will be upgrading this
 #   build to mupdf-1.3, but it'll take more work than I currently have
 #   time for:
@@ -31,11 +38,24 @@
 #   The security fix is needed now, it's a tiny patch, and shouldn't have
 #   to wait on all that other stuff.
 
-# 20140318 bkw: fix permissions on headers and man pages
+# 20140318 bkw: fix permissions on headers and man pages.
+
+# 20130618 bkw:
+# - Took over maintenance.
+# - Updated for mupdf 1.2.
+# - Build library shared, not static.
+# - Build with system zlib, libjpeg, openjpeg, jbig2dec, libtiff, libpng,
+#   liblcms2 instead of bundled sources (which made the lib + exes *huge*).
+#   Also, the included libjpeg is too new (it broke zathura-pdf-mupdf).
+# - Include mutool in package (instead of just its man page).
+# - Add CHANGES CONTRIBUTORS doc/* to /usr/doc.
+# - Use DESTDIR libdir mandir instead of patching makefile.
+# - Updated README & slack-desc to mention XPS and CBZ.
+# - Fix the man pages slightly.
 
 PRGNAM=mupdf
-VERSION=${VERSION:-1.2}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-1.5}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -70,36 +90,45 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION-source
-unzip $CWD/$PRGNAM-$VERSION-source.zip
+tar xvf $CWD/$PRGNAM-$VERSION-source.tar.gz
 cd $PRGNAM-$VERSION-source
+
+# don't find/chown/chmod until after the thirdparty junk is removed.
+
+# Build against system libs instead of bundled ones. If we didn't do this,
+# libmupdf.a would be useless for building anything else.
+
+# Everything removed from thirdparty/ has to be installed systemwide, and must
+# either be a Slackware core pkg, or mentioned in REQUIRES= in the .info
+# file... except mujs, which is mupdf's javascript support lib. If missing,
+# we end up with a mupdf with no JS support, which is probably a good idea
+# for the default build. If you want javascript, MUJS=yes in the env.
+
+MUJS="${MUJS:-no}"
+[ "$MUJS" = "yes" ] && mv thirdparty/mujs .keep
+rm -rf thirdparty/*
+[ "$MUJS" = "yes" ] && mv .keep thirdparty/mujs
+
 chown -R root:root .
 find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# We want a shared library, not static.
-# This patch based on http://bugs.ghostscript.com/show_bug.cgi?id=693009
-# with the following changes:
-# - actually applies to mupdf-1.2
-# - links the applications dynamically
-# - doesn't even build/install the static lib by default
-# - adds mutool to list of stuff installed to $prefix/bin
-patch -p1 < $CWD/shared_libfitz.diff
+# opj_stream_set_user_data() now takes 3 args in openjpeg 2.1.
+# Patch applies to both 1.4 and 1.5.
+patch -p1 < $CWD/openjpeg-2.1-api-change.diff
 
-# 'see also' mentions nonexistent stuff (mupdfclean, mupdfshow), also
-# the -b option to mupdf was missing.
-patch -p1 < $CWD/man_page.diff
+# Makerules incorrectly tries to build with openjpeg-1.x system lib, while
+# the bundled version is 2.0, and the code uses the 2.0 API.
+# Actually this was fixed in 1.5, but I leave this here in case someone
+# wants to use this script to build mupdf-1.4 for some reason.
+sed -i 's,libopenjpeg1,libopenjp2,g' Makerules
 
-# Build against system libs instead of shipped ones
-sed -i 's,libopenjpeg,libopenjpeg1,' Makerules
-rm -rf thirdparty
-
-# patch from upstream git, fix security vulnerability CVE-2014-2013.
-# from here: http://git.ghostscript.com/?p=user/zeniko/mupdf.git;h=60dabde18d
-# Patch is for mupdf-1.3, I've backported it to 1.2 for now.
-patch -p1 < $CWD/xps_parse_color_overflow_fix.diff
+# Hard-code the version number so it'll stop trying to use git to retrieve
+# it and spewing harmless but scary 'fatal: Not a git repository' errors.
+sed -i "/^VERSION/s,=.*,= $VERSION," Makefile
 
 make build=release prefix=/usr XCFLAGS="$SLKCFLAGS"
 make \
@@ -110,20 +139,61 @@ make \
   DESTDIR=$PKG \
   install
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+if [ "$MUJS" = "yes" ]; then
+  # If JS support included, applications will need to link with this:
+  install -m0664 build/release/libmujs.a $PKG/usr/lib$LIBDIRSUFFIX/
+  install -m0664 thirdparty/mujs/mujs.h $PKG/usr/include/
+else
+  # Don't need mujstest if no javascript support.
+  rm -f $PKG/usr/bin/mujstest
+fi
+
+strip $PKG/usr/bin/*
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-chmod -x $PKG/usr/include/*.h $PKG/usr/man/man?/*
+# Compatibility symlinks. Older versions, the binary is just "mupdf".
+# Separate -curl binary exists in 1.5 but not 1.4.
+ln -s $PRGNAM-x11 $PKG/usr/bin/$PRGNAM
+ln -s $PRGNAM.1.gz $PKG/usr/man/man1/$PRGNAM-x11.1.gz
+[ -e $PKG/usr/bin/$PRGNAM-x11-curl ] && \
+  ln -s $PRGNAM.1.gz $PKG/usr/man/man1/$PRGNAM-x11-curl.1.gz
+
+# Installed permissions are atrocious (everything 755).
+find $PKG -type f | xargs chmod 644
+chmod 755 $PKG/usr/bin/*
+
+# .desktop taken from debian and modified:
+# - make it validate.
+# - add mime types for cbz and xps.
+mkdir -p $PKG/usr/share/applications
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+# Icon converted from platform/x11/mupdf.ico, with icotool.
+mkdir -p $PKG/usr/share/pixmaps
+cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# .pc file taken from debian and parameterized.
+PCLIBS="-l$PRGNAM"
+[ "$MUJS" = "yes" ] && PCLIBS="$PCLIBS -lmujs"
+
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/pkgconfig/
+sed -e "s,@LIB@,lib$LIBDIRSUFFIX,g" \
+    -e "s,@VERSION@,$VERSION,g" \
+    -e "s,@PCLIBS@,$PCLIBS,g" \
+    $CWD/$PRGNAM.pc > $PKG/usr/lib$LIBDIRSUFFIX/pkgconfig/$PRGNAM.pc
+
+# slack-desc will conveniently say whether javascript is built in.
+WITH=without
+[ "$MUJS" = "yes" ] && WITH=with
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a README COPYING CHANGES CONTRIBUTORS doc/* $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README COPYING CHANGES CONTRIBUTORS docs/*.* $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@WITH@,$WITH," < $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
