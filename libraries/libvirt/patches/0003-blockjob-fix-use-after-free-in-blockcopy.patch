@@ -1,0 +1,105 @@
+From 9617e31b5349b193469874706abcbcb013e6a6fd Mon Sep 17 00:00:00 2001
+From: Eric Blake <eblake@redhat.com>
+Date: Wed, 6 Aug 2014 14:06:23 -0600
+Subject: [PATCH 3/3] blockjob: fix use-after-free in blockcopy
+
+Commit febf84c2 tried to delay in-memory modification of the actual
+domain disk structure until after the qemu event was received.
+However, I missed that the code for block pivot had been temporarily
+setting disk->src = disk->mirror prior to the qemu command, in order
+to label the backing chain of a reused external blockcopy disk;
+and calls into qemu while still in that state before finally undoing
+things at the cleanup label.  Since the qemu event handler then does:
+ virStorageSourceFree(disk->src);
+ disk->src = disk->mirror;
+we have the sad race that a fast enough qemu event can cause a leak of
+the original disk->src, as well as a use-after-free of the disk->mirror
+contents, bad enough to crash libvirtd in some of my test runs, even
+though the common case of the qemu event being much later won't trip
+the race.
+
+I'll go wear the brown paper bag of shame, for introducing a crasher
+in between rc1 and rc2 of the freeze for 1.2.7 :(  My only
+consolation is that virDomainBlockJobAbort requires the domain:write
+ACL, so it is not a CVE.
+
+The valgrind report when the race occurs looks like:
+
+==25612== Invalid read of size 4
+==25612==    at 0x50E7C90: virStorageSourceGetActualType (virstoragefile.c:1948)
+==25612==    by 0x209C0B18: qemuDomainDetermineDiskChain (qemu_domain.c:2473)
+==25612==    by 0x209D7F6A: qemuProcessHandleBlockJob (qemu_process.c:1087)
+==25612==    by 0x209F40C9: qemuMonitorEmitBlockJob (qemu_monitor.c:1357)
+...
+==25612==  Address 0xe4b5610 is 0 bytes inside a block of size 200 free'd
+==25612==    at 0x4A07577: free (in /usr/lib64/valgrind/vgpreload_memcheck-amd64-linux.so)
+==25612==    by 0x50839E9: virFree (viralloc.c:582)
+==25612==    by 0x50E7E51: virStorageSourceFree (virstoragefile.c:2015)
+==25612==    by 0x209D7EFF: qemuProcessHandleBlockJob (qemu_process.c:1073)
+==25612==    by 0x209F40C9: qemuMonitorEmitBlockJob (qemu_monitor.c:1357)
+
+* src/qemu/qemu_driver.c (qemuDomainBlockPivot): Don't corrupt
+disk->src, and only label chain for blockcopy.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit 265680c58ebbee30bb70369e7d9905a599afbd6a)
+---
+ src/qemu/qemu_driver.c | 40 +++++++++++++++++++++++++---------------
+ 1 file changed, 25 insertions(+), 15 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 57cc913..a050dbc 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -14888,23 +14888,33 @@ qemuDomainBlockPivot(virConnectPtr conn,
+         }
+     }
+ 
+-    /* We previously labeled only the top-level image; but if the
+-     * image includes a relative backing file, the pivot may result in
+-     * qemu needing to open the entire backing chain, so we need to
+-     * label the entire chain.  This action is safe even if the
+-     * backing chain has already been labeled; but only necessary when
+-     * we know for sure that there is a backing chain.  */
+-    oldsrc = disk->src;
+-    disk->src = disk->mirror;
++    /* For active commit, the mirror is part of the already labeled
++     * chain.  For blockcopy, we previously labeled only the top-level
++     * image; but if the user is reusing an external image that
++     * includes a backing file, the pivot may result in qemu needing
++     * to open the entire backing chain, so we need to label the
++     * entire chain.  This action is safe even if the backing chain
++     * has already been labeled; but only necessary when we know for
++     * sure that there is a backing chain.  */
++    if (disk->mirrorJob == VIR_DOMAIN_BLOCK_JOB_TYPE_COPY) {
++        oldsrc = disk->src;
++        disk->src = disk->mirror;
++
++        if (qemuDomainDetermineDiskChain(driver, vm, disk, false) < 0)
++            goto cleanup;
+ 
+-    if (qemuDomainDetermineDiskChain(driver, vm, disk, false) < 0)
+-        goto cleanup;
++        if (disk->mirror->format &&
++            disk->mirror->format != VIR_STORAGE_FILE_RAW &&
++            (virDomainLockDiskAttach(driver->lockManager, cfg->uri, vm,
++                                     disk) < 0 ||
++             qemuSetupDiskCgroup(vm, disk) < 0 ||
++             virSecurityManagerSetDiskLabel(driver->securityManager, vm->def,
++                                            disk) < 0))
++            goto cleanup;
+ 
+-    if (disk->mirror->format && disk->mirror->format != VIR_STORAGE_FILE_RAW &&
+-        (virDomainLockDiskAttach(driver->lockManager, cfg->uri, vm, disk) < 0 ||
+-         qemuSetupDiskCgroup(vm, disk) < 0 ||
+-         virSecurityManagerSetDiskLabel(driver->securityManager, vm->def, disk) < 0))
+-        goto cleanup;
++        disk->src = oldsrc;
++        oldsrc = NULL;
++    }
+ 
+     /* Attempt the pivot.  Record the attempt now, to prevent duplicate
+      * attempts; but the actual disk change will be made when emitting
+-- 
+2.0.3
+
