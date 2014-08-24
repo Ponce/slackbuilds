@@ -1,9 +1,11 @@
 #!/bin/sh
 
-# This only requires the big texlive-$VERSION-texmf.tar.xz and
+# This requires the texlive-$VERSION-texmf.tar.xz (large) and
 # texlive-$VERSION-extra.tar.xz tarballs to be present in $CWD
+# ftp://tug.org/historic/systems/texlive/2014/texlive-20140525-texmf.tar.xz
+# ftp://tug.org/historic/systems/texlive/2014/texlive-20140525-extra.tar.xz
 
-# If texlive.tlpdb is not present, it will have to be obtained from
+# If texlive.tlpdb is not present, it will have to be obtained from 
 # subversion (based on the # release date), e.g.
 # svn co -r {20140525} svn://tug.org/texlive/trunk/Master/tlpkg
 # You can then copy tlpkg/texlive.tlpdb to $CWD
@@ -12,99 +14,54 @@ set -eu
 
 VERSION=20140525
 
+pkglist=${pkglist:-"texmf-tetexish texmf-extra texmf-docs texmf-src"}
+
 CWD=$(pwd)
+TMP=${TMP:-$CWD/tmplists}
+PACKLISTS=${PACKLISTS:-$CWD/packlists}
+TARBALLS=${TARBALLS:-$CWD/tarballs}
+
+export CWD TMP PACKLISTS TARBALLS
+
 TMF="$CWD/texlive-$VERSION-texmf";
 
 if [ ! -e $CWD/texlive.tlpdb ] ; then
   printf "\nYou need texlive.tlpdb in $CWD - get it here:\n"
-  printf "http://ftp.ctex.org/mirrors/CTAN/systems/texlive/tlnet/tlpkg/texlive.tlpdb\n\n"
-  exit 1
+  printf "http://harrier.slackbuilds.org/texlive-2014/texscythe/contrib/texlive.tlpdb\n\n"
+  exit 1 
 fi
 
-rm -rf tmplists ; mkdir tmplists
+printf "\nMaking these tarballs: $pkglist\n\n" ; sleep 2
+
+rm -rf $TMP $PACKLISTS
+mkdir -p $TMP $PACKLISTS
 
 # Initialize the texscyther db
-texscyther --initdb
+if [ ! -r $CWD/$CWD/texscythe.db ]; then
+  texscyther --initdb --sqldb $CWD/texscythe.db
+fi
 
-# Build a packaging list for all of the texmf stuff, but exclude docs and src
-texscyther \
-  --tlpdb $CWD/texlive.tlpdb \
-  --nodirs \
-  --subset \
-    --include scheme-full \
-    --exclude scheme-full:doc scheme-full:src \
-  --output-plist tmplists/full
+for pkg in $(printf "$pkglist") ; do ./helpers/$pkg ; done
 
-# Build a packaging list for the docs (bibarts is for DOS)
-texscyther \
-  --tlpdb $CWD/texlive.tlpdb \
-  --nodirs \
-  --subset \
-    --include scheme-full:doc \
-    --exclude scheme-full:src bibarts \
-  --output-plist tmplists/docs
+if [ ! -d $TMF ]; then
+  printf "Extracting sources to create tarballs - please be patient...\n"
+  tar xf texlive-$VERSION-texmf.tar.xz
+  tar xf texlive-$VERSION-extra.tar.xz
+  mv texlive-$VERSION-extra/* $TMF && rmdir texlive-$VERSION-extra
+fi
 
-# Build a packaging list for the texmf sources
-texscyther \
-  --tlpdb $CWD/texlive.tlpdb \
-  --nodirs \
-  --subset \
-    --include scheme-full:src \
-    --exclude bibarts \
-  --output-plist tmplists/src
+printf "Creating tarballs - please be moar patient...\n"
+rm -rf $TARBALLS ; mkdir -p $TARBALLS
 
-# These next bits could probably be done using the --regex option passed to
-# texscyther, but I already know how to do it this way :-)
-
-# Filter some stuff out of texmf (build a ladder over UUOC if needed)
-cat tmplists/full | \
-  grep "texmf-dist/" | \
-  grep -v "win32" \
-  > full-packlist
-
-# Filter some stuff out of docs (use that ladder again)
-cat tmplists/docs | \
-  grep "texmf-dist/" | \
-  grep -v "context/stubs/mswin/" | \
-  grep -v "win32" | \
-  grep -v "MinGW" \
-  > docs-packlist
-
-# No filtering (for now) of src stuff
-cat $CWD/tmplists/src | \
-  > $CWD/src-packlist
-
-printf "Generating tarballs - please be patient...\n"
-
-rm -rf $TMF
-
-tar xf texlive-$VERSION-texmf.tar.xz
-tar xf texlive-$VERSION-extra.tar.xz
-mv texlive-$VERSION-extra/* $TMF && rmdir texlive-$VERSION-extra
-
-rm -rf tarballs ; mkdir tarballs
-
-printf "\tCreating tarballs/texlive-texmf-$VERSION.tar\n"
-tar cf \
-  tarballs/texlive-texmf-$VERSION.tar \
-  -C $TMF \
-  -T full-packlist
-
-printf "\tCreating tarballs/texlive-docs-$VERSION.tar\n"
-tar cf \
-  tarballs/texlive-docs-$VERSION.tar \
-  -C $TMF \
-  -T docs-packlist
-
-printf "\tCreating tarballs/texlive-src-$VERSION.tar\n"
-tar cf \
-  tarballs/texlive-src-$VERSION.tar \
-  -C $TMF \
-  -T src-packlist
+for pkg in $(printf "$pkglist") ; do \
+  printf "\tCreating $TARBALLS/texlive-$pkg-$VERSION.tar\n"
+    tar cf $TARBALLS/texlive-$pkg-$VERSION.tar -C $TMF \
+           -T $PACKLISTS/$pkg-packlist
+done
 
 printf "Compressing tarballs - please be MOAR patient...\n"
-xz -9 tarballs/*.tar
+xz -9 $TARBALLS/*.tar
 
 # Cleanup the leftovers
-rm -rf tmplists $TMF {full,docs,src}-packlist *.db
+rm -rf $TMP $PACKLISTS #$TMF #leave TMF for now
 
