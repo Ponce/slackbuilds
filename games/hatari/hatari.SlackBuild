@@ -6,8 +6,16 @@
 
 # Licensed under the WTFPL. See http://sam.zoy.org/wtfpl/ for details.
 
+# 20140825 bkw:
+# - updated for v1.8.0
+# - install docs/manpages to right places, instead of moving after the fact
+# - get rid of the need for a symlink /usr/doc/hatari
+# - only symlink emutos.img -> tos.img if no link already exists, so
+#   reinstalling the package won't reset the default ROM.
+# - add mime type and auto-associate ST disk images and executables.
+
 PRGNAM=hatari
-VERSION=${VERSION-1.7.0}
+VERSION=${VERSION-1.8.0}
 BUILD=${BUILD-1}
 TAG=${TAG-_SBo}
 
@@ -37,45 +45,44 @@ fi
 set -e
 
 rm -rf $PKG $TMP/$PRGNAM-$VERSION
-mkdir -p $PKG $PKG/install $PKG/etc/$PRGNAM
-
-# configure script is really a wrapper for cmake, doesn't support
-# --libdir, --mandir, --docdir. We'll just move everything where it
-# goes after the 'make install'. (If there were shared libs to deal
-# with, this likely wouldn't be good enough)
+mkdir -p $PKG $PKG/etc/$PRGNAM
 
 cd $TMP
 tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
 cd $PRGNAM-$VERSION
+
+# configure script is really a wrapper for cmake, doesn't support
+# --libdir, --mandir, --docdir. cheat a little.
+sed -i \
+  -e 's,share/man/man1,man/man1,' \
+  -e "s,share/doc/$PRGNAM,doc/$PRGNAM-$VERSION," \
+  CMakeLists.txt
+
+# hard-code the doc path in the UI (we don't use /usr/share/doc/hatari)
+sed -i \
+  -e "/path *= *path *+/s,=.*,= \"/usr/doc/$PRGNAM-$VERSION/\"," \
+  python-ui/uihelpers.py
+
 ./configure --prefix=/usr
 
 make
 make install/strip DESTDIR=$PKG
 
-# amazingly, the man pages are already gzipped (but in the wrong place)
-mv $PKG/usr/share/man $PKG/usr/man
-
-# Also, the docs are in the wrong place:
-WRONGDOCDIR=$PKG/usr/share/doc/$PRGNAM
 DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION
-
-mkdir -p $DOCDIR
-mv $WRONGDOCDIR/* $DOCDIR
-rmdir $WRONGDOCDIR
-
-# However, the doc location is hardcoded in the UI. This works
-# because /usr/share/doc is really a symlink to /usr/doc on Slackware.
-ln -s $PRGNAM-$VERSION $PKG/usr/doc/$PRGNAM
-
 cat $CWD/$PRGNAM.SlackBuild > $DOCDIR/$PRGNAM.SlackBuild
 
 # these docs don't get installed for some reason:
 cp tools/hmsa/readme-hmsa.txt readme.txt gpl.txt $DOCDIR
 
-# Make sure hatariui shows up in desktop menu:
-echo 'Categories=Game;Emulator;' >> $PKG/usr/share/applications/${PRGNAM}ui.desktop
+# Replace .desktop with modified one, auto-associates ST disks/executables.
+cat $CWD/${PRGNAM}ui.desktop > $PKG/usr/share/applications/${PRGNAM}ui.desktop
 
-( cd $PKG/usr/share/$PRGNAM && mv tos.img emutos.img && ln -s emutos.img tos.img )
+# Custom MIME types for ST disk images and executables, by script author.
+mkdir -p $PKG/usr/share/mime/packages
+cat $CWD/$PRGNAM.xml > $PKG/usr/share/mime/packages/$PRGNAM.xml
+
+# Don't symlink emutos to tos here, do it conditionally in doinst.sh.
+( cd $PKG/usr/share/$PRGNAM && mv tos.img emutos.img )
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
