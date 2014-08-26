@@ -6,8 +6,28 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20140825 bkw:
+# - updated for 2.9
+# - include icon in slackbuild dir (upstream removed it from src tarball)
+# - use ColEm.html from the source (upstream includes it now)
+# - get rid of DISPLAY_BPP stuff, bpp is now detected at runtime,
+#   tested same binary on 16bpp and 32bpp, doubt anyone still uses 8bpp
+# - host source myself, since upstream doesn't keep old releases
+# - convert man page to .pod, for easier editing
+# - install binary in /usr/games, man page in section 6
+# - don't unzip the system ROM to $CWD (it might be read-only)
+# - support ROM images with alternate name os7.rom
+# - clean up README formatting, get rid of bpp stuff, mention OSS audio
+# - add a generic-icon to colem.xml, at least in XFCE this makes .col
+#   files show up with the colem icon.
+# - improve the .desktop file:
+#   + don't display in the start menu (since a ROM argument is required)
+#   + auto-associate with colecovision ROMs (as defined in colem.xml)
+#   + run "aoss colem" to get audio working on a stock Slack 14.1 system
+#     with OSS modules disabled by default.
+
 PRGNAM=colem
-VERSION=${VERSION:-2.6}
+VERSION=${VERSION:-2.9}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -50,7 +70,7 @@ fi
 set -e
 
 ZIPNAME="ColEm"
-ZIPVER=$( echo $VERSION | sed 's/\.//g' )
+ZIPVER=${VERSION//./}
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -66,44 +86,43 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-sed -i 's/-O3/$(SLKCFLAGS)/' EMULib/Rules.gcc
+sed -i "s/-O2/$SLKCFLAGS/" EMULib/Rules.gcc
 
 # Make the emulator look in /usr/share/colem and ~/.colem for the
 # system ROMs, as well as the current directory. Without this, it's
 # quite annoying to use colem from either the command line or KDE.
 patch -p1 < $CWD/rom_path.diff
 
+# Don't lie and say we support .zip files. There's no code to implement it,
+# at least not in the *nix port.
+sed -i 's,and PKZIPped ,,' ColEm/Help.h ColEm/ColEm.html
+
 cd $ZIPNAME/Unix
 
-# Allow building for 8bpp or 16bpp X11 displays (the default is 32,
-# which works on either 24bpp or 32bpp, which 99% of everyone is
-# using now).
-if [ "${DISPLAY_BPP:-32}" != "32" ]; then
-  sed -i "/^DEFINES/s/-DBPP32/-DBPP$DISPLAY_BPP/" Makefile
-fi
+# ColEm.html claims that -DGIFLIB makes the F10 key save a GIF snapshot,
+# but it's not actually implemented in ColEm-2.9. In 2.6 it was implemented
+# only for MS-DOS.
+#sed -i "/^DEFINES/s/$/ -DGIFLIB/" Makefile
 
 # Allow building on big-endian platforms (such as s390)
 if [ "${BIGENDIAN:-no}" != "no" ]; then
   sed -i "/^DEFINES/s/-DLSB_FIRST/-DMSB_FIRST/" Makefile
 fi
 
-make SLKCFLAGS="$SLKCFLAGS"
-mkdir -p $PKG/usr/bin
-install -s -m0755 -oroot -groot $PRGNAM $PKG/usr/bin
+make
+
+# no 'make install', do it manually.
+mkdir -p $PKG/usr/games
+install -s -m0755 -oroot -groot $PRGNAM $PKG/usr/games
 
 # Man page written by script author.
-mkdir -p $PKG/usr/man/man1
-gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+mkdir -p $PKG/usr/man/man6
+gzip -9c < $CWD/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README
-
-# HTML doc downloaded from http://fms.komkon.org/ColEm/ColEm.html
-cat $CWD/$ZIPNAME.html > $PKG/usr/doc/$PRGNAM-$VERSION/$ZIPNAME.html
-
+# Icon used to be distributed with the colem 2.6 source, as
+# Maemo/Package/colem-64x64.png
 mkdir -p $PKG/usr/share/pixmaps
-cat ../Maemo/Package/colem-64x64.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
 
 # .desktop file and mime .xml file originally taken from ColEm-Maemo
 # sources and modified to get rid of the Maemo-specific stuff.
@@ -113,20 +132,31 @@ cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
 mkdir -p $PKG/usr/share/mime/packages
 cat $CWD/$PRGNAM.xml > $PKG/usr/share/mime/packages/$PRGNAM.xml
 
-# The ROM directory
+# The ROM directory. Included even if there's no ROM in the package.
 mkdir -p $PKG/usr/share/$PRGNAM
 
-# If there's a ROM image in $CWD, include it in the package
+# Look for zipped ROM images and unzip them.
 if [ -e $CWD/coleco.zip ]; then
-	( cd $CWD ; unzip -o coleco.zip )
+	unzip -o $CWD/coleco.zip
 elif [ -e $CWD/COLECO.ZIP ]; then
-	( cd $CWD ; unzip -o COLECO.ZIP )
+	unzip -o $CWD/COLECO.ZIP
 fi
-if [ -e $CWD/coleco.rom ]; then
-	cat $CWD/coleco.rom > $PKG/usr/share/$PRGNAM/coleco.rom
-elif [ -e $CWD/COLECO.ROM ]; then
-	cat $CWD/COLECO.ROM > $PKG/usr/share/$PRGNAM/coleco.rom
-fi
+
+# Look for non-zipped ROM images, either unzipped above or in $CWD.
+for i in coleco.rom COLECO.ROM os7.rom OS7.ROM; do
+  [ -e $i ] && ROM=$i
+  [ -e $CWD/$i ] && ROM=$CWD/$i
+done
+
+# If we found a ROM image, include it in the package.
+[ -n "$ROM" ] && cat $ROM > $PKG/usr/share/$PRGNAM/coleco.rom
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README
+
+# HTML doc now included in the source tarball (didn't used to be).
+cat ../$ZIPNAME.html > $PKG/usr/doc/$PRGNAM-$VERSION/$ZIPNAME.html
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
