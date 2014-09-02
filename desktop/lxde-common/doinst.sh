@@ -14,6 +14,8 @@ config() {
 config etc/xdg/lxsession/LXDE/desktop.conf.new
 config etc/xdg/lxsession/LXDE/autostart.new
 config etc/xdg/pcmanfm/LXDE/pcmanfm.conf.new
+config etc/xdg/lxpanel/LXDE/panels/panel.new
+config etc/xdg/lxpanel/LXDE/config.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
