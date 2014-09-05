@@ -1,0 +1,192 @@
+*** Running a taskd server under Slackware ***
+
+Table of contents:
+	
+	* Taskd configuration for Slackware
+	* Creating a taskd user and data directory
+	* Initializing the server
+	* Certificates and clients
+	* Starting the server
+	* Cautions and quirks...
+
+See man taskd, /usr/doc/taskd-VERSION/doc/operation.txt
+and man task-sync (from task) for full details of
+what follows. In particular, read the operation.txt
+document for a more complete overview.
+
+Taskd configuration for Slackware
+=================================
+
+The taskd server is written to be cross-platform among
+Unix-like OSs and leaves many setup and configuration
+choices to the user. The provided man pages and text
+guides are complete and helpful, but this SlackBuild
+script adds a few details to make initial setup easier
+on a Slackware system.
+
+The added pieces are:
+
+	* Creation of a taskd user and group
+	* Creation of data directory - /var/lib/taskd
+	* A global path config file - /etc/taskddata
+	* Profile scripts - /etc/profile.d/taskddata.{sh,csh}
+	* A Slackware start script - /etc/rc.d/rc.taskd
+
+If you build and install the package with this script, you
+you will end with a complete taskd install just as provided
+by the upstream sources. Simply ignore or remove the above 
+listed files and skip the following config steps, and you
+may then configure and run the server according to your own
+choices based on man taskd and the distribution docs.
+
+If you continue, the following steps will get your taskd 
+server running quickly and safely based on the above 
+listed choices.
+
+Create a taskd user and data directory
+======================================
+
+The server should be run as a non-priviledged user, and
+the data paths should be owned by that user and not
+accessible by others. You may use any UID/GID you choose,
+those guaranteed not to conflict on a Slackware/SBo system
+may be found here: http://www.slackbuilds.org/uid_gid.txt
+
+To create the user account and data directory, execute the
+following shell commands as root:
+
+groupadd -g 290 taskd
+useradd -g taskd -u 290 -d /var/lib/taskd taskd 
+mkdir -p /var/lib/taskd
+chown taskd:taskd /var/lib/taskd
+chmod 700 /var/lib/taskd
+
+Initializing the server
+=======================
+
+You need to initialize the server as the taskd user,
+AND  the $TASKDDATA env variable must be set for that user,
+so let's verify that first:
+
+	su - taskd
+	echo $TASKDDATA
+
+If the value of $TASKDDATA is not the same as the data path
+set above, check the following:
+
+	/etc/taskddata - Must export the variable when sourced
+
+	/etc/profile.d/taskddata.{sh,csh} - are executable
+		OR
+	/etc/profile - includes a line ". /etc/taskddata"
+
+After you verify taskd user correctly sees $TASKDDATA...
+
+	taskd init --data $TASKDDATA
+	taskd config server localhost:53589
+
+Change logs and PIDs from /tmp to data path
+
+	taskd config log $TASKDDATA/taskd.log
+	taskd config pid.file $TASKDDATA/taskd.pid
+	taskd config ip.log   1
+
+We will allow all connections for now...
+
+	taskd config client.allow all
+	taskd config client.deny none
+
+Certificates and clients
+========================
+
+The server needs a certificate, key and crl to operate.
+See operation.txt and man taskd to set up your own certs,
+the following uses locally created self-signed certs.
+
+You will need to be root for this...
+
+      cd /usr/share/taskd-VERSION/pki
+      ./generate
+
+Once the various files are created, install them in $TASKDDATA:
+
+      cp client.cert.pem $TASKDDATA
+      cp server.cert.pem $TASKDDATA
+      cp server.key.pem $TASKDDATA
+      cp server.crl.pem $TASKDDATA
+
+Configure the server to use them:
+
+      taskd config client.cert $TASKDDATA/client.cert.pem
+      taskd config server.cert $TASKDDATA/server.cert.pem
+      taskd config server.key $TASKDDATA/server.key.pem
+      taskd config server.crl $TASKDDATA/server.crl.pem
+
+We are using self-signed certs at this point, so...
+
+      cp ca.cert.pem $TASKDDATA
+      taskd config ca.cert $TASKDDATA/ca.cert.pem
+
+Now you must change ownership of these to taskd in the data
+directory:
+
+	chown taskd:taskd /var/lib/taskd/*
+
+The resultant client.cert.pem and client.key.pem files 
+are needed by the clients (see man task-sync from task).
+
+This will get taskd working and is probably sufficient for local
+use. You will want to use proper certificates and keys created
+per-user for production use. See the accompanying docs for details.
+
+See man taskd for creating and managing organizations, groups and 
+users on the server.
+
+Starting the server
+===================
+
+To start/stop the taskd server:
+
+chmod +x /etc/rc.d/rc.taskd
+
+/etc/rc.d/rc.taskd start
+/etc/rc.d/rc.taskd stop
+
+See comments in /etc/rc.d/rc.taskd to auto-start at boot.
+
+Cautions and quirks...
+======================
+
+Taskd is a new application and is not as mature as the task
+client application. Although it has proven to be very stable in 
+operation, it has a few loose ends still when it comes to
+admin of the server. Hopefully these will be cleaned up with
+future releases!
+
+A recurring theme in my own use has been that when creating
+new organizations and users, I forget to su - taskd first and
+perform the operation as root - and it succeeds! But taskd
+creates the associated subdirectories and files with root
+ownership and the server cannot use them!
+
+Another is when changing server certs, I generate and copy
+them in as root - the server will not start afterward.
+
+The fix is easy in both cases...
+
+chown -R taskd:taskd /var/lib/taskd
+
+Just remember to perform all server admin as taskd, and when
+something breaks - check ownerships first!
+
+Another quirk is the start script - rc.taskd. I generated this
+based on the distribution taskdctl script, so I'll share the
+blame! It is not very robust when it encounters errors at startup
+and will report "server started" under some conditions where the
+server actually failed to start... use man taskd and test from
+an su - taskd shell when getting the configs right.
+
+Hopefully the server will catch the client soon in terms of
+polish!
+
+Enjoy!
