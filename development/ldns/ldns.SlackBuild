@@ -3,6 +3,7 @@
 # Copyright 2008, 2009  Eric Hameleers, Eindhoven, NL
 # Copyright 2008, 2009  Patrick J. Volkerding, Sebeka, MN  USA
 # Copyright 2010,  R. Andrew Bailey, Chantilly, VA  USA
+# Copyright 2014 Larry Hajali <larryhaja[at]gmail[dot]com>
 # All rights reserved.
 #
 #   Permission to use, copy, modify, and distribute this software for
@@ -33,7 +34,7 @@
 # -----------------------------------------------------------------------------
 
 PRGNAM=ldns
-VERSION=${VERSION:-1.6.5}
+VERSION=${VERSION:-1.6.17}
 TAG=${TAG:-_SBo}
 BUILD=${BUILD:-1}
 
@@ -89,42 +90,54 @@ CFLAGS="$SLKCFLAGS" \
   --sysconfdir=/etc \
   --mandir=/usr/man \
   --disable-static \
+  --enable-rrtype-ninfo \
+  --enable-rrtype-rkey \
+  --enable-rrtype-cds \
+  --enable-rrtype-uri \
+  --enable-rrtype-ta \
+  --disable-rpath \
+  --with-drill \
+  --with-examples \
+  --with-pyldns \
+  --with-pyldnsx \
+  --with-p5-dns-ldns \
+  --with-ca-path=/etc/ssl/certs \
+  --with-ca-file=/etc/ssl/certs/ca-certificates.crt \
+  --with-trust-anchor=/etc/$PRGNAM/root.key \
   --build=$ARCH-slackware-linux
 
 make
-make install DESTDIR=$PKG
+make install DESTDIR=$PKG INSTALLVENDORMAN3DIR=/usr/man/man3 INSTALLDIRS=vendor
+python -m compileall $PKG/usr/lib*/python*/site-packages
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a LICENSE README* $PKG/usr/doc/$PRGNAM-$VERSION
-
-cd drill
-  CXXFLAGS="$SLKCFLAGS" \
-  CFLAGS="$SLKCFLAGS" \
-  ./configure \
-    --prefix=/usr \
-    --libdir=/usr/lib${LIBDIRSUFFIX} \
-    --localstatedir=/var \
-    --sysconfdir=/etc \
-    --mandir=/usr/man \
-    --build=$ARCH-slackware-linux
-  make
-  make install DESTDIR=$PKG
-  mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/drill
-  cp -a ChangeLog* README REGRESSIONS $PKG/usr/doc/$PRGNAM-$VERSION/drill
-  find $PKG/usr/doc -type f -exec chmod 644 {} \;
-cd ..
-
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-find $PKG/usr/man -type f -name "*.?" -exec gzip -9f {} \;
+find $PKG -name perllocal.pod -o -name ".packlist" -o -name "*.bs" | xargs rm -f || true
+find $PKG -depth -type d -empty -delete || true
+
+# Create the root.key file
+mkdir -p $PKG/etc/$PRGNAM
+sed -n '/Zone/,$p' $CWD/root-anchors.xml | sed -e 's|<[^>]*>||g' | \
+  while read line; do
+    echo -n " $line"
+  done | sed 's|\.|\. IN DS|' | \
+  xargs > $PKG/etc/$PRGNAM/root.key.new
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a Changelog LICENSE README* doc/TODO $PKG/usr/doc/$PRGNAM-$VERSION
+
+mkdir -p $PKG/$(find /usr/share/vim -type d -name "vim[0-9]*")/syntax
+install -m 0644 libdns.vim \
+  $PKG/$(find /usr/share/vim -type d -name "vim[0-9]*")/syntax/$PRGNAM.vim
+
 find $PKG/usr/man -type f -exec chmod 0644 {} \;
-for i in $(find $PKG/usr/man -type l -name "*.?") ; do
-  ln -s $( readlink $i ).gz $i.gz ; rm $i ;
-done
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+find $PKG -name "LDNS.so" -exec chmod 0755 {} \;
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
