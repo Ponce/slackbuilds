@@ -1,0 +1,114 @@
+#!/bin/sh
+#
+# sxserver - this init script starts and stops the SX server
+#
+# chkconfig: 2345 80 20
+# description: Scalable public and private cloud storage
+
+### BEGIN INIT INFO
+# Provides: sxserver
+# Required-Start: $local_fs $network $remote_fs $time
+# Required-Stop: $local_fs $network $remote_fs $time
+# Default-Stop: 0 1 6
+# Short-Description: start and stop sxhttpd/sx.fcgi
+# Description: Scalable public and private cloud storage
+### END INIT INFO
+
+# Source function library.
+. /etc/rc.d/init.d/functions
+
+exec="/usr/sbin/sx.fcgi"
+exec_httpd="/usr/sbin/sxhttpd"
+config="/etc/sxserver/sxfcgi.conf"
+
+[ -e /etc/sysconfig/sxserver ] && . /etc/sysconfig/sxserver
+
+lockfile=/var/lock/subsys/sxserver
+
+start() {
+    [ -x $exec ] || exit 5
+    [ -x $exec_httpd ] || exit 5
+    [ -f $config ] || exit 6
+    mkdir -p /var/run/sxserver
+    OWNER=`grep run-as $config |cut -f2 -d\"`
+    chown "$OWNER" /var/run/sxserver
+    action $"Starting sxserver: " daemon --pidfile /var/run/sxserver/sxfcgi.pid $exec
+    retval=$?
+    if test $retval -eq 0; then
+        action $"Starting sxhttpd: " daemon --pidfile /var/run/sxserver/sxhttpd.pid $exec_httpd -c /etc/sxserver/sxhttpd.conf
+        retval=$?
+    fi
+    [ $retval -eq 0 ] && touch $lockfile
+    return $retval
+}
+
+stop() {
+    action $"Stopping sxhttpd: " killproc -p /var/run/sxserver/sxhttpd.pid "sxhttpd"
+    retval_httpd=$?
+
+    action $"Stopping sxserver: " killproc -p /var/run/sxserver/sxfcgi.pid "sxserver"
+    retval=$?
+
+    [ $retval -eq 0 ] && retval=$retval_httpd
+    [ $retval -eq 0 ] && rm -f $lockfile
+    return $retval
+}
+
+restart() {
+    stop
+    start
+}
+
+reload() {
+    restart
+}
+
+force_reload() {
+    restart
+}
+
+rh_status() {
+    status -p /var/run/sxserver/sxhttpd.pid sxhttpd
+    retval_httpd=$?
+    status -p /var/run/sxserver/sxfcgi.pid sxserver
+    retval=$?
+    [ $retval -eq 0 ] && retval=$retval_httpd
+    return $retval
+}
+
+rh_status_q() {
+    rh_status >/dev/null 2>&1
+}
+
+
+case "$1" in
+    start)
+        rh_status_q && exit 0
+        $1
+        ;;
+    stop)
+        rh_status_q || exit 0
+        $1
+        ;;
+    restart)
+        $1
+        ;;
+    reload)
+        rh_status_q || exit 7
+        $1
+        ;;
+    force-reload)
+        force_reload
+        ;;
+    status)
+        rh_status
+        ;;
+    condrestart|try-restart)
+        rh_status_q || exit 0
+        restart
+        ;;
+    *)
+        echo $"Usage: $0 {start|stop|status|restart|condrestart|try-restart|reload|force-reload}"
+        exit 2
+esac
+exit $?
