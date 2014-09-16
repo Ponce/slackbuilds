@@ -1,4 +1,4 @@
- config() {
+config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
   # If there's no config file by that name, mv it over:
@@ -11,9 +11,7 @@
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/jeex/magic.binary.new
 config etc/jeex/jeex.rc.new
-config etc/jeex/magic.text.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
