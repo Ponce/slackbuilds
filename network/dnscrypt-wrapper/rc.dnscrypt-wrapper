@@ -1,0 +1,262 @@
+#!/bin/bash
+
+CONFIGFILE="/etc/default/dnscrypt-wrapper"
+DAEMON="/usr/bin/dnscrypt-wrapper"
+
+. $CONFIGFILE
+
+start_instance() {
+    if [ -z ${PIDFILE[$1]} ]; then
+        echo "No configuration for instance $1 found!"
+        return
+    fi
+    if [ -r ${PIDFILE[$1]} ]; then
+        PID=$(cat ${PIDFILE[$1]})
+        if [ -z "$PID" ] || ! kill -0 $PID ; then
+            echo "Removing stale PID file..."
+            rm -f ${PIDFILE[$1]}
+        else
+            echo "dnscrypt-wrapper (instance $1) already running!"
+            return
+        fi
+    fi
+
+    # dnscrypt-wrapper will NOT work without this. /dev/urandom is required in
+    # the chroot.
+    if [ -n "${CHROOTDIR[$1]}" ]; then
+        if [ "$(readlink -f ${CHROOTDIR[$1]})" != "/" ]; then
+            if [ ! -d ${CHROOTDIR[$1]} ]; then
+                mkdir -p ${CHROOTDIR[$1]}
+                chmod 755 ${CHROOTDIR[$1]}
+            fi
+            if [ ! -d ${CHROOTDIR[$1]}/dev ]; then
+                mkdir -p ${CHROOTDIR[$1]}/dev
+                chmod 755 ${CHROOTDIR[$1]}/dev
+            fi
+            if [ ! -c ${CHROOTDIR[$1]}/dev/urandom ]; then
+                mknod -m 666 ${CHROOTDIR[$1]}/dev/urandom c 1 9
+            fi
+        fi
+    fi
+
+    OPTIONS="-d"
+    if [ -n "${LISTENADDRESS[$1]}" ]; then
+        OPTIONS="${OPTIONS} --listen-address=${LISTENADDRESS[$1]}"
+    fi
+    if [ -n "${PIDFILE[$1]}" ]; then
+        OPTIONS="${OPTIONS} --pidfile=${PIDFILE[$1]}"
+    fi
+    if [ -n "${USER[$1]}" ]; then
+        OPTIONS="${OPTIONS} --user=${USER[$1]}"
+    fi
+    if [ -n "${DNSCRYPTDIR[$1]}" ]; then
+        OPTIONS="${OPTIONS} --crypt-publickey-file=${DNSCRYPTDIR[$1]}/crypt_public.key"
+        OPTIONS="${OPTIONS} --crypt-secretkey-file=${DNSCRYPTDIR[$1]}/crypt_secret.key"
+        OPTIONS="${OPTIONS} --provider-publickey-file=${DNSCRYPTDIR[$1]}/public.key"
+        OPTIONS="${OPTIONS} --provider-secretkey-file=${DNSCRYPTDIR[$1]}/secret.key"
+    fi
+    if [ -z "${DNSCRYPTDIR[$1]}" ] && [ -n "${CRYPTPUBLICKEYFILE[$1]}" ]; then
+        OPTIONS="${OPTIONS} --crypt-publickey-file=${CRYPTPUBLICKEYFILE[$1]}"
+    fi
+    if [ -z "${DNSCRYPTDIR[$1]}" ] && [ -n "${CRYPTSECRETKEYFILE[$1]}" ]; then
+        OPTIONS="${OPTIONS} --crypt-secretkey-file=${CRYPTSECRETKEYFILE[$1]}"
+    fi
+    if [ -z "${DNSCRYPTDIR[$1]}" ] && [ -n "${PROVIDERPUBLICKEYFILE[$1]}" ]; then
+        OPTIONS="${OPTIONS} --provider-publickey-file=${PROVIDERPUBLICKEYFILE[$1]}"
+    fi
+    if [ -z "${DNSCRYPTDIR[$1]}" ] && [ -n "${PROVIDERSECRETKEYFILE[$1]}" ]; then
+        OPTIONS="${OPTIONS} --provider-secretkey-file=${PROVIDERSECRETKEYFILE[$1]}"
+    fi
+    if [ -n "${RESOLVERADDRESS[$1]}" ]; then
+        OPTIONS="${OPTIONS} --resolver-address=${RESOLVERADDRESS[$1]}"
+    fi
+    if [ -n "${PROVIDERNAME[$1]}" ]; then
+        OPTIONS="${OPTIONS} --provider-name=${PROVIDERNAME[$1]}"
+    fi
+    if [ -n "${PROVIDERCERTFILE[$1]}" ]; then
+        OPTIONS="${OPTIONS} --provider-cert-file=${PROVIDERCERTFILE[$1]}"
+    fi
+    if [ -n "${LOGFILE[$1]}" ]; then
+        OPTIONS="${OPTIONS} --logfile=${LOGFILE[$1]}"
+    fi
+    $DAEMON $OPTIONS
+}
+
+stop_instance() {
+    if [ -z ${PIDFILE[$1]} ]; then
+        echo "No configuration for instance $1 found!"
+        return
+    fi
+    if [ ! -r ${PIDFILE[$1]} ]; then
+        echo "dnscrypt-wrapper (instance $1) is not running!"
+        return
+    fi
+    echo "Stopping dnscrypt-wrapper (instance $1)..."
+    kill $(cat ${PIDFILE[$1]})
+    rm -f ${PIDFILE[$1]}
+}
+
+status_instance() {
+    if [ -z ${PIDFILE[$1]} ]; then
+        echo "No configuration for instance $1 found!"
+        return
+    fi
+    if [ ! -r ${PIDFILE[$1]} ]; then
+        echo "dnscrypt-wrapper (instance $1) is not running."
+        return
+    fi
+    PID=$(cat ${PIDFILE[$1]})
+    if [ -z "$PID" ]; then
+        echo "PID file is empty! dnscrypt-wrapper (instance $1) does not appear to be running, but there is a stale PID file."
+    elif kill -0 $PID ; then
+        echo "dnscrypt-wrapper (instance $1) is running."
+    else
+        echo "dnscrypt-wrapper (instance $1) is not running, but there is a stale PID file."
+    fi
+}
+
+generate-keys_instance() {
+    if [ -z ${PIDFILE[$1]} ]; then
+        echo "No configuration for instance $1 found!"
+        return
+    fi
+    if [ -z ${DNSCRYPTDIR[$1]} ]; then
+        echo "DNSCRYPTDIR not set for instance $1! Either set DNSCRYPTDIR or generate keys manually."
+        return
+    fi
+    (
+    echo "Generating keys for instance $1. You should record the fingerprint, since this will be used by clients."
+    cd ${DNSCRYPTDIR[$1]}
+    rm -f crypt_secret.key crypt_public.key public.key secret.key
+    $DAEMON --gen-provider-keypair
+    $DAEMON --gen-crypt-keypair
+    chmod 0600 crypt_secret.key crypt_public.key public.key secret.key
+    )
+}
+
+generate-cert_instance() {
+    if [ -z ${PIDFILE[$1]} ]; then
+        echo "No configuration for instance $1 found!"
+        return
+    fi
+    if [ -z ${PROVIDERCERTFILE[$1]} ]; then
+        echo "PROVIDERCERTFILE for instance $1 not set! Set PROVIDERCERTFILE before generating a certificate."
+        return
+    fi
+    OPTIONS=""
+    if [ -n "${DNSCRYPTDIR[$1]}" ]; then
+        OPTIONS="${OPTIONS} --crypt-publickey-file=${DNSCRYPTDIR[$1]}/crypt_public.key"
+        OPTIONS="${OPTIONS} --crypt-secretkey-file=${DNSCRYPTDIR[$1]}/crypt_secret.key"
+        OPTIONS="${OPTIONS} --provider-publickey-file=${DNSCRYPTDIR[$1]}/public.key"
+        OPTIONS="${OPTIONS} --provider-secretkey-file=${DNSCRYPTDIR[$1]}/secret.key"
+    fi
+    if [ -z "${DNSCRYPTDIR[$1]}" ] && [ -n "${CRYPTPUBLICKEYFILE[$1]}" ]; then
+        OPTIONS="${OPTIONS} --crypt-publickey-file=${CRYPTPUBLICKEYFILE[$1]}"
+    fi
+    if [ -z "${DNSCRYPTDIR[$1]}" ] && [ -n "${CRYPTSECRETKEYFILE[$1]}" ]; then
+        OPTIONS="${OPTIONS} --crypt-secretkey-file=${CRYPTSECRETKEYFILE[$1]}"
+    fi
+    if [ -z "${DNSCRYPTDIR[$1]}" ] && [ -n "${PROVIDERPUBLICKEYFILE[$1]}" ]; then
+        OPTIONS="${OPTIONS} --provider-publickey-file=${PROVIDERPUBLICKEYFILE[$1]}"
+    fi
+    if [ -z "${DNSCRYPTDIR[$1]}" ] && [ -n "${PROVIDERSECRETKEYFILE[$1]}" ]; then
+        OPTIONS="${OPTIONS} --provider-secretkey-file=${PROVIDERSECRETKEYFILE[$1]}"
+    fi
+    (
+    echo "Generating certificate for instance $1."
+    mkdir /tmp/dnscrypt-wrapper-$$
+    cd /tmp/dnscrypt-wrapper-$$
+    $DAEMON $OPTIONS --gen-cert-file
+    chmod 0600 dnscrypt.cert
+    mv -f dnscrypt.cert ${PROVIDERCERTFILE[$1]}
+    cd /
+    rmdir /tmp/dnscrypt-wrapper-$$
+    )
+}
+
+start() {
+    for i in `/usr/bin/seq 0 $((${#PIDFILE[@]}-1))`
+    do
+        start_instance $i
+    done
+}
+
+stop() {
+    for i in `/usr/bin/seq 0 $((${#PIDFILE[@]}-1))`
+    do
+        stop_instance $i
+    done
+}
+
+status() {
+    for i in `/usr/bin/seq 0 $((${#PIDFILE[@]}-1))`
+    do
+        status_instance $i
+    done
+}
+
+generate-keys() {
+    for i in `/usr/bin/seq 0 $((${#PIDFILE[@]}-1))`
+    do
+        generate-keys_instance $i
+    done
+}
+
+generate-cert() {
+    for i in `/usr/bin/seq 0 $((${#PIDFILE[@]}-1))`
+    do
+        generate-cert_instance $i
+    done
+}
+
+case "$1" in
+    'start')
+        start
+        ;;
+    'stop')
+        stop
+        ;;
+    'restart')
+        stop
+        start
+        ;;
+    'status')
+        status
+        ;;
+    'generate-keys')
+        generate-keys
+        ;;
+    'generate-cert')
+        generate-cert
+        ;;
+    *_start)
+        INSTANCE=`echo $1 | /bin/cut -d '_' -f 1`
+        start_instance $INSTANCE
+        ;;
+    *_stop)
+        INSTANCE=`echo $1 | /bin/cut -d '_' -f 1`
+        stop_instance $INSTANCE
+        ;;
+    *_restart)
+        INSTANCE=`echo $1 | /bin/cut -d '_' -f 1`
+        stop_instance $INSTANCE
+        sleep 1
+        start_instance $INSTANCE
+        ;;
+    *_status)
+        INSTANCE=`echo $1 | /bin/cut -d '_' -f 1`
+        status_instance $INSTANCE
+        ;;
+    *_generate-keys)
+        INSTANCE=`echo $1 | /bin/cut -d '_' -f 1`
+        generate-keys_instance $INSTANCE
+        ;;
+    *_generate-cert)
+        INSTANCE=`echo $1 | /bin/cut -d '_' -f 1`
+        generate-cert_instance $INSTANCE
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status|generate-keys|generate-cert|#_start|#_stop|#_restart|#_status|#_generate-keys|#_generate-cert}"
+        exit 1
+        ;;
+esac
