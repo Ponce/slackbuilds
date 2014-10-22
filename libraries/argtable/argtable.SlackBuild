@@ -22,9 +22,24 @@
 
 # Modified by the SlackBuilds.org Project
 
+# modified again 20140210 bkw:
+# - took over maintenance
+# - update for v2.13
+# - derive SRCVER from VERSION
+# - 'make install-strip' instead of boilerplate find/strip
+# - get rid of static lib
+# - simplify man page gzipping, make argtable.3.gz a symlink to
+#   argtable2.3.gz, since they're identical
+# - don't need full API docs in HTML, PDF, *and* PS, install only
+#   HTML by default, add env vars for PS and PDF
+# - don't install INSTALL (it's autoconf boilerplate)
+# - do install AUTHORS (contains actual information)
+# - fix paths in FILES section of man page + html doc
+# Installed package is now 1/14 the size the old 2.9 package was.
+
 PRGNAM=argtable
-VERSION=2.9
-SRCVER=2-9
+VERSION=${VERSION:-2.13}
+SRCVER=${VERSION/./-}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -70,6 +85,9 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
+# man and html pages misuse autoconf macros
+patch -p1 < $CWD/doc_paths.diff
+
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -79,21 +97,32 @@ CXXFLAGS="$SLKCFLAGS" \
   --mandir=/usr/man \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
   --localstatedir=/var \
+  --enable-shared \
+  --disable-static \
   --build=$ARCH-slackware-linux \
   --host=$ARCH-slackware-linux
 
 make
-make install DESTDIR=$PKG
+make install-strip DESTDIR=$PKG
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# upstream installs 2 copies of the man page, use symlink instead
+MAN3=$PKG/usr/man/man3
+rm -f $MAN3/$PRGNAM.3
+gzip $MAN3/${PRGNAM}2.3
+ln -s ${PRGNAM}2.3.gz $MAN3/$PRGNAM.3.gz
 
-( cd $PKG/usr/man
-  find . -type f -name "*.?" -exec gzip -9 {} \;
-)
+# before adding this bit, the package was 4.7MB ungzipped, 4.3MB (92%)
+# of which were PDF and PostScript copies of the API docs, which almost
+# nobody is ever going to read anyway. We'll keep the HTML ones, they're
+# the same information, much smaller. If anyone *really* wants the bloated
+# docs, they can set PS=yes and/or PDF=yes.
 
-cp -a ChangeLog COPYING INSTALL README $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION
+[ "${PS:-no}" != "yes" ] && rm -f $DOCDIR/*.ps
+[ "${PDF:-no}" != "yes" ] && rm -f $DOCDIR/*.pdf
+
+cp -a AUTHORS ChangeLog COPYING README $DOCDIR
+cat $CWD/$PRGNAM.SlackBuild > $DOCDIR/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
