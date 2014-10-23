@@ -3,11 +3,14 @@
 # Slackware build script for icecat
 # Written by David Negroni <dnegroni.italy@gmail.com>
 # Modified by melikamp <melikamp@melikamp.net>
+# With some code copy-pasted from Patrick J. Volkerding's
+# firefox build script.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation; either version 3 of the License, or
-# (at your option) any later version.
+# (at your option) any later version, with the following exception:
+# the text of the GPL license may be omitted.
 
 # This program is distributed in the hope that it will be useful, but
 # without any warranty; without even the implied warranty of
@@ -17,15 +20,12 @@
 # including the end of all existence and the Universe as we know it.
 # See the GNU General Public License for more details.
 
-# You should have received a copy of the GNU General Public License
-# along with this program (most likely, a file named COPYING).  If
-# not, see <http://www.gnu.org/licenses/>.
-
-# You can get the latest version of this slackbuild early at
-# http://melikamp.com/features/slackbuilds.shtml
+# You may have received a copy of the GNU General Public License along
+# with this program (most likely, a file named COPYING).  If not, see
+# <http://www.gnu.org/licenses/>.
 
 PRGNAM="icecat"
-VERSION=${VERSION:-24.0}
+VERSION=${VERSION:-31.2.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -43,18 +43,36 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  SLKCFLAGS=""
   LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  OPTIMIZE=" --enable-optimize=-O2 "
+  # On IA32, use gold since GNU ld runs out of memory linking libxul.so:
+  PATH="$(pwd)/gold:$PATH"
+  export CC="gcc -B$(pwd)/gold"
+  export CXX="g++ -B$(pwd)/gold"
+elif [ "$ARCH" = "s390" ]; then
+  SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
+  OPTIMIZE=" --enable-optimize=-O2 "
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
+  OPTIMIZE=" --enable-optimize=-O2 "
+elif [ "$ARCH" = "arm" ]; then
+  SLKCFLAGS="-O2 -march=armv4 -mtune=xscale"
+  LIBDIRSUFFIX=""
+  OPTIMIZE=" --enable-optimize=-O2 "
+elif [ "$ARCH" = "armel" ]; then
+  SLKCFLAGS="-O2 -march=armv4t"
+  LIBDIRSUFFIX=""
+  OPTIMIZE=" --enable-optimize=-O2 "
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
+  OPTIMIZE=" --enable-optimize=-O2 "
 fi
+
+#NUMJOBS=${NUMJOBS:-" -j7 "}
 
 set -e
 
@@ -62,36 +80,94 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/${PRGNAM}-$VERSION.tar.gz || exit 1
+tar xvf $CWD/${PRGNAM}-$VERSION.tar.xz
 cd ${PRGNAM}-$VERSION
+
+# Fix a long standing bug that's prevented staying current on GTK+.
+# Thanks to the BLFS folks.  :-)
+cat << EOF >> layout/build/Makefile.in
+
+ifdef MOZ_ENABLE_CANVAS
+EXTRA_DSO_LDOPTS += \$(XLDFLAGS) -lX11 -lXrender
+endif
+
+EOF
+
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
- -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-cp -v .mozconfig{,.orig}
-sed -i '/--prefix/s:/usr/local:/usr:' .mozconfig
-sed -i '/--with-system-jpeg/s/^/#/' .mozconfig
-echo 'ac_add_options --enable-gio' >> .mozconfig
-
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
+# Our building options, in a configure-like display ;)
+OPTIONS="\
+  --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --build=$ARCH-slackware-linux
+  --with-system-zlib \
+  --enable-application=browser \
+  --enable-default-toolkit=cairo-gtk2 \
+  --enable-startup-notification \
+  --enable-crypto \
+  --enable-svg \
+  --enable-canvas \
+  --enable-logging \
+  --enable-xft \
+  --enable-webm \
+  --enable-xinerama \
+  $OPTIMIZE \
+  --enable-reorder \
+  --enable-strip \
+  --enable-cpp-rtti \
+  --enable-single-profile \
+  --disable-gnomevfs \
+  --disable-ldap \
+  --disable-accessibility \
+  --disable-crashreporter \
+  --disable-debug \
+  --disable-pedantic \
+  --disable-pulseaudio \
+  --disable-installer \
+  --disable-mailnews \
+  --disable-composer \
+  --disable-profilesharing"
+# Complains about missing APNG support in Slackware's libpng:
+# --with-system-png \
+# This option breaks mozilla-12.0:
+# --enable-system-cairo \
 
-make
-make install DESTDIR=$PKG
+export CFLAGS="$SLKCFLAGS"
+export CXXFLAGS="$SLKCFLAGS"
+#export MOZ_MAKE_FLAGS="$NUMJOBS"
 
-# Stripping is done in .mozconfig, but there is something we can erase:
-rm -rf $PKG/usr/lib${LIBDIRSUFFIX}/icecat-devel-$VERSION
+# Clear some variables that could break the build
+unset DBUS_SESSION_BUS_ADDRESS ORBIT_SOCKETDIR SESSION_MANAGER \
+  XDG_SESSION_COOKIE XAUTHORITY MAKEFLAGS
+
+# Assemble our .mozconfig, we use this method for building, seems
+# needed for PGO.
+echo ". \$topsrcdir/browser/config/mozconfig" > .mozconfig
+
+# Mozilla devs enforce using an objdir for building
+# https://developer.mozilla.org/en/Configuring_Build_Options#Building_with_an_objdir
+mkdir obj
+echo "mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/obj" >> .mozconfig
+
+# Write in it the options above
+for option in $OPTIONS; do echo "ac_add_options $option" >> .mozconfig; done
+
+echo "ac_add_options --disable-tests" >> .mozconfig
+make -f client.mk build
+make -f client.mk install DESTDIR=$PKG
+
+# We don't need these (just symlinks anyway):
+rm -rf $PKG/usr/lib${LIBDIRSUFFIX}/firefox-devel-$RELEASEVER
+
+# Nor these:
 rm -rf $PKG/usr/include
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  ChangeLog LEGAL LICENSE README.ICECAT README.txt config.cache \
+cp -a Changelog.IceCat LEGAL LICENSE README.IceCat README.txt AUTHORS \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
