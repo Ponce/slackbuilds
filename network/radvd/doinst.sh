@@ -18,13 +18,16 @@ if [ -e etc/rc.d/rc.radvd ]; then
   mv etc/rc.d/rc.radvd.new.incoming etc/rc.d/rc.radvd.new
 fi
 
-# Keep same perms on radvd.conf.new:
-if [ -e etc/radvd.conf ]; then
-  cp -a etc/radvd.conf etc/radvd.conf.new.incoming
-  cat etc/radvd.conf.new > etc/radvd.conf.new.incoming
-  mv etc/radvd.conf.new.incoming etc/radvd.conf.new
+config etc/rc.d/rc.radvd.new
+
+if ! grep rc.radvd etc/rc.d/rc.local > /dev/null
+then
+cat >> etc/rc.d/rc.local <<EOF
+
+# Start radvd
+if [ -x /etc/rc.d/rc.radvd ]; then
+  . /etc/rc.d/rc.radvd start
 fi
 
-config etc/rc.d/rc.radvd.new
-config etc/radvd.conf.new
-
+EOF
+fi
