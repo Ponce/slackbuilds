@@ -5,14 +5,16 @@
 # Written by Aleksandar Samardzic <asamardzic@gmail.com>
 # Updated to 0.99.1.2 by João Felipe Santos <joao.eel@gmail.com>
 # Patch for libpng borrowed from Arch Linux
-# Updated up to version 1.1.1 by Serban Udrea <S.Udrea@gsi.de>
+# Updated up to version 1.4.1 by Serban Udrea <S.Udrea@gsi.de>
 
 PRGNAM=matplotlib
-VERSION=${VERSION:-1.1.1}
+VERSION=${VERSION:-1.4.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-TARBALL_VERSION=1.1.1 # Tarball sometimes has a wrong version number
+TARBALL_VERSION=1.4.1 # Tarball sometimes has a wrong version number
+DISABLE_TESTS=${DISABLE_TESTS:-Y}
+DISABLE_TK_TESTS=${DISABLE_TK_TESTS:-Y}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -37,27 +39,46 @@ tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$TARBALL_VERSION
 chown -R root:root .
 find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# patch -p1 < $CWD/libpng-1.4.patch # Does not seem to be needed anymore
+# Use setup.cfg to decide about the optional subpackages tests and
+# toolkits_tests
+cat setup.cfg.template > setup.cfg
 
-# Use setup.cfg to tell setup.py not to install pytz and dateutil
-mv setup.cfg.template setup.cfg
-sed -i "s|#pytz|pytz|" setup.cfg
-sed -i "s|#dateutil|dateutil|" setup.cfg
+DISABLE_TESTS=$(echo "$DISABLE_TESTS"|cut -b 1|tr a-z A-Z)
+DISABLE_TK_TESTS=$(echo "$DISABLE_TK_TESTS"|cut -b 1|tr a-z A-Z)
 
-python setup.py install --root $PKG
+if [ "$DISABLE_TESTS" = "Y" ]
+then
+ sed -i "s|#tests = True|tests = False|" setup.cfg
+else
+ python -c "import nose, mock" > /dev/null 2>&1 || \
+ { echo "ERROR: Missing requirements nose and/or mock!" && exit 1; }
+fi
+
+if [ "$DISABLE_TK_TESTS" = "Y" ]
+then
+ sed -i "s|#toolkits_tests = auto|toolkits_tests = False|" setup.cfg
+elif [ "$DISABLE_TESTS" = "Y" ]
+then
+ echo "ERROR: Cannot enable toolkits_tests if tests are disabled!" && exit 1
+fi
+
+# Use modified setupext.py to make sure that the build process gets
+# interrupted if requirements are not fulfilled
+
+cat "${CWD}/setupext.py" > setupext.py
+
+python setup.py install --root $PKG # > ${CWD}/SETUP.OUTPUT 2>&1
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  CHANGELOG INSTALL README.txt TODO \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CHANGELOG INSTALL $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
