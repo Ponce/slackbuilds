@@ -1,11 +1,46 @@
 #!/bin/sh
 
 # Slackware build script for pcc (Portable C Compiler)
-# Written by Armin Besirovic <armin[at]linux[dot]org[dot]ba>
+
+# Originally written by Armin Besirovic <armin[at]linux[dot]org[dot]ba>
+
+# Modified by B. Watson <yalhcru@gmail.com>
+
+# 20141031 bkw:
+# - took over maintentance.
+# - upgraded for 1.1.0 beta series.
+# - combined pcc and pcc-libs into one build, since either one is
+#   useless without the other.
+# - removed pcc-lib's 002-build-libpcc-with-pcc.patch as it's been
+#   applied upstream in the 1.1.0 branch.
+# - use private /usr/libexec/pcc/ dir instead of installing stuff
+#   directly in /usr/libexec. Probably just paranoia.
+# - rename cpp-pcc man page to pcpp, since the beta installs a
+#   /usr/bin/pcpp.
+# - get rid of -j1 in make command, seems to no longer be needed.
+# - add logic to choose which compiler to use if CC not set.
+# - extract license from source, install to /usr/doc
+
+# notes:
+
+# - pcc 1.0 hasn't worked since Slackware 13.37. It builds & installs
+#   fine, but anything compiled with it just segfaults in the
+#   startup code. Hence the upgrade to a beta snapshot, which at
+#   least can compile a working "hello world" on Slack 14.1.
+
+# - upstream only keeps about a weeks' worth of snapshot tarballs, so
+#   so I'm self-hosting them. I do plan to update the snapshot version
+#   from time to time, but *not* on a weekly basis. Eventually 1.1.0
+#   will be released, and there will be much rejoicing.
+
+# - upstream filenames are pcc-1.1.0.BETA-<yyyymmdd>. If you want to
+#   try a different snapshot, set VERSION=1.1.0_beta_<yyyymmdd> in
+#   the env. AFAIK, the pcc and pcc-libs snapshot dates must always
+#   match (this script enforces it).
 
 PRGNAM=pcc
-VERSION=${VERSION:-1.0.0}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.1.0_beta_20141031}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -21,58 +56,114 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
+# non-standard stanza here: we're not going to use -march= or -mtune=
+# on 32-bit Slackware, because doing so prevents pcc from being used
+# to compile itself. I could add logic to use those flags only if
+# CC is gcc, but the extra complexity isn't worth the dubious benefit.
+SLKCFLAGS="-O2 -fPIC"
+if [ "$ARCH" = "x86_64" ]; then
   LIBDIRSUFFIX="64"
 else
-  SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
 
 set -e
 
+# All this cruft will go away, when 1.1.0 is released.
+SHORTVER=$( echo $VERSION | cut -d_ -f1 )
+SNAPVER=$( echo $VERSION | cut -d_ -f3 )
+TARBALL=$PRGNAM-$SHORTVER.BETA-$SNAPVER.tgz
+TARDIR=$PRGNAM-$SHORTVER.BETA
+LIBTARBALL=$PRGNAM-libs-$SHORTVER.BETA-$SNAPVER.tgz
+LIBTARDIR=$PRGNAM-libs-$SHORTVER.BETA
+
+# which compiler shall we use?
+if [ "$CC" = "" ]; then
+  # user didn't specify, autodetect.
+  if pcc --version &>/dev/null; then
+    CC=pcc
+  elif gcc --version &>/dev/null; then
+    CC=gcc
+  elif clang --version &>/dev/null; then
+    CC=clang
+  else
+    echo "Can't find any of pcc, gcc, or clang in \$PATH. Giving up." 1>&2
+  fi
+fi
+
+export CC
+WITHCC="$( basename $CC )"
+[ "$CC" = "pcc" ] && WITHCC="pcc itself"
+
+# enable TLS? upstream disables it by default.
+TLSOPT="--disable-tls"
+if [ "${TLS:-no}" = "yes" ]; then
+  TLSOPT="--enable-tls"
+fi
+
 rm -rf $PKG
-mkdir -p $TMP $PKG $OUTPUT
-cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tgz
-cd $PRGNAM-$VERSION
+mkdir -p $TMP/$PRGNAM $PKG $OUTPUT
+cd $TMP/$PRGNAM
+rm -rf $TARDIR $LIBTARDIR
+tar xvf $CWD/$TARBALL
+tar xvf $CWD/$LIBTARBALL
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
   -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# first, the compiler itself:
+cd $TARDIR
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  $TLSOPT \
+  --prefix=/usr \
+  --mandir=/usr/man \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --libexecdir=/usr/libexec/$PRGNAM \
+  --build=$ARCH-slackware-linux
+
+# no install-strip, but binaries are already stripped by default.
+make
+make install DESTDIR=$PKG
+
+gzip -9 $PKG/usr/man/man?/*.?
+# Don't overwrite Slackware's man page.
+mv $PKG/usr/man/man1/cpp.1.gz $PKG/usr/man/man1/pcpp.1.gz
+
+# why are there no docs in the @##!$^ tarball?!
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# license is BSD-style, in comments in the code.
+sed -n '/Copyright/,/^ *$/s,^...,,p' cc/cc/cc.c \
+  > $PKG/usr/doc/$PRGNAM-$VERSION/LICENSE
+
+# now, build the libs. we don't attempt to build them with the just-built
+# pcc (maybe possible, but not worth the effort).
+cd $TMP/$PRGNAM/$LIBTARDIR
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
-  --mandir=/usr/man \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --build=$ARCH-slackware-linux
 
-make -j1
+# pcc-libs installs nothing we can strip.
+make
 make install DESTDIR=$PKG
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-gzip -9 $PKG/usr/man/man?/*.?
-# Don't overwrite Slackware's man page.
-mv $PKG/usr/man/man1/cpp.1.gz $PKG/usr/man/man1/cpp-pcc.1.gz
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# there is a bit of documentation included with pcc-libs, but nothing
+# really relevant unless you're hacking on pcc itself, not gonna bother.
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s,@WITHCC@,$WITHCC," \
+    -e "s,@TLSOPT@,$TLSOPT," \
+	$CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
