@@ -24,7 +24,7 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=thttpd
-VERSION=${VERSION:-2.25b}
+VERSION=${VERSION:-2.26}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -83,19 +83,28 @@ tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Apply some patches, from gentoo:
-for i in $CWD/patches/*.diff $CWD/patches/*.patch
+# Apply some patches, from arch/gentoo:
+for i in $CWD/patches/*.patch
 do
   echo
   echo "Appling patch $i ..."
   cat $i | patch -p1 || exit 1
 done
 echo
+
+# Fix CFLAGS detection
+sed -i \
+  -e 's/^CFLAGS =/CFLAGS +=/' \
+  -e '/^STATICFLAG =/c STATICFLAG =' \
+    Makefile* extras/Makefile* cgi-src/Makefile*
+
+# Fix --build value detection in ./configure
+libtoolize --force --copy --install
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -118,19 +127,23 @@ sed -i \
 # Change the group to 'thttpd', rather than 'www'
 sed -i '/WEBGROUP =/ s/www/'$PRGNAM'/' Makefile* extras/Makefile* cgi-src/Makefile*
 
-## Use this line ONLY if you are going to build thttpd as a normal user.
-##sed -i '/WEBGROUP =/ s/www/'$(/bin/id -ng)'/' Makefile* extras/Makefile* cgi-src/Makefile*
+### Use the next line ONLY if you are going to build thttpd as a normal user.
+### sed -i '/WEBGROUP =/ s/'$PRGNAM'/'$(/bin/id -ng)'/' Makefile* extras/Makefile* cgi-src/Makefile*
 
 # Disable the use of bin as owner user and group.
 sed -i 's/-o bin -g bin//' Makefile* extras/Makefile* cgi-src/Makefile*
 
 # Create required directories
-mkdir -p $PKG/etc/rc.d $PKG/usr/man/man1 $PKG/etc/logrotate.d $PKG/var/log/$PRGNAM
+mkdir -p $PKG/etc/rc.d $PKG/usr/man/man1 $PKG/etc/logrotate.d \
+  $PKG/var/log/$PRGNAM $PKG/var/run/$PRGNAM
+chown $PRGNAM:$PRGNAM $PKG/var/log/$PRGNAM $PKG/var/run/$PRGNAM
 
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
 make
 make install DESTDIR=$PKG
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 # Install default html file.
