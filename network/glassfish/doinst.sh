@@ -23,4 +23,3 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.glassfish.new
-
