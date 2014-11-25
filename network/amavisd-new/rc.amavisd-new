@@ -2,76 +2,150 @@
 
 # Startup script for amavisd-new daemon for use on Slackware Linux x86|x86_64
 
-# Copyright (c) 2008-2012, Nishant Limbachia, Hoffman Estates, IL, USA
-# [nishant _AT_ mnspace _DOT_ net]
+# Copyright (c) 2008-2014, Nishant Limbachia, Hoffman Estates, IL, USA
+# (nishant _AT_ mnspace _DOT_ net)
 # Usage: /etc/rc.d/rc.amavisd-new start|stop|restart|reload|status
 # For automatic startup at boot, call this script from rc.local
 
-PIDFILE=/var/run/amavis/amavisd.pid
+# Notes - 03/25/2013 #
+# With v2.8.0, amavis-mc daemon was added to the mix and so this rc script
+# has been overhauled from the previous version.  If you have suggestions to
+# improve, please feel free to share.
+
+# Script starts three different daemons: amavis-mc, amavisd-signer & amavisd
+# All the daemons have their own start and stop functions, however, amavisd
+# also has restart and reload which are supported by the program.
+
+# Assuming you want all 3 daemons, you can start all at once like this:
+# /etc/rc.d/rc.amavisd-new start
+
+
+MC_PID=/var/run/amavis/amavis-mc.pid
+PID=/var/run/amavis/amavisd.pid
+
+amavisd_signer_start() {
+	# start amavisd-signer
+	printf "Starting amavisd-signer daemon\n"
+	/usr/sbin/amavisd-signer
+}
+
+amavisd_signer_stop() {
+	# stop amavisd-signer first
+	printf "Stopping amavisd-signer daemon\n"
+	pkill amavisd-signer
+}
+
+amavis_mc_start() {
+	# start amavis-mc process
+	if [ -f $MC_PID ]; then
+	    printf "amavis-mc daemon running with PID: $(cat $MC_PID)\n"
+	    printf "Terminating previous amavis-mc process\n"
+	    kill $(cat $MC_PID)
+	    rm -f $MC_PID
+	    printf "Starting amavis-mc daemon\n"
+	    /usr/sbin/amavis-mc -P $MC_PID
+	else
+	    printf "Starting amavis-mc daemon\n"
+	    /usr/sbin/amavis-mc -P $MC_PID
+	fi
+}
+
+amavis_mc_stop() {
+	if [ -f $MC_PID ]; then
+	    printf "Stopping amavis-mc daemon\n"
+	    kill $(cat $MC_PID)
+	    rm -f $MC_PID
+	else
+	    printf "amavis-mc daemon is not running\n"
+	fi
+}
 
 amavisd_start() {
-  if [ -x /etc/rc.d/rc.amavisd-new ]; then
-	# start amavisd-signer first
-	echo "Starting amavisd-signer daemon"
-	/usr/sbin/amavisd-signer
-	
-	if [ -f $PIDFILE ]; then
-		echo "amavisd-new daemon running with PID: $(cat $PIDFILE)"
-		echo "Or we may have a stale pid file from previous run"
-		echo "try /etc/rc.d/rc.amavisd-new stop|restart Or"
-		echo "remove the stale pid file and try starting again"
-		echo ""
-		exit 1
+  	if [ -f $PID ]; then
+	    printf "amavisd-new daemon running with PID: $(cat $PID)\n"
+	    printf "Terminating previous amavisd-new process\n"
+	    kill $(cat $PID)
+	    rm -f $PID
+	    printf "Starting amavisd-new daemon\n"
+	    /usr/sbin/amavisd start
 	else
-		echo "Starting amavisd-new daemon"
-    		/usr/sbin/amavisd-new start
+	    printf "Starting amavisd-new daemon\n"
+	    /usr/sbin/amavisd start
 	fi
-  fi
 }
 
 amavisd_stop() {
-	# stop amavisd-signer first
-	echo "Stopping amavisd-signer daemon"
-	pkill amavisd-signer
-	
-	if [ -f $PIDFILE ]; then
-		echo "Stopping amavisd-new daemon"
-		/usr/sbin/amavisd-new stop
+	if [ -f $PID ]; then
+	    printf "Stopping amavisd-new daemon\n"
+	    /usr/sbin/amavisd stop
+	    rm -f $PID
 	else
-		echo "amavisd-new daemon is not running"
-	fi
-}
-
-amavisd_restart() {
-	echo "Restarting amavisd-new daemon"
-	/usr/sbin/amavisd-new restart
+	    printf "amavisd-new daemon is not running\n"
+	fi	
 }
 
 amavisd_reload() {
 	echo "Reloading amavisd-new daemon"
-	/usr/sbin/amavisd-new reload
+	/usr/sbin/amavisd reload
 }
 
-amavisd_status() {
-	echo "amavisd-new daemon running with PID: $(cat $PIDFILE)"
-	echo "amavisd-signer daemon running with PID: $(pgrep amavisd-signer)"
+amavisd_restart() {
+	printf "Restarting amavisd-new daemon\n"
+	/usr/sbin/amavisd restart
 }
+
+### This is where all the combined processes start
+
+daemons_start() {
+    amavis_mc_start
+    sleep 2
+    amavisd_signer_start
+    sleep 2
+    amavisd_start
+}
+
+daemons_stop() {
+    amavisd_stop
+    amavisd_signer_stop
+    amavis_mc_stop
+}
+
+daemons_restart() {
+    amavis_mc_stop
+    sleep 2
+    amavis_mc_start
+    
+    amavisd_signer_stop
+    sleep 2
+    amavisd_signer_start
+    
+    sleep 2
+    amavisd_restart
+}
+
+daemons_status() {
+    printf "amavis-mc daemon running with PID: $(cat $MC_PID)\n"
+    printf "amavisd-new daemon running with PID: $(cat $PID)\n"
+    printf "amavisd-signer daemon running with PID: $(pgrep amavisd-signer)\n"
+}
+
+### 
 
 case "$1" in
 'start')
-	amavisd_start
+	daemons_start
   ;;
 'stop')
-	amavisd_stop
+	daemons_stop
   ;;
 'restart')
-	amavisd_restart
+	daemons_restart
   ;;
 'reload')
 	amavisd_reload
   ;;
 'status')
-	amavisd_status
+	daemons_status
   ;;
 *)
 	echo "USAGE: $0 start|stop|restart|reload|status"

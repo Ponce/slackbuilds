@@ -11,17 +11,13 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-preserve_perms() {
-  NEW="$1"
-  OLD="$(dirname $NEW)/$(basename $NEW .new)"
-  if [ -e $OLD ]; then
-    cp -a $OLD ${NEW}.incoming
-    cat $NEW > ${NEW}.incoming
-    mv ${NEW}.incoming $NEW
-  fi
-  config $NEW
-}
+# Keep same perms on rc.amavisd.new:
+if [ -e etc/rc.d/rc.amavisd-new ]; then
+  cp -a etc/rc.d/rc.amavisd-new etc/rc.d/rc.amavisd-new.new.incoming
+  cat etc/rc.d/rc.amavisd-new.new > etc/rc.d/rc.amavisd-new.new.incoming
+  mv etc/rc.d/rc.amavisd-new.new.incoming etc/rc.d/rc.amavisd-new.new
+fi
 
-preserve_perms etc/rc.d/rc.amavisd-new.new
-preserve_perms etc/amavisd.conf.new
-preserve_perms etc/logrotate.d/amavisd-new.new
+config etc/rc.d/rc.amavisd-new.new
+config etc/amavisd.conf.new
+config etc/logrotate.d/amavisd-new.new
