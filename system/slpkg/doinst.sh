@@ -8,7 +8,10 @@ config() {
   fi
 }
 
-config /etc/slpkg/slpkg.conf.new
+CONFIGS="slpkg.conf blacklist slackware-mirrors"
+for file in $CONFIGS; do
+    config /etc/slpkg/${file}.new
+done
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
