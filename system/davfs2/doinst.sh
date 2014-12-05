@@ -13,4 +13,3 @@ config() {
 
 config etc/davfs2/davfs2.conf.new
 config etc/davfs2/secrets.new
-
