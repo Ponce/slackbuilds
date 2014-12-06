@@ -2,26 +2,37 @@
 
 # Slackware build script for BLAS
 
-# Written by Eugene Suter <easuter@gmail.com>
-
-# Version number is now timestamp on source tarball
-# since no official version is given on website
+# Copyright 2014 Kyle Guinn <elyk03@gmail.com>, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=blas
-VERSION=${VERSION:-20110419}
+SRCNAM=lapack
+VERSION=${VERSION:-3.5.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-# Shared library version
-# This should match the versioning of blas
-SOVERS=3.2.2
-SOMAJOR=3
-
 if [ -z "$ARCH" ]; then
-  case "$( uname -m )" in
+  case "$(uname -m)" in
     i?86) ARCH=i486 ;;
     arm*) ARCH=arm ;;
-       *) ARCH=$( uname -m ) ;;
+       *) ARCH=$(uname -m) ;;
   esac
 fi
 
@@ -29,6 +40,8 @@ CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
+
+DOCS="LICENSE"
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
@@ -44,44 +57,71 @@ else
   LIBDIRSUFFIX=""
 fi
 
-set -e 
+set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf BLAS
-tar xvf $CWD/$PRGNAM.tgz
-cd BLAS
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tgz
+cd $SRCNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+chmod -R u+w,go-w,a+rX-st .
 
-# Build the object files and the static library
-make OPTS="$SLKCFLAGS -std=legacy" all
-ranlib $PRGNAM\_LINUX.a
-mkdir shared
-( cd shared
-  ar -x ../$PRGNAM\_LINUX.a
-  gcc -fPIC -lgfortran -shared *.o -Wl,-soname,lib$PRGNAM.so.$SOMAJOR \
-          -o lib$PRGNAM.so.$SOVERS
-)
+# `make install` wants to compile and install the rest of lapack,
+# so install files manually instead.
+#
+# Avoid adding an RPATH entry to the shared lib.  It's unnecessary, and
+# since we're not running `make install` we don't want to end up with
+# a temporary RPATH that refers to the build directory.
+#
+# WARNING:  The SONAME is "libblas.so", not "libblas.so.0" nor
+# "libblas.so.$MAJOR" as crafted in previous versions of this script.
+# I don't know if this is intentional or an omission by upstream.
+mkdir -p shared
+cd shared
+  cmake \
+    -DCMAKE_Fortran_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_RULE_MESSAGES=OFF \
+    -DCMAKE_VERBOSE_MAKEFILE=TRUE \
+    -DBUILD_SHARED_LIBS=ON \
+    -DCMAKE_SKIP_RPATH=YES \
+    ..
+  make blas/fast
+  install -D -m0755 -s lib/libblas.so $PKG/usr/lib${LIBDIRSUFFIX}/libblas.so
+  install -D -m0644 BLAS/blas.pc $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/blas.pc
+cd ..
 
-mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}
-cp ${PRGNAM}_LINUX.a $PKG/usr/lib${LIBDIRSUFFIX}/libblas.a
-cp shared/lib$PRGNAM.so.$SOVERS $PKG/usr/lib${LIBDIRSUFFIX}
-( cd $PKG/usr/lib${LIBDIRSUFFIX}
-  chmod 0755 *.so.*
-  ln -s lib$PRGNAM.so.$SOVERS lib$PRGNAM.so.$SOMAJOR
-  ln -s lib$PRGNAM.so.$SOMAJOR lib$PRGNAM.so
-)
+# cmake doesn't appear to let us build both shared and static libs
+# at the same time, so build it twice.  This may build a non-PIC library
+# on some architectures, which should be faster.
+mkdir -p static
+cd static
+  cmake \
+    -DCMAKE_Fortran_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_RULE_MESSAGES=OFF \
+    -DCMAKE_VERBOSE_MAKEFILE=TRUE \
+    ..
+  make blas/fast
+  install -D -m0644 lib/libblas.a $PKG/usr/lib${LIBDIRSUFFIX}/libblas.a
+cd ..
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# Fix the pkg-config file:
+# 1.  Version is missing.
+# 2.  -L is hard-coded when a variable exists.
+sed -i \
+  -e "/^Version:/cVersion: ${VERSION}" \
+  -e "/^Libs:/s/-L[^ ]*/-L\${libdir}/" \
+  $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/blas.pc
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
