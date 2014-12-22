@@ -1,0 +1,115 @@
+#!/bin/sh
+
+# Slackware build script for tribler
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Notes:
+
+# The squelch_dht_exceptions patch is my own. I'm not a Python expert so if
+# you've got a better solution, please let me know.
+
+# Python dependency hell. Of the stuff in REQUIRES=, only gmpy could be
+# optional. However if it's not installed, the application complains about it,
+# and says upstream doesn't actually test their fallback code much.
+
+# I didn't list vlc as a required dep, because without vlc installed, tribler
+# is still a perfectly usable search engine and torrent client. Also vlc
+# can be installed later and will work (it's a runtime dep).
+
+# Don't be put off by the use of a tarball made from a git checkout. The
+# release zipfile on upstream's site is incomplete (is missing the dispersy/
+# subdirectory, for one thing). My source is from their v6.4.0 git tag, not
+# from HEAD. See git2tarxz.sh.
+
+PRGNAM=tribler
+VERSION=${VERSION:-6.4.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# This patch stops tribler from spewing 20 or so lines of stack trace
+# every second.
+patch -p1 < $CWD/squelch_dht_exceptions.diff
+
+B=Tribler/Main/Build
+mkdir -p $PKG/usr/share/pixmaps $PKG/usr/share/applications \
+         $PKG/usr/man/man1 $PKG/usr/bin
+cat $B/Ubuntu/${PRGNAM}_big.xpm > $PKG/usr/share/pixmaps/$PRGNAM.xpm
+gzip -9c < $B/Ubuntu/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+
+# make .desktop file validate.
+sed \
+  -e 's,Application;,,' \
+  -e '/\(Categories\|MimeType\)/s,$,;,' \
+  $B/Ubuntu/$PRGNAM.desktop \
+  > $PKG/usr/share/applications/$PRGNAM.desktop
+
+# Upstream's wrapper script wants to redirect stdout to a temp file, and
+# never cleans them up. So /tmp would end up with lots of log files that
+# nobody cares about. I'm getting rid of the redirect, so it just goes
+# to stdout. Users who need the debug output can launch it from a terminal
+# like any other GUI application.
+sed 's, *>.*,,' debian/bin/$PRGNAM > $PKG/usr/bin/$PRGNAM
+chmod 755 $PKG/usr/bin/$PRGNAM
+
+# ditch this stuff, we don't need it in the installed package.
+rm -rf $B debian mac win
+
+# no compiling, pure python.
+mkdir -p $PKG/usr/share/$PRGNAM
+cp -a * $PKG/usr/share/$PRGNAM
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README.md $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
