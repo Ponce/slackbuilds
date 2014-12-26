@@ -14,4 +14,4 @@ if [ -x /usr/bin/mkfontdir -o -x /usr/X11R6/bin/mkfontdir ]; then
     mkfontscale .
     mkfontdir .
   )
-
+fi
