@@ -13,5 +13,5 @@ if [ -x /usr/bin/update-desktop-database ]; then
 fi
 
 if [ -x /usr/bin/install-info ]; then
-  chroot . /usr/bin/install-info --info-dir=/usr/info /usr/info/blah.gz 2> /dev/null
+  chroot . /usr/bin/install-info --info-dir=/usr/info /usr/info/foxtrotgps.info.gz 2> /dev/null
 fi
