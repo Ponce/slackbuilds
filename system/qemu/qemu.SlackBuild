@@ -37,9 +37,10 @@
 # 1.5   10-AUG-2014		updated to new version, watch for legacy "gotchas"
 # 1.6	18-NOV-2014		updated version, last of the 2.1 series, changed defaults per SBo list
 # 1.6a	23-NOV-2014		added overlooked AUDIODRIVERS switch per SBo list
+# 1.7	01-JAN-2015	    updated to 2.2.0 ; build and link static libusb option (rw, tm, SBo list)
 
 PRGNAM=qemu
-VERSION=${VERSION:-2.1.2}
+VERSION=${VERSION:-2.2.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -47,6 +48,7 @@ KVMGROUP=${KVMGROUP:-users}
 TARGETS=${TARGETS:-some}
 VNC_ENABLE=${VNC_ENABLE:-yes}
 AUDIODRIVERS=${AUDIODRIVERS:-alsa,oss,sdl,esd}
+LIBUSB=${LIBUSB:-no}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -114,6 +116,26 @@ else
   with_vnc="--disable-vnc"
 fi
 
+# Build libusb-1.0.19 statically so that usb passthrough will work;
+# not needed if you upgrade the default libdir.
+USBSTATIC=""
+if [ "$LIBUSB" = "yes" ]; then
+  tar xf $CWD/libusb-1.0.19.tar.xz
+  cd libusb-1.0.19
+  CFLAGS="$SLKCFLAGS" \
+  ./configure \
+    --prefix=$TMP/$PRGNAM-$VERSION/libusb-static \
+    --build=$ARCH-slackware-linux \
+    --disable-shared \
+    --enable-static
+  make install
+  cd ..
+  sed -i 's/--cflags libusb-1.0/\0 --static/' configure
+  sed -i 's/--libs libusb-1.0/\0 --static/' configure
+  USBSTATIC="$TMP/$PRGNAM-$VERSION/libusb-static/lib/pkgconfig"
+fi
+
+PKG_CONFIG_PATH+="${USBSTATIC}" \
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -132,16 +154,14 @@ CXXFLAGS="$SLKCFLAGS" \
   $with_vnc \
   $targets
 
-#usb passthrough may fail since Slackware's libusb is too old.
-# other useful options:
-# --enable-vde             enable support for vde network
-# --enable-libnfs          enable nfs support
-# --enable-vde             enable support for vde network
-# --enable-bluez           enable bluez stack connectivity
+# Make these first; otherwise make won't run in parallel.
+make config-all-devices.mak config-all-disas.mak
 
 make V=1
-
 make install DESTDIR=$PKG
+
+# Remove empty /var
+rm -rf $PKG/var/run
 
 # install some udev rules for /dev/kvm
 mkdir -p $PKG/lib/udev/rules.d/
@@ -165,7 +185,6 @@ fi
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a Changelog COPYING* CODING_STYLE HACKING LICENSE MAINTAINERS README qemu-*.html docs/* \
   $PKG/usr/doc/$PRGNAM-$VERSION
-
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
