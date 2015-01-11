@@ -24,5 +24,5 @@ preserve_perms() {
 
 preserve_perms etc/rc.d/rc.fcron.new
 config etc/fcron.conf.new
-config etc/fcron.allow
-config etc/fcron.deny
+config etc/fcron.allow.new
+config etc/fcron.deny.new
