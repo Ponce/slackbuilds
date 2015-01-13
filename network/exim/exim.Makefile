@@ -488,9 +488,9 @@ WITH_CONTENT_SCAN=yes
 # LDFLAGS += -lopendmarc
 
 
-# Uncomment the following line to support Transport post-delivery actions,
+# Uncomment the following line to support Events,
 # eg. for logging to a database.
-# EXPERIMENTAL_TPDA=yes
+# EXPERIMENTAL_EVENT=yes
 
 # Uncomment the following line to add Redis lookup support
 # You need to have hiredis installed on your system (https://github.com/redis/hiredis).
@@ -508,6 +508,9 @@ WITH_CONTENT_SCAN=yes
 
 # Uncomment the following line to add DSN support
 # EXPERIMENTAL_DSN=yes
+
+# Uncomment the following line to add DANE support
+# EXPERIMENTAL_DANE=yes
 
 ###############################################################################
 #                 THESE ARE THINGS YOU MIGHT WANT TO SPECIFY                  #
