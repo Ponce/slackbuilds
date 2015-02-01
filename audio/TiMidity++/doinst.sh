@@ -22,6 +22,6 @@ preserve_perms() {
   config $NEW
 }
 
-config etc/timidity.cfg.new
+config etc/timidity/timidity.cfg.new
 preserve_perms etc/rc.d/rc.timidity.new
 
