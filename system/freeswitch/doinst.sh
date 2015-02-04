@@ -25,7 +25,6 @@ preserve_perms() {
 preserve_perms etc/rc.d/rc.freeswitch.new
 config etc/logrotate.d/freeswitch.new
 
-for i in $(find opt/freeswitch/conf -type f -name '*.new'); do
-  config $i
-done
+find opt/freeswitch/conf -type f -name '*.new' \
+  | while read new ; do config $new ; done
 
