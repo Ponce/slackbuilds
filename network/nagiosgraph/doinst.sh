@@ -11,22 +11,8 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/nagiosgraph/servdb.conf.new
-config etc/nagiosgraph/rrdopts.conf.new
-config etc/nagiosgraph/ngshared.pm.new
-config etc/nagiosgraph/nagiosgraph_fr.conf.new
-config etc/nagiosgraph/nagiosgraph_es.conf.new
-config etc/nagiosgraph/nagiosgraph_de.conf.new
-config etc/nagiosgraph/nagiosgraph.conf.new
-config etc/nagiosgraph/nagiosgraph-nagios.cfg.new
-config etc/nagiosgraph/nagiosgraph-commands.cfg.new
-config etc/nagiosgraph/nagiosgraph-apache.conf.new
-config etc/nagiosgraph/map.new
-config etc/nagiosgraph/labels.conf.new
-config etc/nagiosgraph/hostdb.conf.new
-config etc/nagiosgraph/groupdb.conf.new
-config etc/nagiosgraph/datasetdb.conf.new
-config etc/nagiosgraph/access.conf.new
+find etc/nagiosgraph/ -type f -name *.new \
+  | while read cfg ; do config $cfg ; done
 
 # Create rrd directory and add log files
 ( cd var/nagios; mkdir -p rrd; chown nagios rrd;
