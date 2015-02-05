@@ -1,0 +1,224 @@
+#!/bin/sh
+
+# Slackware build script for kodi
+
+# Copyright 2009-2015 Larry Hajali <larryhaja[at]gmail[dot]com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=kodi
+SRCNAM=xbmc
+VERSION=${VERSION:-14.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION-Helix
+tar xvf $CWD/$VERSION-Helix.tar.gz
+cd $SRCNAM-$VERSION-Helix
+tar xvf $CWD/$SRCNAM-pvr-addons-Helix_rc3.tar.gz || tar xvf $CWD/Helix_rc3.tar.gz
+# Don't have the Makefile download ffmpeg during install.
+if [ -f "$CWD/FFmpeg-2.4.4-Helix.tar.gz" ]; then
+  ln -s $CWD/FFmpeg-2.4.4-Helix.tar.gz tools/depends/target/ffmpeg/ffmpeg-2.4.4-Helix.tar.gz
+elif [ -f "$CWD/2.4.4-Helix.tar.gz" ]; then
+  ln -s $CWD/2.4.4-Helix.tar.gz tools/depends/target/ffmpeg/ffmpeg-2.4.4-Helix.tar.gz
+else
+  echo "FFMPEG wasn't found. Please download it and have it available"
+  echo "in the source directory ${CWD}."
+  exit 1
+fi
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Fix for sse2 cpu's.
+if grep 'sse2' /proc/cpuinfo 2>&1 > /dev/null; then
+  patch -p1 < $CWD/patches/sse2.patch
+fi
+
+# No need to show Git: "Version" in a release build.
+sed -i '/Git:/s|.*|    return GetVersionShort();|' $SRCNAM/GUIInfoManager.cpp
+
+# Patch for building against rtmpdump. Only needed if xbmc fails to build
+# w/rtmpdump.  See the following link for a rather obtuse explanation.
+# http://slaxbmc.blogspot.com/2011/03/23-install-xbmc-from-source.html
+patch -p1 < $CWD/patches/xbmc-Gotham-rtmpdump-build.patch
+
+# Patch for Samba 4.0.
+patch -p1 < $CWD/patches/xbmc-Helix-samba-4.0.patch
+
+# Use installed libdvdread.
+patch -p1 < $CWD/patches/xbmc-13.0-dvdread.patch
+
+# Hack for using afpfs-ng.
+cat lib/afpfs-ng/fix_afpfs-ng_includes.patch | head -1336 | tail -1172 | patch -p1
+AFPFS_NGFLAGS="-I$PWD/include"
+
+# The version of ffmpeg on SBo is too old to compile kodi.
+# Optional ffmpeg is still available but not turned on by
+# default.
+if [ "${FFMPEG:-no}" == "yes" ]; then
+  OPT_DEPS="--with-ffmpeg=shared"
+else
+  OPT_DEPS=""
+fi
+
+# Build webserver. Requires libmicrohttpd.
+if [ "${WEBSERVER:-no}" == "yes" ]; then
+  OPT_DEPS="$OPT_DEPS --enable-webserver"
+else
+  OPT_DEPS="$OPT_DEPS --disable-webserver"
+fi
+
+# Use pulseaudio.
+if [ "${PULSE:-no}" == "yes" ]; then
+  OPT_DEPS="$OPT_DEPS --enable-pulse"
+fi
+
+# Build the pvr addons.
+cd $SRCNAM-pvr-addons-Helix_rc3
+  # Fix include statements. Only needed if jsoncpp is installed.
+  if [ -d /usr/include/jsoncpp ]; then
+    sed -i 's|<json.*/|<jsoncpp/|' addons/*/*/*.*
+    sed -i '/sstream/s|.*|&\n#include <iostream>|' addons/*/*/FilmonAPI.cpp
+  fi
+  ./bootstrap
+  CFLAGS="$SLKCFLAGS $AFPFS_NGFLAGS -DGL_GLEXT_PROTOTYPES" \
+  CXXFLAGS="$SLKCFLAGS $AFPFS_NGFLAGS -DGL_GLEXT_PROTOTYPES" \
+  ./configure \
+    --prefix=/usr \
+    --libdir=/usr/lib${LIBDIRSUFFIX}/xbmc/addons \
+    --enable-release \
+    --enable-addons-with-dependencies \
+    --enable-static=no \
+    --disable-silent-rules \
+    --disable-dependency-tracking \
+    --docdir=/usr/doc/$PRGNAM-$VERSION \
+    --build=$ARCH-slackware-linux
+
+    make
+cd -
+
+# Only link to static library.
+sed -i 's|-lsquish-native|-lsquish|' tools/TexturePacker/Makefile.in
+
+# Need to fix an autoreconf error with older version of pkg-config.
+# http://forum.kodi.tv/showthread.php?tid=195791
+cat /usr/share/aclocal/pkg.m4 > m4/pkg.m4
+echo 'm4_pattern_allow([^PKG_CONFIG(_(PATH|LIBDIR|SYSROOT_DIR|ALLOW_SYSTEM_(CFLAGS|LIBS)))?$])' \
+  >> m4/pkg.m4
+sed -i "/autoreconf/s|.*|& -I $PWD/m4|" bootstrap.mk
+./bootstrap
+
+CFLAGS="$SLKCFLAGS $AFPFS_NGFLAGS" \
+CXXFLAGS="$SLKCFLAGS $AFPFS_NGFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --enable-static=no \
+  --disable-debug \
+  --enable-gl \
+  --enable-mid \
+  --enable-goom \
+  --enable-alsa \
+  --disable-asap-codec \
+  --enable-texturepacker \
+  $OPT_DEPS \
+  --build=$ARCH-slackware-linux
+
+make VERBOSE=1
+
+# Wii controller usage. Default is no.
+if ! [ "${WII:-no}" = "no" ]; then
+  make eventclients DESTDIR=$PKG WII_EXTRA_OPTS="-DCWIID_OLD"
+  find $PKG/usr/lib${LIBDIRSUFFIX}/python* -iname "*\.py" -exec chmod 0644 '{}' \;
+  # Create byte-compiled python files.
+  python -m compileall $PKG/usr/lib${LIBDIRSUFFIX}/python*/site-packages/$PRGNAM
+fi
+
+make install DESTDIR=$PKG
+python -m compileall $PKG/usr/share/$PRGNAM/addons/service.xbmc.versioncheck
+
+install -m 0755 tools/TexturePacker/TexturePacker $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Install manpages.
+mkdir -p $PKG/usr/man/man1
+for i in $PRGNAM.bin.1 $PRGNAM.1 $PRGNAM-standalone.1; do
+  install -m 0644 docs/manpages/$i $PKG/usr/man/man1/$i
+done
+
+if ! [ "${WII:-no}" = "no" ]; then
+  for i in $PRGNAM-j2meremote.1 $PRGNAM-ps3remote.1 $PRGNAM-wiiremote.1 $PRGNAM-send.1; do
+    install -m 0644 docs/manpages/$i $PKG/usr/man/man1/$i
+  done
+fi
+gzip -9 $PKG/usr/man/man?/*.?
+
+cp -a \
+  tools/EventClients/README.txt $SRCNAM-pvr-addons-Helix_rc3/COPYING \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Final clean up.
+find $PKG \( -name "Makefile*" -o -name "*cmake*" -o -name "*\.in" \) -exec rm -f '{}' \;
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
