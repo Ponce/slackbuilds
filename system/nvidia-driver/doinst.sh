@@ -3,4 +3,3 @@ if [ -x /usr/bin/update-desktop-database ]; then
 fi
 
 /usr/sbin/nvidia-switch --install
-
