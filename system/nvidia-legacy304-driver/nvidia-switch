@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Copyright 2012 Edward W. Koenig, Vancouver, WA, USA
+# Copyright 2012-2015 Edward W. Koenig, Vancouver, WA, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -20,18 +20,23 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# nvidia-switch utility 2.0.0
+# nvidia-switch utility 2.3
 #
 # A tool to install and cleanly remove the nvidia driver without stomping on the xorg files.
-# Note: this tool no longer supports switching drivers "on the fly" only installing and uninstalling
-# the nvidia driver and restoring the original xorg files. 
+# Note: this tool "should" allow switching on the fly, but why? Pick a driver! You will still
+# need to edit a bunch of other config files.
+
+# TO-DO: needs cleanup; too "wordy" and brittle.
 
 set -e
 
 ROOT="/"
 CWD=$(pwd)
 LIBSUFFIX="LIBDIRSUFFIX" # This will be replaced in the build script
+COMPAT32="LIB32FLAG" # This will be replaced in the build script (yes | no)
+INC="${ROOT}usr/include/GL"
 LIB="${ROOT}usr/lib${LIBSUFFIX}"
+LIB32="${ROOT}usr/lib"
 XMOD="${LIB}/xorg/modules"
 XLIB="$XMOD/extensions"
 NV_VERSION='PKGVERSION' # This will be replaced in the build script
@@ -39,37 +44,57 @@ GL_VERSION="1.2.0"
 NV_CONF="/usr/share/X11/xorg.conf.d/10-nvidia.conf"
 
 save_GL(){
-  cd "$LIB"
+  cd $2
   if [ "$1" = "nvidia" ]; then
-	mv libGL.so.$GL_VERSION libGL.so.$GL_VERSION-xorg
-	ln -sf libGL.so.$NV_VERSION-nvidia libGL.so.$NV_VERSION
-	ln -sf libGL.so.$NV_VERSION libGL.so.1
-	ln -sf libGL.so.1 libGL.so
-  elif [ "$1" = "xorg" ]; then
-	mv libGL.so.$GL_VERSION-xorg libGL.so.$GL_VERSION
- 	rm -f libGL.so.$NV_VERSION
-	ln -sf libGL.so.$GL_VERSION libGL.so.1
-	ln -sf libGL.so.$GL_VERSION libGL.so
-  fi 
-cd "$CWD"
+    if [ ! -e libGL.so.$GL_VERSION-xorg ]; then
+       mv libGL.so.$GL_VERSION libGL.so.$GL_VERSION-xorg
+       mv libGL.la libGL.la-xorg
+    fi
+    mv libGL.so.$NV_VERSION-nvidia libGL.so.$NV_VERSION
+    ln -sf libGL.so.$NV_VERSION libGL.so.1
+    ln -sf libGL.so.$NV_VERSION libGL.so
+    if [ ! -e libEGL.so.1.0.0-xorg ]; then
+       mv libEGL.so.1.0.0 libEGL.so.1.0.0-xorg
+    fi
+    mv libGL.la-nvidia libGL.la
+  fi
+
+  if [ "$1" = "xorg" ]; then
+     mv libGL.so.$NV_VERSION libGL.so.$NV_VERSION-nvidia
+     mv libGL.la libGL.la-nvidia
+     if [ -e libGL.so.$GL_VERSION-xorg ]; then
+        mv libGL.so.$GL_VERSION-xorg libGL.so.$GL_VERSION
+        ln -sf libGL.so.$GL_VERSION libGL.so.1
+        ln -sf libGL.so.$GL_VERSION libGL.so
+        mv libGL.la-xorg libGL.la
+     else
+	echo WARNING: libGL.so is missing.
+     fi
+
+  fi
+  cd "$CWD"
 }
 
 save_wfb(){
   cd "$XMOD"
   if [ "$1" = "nvidia" ]; then
-	ln -sf libnvidia-wfb.so.$NV_VERSION-nvidia libnvidia-wfb.so.$NV_VERSION
+	mv libnvidia-wfb.so.$NV_VERSION-nvidia libnvidia-wfb.so.$NV_VERSION
 	ln -sf libnvidia-wfb.so.$NV_VERSION libnvidia-wfb.so.1
 	if [ ! -e libwfb.so ]; then
+            mv libwfb.so libwfb.so-xorg
             ln -sf libnvidia-wfb.so.$NV_VERSION libwfb.so
         fi
   elif [ "$1" = "xorg" ]; then
-	rm -f libnvidia-wfb.so.$NV_VERSION
+	mv libnvidia-wfb.so.$NV_VERSION libnvidia-wfb.so.$NV_VERSION-nvidia
 	rm -f libnvidia-wfb.so.1
         if [ -L libwfb.so ]; then
 	    rm -f libwfb.so
+            if [ -e libwfb.so-xorg ]; then
+                mv libwfb.so-xorg libwfb.so
+            fi
         fi
-  fi 
-cd "$CWD"
+  fi
+  cd "$CWD"
 }
 
 save_glx(){
@@ -86,27 +111,23 @@ save_glx(){
 	rm -f libglx.so
 	mv libglx.so-xorg libglx.so
 	mv libglx.la-xorg libglx.la
-  fi 
+  fi
 cd "$CWD"
-}
-
-nvidia_ldconfig(){
-   /sbin/ldconfig
-   #Generate correct symink for that lib
-   /sbin/ldconfig -l $1
 }
 
 nvidia_install(){
   echo $'Installing to nvidia-driver files!\n'
-  echo "Make sure the nvidia driver is ENABLED in /etc/X11/xorg.conf."
+  echo "Make sure the nvidia driver is ENABLED in /etc/X11/xorg.conf"
+  echo "and in /etc/X11/xorg.conf.d."
   echo "Otherwise, this may lead to improperly working drivers."
 
-  save_GL "nvidia"
+  save_GL "nvidia" $LIB
   save_wfb "nvidia"
   save_glx "nvidia"
-
-  LD_NVIDIA="${LIB}/libGL.so.$NV_VERSION-nvidia"
-  nvidia_ldconfig $LD_NVIDIA
+# Check for multilib configuration
+  if [ "$COMPAT32" = "yes" ]; then
+    save_GL "nvidia" $LIB32
+  fi
 }
 
 nvidia_remove(){
@@ -115,36 +136,27 @@ nvidia_remove(){
   echo "and in /etc/X11/xorg.conf.d."
   echo "Otherwise, this may lead to improperly working drivers."
 
-  save_GL "xorg"
+  save_GL "xorg" $LIB
   save_wfb "xorg"
   save_glx "xorg"
+# Check for multilib configuration
+  if [ "$COMPAT32" = "yes" ]; then
+    save_GL "xorg" $LIB32
+  fi
 
   if [ -e $NV_CONF ]; then
 	rm -f $NV_CONF
   fi
-  
-  LD_NVIDIA="${LIB}/libGL.so.$GL_VERSION"
-  nvidia_ldconfig $LD_NVIDIA
 }
 
 usage(){
   echo "Usage:"
-  echo " --install		Set up nvidia driver files"
+  echo " --install		Set up nvidia driver files (only during pkg install)"
   echo " --remove		Return to stock xorg files and remove all symlinks"
   echo " --help			Show this help message"
 }
 
 if [ "$1" = '--install' ]; then
-  ROOT="/"
-  CWD=$(pwd)
-  if [ -e "${ROOT}usr/lib64" ]; then
-    LIBSUFFIX="64"
-  else
-    LIBSUFFIX=""
-  fi
-  LIB="${ROOT}usr/lib${LIBSUFFIX}"
-  XMOD="${LIB}/xorg/modules"
-  XLIB="$XMOD/extensions"
   nvidia_install
 elif [ "$1" = '--remove' ]; then
   nvidia_remove
