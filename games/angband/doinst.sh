@@ -20,7 +20,7 @@ config etc/angband/edit/p_hist.txt.new
 config etc/angband/edit/p_race.txt.new
 config etc/angband/edit/pain.txt.new
 config etc/angband/edit/pit.txt.new
-config etc/angband/edit/shop_own.txt.new
+config etc/angband/edit/room_template.txt.new
 config etc/angband/edit/spell.txt.new
 config etc/angband/edit/store.txt.new
 config etc/angband/edit/terrain.txt.new
