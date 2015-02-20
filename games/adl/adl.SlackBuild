@@ -1,0 +1,107 @@
+#!/bin/sh
+
+# Slackware build script for adl
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/
+# for details.
+
+# VERSION is the timestamp of the tarball. Most of the files
+# inside are stamped May 10 1991, and the copyright notice
+# says 1987.
+
+# In case anyone's wondering: compiled ADL files are NOT architecture
+# independent. 32-bit adlcomp produces files that won't run on a 64-bit
+# adlrun, and vice versa.
+
+PRGNAM=adl
+VERSION=${VERSION:-19930322}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM
+tar xvf $CWD/$PRGNAM.tar.Z
+cd $PRGNAM
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Patch does this:
+# - fix various compile errors (mostly relating to lack of ANSI prototypes).
+# - remove 'extern char *malloc()' and such, include system headers instead.
+# - add support for OPTFLAGS (instead of hard-coded -O in CFLAGS).
+# - -DADL_NAME="/usr/games/adlrun" (for adlcomp's emitted shebang lines).
+# - stop adlrun from opening game files read/write: it never writes to them,
+#   and the open fails for e.g. non-root user trying to run /usr/games/aard.
+patch -p1 < $CWD/compilefixes.diff
+
+# 'make install' doesn't create directories.
+mkdir -p $PKG/usr/games $PKG/usr/man/man6
+
+make all install BIN=$PKG/usr/games OPTFLAGS="$SLKCFLAGS"
+
+# the adltouch utility is broken, don't include in package.
+# adldebug also seems like it might be broken, but it might just be that
+# I'm using it wrong.
+rm -f $PKG/usr/games/adltouch
+
+# a couple of the samples are complete games, let's install them.
+cp -a samples/aard/aard samples/mpu/mpu $PKG/usr/games
+
+# we're going to install samples/ in /usr/doc, but not the compiled games.
+make -C samples clean
+
+# use reconstituted man pages instead of the preformatted ones in the
+# source. See fixman.sh.
+for page in $CWD/man/*.6; do
+  gzip -9c < $page > $PKG/usr/man/man6/$( basename $page ).gz
+done
+
+DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $DOCDIR
+# rename this so no GUIs think it's a MS Word doc:
+cp -a man/adl.doc $DOCDIR/adl.doc.txt
+cp -a copyrigh readme samples $DOCDIR
+cat $CWD/$PRGNAM.SlackBuild > $DOCDIR/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
