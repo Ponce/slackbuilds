@@ -23,7 +23,7 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=grass
-VERSION=${VERSION:-6.4.4}
+VERSION=${VERSION:-7.0.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -75,10 +75,22 @@ set -- $(echo $ENABLE | sed 's/,/ /g')
 while [ "$1" != "" ]; do
   case "$1"
   in
-  blas | \
-  lapack | \
-  ffmpeg | \
-  sqlite )
+  sqlite | \
+  netcdf | \
+  opencl )
+    WITHLIST="$WITHLIST --with-$1"
+    shift
+    ;;
+  # blas and lapack are both needed, so provide a single option ...
+  # (Maybe atlas would be better, but the docs are unclear about how the
+  # dependencies are used.)
+  gmath )
+    WITHLIST="$WITHLIST --with-blas --with-lapack"
+    shift
+    ;;
+  # ... but for compatibility with previous versions of this SlackBuild,
+  # allow blas and lapack to be enabled individually.
+  blas | lapack )
     WITHLIST="$WITHLIST --with-$1"
     shift
     ;;
@@ -91,87 +103,103 @@ while [ "$1" != "" ]; do
     WITHLIST="$WITHLIST --with-postgres"
     shift
     ;;
+  unixODBC )
+    WITHLIST="$WITHLIST --with-odbc"
+    shift
+    ;;
+  # If anybody needs LAS support, please submit libLAS to SBo :-)
   * )
     shift
     ;;
   esac
 done
 
-if [ "$LIBDIRSUFFIX" = "64" ]; then
-  BITNESS=" --enable-64bit"
-else
-  BITNESS=""
-fi
-
 # geos now always enabled: it's an indirect hard dep (via gdal), and makes grass nicer :-)
-# ffmpeg includes are only parsed if ffmpeg is enabled so it is safe to pass them to configure.
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS -fpermissive" \
 LDFLAGS="-ldl -lncurses" \
 ./configure \
   --prefix=/opt \
+  --exec-prefix=/wibble/usr \
+  --enable-largefile \
+  --with-cairo \
   --with-cxx \
   --with-fftw \
-  --with-motif \
   --with-freetype \
   --with-freetype-includes=/usr/include/freetype2 \
-  --with-readline \
-  --with-python \
-  --with-proj-share=/usr/share/proj \
-  --with-cairo \
-  --with-wxwidgets \
   --with-geos \
-  --enable-largefile  \
+  --with-nls \
+  --with-openmp \
+  --with-python \
+  --with-pthread \
+  --with-proj-share=/usr/share/proj \
+  --with-readline \
+  --with-wxwidgets \
   $WITHLIST \
-  $BITNESS \
-  --with-ffmpeg-includes="/usr/include/libavcodec /usr/include/libavdevice \
-  /usr/include/libavfilter /usr/include/libavformat /usr/include/libavutil \
-  /usr/include/libpostproc /usr/include/libswresample /usr/include/libswscale" \
   --build=$ARCH-slackware-linux \
   --host=$ARCH-slackware-linux
 
 make
-make prefix=$PKG/opt BINDIR=$PKG/usr/bin  \
-     PREFIX=$PKG/usr install
+make prefix=$PKG/opt exec_prefix=$PKG/usr install
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-# Create unversioned symlink
-( cd $PKG/opt ; ln -s $PRGNAM-$VERSION $PRGNAM )
-
-# Wrapper script fixups
-sed -i -e "s;$PKG;;" -e "s;-$VERSION;;" $PKG/usr/bin/grass64
-( cd $PKG/usr/bin ; ln -s grass64 $PRGNAM )
-
-# Fix fonts path for fontcap
-sed -i -e "s;$PKG;;" $PKG/opt/$PRGNAM-$VERSION/etc/fontcap
-
-# Unversion and install the pkgconfig file
-sed -i -e "s/-${VERSION}//g" grass.pc
+# Install the pkgconfig file:
 install -D -m0644 grass.pc $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/grass.pc
 
-find $PKG/opt/$PRGNAM-$VERSION/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/opt/$PRGNAM-$VERSION/man -type l ) ; do \
-  ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+# Create unversioned symlinks:
+( cd $PKG/opt ; ln -s $PRGNAM-$VERSION $PRGNAM )
+( cd $PKG/usr/bin ; ln -s grass70 $PRGNAM )
 
+# Remove hardcoded version strings:
+sed -i -e "s/-${VERSION}//g" \
+  $PKG/usr/bin/grass70 \
+  $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/grass.pc
+
+# Remove packaging directory pollution:
+sed -i -e "s;$PKG;;" \
+  $PKG/usr/bin/grass70 \
+  $PKG/opt/$PRGNAM-$VERSION/demolocation/.grassrc70 \
+  $PKG/opt/$PRGNAM-$VERSION/etc/fontcap \
+  $PKG/opt/$PRGNAM-$VERSION/include/Make/Grass.make \
+  $PKG/opt/$PRGNAM-$VERSION/include/Make/Platform.make
+
+# Documentation:
+PKGOPTMAN=$PKG/opt/$PRGNAM-$VERSION/docs/man
+find $PKGOPTMAN -type f -exec gzip -9 {} \;
+for i in $( find $PKGOPTMAN -type l ) ; do \
+  ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 mkdir -p $PKG/usr/man/man1
 cp -a \
-  $PKG/opt/$PRGNAM-$VERSION/man/man1/grass6.1.gz \
+  $PKGOPTMAN/man1/grass7.1.gz \
   $PKG/usr/man/man1/grass.1.gz
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+mv \
+  $PKG/opt/$PRGNAM-$VERSION/{AUTHORS,CHANGES,COPYING,GPL.TXT,REQUIREMENTS.html} \
+  $PKG/opt/$PRGNAM-$VERSION/*.csv \
+  $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  AUTHORS CHANGES COPYING ChangeLog* GPL.TXT INSTALL README REQUIREMENTS.html \
-  SUBMITTING SUBMITTING_SCRIPTS SUBMITTING_TCLTK TODO \
+  ChangeLog* INSTALL README SUBMITTING* TODO \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
-install -D -m 0644 $CWD/$PRGNAM.desktop \
+# Desktop:
+mkdir -p $PKG/usr/share/applications
+cp -a \
+  $CWD/$PRGNAM.desktop \
   $PKG/usr/share/applications/$PRGNAM.desktop
-install -D -m 0644 gui/icons/$PRGNAM-48x48.png \
-  $PKG/usr/share/pixmaps/$PRGNAM.png
+mkdir -p $PKG/usr/share/pixmaps
+cp -a \
+  gui/icons/$PRGNAM-64x64.png \
+  $PKG/usr/share/pixmaps/${PRGNAM}.png
+
+# Cleanup:
+rm -rf $PKG/opt/$PRGNAM-$VERSION/demolocation/PERMANENT/.tmp
+rm $PKG/opt/$PRGNAM-$VERSION/config.status
+rm -rf $PKG/opt/$PRGNAM-$VERSION/share/
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
