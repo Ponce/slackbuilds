@@ -12,4 +12,3 @@ config() {
 }
 
 config etc/mosquitto/mosquitto.conf.new
-
