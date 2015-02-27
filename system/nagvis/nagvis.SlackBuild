@@ -1,0 +1,117 @@
+#!/bin/sh
+
+# Slackware build script for nagvis
+
+# Copyright 2015  Mario Preksavec, Zagreb, Croatia
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=nagvis
+VERSION=${VERSION:-1.8rc3}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+ARCH=noarch
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Patches thanks to Debian folks!
+patch -p1 <$CWD/patches/global.diff
+patch -p1 <$CWD/patches/privacy.diff
+
+# Remove cruft
+find . -type f -name '.gitignore' -exec rm {} \;
+
+# Manual install
+mkdir -p $PKG/usr/share/$PRGNAM $PKG/etc/{$PRGNAM/profiles,httpd/extra} \
+  $PKG/var/lib/$PRGNAM $PKG/var/cache/$PRGNAM/tmpl/{cache,compile} \
+  $PKG/usr/doc/$PRGNAM-$VERSION/{html,scripts,demo/{conf.d,geomap,maps}}
+cp -a etc/{conf.d,geomap,maps} $PKG/etc/$PRGNAM
+cp -a share $PKG/usr/share/$PRGNAM
+cp -a docs/{de_DE,en_US,general} $PKG/usr/doc/$PRGNAM-$VERSION/html
+cp -a nagvis-make-admin $PKG/usr/doc/$PRGNAM-$VERSION/scripts
+cp -a ChangeLog INSTALL LICENCE README TODO $PKG/usr/doc/$PRGNAM-$VERSION
+mv $PKG/usr/share/$PRGNAM/share/userfiles $PKG/var/lib/$PRGNAM
+
+# Put demo maps with documentation
+mv $PKG/etc/$PRGNAM/conf.d/demo* $PKG/usr/doc/$PRGNAM-$VERSION/demo/conf.d
+mv $PKG/etc/$PRGNAM/geomap/demo* $PKG/usr/doc/$PRGNAM-$VERSION/demo/geomap
+mv $PKG/etc/$PRGNAM/maps/demo* $PKG/usr/doc/$PRGNAM-$VERSION/demo/maps
+
+# Symlink stupidity
+ln -s /var/lib/$PRGNAM/userfiles $PKG/usr/share/$PRGNAM/share/userfiles
+ln -s /usr/doc/$PRGNAM-$VERSION/html $PKG/usr/share/$PRGNAM/share/docs
+ln -s /usr/doc/$PRGNAM-$VERSION/html $PKG/usr/share/$PRGNAM/docs
+ln -s /etc/$PRGNAM $PKG/usr/share/$PRGNAM/etc
+ln -s /var/cache/$PRGNAM $PKG/usr/share/$PRGNAM/share/var
+ln -s /var/cache/$PRGNAM $PKG/usr/share/$PRGNAM/var
+
+# Install configuration
+sed -e "s#@NAGVIS_WEB@#/$PRGNAM#g" \
+    -e "s#@NAGVIS_PATH@#/usr/share/$PRGNAM/share#g" \
+    -e "s#@NAGIOS_PATH@/etc#/etc/nagios#g" \
+  etc/apache2-$PRGNAM.conf-sample > $PKG/etc/httpd/extra/$PRGNAM.conf.new
+sed -e "s#;file_group=\"\"#file_group=\"apache\"#" \
+    -e "s#;file_mode=\"660\"#file_mode=\"660\"#" \
+    -e "s#;language=\"en_US\"#language=\"en_US\"#" \
+    -e "s#;base=\"/usr/local/$PRGNAM/\"#base=\"/usr/share/$PRGNAM/\"#" \
+    -e "s#;htmlbase=\"/$PRGNAM\"#htmlbase=\"/$PRGNAM\"#" \
+    -e "s#;graphvizpath=\"/usr/bin/\"#graphvizpath=\"/usr/bin/\"#" \
+    -e "s#\[rotation_demo\]#;\[rotation_demo\]#" \
+    -e "s#interval=15#;interval=15#" \
+    -e "s#maps=\"\(.*\)\"#;maps=\"\1\"#" \
+  etc/$PRGNAM.ini.php-sample > $PKG/etc/$PRGNAM/$PRGNAM.ini.php.new
+cat etc/perms.db-sample > $PKG/etc/$PRGNAM/perms.db.new
+
+# Adjust apache config
+sed -i '/Allow from all/a\ \ Require all granted' \
+  $PKG/etc/httpd/extra/$PRGNAM.conf.new
+
+# Append .new to configs
+find $PKG/etc/$PRGNAM -type f ! -name '*.new' -exec mv {} {}.new \;
+
+# Apache needs permissions
+chown -R apache:apache $PKG/etc/$PRGNAM $PKG/var/{cache,lib}/$PRGNAM
+
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
