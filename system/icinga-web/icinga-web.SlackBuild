@@ -1,0 +1,108 @@
+#!/bin/sh
+
+# Slackware build script for icinga-web
+
+# Copyright 2015  Mario Preksavec, Zagreb, Croatia
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=icinga-web
+VERSION=${VERSION:-1.12.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+ARCH=noarch
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+./configure \
+  --prefix=/usr/share/$PRGNAM \
+  --datadir=/usr/share/$PRGNAM \
+  --datarootdir=/usr/share/$PRGNAM \
+  --sysconfdir=/etc/$PRGNAM \
+  --with-conf-dir=/etc/$PRGNAM \
+  --with-web-user=apache \
+  --with-web-group=apache \
+  --with-api-cmd-file=/var/run/icinga2/cmd/icinga2.cmd \
+  --with-log-dir=/var/log/$PRGNAM \
+  --with-cache-dir=/var/cache/$PRGNAM \
+  --with-reporting-tmp-dir=/var/cache/$PRGNAM/tmp \
+  --with-icinga-bin=/usr/sbin/icinga2 \
+  --with-icinga-cfg=/etc/icinga2/icinga2.conf \
+  --with-icinga-objects-dir=/etc/icinga2/objects \
+  --with-clearcache-path=/usr/bin \
+  --with-web-apache-path=/etc/httpd/extra \
+  --with-bin-user=root \
+  --with-bin-group=root \
+  --build=$ARCH-slackware-linux
+
+make install install-apache-config DESTDIR=$PKG
+
+# Append .new to configs
+for i in $PKG/etc/$PRGNAM/*.xml ; do mv $i $i.new ; done
+mv $PKG/etc/httpd/extra/$PRGNAM.conf $PKG/etc/httpd/extra/$PRGNAM.conf.new
+
+# Tune up clearcache
+mv $PKG/usr/bin/clearcache.sh $PKG/usr/bin/${PRGNAM}-clearcache
+
+# Erase cruft left behind
+rm -rf $PKG/usr/share/$PRGNAM/bin
+
+# Move & symlink tmp dir
+mv $PKG/usr/share/$PRGNAM/app/data/tmp $PKG/var/cache/$PRGNAM/tmp
+ln -s /var/cache/$PRGNAM/tmp $PKG/usr/share/$PRGNAM/app/data/tmp
+
+# Place the pnp templates for -module-pnp
+cp -a contrib/PNP_Integration/templateExtensions/* \
+  $PKG/usr/share/$PRGNAM/app/modules/Cronks/data/xml/extensions/
+
+# Apache needs permissions
+chown -R apache:apache $PKG/var/{cache,log}/$PRGNAM
+
+mkdir -p $PKG/usr/doc
+mv $PKG/usr/share/$PRGNAM/doc $PKG/usr/doc/$PRGNAM-$VERSION
+mv $PKG/usr/share/$PRGNAM/etc/schema $PKG/usr/doc/$PRGNAM-$VERSION
+sed -e "s#%%USER%%#icinga#;s#%%PATH%%#/usr/share/$PRGNAM#" etc/scheduler/icingaCron \
+  > $PKG/usr/doc/$PRGNAM-$VERSION/icingaCron.example
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
