@@ -1,0 +1,154 @@
+#!/bin/sh
+
+# Slackware build script for icinga2
+
+# Copyright 2015  Mario Preksavec, Zagreb, Croatia
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=icinga2
+VERSION=${VERSION:-2.2.4}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+# Bail if user or group isn't valid on your system
+if ! grep ^icinga: /etc/passwd 2>&1 > /dev/null; then
+
+cat << EOF
+
+  You must have icinga user and a group to run this script
+
+  # groupadd -g 297 icinga
+  # groupadd -g 298 icingacmd
+  # useradd -u 297 -d /dev/null -s /bin/false -G icingacmd -g icinga icinga
+
+EOF
+
+  exit
+fi
+
+# Use MySQL by default
+MYSQL=${MYSQL:-yes}
+case "$MYSQL" in
+  no) MYSQL="-DICINGA2_WITH_MYSQL=OFF" ;;
+   *) MYSQL="" ;;
+esac
+
+# Use PGSQL by default
+PGSQL=${PGSQL:-no}
+case "$PGSQL" in
+  no) PGSQL="-DICINGA2_WITH_PGSQL=OFF" ;;
+   *) PGSQL="" ;;
+esac
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/v$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_SYSCONFDIR=/etc \
+    -DCMAKE_INSTALL_LOCALSTATEDIR=/var \
+    -DCMAKE_INSTALL_MANDIR=/usr/man \
+    -DCMAKE_INSTALL_DOCDIR=/usr/doc/$PRGNAM-$VERSION \
+    $MYSQL \
+    $PGSQL \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install DESTDIR=$PKG
+cd ..
+
+# Where precision tools fail, the hammer succeeds
+mv $PKG/usr/share/man $PKG/usr/man
+
+# Match config with monitoring-plugins and manubulon-snmp-plugins packages
+sed -i -e 's#^\(const ManubulonPluginDir =\).*#\1 "/usr/libexec/manubulon-snmp-plugins"#' \
+       -e 's#^\(const PluginDir =\).*#\1 "/usr/libexec/monitoring-plugins"#' \
+  $PKG/etc/$PRGNAM/constants.conf
+
+# Convert SYSV init script to BSD style
+mv $PKG/etc/init.d $PKG/etc/rc.d
+mv $PKG/etc/rc.d/$PRGNAM $PKG/etc/rc.d/rc.$PRGNAM
+
+# Set permissions
+chmod -R 0775 $PKG/var/{cache,log,lib,run,spool}/$PRGNAM
+chown -R icinga:icinga $PKG/var/{cache,log,lib,run,spool}/$PRGNAM
+chown icinga:icingacmd $PKG/var/{log/$PRGNAM,run/$PRGNAM/cmd}
+
+# Finally, append .new to files
+find $PKG/etc $PKG/usr/share/$PRGNAM -type f ! -name "README" -exec mv {} {}.new \;
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a INSTALL.md $CWD/README.SLACKWARE $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
