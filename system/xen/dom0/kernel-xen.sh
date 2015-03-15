@@ -13,11 +13,10 @@ ROOTMOD=${ROOTMOD:-ext4}
 ROOTFS=${ROOTFS:-ext4}
 ROOTDEV=${ROOTDEV:-/dev/sda2}
 
-# Automatically determine the architecture we're building on:
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
+      i?86) ARCH=i486 ;;
     x86_64) ARCH=x86_64 ;;
-    # Bail out on everything else:
          *) echo "Unsupported architecture detected ($ARCH)"; exit ;;
   esac
 fi

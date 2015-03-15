@@ -2,7 +2,7 @@
 
 # Slackware build script for xen
 
-# Copyright 2010, 2011, 2013, 2014  Mario Preksavec, Zagreb, HR
+# Copyright 2010, 2011, 2013, 2014, 2015  Mario Preksavec, Zagreb, Croatia
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,14 +23,15 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=xen
-VERSION=${VERSION:-4.3.3}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-4.5.0}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    x86_64) ARCH=x86_64 ;;
-         *) echo "Unsupported architecture detected ($ARCH)"; exit ;;
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
   esac
 fi
 
@@ -54,11 +55,31 @@ EOF
   exit
 fi
 
-if [ $ARCH == "x86_64" ]; then
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
+  SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
+
+USE_LIBSSH2=${USE_LIBSSH2:-no}
+case "$LIBSSH2" in
+  yes) LIBSSH2="en" ;;
+    *) LIBSSH2="dis" ;;
+esac
+
+USE_BLUEZ=${USE_BLUEZ:-no}
+case "$BLUEZ" in
+  yes) BLUEZ="en" ;;
+    *) BLUEZ="dis" ;;
+esac
 
 set -e
 
@@ -73,29 +94,38 @@ find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
   -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Fix some stupid things
-patch -p1 <$CWD/patches/configuration_goes_to_system_etc.diff
+# Tweak some things
+sed "s/@@LIBSSH2@@/$LIBSSH2/;s/@@BLUEZ@@/$BLUEZ/" \
+  $CWD/patches/qemu_configure_options.diff | patch -p1
 patch -p1 <$CWD/patches/symlinks_instead_of_hardlinks.diff
-patch -p1 <$CWD/patches/remove_obsolete_udev_rules.diff
 
 # Local attach support for PHY backends using scripts
 patch -p1 <$CWD/patches/local_attach_support_for_phy.patch
 
 # Let's not download stuff during the build...
 patch -p1 <$CWD/patches/use_already_present_ipxe.diff
-cp -a $CWD/ipxe-git-9a93db3f0947484e30e753bbd61a10b17336e20e.tar.gz \
+patch -p1 <$CWD/patches/disable_git_checkout.diff
+cp $CWD/ipxe-git-9a93db3f0947484e30e753bbd61a10b17336e20e.tar.gz \
   tools/firmware/etherboot/_ipxe.tar.gz
-patch -p1 <$CWD/patches/use_already_present_seabios.diff
-tar -xf $CWD/seabios-git-3a28511b46f0c2af5fae1b6ed2b0c19d7913cee3.tar.gz \
+tar -xf $CWD/seabios-git-rel-1.7.5.tar.gz \
   -C tools/firmware
-cp -a $CWD/{lwip,zlib,newlib,pciutils,grub,gmp,tpm_emulator}-*.tar.?z* \
+cp $CWD/{lwip,zlib,newlib,pciutils,grub,gmp,tpm_emulator}-*.tar.?z* \
   $CWD/polarssl-*.tgz stubdom
 
+# Patch from upstream
+patch -p1 <$CWD/patches/xsa119-unstable.patch
+
+# Occasionally, parallel building fails
+patch -p1 <$CWD/patches/libcacard_fix_parallel_compile.patch
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --libexecdir=/usr/libexec \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --mandir=/usr/man \
@@ -136,12 +166,7 @@ find $PKG/boot/ -type l -a -name "xen-*" -exec rm -f {} \; 2>/dev/null || true
 # Move from SYSV to BSD init scripts
 mv $PKG/etc/rc.d/init.d/xen-watchdog $PKG/etc/rc.d/rc.xen-watchdog.new
 mv $PKG/etc/rc.d/init.d/xencommons $PKG/etc/rc.d/rc.xencommons.new
-mv $PKG/etc/rc.d/init.d/xend $PKG/etc/rc.d/rc.xend.new
 mv $PKG/etc/rc.d/init.d/xendomains $PKG/etc/rc.d/rc.xendomains.new
-
-# Fully qualified paths are needed for /etc/rc.d/rc.local_shutdown
-#sed -i 's:\(^[[:space:]]*\)xend :\1/usr/sbin/xend : ' $PKG/etc/rc.d/rc.xend.new
-#sed -i 's:CMD=x\([m|l]\):CMD=/usr/sbin/x\1:' $PKG/etc/rc.d/rc.xendomains.new
 
 # Put udev rules files in the right place
 mkdir -p $PKG/lib/udev/rules.d
@@ -149,11 +174,9 @@ mv $PKG/etc/udev/rules.d/xen*.rules $PKG/lib/udev/rules.d/
 
 # Remove empty directories
 rmdir $PKG/etc/{rc.d/init.d,udev/rules.d,udev}
-# Only if they are really empty
-#rmdir --ignore-fail-on-non-empty $PKG/usr/doc/$PRGNAM-$VERSION/{pdf,ps}
 
 # Append .new to config files
-for i in $PKG/etc/xen/{*.conf,*.sxp,*.xml} ; do mv $i $i.new ; done
+for i in $PKG/etc/xen/*.conf ; do mv $i $i.new ; done
 mv $PKG/etc/qemu/target-x86_64.conf $PKG/etc/qemu/target-x86_64.conf.new
 mv $PKG/etc/default/xencommons $PKG/etc/default/xencommons.new
 mv $PKG/etc/default/xendomains $PKG/etc/default/xendomains.new
@@ -164,8 +187,18 @@ find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-cp -a COPYING MAINTAINERS README $CWD/{dom0,domU} $PKG/usr/doc/$PRGNAM-$VERSION
-chown -R root:root $PKG/usr/doc/$PRGNAM-$VERSION/{dom0,domU}
+if [ "${INSTALL_OPENVSWITCH_EXTENDED:-no}" != "no" ]; then
+  install -m777 -oroot -groot $CWD/openvswitch/vif-openvswitch-extended \
+    $PKG/etc/xen/scripts/vif-openvswitch-extended
+  install -m777 -oroot -groot $CWD/openvswitch/openvswitch-clean.sh \
+    $PKG/usr/bin/openvswitch-clean
+  cp $CWD/openvswitch/openvswitch.conf $PKG/etc/xen/openvswitch.conf.new
+  cp $CWD/openvswitch/README.openvswitch-extended $PKG/usr/doc/$PRGNAM-$VERSION
+else
+  cp -r $CWD/openvswitch $PKG/usr/doc/$PRGNAM-$VERSION
+fi
+
+cp -r COPYING MAINTAINERS README $CWD/{dom0,domU} $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
 
