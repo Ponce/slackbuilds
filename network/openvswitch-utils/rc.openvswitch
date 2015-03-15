@@ -1,0 +1,87 @@
+#!/bin/sh
+# Start/stop/restart openvswitch.
+
+# To start Open vSwitch automatically at boot, be sure this script is
+# executable:
+#
+#   % chmod 755 /etc/rc.d/rc.openvswitch
+
+# Before you can run Open vSwitch daemon, you must have a database.  To
+# install one, perform the following as root:
+#
+#   % /etc/rc.d/rc.openvswitch clean-database
+#
+
+DBCONF=/etc/openvswitch/ovs-vswitchd.conf.db
+SOCKET=/var/run/openvswitch/db.sock
+VSPID=/var/run/openvswitch/ovs-vswitchd.pid
+DBPID=/var/run/openvswitch/ovsdb-server.pid
+
+# Insert kernel driver for Open vSwitch:
+/sbin/modprobe openvswitch
+
+# Insert kernel driver for VLANs:
+/sbin/modprobe 8021q
+
+# Start openvswitch:
+openvswitch_start() {
+  echo "Starting openvswitch:  /etc/rc.d/rc.openvswitch"
+  /usr/sbin/ovsdb-server /etc/openvswitch/ovs-vswitchd.conf.db --remote=punix:$SOCKET \
+    --detach --pidfile=$DBPID --verbose=ANY:ANY:err
+  /usr/bin/ovs-vsctl --no-wait --verbose=ANY:ANY:err init
+  /usr/sbin/ovs-vswitchd unix:$SOCKET --detach --pidfile=$VSPID --verbose=ANY:ANY:err
+}
+
+# Stop openvswitch:
+openvswitch_stop() {
+  echo "Stopping openvswitch:  /etc/rc.d/rc.openvswitch"
+  if [ -e $VSPID ]; then
+    pid=$(cat $VSPID)
+    /usr/bin/ovs-appctl -t /var/run/openvswitch/ovs-vswitchd.$pid.ctl exit
+  fi
+  if [ -e $DBPID ]; then
+    pid=$(cat $DBPID)
+    /usr/bin/ovs-appctl -t /var/run/openvswitch/ovsdb-server.$pid.ctl exit
+  fi
+}
+
+# Clean openvswitch:
+openvswitch_clean() {
+  if [ ! -e $DBPID ] && [ ! -e $VSPID ]; then
+    rm -f $DBCONF
+    /usr/bin/ovsdb-tool create $DBCONF /usr/share/openvswitch/vswitch.ovsschema
+  else
+    echo "Stop openvswitch first!"
+  fi
+}
+
+case "$1" in
+  'start')
+    openvswitch_start
+  ;;
+  'stop')
+    openvswitch_stop
+  ;;
+  'restart')
+    openvswitch_stop
+    sleep 1
+    openvswitch_start
+  ;;
+  'clean-database')
+    openvswitch_clean
+  ;;
+  'start-clean')
+    openvswitch_clean
+    sleep 1
+    openvswitch_start
+  ;;
+  'restart-clean')
+    openvswitch_stop
+    sleep 1
+    openvswitch_clean
+    sleep 1
+    openvswitch_start
+  ;;
+  *)
+    echo "Usage $0 start|stop|restart|clean-database|start-clean|restart-clean"
+esac
