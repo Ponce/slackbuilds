@@ -28,6 +28,5 @@ config etc/snort/threshold.conf.new
 config etc/snort/attribute_table.dtd.new
 config etc/snort/classification.config.new
 config etc/snort/gen-msg.map.new
-#config etc/snort/sid-msg.map.new
 config etc/snort/unicode.map.new
 
