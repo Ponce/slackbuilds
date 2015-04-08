@@ -3,7 +3,7 @@
 # Slackware build script for Audacity
 
 # Copyright 2006-2010 Chess Griffin <chess@chessgriffin.com>
-# Copyright 2011-2014 Matteo Bernardini <ponce@slackbuilds.org>
+# Copyright 2011-2015 Matteo Bernardini <ponce@slackbuilds.org>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -30,7 +30,7 @@
 # Modified by the SlackBuilds.org project
 
 PRGNAM=audacity
-VERSION=${VERSION:-2.0.6}
+VERSION=${VERSION:-2.1.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -61,10 +61,12 @@ else
   LIBDIRSUFFIX=""
 fi
 
-do_soundtouch="out" ; [ "${SOUNDTOUCH:-no}" != "no" ] && do_soundtouch=""
-do_twolame="out"    ; [ "${TWOLAME:-no}" != "no" ]    && do_twolame=""
-do_vamp="out"       ; [ "${VAMP:-no}" != "no" ]       && do_vamp=""
-do_ffmpeg="out"     ; [ "${FFMPEG:-no}" != "no" ]     && do_ffmpeg=""
+if [ -x /usr/bin/listplugins ];      then do_ladspa="--with-ladspa";          else do_ladspa="--without-ladspa";   fi
+if pkg-config --exists libavcodec;   then do_ffmpeg="-ffmpeg=system";         else do_ffmpeg="out-ffmpeg";         fi
+if pkg-config --exists lv2;          then do_lv2="-lv2=system";               else do_lv2="out-lv2";               fi
+if pkg-config --exists soundtouch;   then do_soundtouch="-soundtouch=system"; else do_soundtouch="out-soundtouch"; fi
+if pkg-config --exists twolame;      then do_twolame="-libtwolame=system";    else do_twolame="out-libtwolame";    fi
+if pkg-config --exists vamp-hostsdk; then do_vamp="-libvamp=system";          else do_vamp="out-libvamp";          fi
 
 set -e
 
@@ -72,7 +74,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-src-$VERSION
-tar xvf $CWD/$PRGNAM-minsrc-$VERSION.tar.?z*
+tar xvf $CWD/$PRGNAM-src-$VERSION.tar.?z*
 cd $PRGNAM-src-$VERSION
 chown -R root:root .
 find -L . \
@@ -81,9 +83,9 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-# Fix vamp plugin search path on x86_64 - thanks to B. Watson
+# fix vamp plugin search path on x86_64 - thanks to B. Watson
 sed -i "s,lib/vamp,lib$LIBDIRSUFFIX/vamp,g" \
-       lib-src/libvamp/src/vamp-hostsdk/PluginHostAdapter.cpp
+  lib-src/libvamp/src/vamp-hostsdk/PluginHostAdapter.cpp || true
 
 # libsoxr is the new default resampling library
 CFLAGS="$SLKCFLAGS" \
@@ -93,23 +95,33 @@ CXXFLAGS="$SLKCFLAGS" \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --enable-unicode \
   --enable-nyquist \
-  --enable-vamp \
-  --with-expat \
-  --with-libvorbis \
-  --with-libmad \
-  --with-libflac \
-  --with-libsndfile \
-  --with-libid3tag \
+  --with-expat=system \
+  --with-libvorbis=system \
+  --with-libmad=system \
+  --with-libflac=system \
+  --with-libsndfile=system \
+  --with-libid3tag=system \
   --with-libsoxr \
-  --with$do_ffmpeg-ffmpeg \
-  --with$do_soundtouch-soundtouch \
-  --with$do_twolame-libtwolame \
-  --with$do_vamp-libvamp
+  --with-portaudio \
+  $do_ladspa \
+  --with$do_ffmpeg \
+  --with$do_lv2 \
+  --with$do_soundtouch \
+  --with$do_twolame \
+  --with$do_vamp \
+  --without-libresample \
+  --without-libsamplerate
+
+# ensure we use the system headers for these, note we do this after
+# configure as it wants to run sub-configures in these dirs
+for i in ffmpeg expat libid3tag libflac libmad libresample libsndfile libvamp lv2 soundtouch twolame; do
+  rm -rf lib-src/$i
+done
 
 make
 make install DESTDIR=$PKG
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 # We're going to overwrite the included audacity.desktop file with ours,
@@ -119,8 +131,9 @@ install -D -m 0644 $CWD/audacity.desktop \
 install -D -m 0644 images/AudacityLogo48x48.xpm \
   $PKG/usr/share/pixmaps/audacity.xpm
 
-# Move manpage directory to proper location; pages are already gzipped
+# Move manpage directory to proper location
 mv $PKG/usr/share/man $PKG/usr
+find $PKG/usr/man -type f -exec gzip -9 {} \;
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 rm -fr $PKG/usr/share/doc
