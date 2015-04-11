@@ -9,4 +9,4 @@ _npm_completion () {
                          2>/dev/null)) || return $?
   IFS="$si"
 }
-complete -F _npm_completion npm
+complete -o default -F _npm_completion npm
