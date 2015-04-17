@@ -1,0 +1,77 @@
+#!/bin/bash
+#
+# opendkim    Start and stop OpenDKIM.
+
+# OpenDKIM startup script for Slackware 14.1 by Gerardo Zamudio
+# Modified from the  script by Steve Jenkins (SteveJenkins.com) - 10-29-2012
+# Based on a script by Andrew Colin Kissa (TopDog) for dkim-milter - 05-28-2009
+
+USER="opendkim"
+PROGRAM=/usr/sbin/opendkim
+CONF_FILE=/etc/opendkim.conf
+PID_FILE=/var/run/opendkim/opendkim.pid
+KEYGEN=/usr/sbin/opendkim-genkey
+DKIM_KEYDIR=/etc/opendkim/keys
+DKIM_SELECTOR=default
+AUTOCREATE_DKIM_KEYS=yes
+
+do_dkim_keygen() {
+        if [ ! -s $DKIM_KEYDIR/$DKIM_SELECTOR.private ]; then
+                echo -n $"Generating default DKIM keys: "
+                if [ "x$(hostname -d)" = "x" ]; then
+                        echo $"Cannot determine host's domain name, so skipping default key generation."
+                else
+                        mkdir -p $DKIM_KEYDIR
+                        $KEYGEN -b 2048 -D $DKIM_KEYDIR -s $DKIM_SELECTOR -d "$(hostname -d)"
+                        chown root:$USER $DKIM_KEYDIR
+                        chown $USER:$USER $DKIM_KEYDIR/$DKIM_SELECTOR.{private,txt}
+                        chmod 600 $DKIM_KEYDIR/$DKIM_SELECTOR.private
+                        chmod 644 $DKIM_KEYDIR/$DKIM_SELECTOR.txt
+                        echo
+                        echo Default DKIM keys for "$(hostname -d)" created in $DKIM_KEYDIR.
+                fi
+        fi
+}
+
+case "$1" in
+  start)
+        # Create keys if necessary
+        if [ "x${AUTOCREATE_DKIM_KEYS}" != xNO ]; then
+                do_dkim_keygen
+        fi
+
+        echo -n $"Starting OpenDKIM Milter... "
+        echo
+        if [ -f $PID_FILE ]; then
+                PID=$(cat $PID_FILE)
+                echo OpenDKIM already running as pid "$PID"
+                exit 2;
+        else
+                $PROGRAM -l -x $CONF_FILE -P $PID_FILE
+        fi
+        ;;
+  stop)
+		echo -n $"Stopping OpenDKIM Milter... "
+        echo
+        if [ ! -f $PID_FILE ]; then
+                echo OpenDKIM is not running!
+                exit 2;
+        else
+				kill -TERM "$(cat $PID_FILE)" && rm -rf /var/run/opendkim.pid
+		fi
+        ;;
+  status)
+        if [ -f $PID_FILE ]; then
+                PID=$(cat $PID_FILE)
+                echo OpenDKIM already running as pid "$PID"
+                exit 2;
+        else
+                echo OpenDKIM is not running!
+        fi
+        ;;
+  *)
+        echo $"Usage: $0 {start|stop|status|}"
+        exit 1
+esac
+
+exit $?
