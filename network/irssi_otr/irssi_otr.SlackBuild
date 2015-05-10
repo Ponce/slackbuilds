@@ -6,29 +6,15 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-# 20130326 bkw:
-# - Use a private copy of libotr 3.x, statically built.
-#   Needed because SBo libotr has upgraded to 4.0, which this
-#   plugin won't build with. Removed libotr from REQUIRES in .info file.
-# - Add xchat support (upstream already supported it, no patching needed)
-# - Better template compliance (cmake in a build dir, actually use SLKCFLAGS)
-# - Bumped BUILD to 2
-
-# For anyone that gets tempted to try the latest git irssi-otr code, here's
-# what I found when I messed with a git checkout from 20130326:
-
-# Pros: libotr 4.0 is supported
-#       weechat support has been added
-# Cons: xchat support is totally broken
-#       irssi segfaults on plugin load, unless the plugin is built with -O0
-#       the weechat support doesn't work without patching
-
-# In view of the above, I decided to stick with the irssi_otr 0.3 release.
-# Sorry, weechat users.
+# 20150510 bkw:
+# - updated for 1.0.0.
+# - 1.0.0 uses libotr-4.x, so rip out all the static linking mess.
+# - upstream switched from cmake to autoconf, rewrite most of script.
+# - xchat support was dropped by upstream, so remove all references.
 
 PRGNAM=irssi_otr
-VERSION=${VERSION:-0.3}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.0.0}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -59,46 +45,11 @@ else
 fi
 
 TARNAM=$( echo $PRGNAM | sed 's/_/-/g' )
-LIBOTR_VERSION=3.2.1
-
-IRSSI=${IRSSI:-yes}
-IRSSI_PLUGIN="libotr.so"
-IRSSI_PLUGIN_DIR=$PKG/usr/lib$LIBDIRSUFFIX/irssi/modules
-
-XCHAT=${XCHAT:-yes}
-XCHAT_PLUGIN="libxchatotr.so"
-XCHAT_PLUGIN_DIR=$PKG/usr/lib$LIBDIRSUFFIX/xchat/plugins
-
-if [ "$IRSSI" != "yes" -a "$XCHAT" != "yes" ]; then
-  echo "Can't build with both irssi and xchat disabled (nothing to build)" 2>&1
-  exit 1
-fi
 
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
-cd $TMP
-
-# First, build our static libotr3. It won't get installed as part of
-# the package.
-rm -rf libotr-$LIBOTR_VERSION
-tar xvf $CWD/libotr-$LIBOTR_VERSION.tar.gz
-cd libotr-$LIBOTR_VERSION
-
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure --prefix=$( pwd )/installed \
-  --enable-static \
-  --disable-shared \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --build=$ARCH-slackware-linux
-
-make
-make install
-
-# Now we can build irssi_otr.
 cd $TMP
 rm -rf $TARNAM-$VERSION
 tar xvf $CWD/$TARNAM-$VERSION.tar.gz
@@ -110,49 +61,32 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-mkdir build
-cd build
+# irssi module dir is hardcoded to lib.
+sed -i "/^IRSSI_MODULE_DIR/s,lib,lib$LIBDIRSUFFIX," configure.ac
 
-if [ "$IRSSI" = "yes" ]; then
-  CLIENTS=" irssi"
-  cmake -DCMAKE_C_FLAGS_RELEASE="$SLKCFLAGS" \
-        -DCMAKE_BUILD_TYPE="release"  \
-        -DLIBOTR_INCLUDE_DIR=$TMP/libotr-$LIBOTR_VERSION/installed/include \
-        -DLIBOTR_LIBRARY=$TMP/libotr-$LIBOTR_VERSION/installed/lib/libotr.a \
-        ..
-  make
+./bootstrap
 
-  # Easier to manually install than to coerce cmake's install
-  # target into using LIBDIRSUFFIX
-  mkdir -p $IRSSI_PLUGIN_DIR
-  install -s -o root -g root -m 0755 $IRSSI_PLUGIN $IRSSI_PLUGIN_DIR
-fi
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --build=$ARCH-slackware-linux
 
-if [ "$XCHAT" = "yes" ]; then
-  CLIENTS="$CLIENTS xchat"
-  rm -rf *
-  sed -i 's,irssi,xchat,' ../tarballdefs.cmake
-  cmake -DCMAKE_C_FLAGS_RELEASE="$SLKCFLAGS" \
-      -DCMAKE_BUILD_TYPE="release"  \
-      -DLIBOTR_INCLUDE_DIR=$TMP/libotr-$LIBOTR_VERSION/installed/include \
-      -DLIBOTR_LIBRARY=$TMP/libotr-$LIBOTR_VERSION/installed/lib/libotr.a \
-      -DXCHAT_INCLUDE_DIR=$CWD \
-      ..
+make
+make install-strip DESTDIR=$PKG
 
-  make
-  mkdir -p $XCHAT_PLUGIN_DIR
-  install -s -o root -g root -m 0755 $XCHAT_PLUGIN $XCHAT_PLUGIN_DIR
-fi
-
-cd ..
-
+# AUTHORS is a 0-byte placeholder.
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a LICENSE README ChangeLog *.txt $PKG/usr/doc/$PRGNAM-$VERSION
-[ "$XCHAT" = "yes" ] && cp -a README.xchat $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a ChangeLog LICENSE README* $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-sed "s/@CLIENTS@/$CLIENTS/" $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
