@@ -1,8 +1,15 @@
 #!/bin/sh
 
 # Slackware build script for flite
-# Written by Martin Lefebvre (dadexter@sekurity.com)
-# Maintained by B. Watson (yalhcru@gmail.com), original author is MIA
+# Originally written by Martin Lefebvre (dadexter@sekurity.com)
+# Now maintained by B. Watson (yalhcru@gmail.com), original author is MIA.
+
+# 20150509 bkw:
+# - update for 2.0.0
+# - add HTML and .info docs
+# - add man page
+# - update HOMEPAGE
+# - add optional extra voice support
 
 # 20141020 bkw: fix handy-ruler, make VERSION respect environment.
 
@@ -13,7 +20,7 @@
 # http://www.wtfpl.net/txt/copying/ for details.
 
 PRGNAM=flite
-VERSION=${VERSION:-1.4}
+VERSION=${VERSION:-2.0.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -59,9 +66,6 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Minor fix to let parallel make succeed. Patch borrowed from gentoo.
-patch -p1 < $CWD/flite-1.4-fix-parallel-builds.patch
-
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -83,13 +87,60 @@ rm -rf $PKG/usr/lib$LIBDIRSUFFIX/*.a
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
+# include any *.flitevox files the user downloaded.
+for file in $CWD/*.flitevox; do
+  [ -e "$file" ] && \
+    mkdir -p $PKG/usr/share/$PRGNAM && \
+    cat $file > $PKG/usr/share/$PRGNAM/"$( basename "$file" )" &&
+    EXTRA=yes
+done
+
+# build the docs. NB don't replace subshells with "cd dir" and
+# "cd -", as they don't nest.
+( cd doc
+  # build the HTML docs.
+  make $PRGNAM.html
+  ( cd html
+
+    # Upstream hardlinks index.html, use a symlink instead.
+    rm -f index.html
+    ln -s ${PRGNAM}_toc.html index.html
+
+    # Also, we don't ship the PDF doc, so link to upstream's.
+    # Fix link to source package.
+    sed -i \
+      -e 's,HREF="flite.pdf",HREF="http://www.festvox.org/flite/doc/flite.pdf",' \
+      -e 's,\.tar\.gz,.tar.bz2,g' \
+      ${PRGNAM}_toc.html
+  )
+
+  # build the GNU info docs
+  makeinfo $PRGNAM.texi
+  mkdir -p $PKG/usr/info
+  gzip -9c < $PRGNAM.info > $PKG/usr/info/$PRGNAM.info.gz
+)
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a ACKNOWLEDGEMENTS COPYING README doc/* $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a ACKNOWLEDGEMENTS COPYING README doc/html doc/*.txt doc/alice \
+      $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-rm -f $PKG/usr/doc/$PRGNAM-$VERSION/Makefile*
+
+# man page written by SlackBuild author.
+mkdir -p $PKG/usr/man/man1
+gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+
+# slack-desc gets a note if extra voices are included.
+if [ "$EXTRA" = "yes" ]; then
+  sed '15s,$, This package includes extra voices in /usr/share/flite/,' \
+      $CWD/slack-desc > $PKG/install/slack-desc
+else
+  cat $CWD/slack-desc > $PKG/install/slack-desc
+fi
+
+# doinst.sh needed because we append to /usr/info/dir.
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
