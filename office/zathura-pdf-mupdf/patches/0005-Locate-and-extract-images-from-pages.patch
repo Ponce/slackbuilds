@@ -1,0 +1,311 @@
+From c3820b67cc2742e531481c7255bfa3bbdbe36a2a Mon Sep 17 00:00:00 2001
+From: Moritz Lipp <mlq@pwmt.org>
+Date: Sun, 19 Apr 2015 23:24:39 +0200
+Subject: [PATCH 5/6] Locate and extract images from pages
+
+---
+ image.c  | 163 ++++++++++++++++++++++++++++-----------------------------------
+ plugin.c |   3 +-
+ plugin.h |  14 ++++++
+ select.c |   3 --
+ utils.c  |   4 ++
+ 5 files changed, 92 insertions(+), 95 deletions(-)
+
+diff --git a/image.c b/image.c
+index ef2f67b..97d4143 100644
+--- a/image.c
++++ b/image.c
+@@ -7,10 +7,9 @@
+ #include <mupdf/pdf.h>
+ 
+ #include "plugin.h"
++#include "utils.h"
+ 
+ static void pdf_zathura_image_free(zathura_image_t* image);
+-static void get_images(zathura_page_t* page, pdf_obj* dict, girara_list_t* list);
+-static void get_resources(zathura_page_t* page, pdf_obj* resource, girara_list_t* list);
+ 
+ girara_list_t*
+ pdf_page_images_get(zathura_page_t* page, mupdf_page_t* mupdf_page, zathura_error_t* error)
+@@ -30,16 +29,7 @@ pdf_page_images_get(zathura_page_t* page, mupdf_page_t* mupdf_page, zathura_erro
+ 
+   mupdf_document_t* mupdf_document = zathura_document_get_data(document);
+ 
+-  pdf_obj* page_object = pdf_load_object(mupdf_document->ctx, (pdf_document*) mupdf_document->document, zathura_page_get_index(page), 0);
+-  if (page_object == NULL) {
+-    goto error_free;
+-  }
+-
+-  pdf_obj* resource = pdf_dict_gets(mupdf_document->ctx, page_object, "Resources");
+-  if (resource == NULL) {
+-    goto error_free;
+-  }
+-
++  /* Setup image list */
+   list = girara_list_new();
+   if (list == NULL) {
+     if (error != NULL) {
+@@ -50,7 +40,25 @@ pdf_page_images_get(zathura_page_t* page, mupdf_page_t* mupdf_page, zathura_erro
+ 
+   girara_list_set_free_function(list, (girara_free_function_t) pdf_zathura_image_free);
+ 
+-  get_resources(page, resource, list);
++  /* Extract images */
++  mupdf_page_extract_text(mupdf_document, mupdf_page);
++
++  fz_page_block* block;
++  for (block = mupdf_page->text->blocks; block < mupdf_page->text->blocks + mupdf_page->text->len; block++) {
++    if (block->type == FZ_PAGE_BLOCK_IMAGE) {
++      fz_image_block *image_block = block->u.image;
++
++      zathura_image_t* zathura_image = g_malloc(sizeof(zathura_image_t));
++
++      zathura_image->position.x1 = image_block->bbox.x0;
++      zathura_image->position.y1 = image_block->bbox.y0;
++      zathura_image->position.x2 = image_block->bbox.x1;
++      zathura_image->position.y2 = image_block->bbox.y1;
++      zathura_image->data        = image_block->image;
++
++      girara_list_append(list, zathura_image);
++    }
++  }
+ 
+   return list;
+ 
+@@ -69,109 +77,82 @@ error_ret:
+   return NULL;
+ }
+ 
+-
+-static void
+-pdf_zathura_image_free(zathura_image_t* image)
++cairo_surface_t*
++pdf_page_image_get_cairo(zathura_page_t* page, mupdf_page_t* mupdf_page,
++    zathura_image_t* image, zathura_error_t* error)
+ {
+-  if (image == NULL) {
+-    return;
++  if (page == NULL || mupdf_page == NULL || image == NULL || image->data == NULL) {
++    if (error != NULL) {
++      *error = ZATHURA_ERROR_INVALID_ARGUMENTS;
++    }
++    goto error_ret;
+   }
+ 
+-  g_free(image);
+-}
++  fz_image* mupdf_image = (fz_image*) image->data;
+ 
+-static void
+-get_images(zathura_page_t* page, pdf_obj* dict, girara_list_t* list)
+-{
+-  if (dict == NULL || list == NULL) {
+-    return;
+-  }
++  fz_pixmap* pixmap = NULL;
++  cairo_surface_t* surface = NULL;
+ 
+-  if (page == NULL) {
+-    return;
++  pixmap = fz_new_pixmap_from_image(mupdf_page->ctx, mupdf_image, 0, 0);
++  if (pixmap == NULL) {
++    goto error_free;
+   }
+ 
+-  zathura_document_t* document = zathura_page_get_document(page);
+-
+-  if (document == NULL) {
+-    return;
++  surface = cairo_image_surface_create(CAIRO_FORMAT_RGB24, mupdf_image->w, mupdf_image->h);
++  if (surface == NULL) {
++    goto error_free;
+   }
+ 
+-  mupdf_document_t* mupdf_document = zathura_document_get_data(document);
++  unsigned char* surface_data = cairo_image_surface_get_data(surface);
++  int rowstride = cairo_image_surface_get_stride(surface);
+ 
+-  for (int i = 0; i < pdf_dict_len(mupdf_document->ctx, dict); i++) {
+-    pdf_obj* image_dict = pdf_dict_get_val(mupdf_document->ctx, dict, i);
+-    if (pdf_is_dict(mupdf_document->ctx, image_dict) == 0) {
+-      continue;
+-    }
++  unsigned char* s = fz_pixmap_samples(mupdf_page->ctx, pixmap);
++  unsigned int n   = fz_pixmap_components(mupdf_page->ctx, pixmap);
+ 
+-    pdf_obj* type = pdf_dict_gets(mupdf_document->ctx, image_dict, "Subtype");
+-    if (strcmp(pdf_to_name(mupdf_document->ctx, type), "Image") != 0) {
+-      continue;
+-    }
++  for (unsigned int y = 0; y < fz_pixmap_height(mupdf_page->ctx, pixmap); y++) {
++    for (unsigned int x = 0; x < fz_pixmap_width(mupdf_page->ctx, pixmap); x++) {
++      guchar* p = surface_data + y * rowstride + x * 4;
+ 
+-    bool duplicate = false;
+-    GIRARA_LIST_FOREACH(list, zathura_image_t*, iter, image)
+-      if (image->data == image_dict) {
+-        duplicate = true;
+-        break;
++      // RGB
++      if (n == 4) {
++        p[0] = s[2];
++        p[1] = s[1];
++        p[2] = s[0];
++      // Gray-scale or mask
++      } else {
++        p[0] = s[0];
++        p[1] = s[0];
++        p[2] = s[0];
+       }
+-    GIRARA_LIST_FOREACH_END(list, zathura_image_t*, iter, image);
+-
+-    if (duplicate == true) {
+-      continue;
++      s += n;
+     }
++  }
+ 
+-    pdf_obj* width  = pdf_dict_gets(mupdf_document->ctx, image_dict, "Width");
+-    pdf_obj* height = pdf_dict_gets(mupdf_document->ctx, image_dict, "Height");
+-
+-    zathura_image_t* zathura_image = g_malloc(sizeof(zathura_image_t));
+-
+-    fprintf(stderr, "image\n");
++  fz_drop_pixmap(mupdf_page->ctx, pixmap);
+ 
+-    // FIXME: Get correct image coordinates
+-    zathura_image->data        = image_dict;
+-    zathura_image->position.x1 = 0;
+-    zathura_image->position.x2 = pdf_to_int(mupdf_document->ctx, width);
+-    zathura_image->position.y1 = 0;
+-    zathura_image->position.y2 = pdf_to_int(mupdf_document->ctx, height);
++  return surface;
+ 
+-    girara_list_append(list, zathura_image);
+-  }
+-}
++error_free:
+ 
+-static void
+-get_resources(zathura_page_t* page, pdf_obj* resource, girara_list_t* list)
+-{
+-  if (resource == NULL || list == NULL) {
+-    return;
++  if (pixmap != NULL) {
++    fz_drop_pixmap(mupdf_page->ctx, pixmap);
+   }
+ 
+-  if (page == NULL) {
+-    return;
++  if (surface != NULL) {
++    cairo_surface_destroy(surface);
+   }
+ 
+-  zathura_document_t* document = zathura_page_get_document(page);
+-
+-  if (document == NULL) {
+-    return;
+-  }
++error_ret:
+ 
+-  mupdf_document_t* mupdf_document = zathura_document_get_data(document);
++  return NULL;
++}
+ 
+-  pdf_obj* x_object = pdf_dict_gets(mupdf_document->ctx, resource, "XObject");
+-  if (x_object == NULL) {
++static void
++pdf_zathura_image_free(zathura_image_t* image)
++{
++  if (image == NULL) {
+     return;
+   }
+ 
+-  get_images(page, x_object, list);
+-
+-  for (int i = 0; i < pdf_dict_len(mupdf_document->ctx, x_object); i++) {
+-    pdf_obj* obj = pdf_dict_get_val(mupdf_document->ctx, x_object, i);
+-    pdf_obj* subsrc = pdf_dict_gets(mupdf_document->ctx, obj, "Resources");
+-    if (subsrc != NULL && pdf_objcmp(mupdf_document->ctx, resource, subsrc)) {
+-      get_resources(page, subsrc, list);
+-    }
+-  }
++  g_free(image);
+ }
+-
+diff --git a/plugin.c b/plugin.c
+index 86cb8de..fef2c6a 100644
+--- a/plugin.c
++++ b/plugin.c
+@@ -17,12 +17,13 @@ register_functions(zathura_plugin_functions_t* functions)
+   functions->page_links_get           = (zathura_plugin_page_links_get_t) pdf_page_links_get;
+ #if 0
+   functions->document_get_information = (zathura_plugin_document_get_information_t) pdf_document_get_information;
+-  functions->page_images_get          = (zathura_plugin_page_images_get_t) pdf_page_images_get;
+ #endif
++  functions->page_images_get          = (zathura_plugin_page_images_get_t) pdf_page_images_get;
+   functions->page_get_text            = (zathura_plugin_page_get_text_t) pdf_page_get_text;
+   functions->page_render              = (zathura_plugin_page_render_t) pdf_page_render;
+ #if HAVE_CAIRO
+   functions->page_render_cairo        = (zathura_plugin_page_render_cairo_t) pdf_page_render_cairo;
++  functions->page_image_get_cairo     = (zathura_plugin_page_image_get_cairo_t) pdf_page_image_get_cairo;
+ #endif
+ }
+ 
+diff --git a/plugin.h b/plugin.h
+index a229a74..8b6c74d 100644
+--- a/plugin.h
++++ b/plugin.h
+@@ -113,6 +113,20 @@ girara_list_t* pdf_page_links_get(zathura_page_t* page, mupdf_page_t* mupdf_page
+  */
+ girara_list_t* pdf_page_images_get(zathura_page_t* page, mupdf_page_t* mupdf_page, zathura_error_t* error);
+ 
++#if HAVE_CAIRO
++/**
++ * Gets the content of the image in a cairo surface
++ *
++ * @param page Page
++ * @param image Image identifier
++ * @param error Set to an error value (see \ref zathura_error_t) if an
++ *   error occured
++ * @return The cairo image surface or NULL if an error occured
++ */
++cairo_surface_t* pdf_page_image_get_cairo(zathura_page_t* page, mupdf_page_t*
++    mupdf_page, zathura_image_t* image, zathura_error_t* error);
++#endif
++
+ /**
+  * Get text for selection
+  * @param page Page
+diff --git a/select.c b/select.c
+index 15f9258..c1e1437 100644
+--- a/select.c
++++ b/select.c
+@@ -7,9 +7,6 @@
+ #include "plugin.h"
+ #include "utils.h"
+ 
+-void mupdf_page_extract_text(mupdf_document_t* mupdf_document,
+-    mupdf_page_t* mupdf_page);
+-
+ char*
+ pdf_page_get_text(zathura_page_t* page, mupdf_page_t* mupdf_page, zathura_rectangle_t rectangle, zathura_error_t* error)
+ {
+diff --git a/utils.c b/utils.c
+index d45a31d..4a003b9 100644
+--- a/utils.c
++++ b/utils.c
+@@ -15,6 +15,10 @@ mupdf_page_extract_text(mupdf_document_t* mupdf_document, mupdf_page_t* mupdf_pa
+ 
+   fz_try (mupdf_page->ctx) {
+     text_device = fz_new_text_device(mupdf_page->ctx, mupdf_page->sheet, mupdf_page->text);
++
++    /* Disable FZ_IGNORE_IMAGE to collect image blocks */
++    fz_disable_device_hints(mupdf_page->ctx, text_device, FZ_IGNORE_IMAGE);
++
+     fz_matrix ctm;
+     fz_scale(&ctm, 1.0, 1.0);
+     fz_run_page(mupdf_page->ctx, mupdf_page->page, text_device, &ctm, NULL);
+-- 
+1.8.4
+
