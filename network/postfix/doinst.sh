@@ -12,6 +12,17 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
+preserve_perms() {
+  NEW="$1"
+  OLD="$(dirname $NEW)/$(basename $NEW .new)"
+  if [ -e $OLD ]; then
+    cp -a $OLD ${NEW}.incoming
+    cat $NEW > ${NEW}.incoming
+    mv ${NEW}.incoming $NEW
+  fi
+  config $NEW
+}
+
 config etc/postfix/access.new
 config etc/postfix/aliases.new
 config etc/postfix/canonical.new
@@ -25,6 +36,8 @@ config etc/postfix/relocated.new
 config etc/postfix/transport.new
 config etc/postfix/virtual.new
 config etc/rc.d/rc.postfix.new
+
+preserve_perms etc/rc.d/rc.postfix.new
 
 # This is an incompatability with the sendmail package
 ( cd usr/lib; rm -f sendmail )
