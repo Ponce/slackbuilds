@@ -24,5 +24,3 @@ preserve_perms() {
 
 preserve_perms etc/rc.d/rc.haproxy.new
 config etc/haproxy/haproxy.cfg.new
-
-
