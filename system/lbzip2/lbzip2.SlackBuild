@@ -22,8 +22,17 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# Modified by B. Watson <yalhcru@gmail.com>.
+
+# 20150519 bkw:
+# - took over maintenance
+# - bump VERSION to 2.5
+# - add gnulib dependency
+# - make VERSION respect environment
+# - clean up slack-desc
+
 PRGNAM=lbzip2
-VERSION=0.23
+VERSION=${VERSION:-2.5}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -59,9 +68,9 @@ set -eu
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz || tar xvf $CWD/v$VERSION.tar.gz
+cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
@@ -69,21 +78,38 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-# Swap in our CFLAGS
-sed -i "s/-O2/$SLKCFLAGS/" Makefile
+# Upstream says automake-1.14 is required, but our
+# 1.11.5 works fine if we change the version check.
+sed -i '/^AM_INIT_AUTOMAKE/s,1\.14,1.11.5,' configure.ac
 
-# Build
+sh build-aux/autogen.sh
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --build=$ARCH-slackware-linux
+
 make
+make install-strip DESTDIR=$PKG
 
-# Manual install
-install -D -s lbzip2 $PKG/usr/bin/lbzip2
-install -D lbzip2.1 $PKG/usr/man/man1/lbzip2.1
-gzip -9 $PKG/usr/man/man1/lbzip2.1
+gzip $PKG/usr/man/man1/$PRGNAM.1
 
-( cd $PKG/usr/bin ; ln -s lbzip2 lbunzip2 ; ln -s lbzip2 lbzcat )
+# The other man pages just source lbzip2.1. Make them
+# symlinks instead (easier to deal with).
+for i in lbunzip2 lbzcat; do
+  rm -f $PKG/usr/man/man1/$i.1
+  ln -s $PRGNAM.1.gz $PKG/usr/man/man1/$i.1.gz
+done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a ChangeLog GPL-2.0 GPL-3.0 README $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a ALGORITHM AUTHORS COPYING ChangeLog* NEWS README THANKS \
+      $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
