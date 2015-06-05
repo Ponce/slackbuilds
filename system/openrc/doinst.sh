@@ -12,13 +12,13 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-BACKUP=(etc/inittab
-        etc/rc.conf
-	etc/conf.d/{bootmisc,consolefont,devfs,dmesg,fsck,hostname,hwclock,keymaps}
-	etc/conf.d/{killprocs,localmount,modules,netmount,network,staticroute}
-	etc/conf.d/{tmpfiles,urandom}
-	etc/logrotate.d/openrc)
-for file in "${BACKUP[@]}"; do
-  config ${file}.new
+BACKUP_FILE=(inittab rc.conf logrotate.d/openrc)
+BACKUP_CONF=(bootmisc consolefont devfs dmesg fsck hostname hwclock keymaps killprocs localmount modules netmount network staticroute tmpfiles urandom)
+
+for file in "${BACKUP_FILE[@]}"; do
+  config "etc/${file}.new"
 done
 
+for file in "${BACKUP_CONF[@]}"; do
+  config "etc/conf.d/${file}.new"
+done
