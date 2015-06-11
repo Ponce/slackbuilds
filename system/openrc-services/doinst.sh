@@ -23,7 +23,7 @@ preserve_perms() {
   config $NEW
 }
 
-openrc_base=(device-mapper dmcrypt lvm mdadm mdraid udev)
+openrc_base=(device-mapper dmcrypt lvm mdadm mdraid udev udev-settle udev-trigger)
 openrc_desktop=(acpid alsasound xdm gpm rfcomm wpa_supplicant)
 openrc_devel=(git-daemon mysqld postgresql svn)
 openrc_misc=(bitlbee cpupower connman ntpd ntp-client sntp rsyslog saned metalog syslog-ng sensord lircd irexec haveged salt-master salt-minion salt-syncdic hdparm clamd boinc atd libvirtd)
@@ -36,3 +36,6 @@ for file in "${openrc_base[@]}" "${openrc_desktop[@]}" "${openrc_devel[@]}" "${o
 done
 
 preserve_perms etc/local.d/rcM.start.new
+
+# disable udev-postmount
+[ -e etc/runlevels/sysinit/udev-postmount ] && rm etc/runlevels/sysinit/udev-postmount
