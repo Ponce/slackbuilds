@@ -2,7 +2,9 @@
 
 # Slackware build script for luxrender
 
-# Copyright 2013  Giorgio Peron Campodarsego, PD, Italy giorgio.peron@gmail.com
+# Copyright 2013  Giorgio Peron Campodarsego, PD, Italy
+# Copyright 2015  Klaatu Wellington, NZ
+#
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,17 +25,27 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=luxrender
-VERSION=${VERSION:-1.3.1}
+SHORT=lux
+VERSION=${VERSION:-1.4}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
-SRCVERSION=lux-d0b0e20c47cc
-LUXRAYSRCVERSION=luxrays-7459cd8a9583
+
+if [ -z $OPENCL ]; then
+    OPENCL="-OpenCL"
+else
+    OPENCL=""
+fi
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
-    arm*) ARCH=arm ;;
-       *) ARCH=$( uname -m ) ;;
+    i?86) echo "32 bit builds not supported." && exit 1
+	  ;;
+    arm*) ARCH=arm
+	  LIBDIRSUFFIX=""
+	  ;;
+       *) ARCH=$( uname -m )
+	  LIBDIRSUFFIX="64"
+	  ;;
   esac
 fi
 
@@ -56,122 +68,65 @@ else
   LIBDIRSUFFIX=""
 fi
 
-set -e 
+set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-rm -rf $LUXRAYSRCVERSION
-rm -rf $SRCVERSION
-tar xvjf $CWD/$SRCVERSION.tar.bz2
-tar xvjf $CWD/$LUXRAYSRCVERSION.tar.bz2
-
-cd $TMP/$LUXRAYSRCVERSION
+rm -rf $SHORT-$VERSION
+tar xvjf $CWD/$SHORT-v"$VERSION"-x86_64-sse2"$OPENCL".tar.bz2
+cd $SHORT-v"$VERSION"-$(uname -m)-sse2"$OPENCL"
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
  -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
-
-# fix some make files
-sed -i \
-  -e "/project(LuxRays)/ a\
-SET(BUILD_LUXMARK on)" \
-  -e "/project(LuxRays)/ a\
-set(OPENGL_INCLUDE_DIR /usr/include/GL)" \
-  CMakeLists.txt
-sed -i \
-  -e "/# Lookup user provide path first/ a\
-SET(OPENCL_ROOT /usr/share)" \
-  -e "s:PATHS \$ENV{ATISTREAMSDKROOT}:PATHS \${OPENCL_ROOT} \$ENV{ATISTREAMSDKROOT}:" \
-  cmake/Packages/FindOpenCL.cmake
-
-# luxmark moc files
-cd samples/luxmark
-moc aboutdialog.h -o moc_aboutdialog.cxx
-moc hardwaretree.h -o moc_hardwaretree.cxx
-moc luxmarkapp.h -o moc_luxmarkapp.cxx
-moc mainwindow.h -o moc_mainwindow.cxx
-moc resultdialog.h -o moc_resultdialog.cxx
-moc submitdialog.h -o moc_submitdialog.cxx
-cd -
-
-cmake \
-  -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
-  -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
-  -DCMAKE_BUILD_TYPE=Release .
-
-# compile luxrays
-make luxrays
-make slg4
-make luxmark
 
 # manual installation
-mkdir -p $PKG/usr/share/$PRGNAM/resources $PKG/usr/share/$PRGNAM/scenes
-cp bin/* $PKG/usr/share/$PRGNAM
-cp -r samples/luxmark/resources $PKG/usr/share/$PRGNAM
-cp -r scenes $PKG/usr/share/$PRGNAM
-cp -r samples/luxmark/scenes $PKG/usr/share/$PRGNAM
-
-mkdir -p $PKG/usr/bin
-cat > $PKG/usr/bin/luxmark << EOF
-#!/bin/sh
-cd /usr/share/luxrender
-./luxmark >/dev/null 2>&1
-EOF
-chmod +x $PKG/usr/bin/luxmark
-cat > $PKG/usr/bin/slg4 << EOF
-#!/bin/sh
-cd /usr/share/luxrender
-./slg4 >/dev/null 2>&1
-EOF
+mkdir -p $PKG/usr/bin/
+cp luxconsole $PKG/usr/bin/
+cp lux*r $PKG/usr/bin/
+cp slg4 $PKG/usr/bin/
 chmod +x $PKG/usr/bin/slg4
+mkdir -p $PKG/usr/lib"$LIBDIRSUFFIX"
+cp *.so $PKG/usr/lib"$LIBDIRSUFFIX"
 
-cd $TMP/$SRCVERSION
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
- -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
-
-# # fix some make files
-sed -i \
-  -e "/##########################      Find LuxRays       ##########################/ a\
-SET(LuxRays_HOME $TMP/$LUXRAYSRCVERSION)" \
-  -e "s:PATHS ../luxrays/include:PATHS \${LuxRays_HOME}/include:" \
-  -e "s:/usr/src/opencl-sdk:/usr/share/cuda:" \
-  cmake/Dependencies.cmake
-sed -i \
-  -e "s:-Wall -fPIC -DHAVE_PTHREAD_H:-Wall -fPIC -DHAVE_PTHREAD_H -l png14:" \
-  -e "s:E} -fvisibility=hidden -fvisibility-inlines-hidden:E} -fvisibility=hidden -fvisibility-inlines-hidden -lpthread:" \
-  -e "s:#SET(CMAKE_VERBOSE_MAKEFILE:SET(CMAKE_VERBOSE_MAKEFILE:g" \
-  -e "/SET(CMAKE_VERBOSE_MAKEFILE true)/ a\
-SET(CMAKE_CXX_FLAGS_RELEASE \"-lpthread\")" \
-  CMakeLists.txt
-
-cmake .
-
-# compile luxrender
-make luxrender
-make install DESTDIR=$PKG 
-
-# /usr/local? no, thanks
-cp -r $PKG/usr/local/* $PKG/usr  
-rm -rf $PKG/usr/local
-
-# copy pylux.so
-cp pylux.so $PKG/usr/lib$LIBDIRSUFFIX/
-
-# Strip binaries and libraries.
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
+# are we using default SBo location of blender?
+if [ -z $BLENDER ]; then
+    BLENDER=$(egrep '^opt\/blender\/2\....?\/scripts\/$' /var/log/packages/blender-*_SBo 2> /dev/null) || BLENDER="no"
+fi
+
+if [ X"$BLENDER" != "Xno" ]; then
+    mkdir -p $PKG/$BLENDER
+    unzip luxblend/luxblend.zip -d $PKG/$BLENDER/addons/
+    unzip luxblend/luxblend-presets.zip -d $PKG/$BLENDER/presets/
+else
+    mkdir -p $PKG/usr/share/$PRGNAM-$VERSION/luxblend
+    cp luxblend/luxblend.zip $PKG/usr/share/$PRGNAM-$VERSION/luxblend
+    cp luxblend/luxblend-presets.zip $PKG/usr/share/$PRGNAM-$VERSION/luxblend
+fi
+
+mkdir -p $PKG/usr/share/applications
+mkdir -p $PKG/usr/share/$PRGNAM-$VERSION
+cp -r examples $PKG/usr/share/$PRGNAM-$VERSION
+cp $CWD/$PRGNAM.desktop $PKG/usr/share/applications
+
+#icons
+mkdir -p $PKG/usr/share/icons/hicolor/scalable/mimetypes
+cp $CWD/application-x-lux.svg $PKG/usr/share/icons/hicolor/scalable/mimetypes
+cp $CWD/luxrender.svg $PKG/usr/share/icons/hicolor/scalable/apps
+
+#mimetypes
+mkdir -p $PKG/usr/share/mime/application/
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS.txt COPYING.txt $PKG/usr/doc/$PRGNAM-$VERSION
+cp README $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/mime-"$SHORT".xml > $PKG/usr/doc/$PRGNAM-$VERSION/mime-"$SHORT".xml
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
