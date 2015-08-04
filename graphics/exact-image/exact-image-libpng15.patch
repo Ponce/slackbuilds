@@ -1,7 +1,28 @@
-diff -Naur exact-image-0.8.7-old/codecs/png.cc exact-image-0.8.7/codecs/png.cc
---- exact-image-0.8.7-old/codecs/png.cc
-+++ exact-image-0.8.7/codecs/png.cc
-@@ -71,7 +71,7 @@
+Description: Fix FTBFS with libpng 1.5
+Author: Nobuhiro Iwamatsu <iwamatsu@nigauri.org>
+Approved: Ralf Treinen <treinen@debian.org>
+Bug-Debian: #635745
+
+--- exactimage-0.8.5.orig/codecs/png.cc
++++ exactimage-0.8.5/codecs/png.cc
+@@ -17,6 +17,7 @@
+ 
+ #include <stdlib.h>
+ #include <png.h>
++#include <zlib.h>
+ 
+ #include <iostream>
+ 
+@@ -58,7 +59,7 @@ int PNGCodec::readImage (std::istream* s
+   png_structp png_ptr;
+   png_infop info_ptr;
+   png_uint_32 width, height;
+-  int bit_depth, color_type, interlace_type;
++  int bit_depth, color_type, interlace_type, num_trans;
+   
+   png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING,
+ 				   NULL /*user_error_ptr*/,
+@@ -71,7 +72,7 @@ int PNGCodec::readImage (std::istream* s
    /* Allocate/initialize the memory for image information.  REQUIRED. */
    info_ptr = png_create_info_struct(png_ptr);
    if (info_ptr == NULL) {
@@ -10,7 +31,7 @@ diff -Naur exact-image-0.8.7-old/codecs/png.cc exact-image-0.8.7/codecs/png.cc
      return 0;
    }
    
-@@ -82,7 +82,7 @@
+@@ -82,7 +83,7 @@ int PNGCodec::readImage (std::istream* s
    
    if (setjmp(png_jmpbuf(png_ptr))) {
      /* Free all of the memory associated with the png_ptr and info_ptr */
@@ -19,7 +40,7 @@ diff -Naur exact-image-0.8.7-old/codecs/png.cc exact-image-0.8.7/codecs/png.cc
      /* If we get here, we had a problem reading the file */
      return 0;
    }
-@@ -99,7 +99,7 @@
+@@ -99,13 +100,13 @@ int PNGCodec::readImage (std::istream* s
    png_read_info (png_ptr, info_ptr);
    
    png_get_IHDR (png_ptr, info_ptr, &width, &height, &bit_depth, &color_type,
@@ -28,7 +49,30 @@ diff -Naur exact-image-0.8.7-old/codecs/png.cc exact-image-0.8.7/codecs/png.cc
    
    image.w = width;
    image.h = height;
-@@ -196,11 +196,11 @@
+   image.bps = bit_depth;
+-  image.spp = info_ptr->channels;
+-  
++  image.spp = png_get_channels(png_ptr, info_ptr);
++
+   png_uint_32 res_x, res_y;
+   res_x = png_get_x_pixels_per_meter(png_ptr, info_ptr);
+   res_y = png_get_y_pixels_per_meter(png_ptr, info_ptr);
+@@ -119,11 +120,13 @@ int PNGCodec::readImage (std::istream* s
+    * (not useful if you are using png_set_packing). */
+   // png_set_packswap(png_ptr);
+ 
++  png_get_tRNS(png_ptr, info_ptr, NULL, &num_trans, NULL);
++
+   /* Expand paletted colors into true RGB triplets */
+   if (color_type == PNG_COLOR_TYPE_PALETTE) {
+     png_set_palette_to_rgb(png_ptr);
+     image.bps = 8;
+-    if (info_ptr->num_trans)
++    if (num_trans)
+       image.spp = 4;
+     else
+       image.spp = 3;
+@@ -196,11 +199,11 @@ int PNGCodec::readImage (std::istream* s
    for (int pass = 0; pass < number_passes; ++pass)
      for (unsigned int y = 0; y < height; ++y) {
        row_pointers[0] = image.getRawData() + y * stride;
@@ -42,7 +86,7 @@ diff -Naur exact-image-0.8.7-old/codecs/png.cc exact-image-0.8.7/codecs/png.cc
    
    /* that's it */
    return true;
-@@ -224,7 +224,7 @@
+@@ -224,7 +227,7 @@ bool PNGCodec::writeImage (std::ostream*
    /* Allocate/initialize the memory for image information.  REQUIRED. */
    info_ptr = png_create_info_struct(png_ptr);
    if (info_ptr == NULL) {
@@ -51,12 +95,15 @@ diff -Naur exact-image-0.8.7-old/codecs/png.cc exact-image-0.8.7/codecs/png.cc
      return false;
    }
    
-@@ -244,8 +244,6 @@
+@@ -244,8 +247,10 @@ bool PNGCodec::writeImage (std::ostream*
    else if (quality > Z_BEST_COMPRESSION) quality = Z_BEST_COMPRESSION;
    png_set_compression_level(png_ptr, quality);
    
--  png_info_init (info_ptr);
++  /* Need?
+   png_info_init (info_ptr);
 -  
++  */
++
    /* Set up our STL stream output control */ 
    png_set_write_fn (png_ptr, stream, &stdstream_write_data, &stdstream_flush_data);
    
