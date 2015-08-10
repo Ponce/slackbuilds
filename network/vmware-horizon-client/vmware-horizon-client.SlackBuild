@@ -1,0 +1,160 @@
+#!/bin/sh
+
+# Slackware build script for vmware-horizon-client
+
+# Copyright 2015 Beni Keller, Schwyz, Switzerland
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=vmware-horizon-client
+VERSION=${VERSION:-3.4.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+ARCH=i486
+_BUILD=2769709
+
+# Install PCOIP component
+PCOIP=${PCOIP:-YES}
+# Install USB-redirection component
+# This is deactivated by default because
+# It's not working with the current version of libcrypto.
+USB=${USB:-NO}
+# Install Smartcard component
+SMARTCRD=${SMARTCRD:-YES}
+# Install Real Time Audio and Video component
+RTAV=${RTAV:-YES}
+
+echo $PCOIP
+break
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+BUNDLE=$CWD/VMware-Horizon-Client-$VERSION-$_BUILD.x86.bundle
+# All the components we support with this SlackBuild. The
+# 'virtual-printing' support is excluded because I have no
+# way to test whether it's working.
+COMPONENTS="client pcoip usb smartcard rtav"
+
+set -e 
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+
+# We use the Gentoo eclass to extract components from the bundle.
+# These are the settings needed for these functions.
+
+
+
+
+export T="$CWD"
+
+ebegin() {
+    echo -n "Begin ${1}: "
+}
+eend() {
+    echo 'done'
+}
+
+source "$CWD/vmware-bundle.eclass"
+
+# Extracting the components from the bundle
+for COMPONENT in $COMPONENTS; do
+    extract_bundle_component $BUNDLE "vmware-horizon-$COMPONENT" "$CWD/extract/vmware-horizon-$COMPONENT"
+done
+
+cd $CWD/extract
+
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+
+# Dirty hack copied from Arch PKGBUILD
+# https://aur.archlinux.org/packages/vm/vmware-horizon-client
+# Helps linking to the correct version of the OpenSSL libs
+for FILE in $(find "$CWD/extract/" -type f); do
+	# executables and libraries only
+	file --mime "${FILE}" | egrep -q "(application/x-(executable|sharedlib)|text/x-shellscript)" || continue
+
+	# make executable
+	chmod +x "${FILE}"
+
+	# link against libudev.so.1
+	#sed -i -e 's/libudev.so.0/libudev.so.1/' "${FILE}"
+
+	# even openssl 1.0.1.x has library file names ending in .so.1.0.0
+	sed -i -e 's/libssl.so.1.0.1/libssl.so.1.0.0/' \
+		-e 's/libcrypto.so.1.0.1/libcrypto.so.1.0.0/' \
+		"${FILE}"
+done
+# Delete these libraries. We'll recreate these files later as links
+rm "$CWD"/extract/vmware-horizon-pcoip/pcoip/lib/vmware/lib{crypto,ssl}.so.1.0.1
+
+# We install the client without the other components
+# Since it's a binary distribution we just copy the files
+cd $CWD/extract/vmware-horizon-client
+
+mkdir -p "$PKG/usr/"
+mkdir -p "$PKG/usr/doc/"
+
+cp -a bin/ "$PKG/usr/"
+cp -a lib/ "$PKG/usr/"
+cp -a share/ "$PKG/usr/"
+cp -a doc/ "$PKG/usr/doc/$PRGNAM-$VERSION/"
+cp -a debug/ "$PKG/usr/doc/$PRGNAM-$VERSION/"
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# We install the components
+if [ "$PCOIP" == "YES" ]; then
+    cd ../vmware-horizon-pcoip
+    cp -a pcoip/lib/* "$PKG/usr/lib/"
+    cp -a pcoip/bin/* "$PKG/usr/bin/"
+    # We create the symbolic links for the libraries
+    ln -sf ../../lib/libcrypto.so.1.0.0 "$PKG/usr/lib/vmware/libcrypto.so.1.0.0"
+    ln -sf ../../lib/libssl.so.1.0.0 "$PKG/usr/lib/vmware/libssl.so.1.0.0"
+fi
+
+if [ "$USB" == "YES" ]; then
+    cd ../vmware-horizon-usb
+    cp -a bin/* "$PKG/usr/bin/"
+fi
+
+if [ "$SMARTCRD" == "YES" ]; then
+    cd ../vmware-horizon-smartcard
+    cp -a lib/* "$PKG/usr/lib/"
+fi
+
+if [ "$RTAV" == "YES" ]; then
+    cd ../vmware-horizon-rtav
+    cp -a lib/* "$PKG/usr/lib/"
+fi
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
