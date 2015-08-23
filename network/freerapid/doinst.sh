@@ -1,3 +1,9 @@
+set -e
+
+# create links for compatibility with new JDK versions...
+ln -sf /usr/lib/java/bin/java /usr/bin/java
+ln -sf /usr/lib/java/bin/javaws /usr/bin/javaws
+
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
 fi
