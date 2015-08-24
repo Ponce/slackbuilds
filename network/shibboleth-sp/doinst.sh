@@ -22,7 +22,7 @@ preserve_perms() {
   config $NEW
 }
 
-preserve_perms etc/rc.d/rc.shibboleth.new
+preserve_perms etc/rc.d/rc.shibd.new
 config etc/httpd/extra/mod_shib.conf.new
 find etc/shibboleth/ -name *.html.new | while read cfg ; do config $cfg ; done
 find etc/shibboleth/ -name *.logger.new | while read cfg ; do config $cfg ; done
