@@ -1,27 +1,42 @@
 set -e
 
-# make links...
+# make links.
 ln -sf /opt/vivaldi-snapshot/vivaldi-snapshot /usr/bin/vivaldi-snapshot
 ln -sf /opt/vivaldi-snapshot/vivaldi-snapshot /opt/vivaldi-snapshot/vivaldi
 
-# chmod vivaldi_sandbox.
+# define owner and permission.
+chown root:root /opt/vivaldi-snapshot/vivaldi-sandbox
 chmod 4755 /opt/vivaldi-snapshot/vivaldi-sandbox
 
 # modify .desktop file.
 sed -i 's/TargetEnvironment/X-TargetEnvironment/g' /usr/share/applications/vivaldi-snapshot.desktop
 
-# Add icons to the system icons
-XDG_ICON_RESOURCE="`which xdg-icon-resource 2> /dev/null || true`"
+# Add icons to the system icons.
+XDG_ICON_RESOURCE="`which xdg-icon-resource 2> /dev/null`"
 if [ ! -x "$XDG_ICON_RESOURCE" ]; then
   echo "Error: Could not find xdg-icon-resource" >&2
   exit 1
 fi
 for icon in "/opt/vivaldi-snapshot/product_logo_"*.png; do
   size="${icon##*/product_logo_}"
-  "$XDG_ICON_RESOURCE" install --novendor --size "${size%.png}" "$icon" "vivaldi-snapshot"
+  "$XDG_ICON_RESOURCE" install --size "${size%.png}" "$icon" "vivaldi-snapshot"
 done
 
-# begin SlackBuild options.
+# Add an entry to the system menu.
+XDG_DESKTOP_MENU="`which xdg-desktop-menu 2> /dev/null`"
+UPDATE_MENUS="`which update-menus 2> /dev/null`"
+if [ ! -x "$XDG_DESKTOP_MENU" ]; then
+  echo "Error: Could not find xdg-desktop-menu" >&2
+  exit 1
+fi
+
+"$XDG_DESKTOP_MENU"  install --novendor /opt/vivaldi-snapshot/vivaldi-snapshot.desktop
+
+if [ -x "$UPDATE_MENUS" ]; then
+  update-menus
+fi
+
+# Begin SlackBuild options.
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
 fi
@@ -31,7 +46,7 @@ if [ -e usr/share/icons/hicolor/icon-theme.cache ]; then
     /usr/bin/gtk-update-icon-cache usr/share/icons/hicolor >/dev/null 2>&1
   fi
 fi
-# end SlackBuild options.
+# End SlackBuild options.
 
 # Updates defaults.list file if present.
 update_defaults_list() {
