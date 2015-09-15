@@ -22,13 +22,19 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20150915 bkw:
+# - updated for *almost* the latest git: ceef74 is "Allow building with
+#   old CMake 2.8". The next commit after that, 7b7923, reverts it so
+#   CMake 3 is required, which we don't have on Slack 14.1.
+# - script needed reworking since upstream switched to cmake.
+
 # 20140828 bkw:
 # - updated for latest git
 # - upstream now supports both sdl1 and sdl2, build for sdl2 only
 #   if installed
 
 PRGNAM=sdl-jstest
-VERSION=${VERSION:-20140814git}
+VERSION=${VERSION:-20150806git}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -61,9 +67,6 @@ fi
 
 set -e
 
-# if SDL2 is available, this will be built too.
-PRGNAM2=sdl2-jstest
-
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
@@ -77,23 +80,29 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-TARGETS="$PRGNAM $PRGNAM.1"
-pkg-config --exists sdl2 && TARGETS="$TARGETS $PRGNAM2 $PRGNAM2.1"
+# upstream made SDL2 required, let's undo that if SDL2 is missing.
+if ! pkg-config --exists sdl2; then
+  patch -p1 < $CWD/no_sdl2.diff
+fi
 
-make $TARGETS CC="gcc $SLKCFLAGS"
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_MANDIR=/usr/man \
+    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+    -DMAN_INSTALL_DIR=/usr/man \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install/strip DESTDIR=$PKG
+cd ..
 
-PKGBIN=$PKG/usr/bin/
-mkdir -p $PKGBIN
-install -s -m0755 $PRGNAM $PKGBIN
-[ -e sdl2-jstest ] && install -s -m0755 $PRGNAM2 $PKGBIN
-
-PKGMAN1=$PKG/usr/man/man1
-mkdir -p $PKGMAN1
-gzip -9c $PRGNAM.1 > $PKGMAN1/$PRGNAM.1.gz
-[ -e sdl2-jstest ] && gzip -9c $PRGNAM2.1 > $PKGMAN1/$PRGNAM2.1.gz
+gzip $PKG/usr/man/man1/*.1
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a README $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README* $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
