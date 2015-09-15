@@ -46,7 +46,7 @@
 # tailored to Qt 5. Modified by Larry Hajali.
 
 PRGNAM=qt5
-VERSION=${VERSION:-5.4.2}
+VERSION=${VERSION:-5.5.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -91,11 +91,6 @@ cd $TMP
 rm -rf ${PRGNAM/5/}-everywhere-opensource-src-$VERSION
 tar xvf $CWD/${PRGNAM/5/}-everywhere-opensource-src-$VERSION.tar.xz
 cd ${PRGNAM/5/}-everywhere-opensource-src-$VERSION
-# Fix dangling symlinks.
-rm -f qtwebengine/src/3rdparty/chromium/third_party/mesa/src/src/gallium/state_trackers/d3d1x/w32api
-rm -f qtwebengine/src/3rdparty/chromium/third_party/webrtc/tools/e2e_quality/audio/perf
-ln -s ../../../../../tools/perf\
-  qtwebengine/src/3rdparty/chromium/third_party/webrtc/tools/e2e_quality/audio/perf
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -118,9 +113,7 @@ else
   RELOCATIONS=""
 fi
 
-if echo "$ARCH" | grep -q "i.86" 2>/dev/null; then
-  sed -i "/^QMAKE_CFLAGS_RELEASE/ s|+=.*|+= $SLKCFLAGS|" qtbase/mkspecs/common/gcc-base.conf
-fi
+sed -i "s|-O2|$SLKCFLAGS|" qtbase/mkspecs/common/gcc-base.conf
 
 # Use Pulseaudio. Default is not to use Pulseaudio. Pulseaudio is a
 # required dependency for the new qtwebengine.
@@ -129,7 +122,7 @@ if [ "${USEPULSE:-no}" == "yes" ]; then
   PULSE="-pulseaudio"
 else
   PULSE="-no-pulseaudio"
-  sed -i '/qtwebengine/d' qt.pro
+  patch -p1 < $CWD/patches/qt5.pulseaudio.diff
 fi
 
 # Build examples. Default is no.
@@ -141,7 +134,6 @@ fi
 
 export CFLAGS="$SLKCFLAGS"
 export CXXFLAGS="$SLKCFLAGS"
-export OPENSOURCE_CXXFLAGS="$SLKCFLAGS"
 ./configure -v \
   -confirm-license \
   -opensource \
@@ -239,7 +231,7 @@ Description: Qt5 Configuration
 Version: $VERSION
 EOF
 
-# Fix internal linking for Qt5WebKit.pc.
+# Fix internal linking for Qt5WebKit.pc and Qt5WebEngineCore.pc.
 sed -i \
   -e "s|-Wl,-whole-archive -lWebKit1 -Wl,-no-whole-archive -L${PWD}/qtwebkit/Source/WebKit[^ ]* ||" \
   -e "s|-Wl,-whole-archive -lWebKit2 -Wl,-no-whole-archive -L${PWD}/qtwebkit/Source/WebKit2[^ ]* ||" \
@@ -249,6 +241,8 @@ sed -i \
   -e "s|-Wl,-whole-archive -lWTF -Wl,-no-whole-archive -L${PWD}/qtwebkit/Source/WTF[^ ]* ||" \
   -e "s|-Wl,-whole-archive -lleveldb -Wl,-no-whole-archive -L${PWD}/qtwebkit/Source/ThirdParty/leveldb[^ ]* ||" \
   $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/Qt5WebKit.pc
+
+sed -i 's|-Wl,--whole-archive.*-Wl,--no-whole-archive||' $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/Qt5WebEngineCore.pc
 
 # While we are at it, there isn't any reason to keep references to $PKG in the *.prl files.
 for PRL in $(find $PKG -name "*\.prl"); do
@@ -266,6 +260,10 @@ sed -i "s|@LIBDIR@|$LIBDIRSUFFIX|" $PKG/usr/share/applications/*
 
 # Currently not working for qt version 5.4.0.  Extra layer added to *.ico file
 # freaks out ImageMagick and fails image conversion.
+# Eg.
+#   $ convert assistant.ico -resize 96x96! assistant.png
+#     convert: file format version mismatch `assistant.ico' @ error/xwd.c/ReadXWDImage/241.
+#     convert: no images defined `assistant.png' @ error/convert.c/ConvertImageCommand/3127.
 #for i in $(find . -name "assistant.ico" -o -name "designer.ico" \
 #  -o -name "linguist.ico" -o -name "qdbusviewer.ico"); do
 #  for j in 16 24 32 48 64 96 128; do
