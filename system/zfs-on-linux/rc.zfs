@@ -28,7 +28,7 @@
 LOCKFILE=/var/lock/zfs/zfs
 ZFS="/sbin/zfs"
 ZPOOL="/sbin/zpool"
-ZPOOL_CACHE="/etc/zfs/zpool.cache"
+UDEVD="/dev/disk/by-id/"
 
 # Source zfs configuration.
 [ -r '/etc/default/zfs' ] &&  . /etc/default/zfs
@@ -38,89 +38,89 @@ ZPOOL_CACHE="/etc/zfs/zpool.cache"
 
 start()
 {
-	[ -f "$LOCKFILE" ] && return 3
+    [ -f "$LOCKFILE" ] && return 3
 
-	# Requires selinux policy which has not been written.
-	if [ -r "/selinux/enforce" ] &&
-	   [ "$(cat /selinux/enforce)" = "1" ]; then
+    # Requires selinux policy which has not been written.
+    if [ -r "/selinux/enforce" ] &&
+       [ "$(cat /selinux/enforce)" = "1" ]; then
 
-		echo "SELinux ZFS policy required"
-		return 4
-	fi
+        echo "SELinux ZFS policy required"
+        return 4
+    fi
 
-	# Delay until all required block devices are present.
-	udevadm settle
+    # Delay until all required block devices are present.
+    udevadm settle
 
-	# Load the zfs module stack
-	/sbin/modprobe zfs
+    # Load the zfs module stack
+    /sbin/modprobe zfs
 
-	# Ensure / exists in /etc/mtab, if not update mtab accordingly.
-	# This should be handled by rc.sysinit but lets be paranoid.
-	awk '$2 == "/" { exit 1 }' /etc/mtab
-	RETVAL=$?
-	if [ "$RETVAL" -eq 0 ]; then
-		/bin/mount -f /
-	fi
+    # Ensure / exists in /etc/mtab, if not update mtab accordingly.
+    # This should be handled by rc.sysinit but lets be paranoid.
+    awk '$2 == "/" { exit 1 }' /etc/mtab
+    RETVAL=$?
+    if [ "$RETVAL" -eq 0 ]; then
+        /bin/mount -f /
+    fi
 
-	# Import all pools described by the cache file, and then mount
-	# all filesystem based on their properties.
-	if [ -f "$ZPOOL_CACHE" ] ; then
-		echo "Importing ZFS pools"
-		"$ZPOOL" import -fc "$ZPOOL_CACHE" -aN 2>/dev/null
+    # Import all pools, and then mount
+    # all filesystem based on their properties.
+    echo "Importing ZFS pools"
+    "$ZPOOL" import -d "$UDEVD" -f -aN 2>/dev/null
 
-		echo "Mounting ZFS filesystems"
-		"$ZFS" mount -a
+    echo "Mounting ZFS filesystems"
+    "$ZFS" mount -a
 
-		echo "Exporting ZFS filesystems"
-		"$ZFS" share -a
-	fi
+    echo "Exporting ZFS filesystems"
+    "$ZFS" share -a
 
-	touch "$LOCKFILE"
+    touch "$LOCKFILE"
 }
 
 stop()
 {
-	[ ! -f "$LOCKFILE" ] && return 3
+    [ ! -f "$LOCKFILE" ] && return 3
 
-	echo "Unmounting ZFS filesystems"
-	"$ZFS" umount -a
+    echo "Unmounting ZFS filesystems"
+    "$ZFS" umount -a
 
-	rm -f "$LOCKFILE"
+    rm -f "$LOCKFILE"
 }
 
 status()
 {
-	[ ! -f "$LOCKFILE" ] && return 3
+    [ ! -f "$LOCKFILE" ] && return 3
 
-	"$ZPOOL" status && echo "" && "$ZPOOL" list
+    "$ZPOOL" status && echo "" && "$ZPOOL" list
 }
 
 case "$1" in
-	start)
-		start
-		RETVAL=$?
-		;;
-	stop)
-		stop
-		RETVAL=$?
-		;;
-	status)
-		status
-		RETVAL=$?
-		;;
-	restart)
-		stop
-		start
-		;;
-	condrestart)
-		if [ -f "$LOCKFILE" ]; then
-			stop
-			start
-		fi
-		;;
-	*)
-		echo $"Usage: $0 {start|stop|status|restart|condrestart}"
-		;;
+    start)
+        start
+        RETVAL=$?
+        ;;
+    stop)
+        stop
+        RETVAL=$?
+        ;;
+    status)
+        status
+        RETVAL=$?
+        ;;
+    restart)
+        stop
+        start
+        ;;
+    condrestart)
+        if [ -f "$LOCKFILE" ]; then
+            stop
+            start
+        fi
+        ;;
+    *)
+        echo $"Usage: $0 {start|stop|status|restart|condrestart}"
+        ;;
 esac
 
 exit $RETVAL
+
+# vim: set ts=4 sts=4 sw=4 expandtab textwidth=78:
