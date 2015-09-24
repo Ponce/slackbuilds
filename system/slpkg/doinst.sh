@@ -8,7 +8,8 @@ config() {
   fi
 }
 
-CONFIGS="slpkg.conf repositories.conf blacklist slackware-mirrors custom-repositories"
+CONFIGS="slpkg.conf repositories.conf blacklist slackware-mirrors \
+    default-repositories custom-repositories"
 for file in $CONFIGS; do
     config etc/slpkg/${file}.new
 done
