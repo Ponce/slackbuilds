@@ -11,19 +11,21 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/mono/browscap.ini.new
 config etc/mono/config.new
+config etc/mono/browscap.ini.new
 config etc/mono/mconfig/config.xml.new
-config etc/mono/2.0/Browsers/Compat.browser.new
 config etc/mono/2.0/DefaultWsdlHelpGenerator.aspx.new
 config etc/mono/2.0/machine.config.new
 config etc/mono/2.0/settings.map.new
 config etc/mono/2.0/web.config.new
+config etc/mono/2.0/Browsers/Compat.browser.new
 config etc/mono/4.0/DefaultWsdlHelpGenerator.aspx.new
 config etc/mono/4.0/machine.config.new
 config etc/mono/4.0/settings.map.new
 config etc/mono/4.0/web.config.new
+config etc/mono/4.0/Browsers/Compat.browser.new
 config etc/mono/4.5/DefaultWsdlHelpGenerator.aspx.new
 config etc/mono/4.5/machine.config.new
 config etc/mono/4.5/settings.map.new
 config etc/mono/4.5/web.config.new
+config etc/mono/4.5/Browsers/Compat.browser.new
