@@ -24,11 +24,24 @@
 #   installed to /usr/lib/ on 64-bit. Grr.
 # - Upstream wants avahi by default. For now, hardcoded --no-avahi.
 
+# 20151108 bkw:
+# - Updated for 0.34.0
+# - Added --disable-cxx11 to ./waf flags, as bluetooth.h uses the gcc
+#   typeof() extension. Not sure if newer versions of bluez would have
+#   this issue (but Slackware 14.1's bluez is pretty old by now).
+# - Added patch from upstream git to allow building without webkitgtk.
+#   The author added support for downloading presets, but didn't make
+#   it optional in 0.34.0. Also added a couple of bugfix patches.
+# - Support building 0.33.0 with VERSION=0.33.0 in the env.
+# - Add SSE=no option.
+# - Add WEBKIT=no option.
+# - Remove LV2=no option from README (but not from script).
+
 # Modified version released under the WTFPL, for details see
 # http://www.wtfpl.net/txt/copying/
 
 PRGNAM=guitarix
-VERSION=${VERSION:-0.32.3}
+VERSION=${VERSION:-0.34.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -84,9 +97,35 @@ find -L . \
 # be present among', implying we should only need Audio *or* AudioVideo.
 sed -i '/^Categories/s,$,Audio;,;' $PRGNAM.desktop.in
 
+# this is no longer documented in README, but still here for debugging.
 if [ "${LV2:-yes}" = "no" ]; then
   LV2OPT=--no-lv2
 fi
+
+# 20151109 bkw: in case anyone needs guitarix-0.33.0:
+# Starting with 0.34.0, the default is to pass -std=c++11 to gcc, which
+# causes Slack 14.1's old bluetooth.h to fail (it uses gcc extensions).
+# Before 0.34.0, this option's not needed... and will cause an error if
+# it's present. Also, our patches are for 0.34.0 and won't apply to
+# 0.33.0. So:
+if ./waf --help | grep -q -- --disable-cxx11; then
+  EXTRAOPT="--disable-cxx11"
+  PATCH=${PATCH:-yes}
+fi
+
+# patches are optional (undocumented in README, on purpose)
+if [ "${PATCH:-no}" = "yes" ]; then
+  for patch in $CWD/patches/*.patch; do
+    patch -p2 < "$patch"
+  done
+fi
+
+# allow building non-SSE package on SSE host
+[ "${SSE:-yes}" = "no" ] && EXTRAOPT="$EXTRAOPT --disable-sse"
+
+# allow disabling webkitgtk. A bit of a dirty hack.
+[ "${WEBKIT:-yes}" = "no" ] && \
+  sed -i 's,webkit-1.0,webkit-DISABLED,' wscript
 
 LIBDIR="/usr/lib${LIBDIRSUFFIX}"
 ./waf configure \
@@ -96,8 +135,9 @@ LIBDIR="/usr/lib${LIBDIRSUFFIX}"
   --lv2dir="$LIBDIR/lv2/" \
   --libdir="$LIBDIR" \
   --no-avahi \
+  $EXTRAOPT \
   $LV2OPT
-./waf build
+./waf build # -v # verbose, shows actual commands
 ./waf install --destdir=$PKG
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
@@ -106,7 +146,8 @@ find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | gr
 # Shared libraries are supposed to be +x.
 chmod 755 $PKG/$LIBDIR/libgx*.so.?.?
 
-# Man page written for this SlackBuild
+# Man page written for this SlackBuild. It's for guitarix-0.32.3, but
+# the command line options haven't changed since then.
 mkdir -p $PKG/usr/man/man1
 gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
 
