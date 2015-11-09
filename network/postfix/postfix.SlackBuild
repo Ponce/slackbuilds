@@ -1,6 +1,7 @@
 #!/bin/sh
 #
-# Copyright 2006, 2011 Alan Hicks, Lizella, GA
+# Copyright 2006, 2011  Alan Hicks, Lizella, GA
+# Copyright 2010, 2011, 2013, 2014, 2015  Mario Preksavec, Zagreb, Croatia
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -20,10 +21,8 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# Modified by Mario Preksavec <mario@slackware.hr>
-
 PRGNAM=postfix
-VERSION=${VERSION:-2.11.4}
+VERSION=${VERSION:-3.0.3}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -37,7 +36,7 @@ fi
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
-PKG="$TMP/package-$PRGNAM"
+PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i486" ]; then
@@ -54,7 +53,7 @@ else
   LIBDIRSUFFIX=""
 fi
 
-# Build with dovecot sasl by default, cyrus/dovecot are supported
+# Build with dovecot sasl support by default
 SASL=${SASL:-dovecot}
 case "$SASL" in
      dovecot) SASLARGS="-DDEF_SERVER_SASL_TYPE=\\\"dovecot\\\""
@@ -95,25 +94,9 @@ cat << EOF
   # mv /usr/include/mysql/events.h /usr/include/mysql/events.h.bak
 
 EOF
+
   exit
 fi
-
-set -e
-
-CFLAGS=${CFLAGS:-$SLKCFLAGS}
-
-config_directory=/etc/postfix
-daemon_directory=/usr/libexec/postfix
-command_directory=/usr/sbin
-queue_directory=/var/spool/postfix
-sendmail_path=/usr/sbin/sendmail
-newaliases_path=/usr/bin/newaliases
-mailq_path=/usr/bin/mailq
-html_directory=/usr/doc/$PRGNAM-$VERSION/html
-manpage_directory=/usr/man
-readme_directory=/usr/doc/$PRGNAM-$VERSION/README_FILES
-mail_owner=postfix
-setgid_group=postdrop
 
 # Bail if user or group isn't valid on your system
 if ! grep ^postfix: /etc/passwd 2>&1 > /dev/null; then
@@ -141,82 +124,70 @@ EOF
   exit
 fi
 
-rm -fr $PKG $TMP/$PRGNAM-$VERSION
+set -e
+
+rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
+rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# TLS, and SASL support
-# Postfix unfortunately does not use a handy ./configure script so you
-# must generate the makefiles using (what else?) "make makefiles". The
-# following includes support for TLS, SASL and MYSQL if you setup your
-# variables properly (see the README file). It should
-# automatically find PCRE and DB3 support. The docs have information
-# for adding additional support such as LDAP.
+# Use config files from build tree, not system ones
+# This should probably go to upstream...
+patch -p1 <$CWD/patches/postconf.diff
 
-make makefiles \
+# Postfix does not use a ./configure script
+
+make makefiles shared=yes \
   CCARGS="-DUSE_SASL_AUTH -DUSE_TLS $SASLARGS $DBARGS $LDAPARGS" \
   AUXLIBS="-lssl -lcrypto $SASLLIBS $DBLIBS $LDAPLIBS" \
   OPT="$SLKCFLAGS" DEBUG=""
 
-make
-
 make non-interactive-package \
   install_root=$PKG \
   tempdir=$TMP/$PRGNAM-temp \
-  config_directory=$config_directory \
-  daemon_directory=$daemon_directory \
-  command_directory=$command_directory \
-  queue_directory=$queue_directory \
-  sendmail_path=$sendmail_path \
-  newaliases_path=$newaliases \
-  mailq_path=$mailq_path \
-  mail_owner=$mail_owner \
-  setgid_group=$setgid_group \
-  html_directory=$html_directory \
-  manpage_directory=$manpage_directory \
-  readme_directory=$readme_directory
+  config_directory=/etc/postfix \
+  daemon_directory=/usr/libexec/postfix \
+  command_directory=/usr/sbin \
+  queue_directory=/var/spool/postfix \
+  sendmail_path=/usr/sbin/sendmail \
+  newaliases_path=/usr/bin/newaliases \
+  mailq_path=/usr/bin/mailq \
+  mail_owner=postfix \
+  setgid_group=postdrop \
+  html_directory=/usr/doc/$PRGNAM-$VERSION/html \
+  manpage_directory=/usr/man \
+  readme_directory=/usr/doc/$PRGNAM-$VERSION/README_FILES
 
-mkdir -p $PKG/install $PKG/etc/rc.d $PKG/usr/doc/$PRGNAM-$VERSION
+install -D -m 0644 -oroot -groot $CWD/rc.postfix $PKG/etc/rc.d/rc.postfix.new
+find $PKG/etc/postfix -type f ! -name "*.default" ! -name "*.proto" ! -name "*.out" \
+  ! -name "postfix-files" -exec mv {} {}.new \;
 
-cp -r AAAREADME COMPATIBILITY COPYRIGHT HISTORY IPv6-ChangeLog LICENSE \
-  PORTING RELEASE_NOTES TLS_ACKNOWLEDGEMENTS TLS_CHANGES TLS_LICENSE \
-  US_PATENT_6321267 implementation-notes examples \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/postfix.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/postfix.SlackBuild
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-install -m 0644 $CWD/rc.postfix  $PKG/etc/rc.d/rc.postfix.new
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+sed -i 's#\($manpage_directory/man[158]/.\+\.[158]\)\(:.*\)#\1.gz\2#' \
+  $PKG/etc/postfix/postfix-files
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AAAREADME COMPATIBILITY COPYRIGHT HISTORY IPv6-ChangeLog LICENSE PORTING \
+  RELEASE_NOTES TLS_ACKNOWLEDGEMENTS TLS_CHANGES TLS_LICENSE US_PATENT_6321267 \
+  examples implementation-notes $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
-
-find $PKG -type f | \
- ( while read LINE; do
-  if file $LINE | egrep "ELF.*(executable|shared object).*not stripped" \
-    &> /dev/null; then
-  strip $LINE
-  fi
- done )
-
-gzip -9 $PKG/usr/man/*/*
-
-cd $PKG/etc/postfix
-# Since we gzip the manpages, let's fix the postfix-files to reflect that
-# so it won't throw errors during post-install
-( cd $PKG/usr/libexec/postfix
-grep manpage postfix-files | while read line;
-do MANPAGE="$(echo "$line" | cut -d: -f1)"
-  sed -i s#"$MANPAGE"#"$MANPAGE.gz"# postfix-files ;
-done
-)
-
-# Create .new files
-for i in \
-  access aliases canonical generic header_checks main.cf main.cf.default \
-  makedefs.out master.cf relocated transport virtual ;
-do \
-  mv $i $i.new ;
-done
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
