@@ -1,5 +1,5 @@
 #!/bin/sh
-DAVMAIL_HOME=/usr/share/java/davmail
+DAVMAIL_HOME=/usr/share/davmail
 for name in $DAVMAIL_HOME/lib/*.jar ; do
   CP=$CP:$name
 done
