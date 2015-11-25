@@ -1,0 +1,82 @@
+#!/bin/sh
+
+# /etc/rc.d/rc.qbittorrent-nox
+# Runs qbittorrent webui under user who started the script.
+# Usage: /etc/rc.d/rc.qbittorrent-nox start <PORT>|stop|restart <PORT>|status
+# Port defaults to 8080 if not provided.
+#
+# To run this script from rc.local you must run it as a non-root user.
+#
+# Example:
+# /bin/su - david -c /etc/rc.d/rc.qbittorrent-nox start 9000
+# Program output is sent to /tmp/qbittorrent-nox-$USER
+
+# First some checks to see what's what.
+
+if [ "$USER" = "root" ] && [ "$1" = "start" ]; then
+    echo "Do not start the daemon as root." >/dev/stderr
+    exit 1
+fi
+
+
+if [ -n "$2" ]; then
+    UIPORT="$2"
+else
+    UIPORT="8080"
+fi
+
+LOG="/tmp/qbittorrent-nox-$USER"
+APP="/usr/bin/qbittorrent-nox"
+
+do_start()
+{
+    if [ -n "$(/bin/netstat -nta | awk '{print $4}' \
+         | cut -d: -f2 | grep $UIPORT | grep 0.0.0.0)" ]; then
+
+        echo "Port $UIPORT is already in use." >/dev/stderr
+        exit 1
+    fi
+
+    $APP --webui-port=$UIPORT 1>$LOG 2>&1 &
+}
+
+do_stop()
+{
+    PID="$(pgrep -u $USER qbittorrent-nox)"
+
+    if [ -n "$PID" ]; then
+        echo "Killing PID $PID"
+        kill $PID
+    else
+        echo "No process found." >/dev/stderr
+    fi
+}
+
+do_status()
+{
+    echo "Local Address	Foreign Address	State	PID/Program name"
+    /bin/netstat -pntl 2>&1 | grep qbittorrent-n \
+    | awk '{print $4 "	" $5 "	" $6 "	" $7}'
+}
+
+case "$1" in
+    'start')
+        do_start
+    ;;
+
+    'stop')
+        do_stop
+    ;;
+    'restart')
+        do_stop
+        sleep 1
+        do_start
+    ;;
+    'status')
+        do_status
+    ;;
+    *)
+        echo "Usage: $0 {start <PORT>|stop|restart <PORT>|status}" >/dev/stderr
+        exit 1
+    ;;
+esac
