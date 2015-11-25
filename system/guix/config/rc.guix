@@ -1,0 +1,84 @@
+#!/bin/sh
+
+# Short-Description:  A purely functional package manager.
+# Description:
+# GNU Guix provides state-of-the-art package management features such as
+# transactional upgrades and roll-backs, reproducible build environments,
+# unprivileged package management, and per-user profiles. It uses low-level
+# mechanisms from the Nix package manager, but packages are defined as native 
+# Guile modules, using extensions to the Scheme language—which makes it nicely
+# hackable.
+
+PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
+
+BASE=guix-daemon
+
+UNSHARE=/usr/bin/unshare
+GUIX=/usr/bin/$BASE
+GUIX_PIDFILE=/var/run/$BASE.pid
+GUIX_LOG=/var/log/guix.log
+GUIX_OPTS=--build-users-group=guixbuild
+
+if [ -f /etc/default/$BASE ]; then
+	. /etc/default/$BASE
+fi
+
+# Check guix is present
+if [ ! -x $GUIX ]; then
+	echo "$GUIX not present or not executable"
+	exit 1
+fi
+
+guix_start() {
+  echo "starting $BASE ..."
+  if [ -x ${GUIX} ]; then
+    # If there is an old PID file (no guix-daemon running), clean it up:
+    if [ -r ${GUIX_PIDFILE} ]; then
+      if ! ps axc | grep guix-daemon 1> /dev/null 2> /dev/null ; then
+        echo "Cleaning up old ${GUIX_PIDFILE}."
+        rm -f ${GUIX_PIDFILE}
+      fi
+    fi
+    nohup "${UNSHARE}" -m -- "${GUIX}" "${GUIX_OPTS}" >> ${GUIX_LOG} 2>&1 &
+    echo $! > ${GUIX_PIDFILE}
+  fi
+}
+
+# Stop guix:
+guix_stop() {
+  echo "stopping $BASE ..."
+  # If there is no PID file, ignore this request...
+  if [ -r ${GUIX_PIDFILE} ]; then
+    kill $(cat ${GUIX_PIDFILE})
+  fi
+  rm -f ${GUIX_PIDFILE}
+}
+
+# Restart guix:
+guix_restart() {
+	guix_stop
+	guix_start
+}
+
+case "$1" in
+'start')
+  guix_start
+  ;;
+'stop')
+  guix_stop
+  ;;
+'restart')
+  guix_restart
+  ;;
+'status')
+  if [ -f ${GUIX_PIDFILE} ] && ps -o cmd $(cat ${GUIX_PIDFILE}) | grep -q $BASE ; then
+	  echo "status of $BASE: running"
+  else
+	  echo "status of $BASE: stopped"
+  fi
+  ;;
+*)
+  echo "usage $0 start|stop|restart|status"
+esac
+
+exit 0
