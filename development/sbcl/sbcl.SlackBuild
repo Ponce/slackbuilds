@@ -1,21 +1,40 @@
 #!/bin/sh
 
-### sbcl.SlackBuild ###
+# Slackware build script for sbcl
 
-# Slackware build script for sbcl (Steel Bank Common Lisp)
-# written by paul wisehart paul@oldcode.org
+# Copyright 2006 - 2015 Paul Wisehart, <paul at oldcode dot org>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Modified by Eugene M., <damagedone at gmx dot com>
 
 PRGNAM=sbcl
-VERSION=${VERSION:-1.0.50}
-BUILD=${BUILD:-1}
+VERSION=${VERSION:-1.2.16}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
-#ARCH should
 if [ -z "$ARCH" ]; then
-    case "$( uname -m )" in
-        i?86) ARCH=i486 ;;
-        *) ARCH=$( uname -m ) ;;
-    esac
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
 fi
 
 CWD=$(pwd)
@@ -24,14 +43,17 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i486" ]; then
-    LIBDIRSUFFIX=""
-    FNAM=$PRGNAM-$VERSION-x86-linux-binary
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
-    LIBDIRSUFFIX="64"
-    FNAM=$PRGNAM-$VERSION-x86-64-linux-binary
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
 else
-    echo "Architecture [$ARCH] not supported."
-    exit 1
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
 fi
 
 set -e
@@ -39,51 +61,56 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-
-rm -rf $(basename $FNAM "-binary") #the resulting directory doesnt have the "-binary"
-tar xvf $CWD/$FNAM.tar.bz2
-cd $(basename $FNAM "-binary")
-
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION-source.tar.bz2
+cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
   -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-mkdir ${PKG}/usr
-INSTALL_ROOT=${PKG}/usr sh install.sh
+sh make.sh clisp --prefix=/usr --fancy
 
-#fixup /usr/lib -> /usr/lib64 if on x86_64:
+make -C doc/manual info pdf
+
+SBCL_HOME="" \
+INSTALL_ROOT=$PKG/usr \
+MAN_DIR=$PKG/usr/man \
+INFO_DIR=$PKG/usr/info \
+DOC_DIR=$PKG/usr/doc/$PRGNAM-$VERSION \
+sh install.sh
+
+# Fixup /usr/lib -> /usr/lib64 if on x86_64:
 if [ "$ARCH" = "x86_64" ]; then
-  cd $PKG/usr
-    mv lib lib${LIBDIRSUFFIX}
-  cd -
+  mv $PKG/usr/lib $PKG/usr/lib${LIBDIRSUFFIX}
 fi
 
-cd $PKG/usr/share
-  mv man ..
-  mv doc ..
-cd -
-
-cd $PKG/usr/doc
-  mv $PRGNAM $PRGNAM-$VERSION
-  rm -rf  $PKG/usr/share
-cd -
-
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-#get rid of unneeded zero-length files.
-cd $PKG
-    find . -name "test-passed" -type f -exec rm -f {} \;
-cd -
+rm -f $PKG/usr/info/dir
+gzip -9 $PKG/usr/info/*.info*
 
-# scripts in profile.d that set SBCL_HOME
+rm -rf $PKG/usr/doc/$PRGNAM-$VERSION/html
+cp -a HACKING INSTALL NEWS OPTIMIZATIONS PRINCIPLES README TLA TODO \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Set SBCL_HOME path
 mkdir -p $PKG/etc/profile.d
-cp $CWD/sbcl.csh $CWD/sbcl.sh $PKG/etc/profile.d
+cat > $PKG/etc/profile.d/sbcl.csh << EOF
+#!/bin/csh
+setenv SBCL_HOME /usr/lib${LIBDIRSUFFIX}/sbcl
+EOF
+cat > $PKG/etc/profile.d/sbcl.sh << EOF
+#!/bin/sh
+export SBCL_HOME=/usr/lib${LIBDIRSUFFIX}/sbcl
+EOF
 chmod 0755 $PKG/etc/profile.d/*
 
 mkdir -p $PKG/install

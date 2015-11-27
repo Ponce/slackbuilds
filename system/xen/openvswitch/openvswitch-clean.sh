@@ -25,12 +25,16 @@ if [ -f /etc/xen/openvswitch.conf ]; then
       ipv4=${ipv4[$name]}
     elif [ ! -z ${ipv4[::default]} ]; then
       ipv4=${ipv4[::default]}
+    else
+      ipv4=
     fi
 
     if [ ! -z ${ipv6[$name]} ]; then
       ipv6=${ipv6[$name]}
     elif [ ! -z ${ipv6[::default]} ]; then
       ipv6=${ipv6[::default]}
+    else
+      ipv6=
     fi
 
     # Domain can have more then one vif

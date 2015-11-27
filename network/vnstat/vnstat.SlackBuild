@@ -11,7 +11,7 @@
 # 1. Redistributions of this script must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 #
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
 # WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
 # MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
 # EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
@@ -22,8 +22,10 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# Modified by Mario Preksavec <mario@slackware.hr>
+
 PRGNAM=vnstat
-VERSION=${VERSION:-1.11}
+VERSION=${VERSION:-1.13}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -40,6 +42,20 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
@@ -48,55 +64,36 @@ tar -xzvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 set -e
 
-# vnstat doesn't have a proper configure. So we set the locations in the
-# Makefiles properly by the way of sed-fu
-sed -i 's#MAN = $(DESTDIR)/usr/share/man#MAN = $(DESTDIR)/usr/man#' \
-  $TMP/$PRGNAM-$VERSION/Makefile
-sed -i "s#CRON = \$(DESTDIR)/etc/cron.d#CRON = \$(DESTDIR)/usr/doc/$PRGNAM-$VERSION/scripts#" \
-  $TMP/$PRGNAM-$VERSION/Makefile
-sed -i 's#install -m 644 cfg/vnstat.conf $(DESTDIR)/etc;#install -D -m 644 cfg/vnstat.conf $(DESTDIR)/etc/vnstat.conf.new;#' \
-  $TMP/$PRGNAM-$VERSION/Makefile
-
-# Set the compile flags in the src/Makefile properly
-if [ "$ARCH" = "i486" ]; then
-  sed -i 's#FLAGS = -O2#FLAGS = -O2 -march=i486 -mtune=i686#' \
-    $TMP/$PRGNAM-$VERSION/src/Makefile
-elif [ "$ARCH" = "i686" ]; then
-  sed -i 's#FLAGS = -O2#FLAGS = -O2 -march=i686 -mtune=i686#' \
-    $TMP/$PRGNAM-$VERSION/src/Makefile
-elif [ "$ARCH" = "x86_64" ]; then
-  sed -i 's#FLAGS = -O2#FLAGS =-O2 -fPIC#' \
-    $TMP/$PRGNAM-$VERSION/src/Makefile
-fi
-
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
 make all
-make install DESTDIR=$PKG
+make install DESTDIR=$PKG MAN=$PKG/usr/man
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/examples
-cp -a CHANGES COPYING FAQ INSTALL* README UPGRADE UNINSTALL examples \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a examples/vnstat* $PKG/usr/doc/$PRGNAM-$VERSION/examples
+cp -a CHANGES COPYING FAQ INSTALL README UNINSTALL UPGRADE $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
-# Remove the init.d cruft for other distros.
-rm -rf $PKG/usr/doc/$PRGNAM-$VERSION/examples/init.d
-
-# Set up the configuration files and startup scripts.
+# Set up the configuration files and startup scripts
 mkdir -p $PKG/etc/rc.d
 cat $CWD/rc.$PRGNAM > $PKG/etc/rc.d/rc.$PRGNAM.new
 mv $PKG/etc/vnstat.conf $PKG/etc/vnstat.conf.new
+sed -e 's#\(LogFile "/var/log/\)vnstat/\(vnstat.log"\)#\1\2#' \
+    -e 's#\(PidFile "/var/run/\)vnstat/\(vnstat.pid"\)#\1\2#' \
+    -i $PKG/etc/vnstat.conf.new
 
 mkdir -p $PKG/install
 cat $CWD/doinst.sh > $PKG/install/doinst.sh

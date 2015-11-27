@@ -24,8 +24,9 @@
 
 PRGNAM=kodi
 SRCNAM=xbmc
-VERSION=${VERSION:-14.2}
-FFMPEGVER=${FFMPEGVER:-2.4.6}
+CODNAM=Isengard
+VERSION=${VERSION:-15.2}
+FFMPEGVER=${FFMPEGVER:-2.6.4}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -43,7 +44,7 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  SLKCFLAGS="-O2 -march=native -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
@@ -61,15 +62,14 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $SRCNAM-$VERSION-Helix
-tar xvf $CWD/$SRCNAM-$VERSION-Helix.tar.gz 2>/dev/null || tar xvf $CWD/$VERSION-Helix.tar.gz
-cd $SRCNAM-$VERSION-Helix
-tar xvf $CWD/$SRCNAM-pvr-addons-Helix_rc3.tar.gz 2>/dev/null || tar xvf $CWD/Helix_rc3.tar.gz
+rm -rf $SRCNAM-$VERSION-$CODNAM
+tar xvf $CWD/$SRCNAM-$VERSION-$CODNAM.tar.gz 2>/dev/null || tar xvf $CWD/$VERSION-$CODNAM.tar.gz
+cd $SRCNAM-$VERSION-$CODNAM
 # Don't have the Makefile download ffmpeg during install.
-if [ -f "$CWD/FFmpeg-${FFMPEGVER}-Helix.tar.gz" ]; then
-  ln -s $CWD/FFmpeg-${FFMPEGVER}-Helix.tar.gz tools/depends/target/ffmpeg/ffmpeg-${FFMPEGVER}-Helix.tar.gz
-elif [ -f "$CWD/${FFMPEGVER}-Helix.tar.gz" ]; then
-  ln -s $CWD/${FFMPEGVER}-Helix.tar.gz tools/depends/target/ffmpeg/ffmpeg-${FFMPEGVER}-Helix.tar.gz
+if [ -f "$CWD/FFmpeg-${FFMPEGVER}-${CODNAM}.tar.gz" ]; then
+  ln -s $CWD/FFmpeg-${FFMPEGVER}-${CODNAM}.tar.gz tools/depends/target/ffmpeg/ffmpeg-${FFMPEGVER}-${CODNAM}.tar.gz
+elif [ -f "$CWD/${FFMPEGVER}-${CODNAM}.tar.gz" ]; then
+  ln -s $CWD/${FFMPEGVER}-${CODNAM}.tar.gz tools/depends/target/ffmpeg/ffmpeg-${FFMPEGVER}-${CODNAM}.tar.gz
 else
   echo "FFMPEG wasn't found. Please download it and have it available"
   echo "in the source directory ${CWD}."
@@ -82,13 +82,8 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Fix for sse2 cpu's.
-if grep 'sse2' /proc/cpuinfo 2>&1 > /dev/null; then
-  patch -p1 < $CWD/patches/sse2.patch
-fi
-
 # No need to show Git: "Version" in a release build.
-sed -i '/Git:/s|.*|    return GetVersionShort();|' $SRCNAM/GUIInfoManager.cpp
+sed -i '/Git:/s|.*|  return GetVersionShort();|' $SRCNAM/GUIInfoManager.cpp
 
 # Patch for building against rtmpdump. Only needed if xbmc fails to build
 # w/rtmpdump.  See the following link for a rather obtuse explanation.
@@ -99,7 +94,11 @@ patch -p1 < $CWD/patches/xbmc-Gotham-rtmpdump-build.patch
 patch -p1 < $CWD/patches/xbmc-Helix-samba-4.0.patch
 
 # Use installed libdvdread.
-patch -p1 < $CWD/patches/xbmc-13.0-dvdread.patch
+patch -p1 < $CWD/patches/xbmc-15.0-dvdread.patch
+
+# Fix static linking for Texturepacker. Thanks to Gentoo.
+# Issue: http://forum.kodi.tv/showthread.php?tid=220407
+patch -p0 < $CWD/patches/kodi-texturepacker.patch
 
 # Hack for using afpfs-ng.
 cat lib/afpfs-ng/fix_afpfs-ng_includes.patch | head -1336 | tail -1172 | patch -p1
@@ -115,7 +114,7 @@ else
 fi
 
 # Build webserver. Requires libmicrohttpd.
-if [ "${WEBSERVER:-no}" == "yes" ]; then
+if [ "${WEBSERVER:-yes}" == "yes" ]; then
   OPT_DEPS="$OPT_DEPS --enable-webserver"
 else
   OPT_DEPS="$OPT_DEPS --disable-webserver"
@@ -126,32 +125,7 @@ if [ "${PULSE:-no}" == "yes" ]; then
   OPT_DEPS="$OPT_DEPS --enable-pulse"
 fi
 
-# Build the pvr addons.
-cd $SRCNAM-pvr-addons-Helix_rc3
-  # Fix include statements. Only needed if jsoncpp is installed.
-  if [ -d /usr/include/jsoncpp ]; then
-    sed -i 's|<json.*/|<jsoncpp/|' addons/*/*/*.*
-    sed -i '/sstream/s|.*|&\n#include <iostream>|' addons/*/*/FilmonAPI.cpp
-  fi
-  ./bootstrap
-  CFLAGS="$SLKCFLAGS $AFPFS_NGFLAGS -DGL_GLEXT_PROTOTYPES" \
-  CXXFLAGS="$SLKCFLAGS $AFPFS_NGFLAGS -DGL_GLEXT_PROTOTYPES" \
-  ./configure \
-    --prefix=/usr \
-    --libdir=/usr/lib${LIBDIRSUFFIX}/xbmc/addons \
-    --enable-release \
-    --enable-addons-with-dependencies \
-    --enable-static=no \
-    --disable-silent-rules \
-    --disable-dependency-tracking \
-    --docdir=/usr/doc/$PRGNAM-$VERSION \
-    --build=$ARCH-slackware-linux
-
-    make
-cd -
-
-# Only link to static library.
-sed -i 's|-lsquish-native|-lsquish|' tools/TexturePacker/Makefile.in
+export PATH="$PATH:$PWD/tools/depends/native/JsonSchemaBuilder/bin"
 
 # Need to fix an autoreconf error with older version of pkg-config.
 # http://forum.kodi.tv/showthread.php?tid=195791
@@ -209,9 +183,7 @@ if ! [ "${WII:-no}" = "no" ]; then
 fi
 gzip -9 $PKG/usr/man/man?/*.?
 
-cp -a \
-  tools/EventClients/README.txt $SRCNAM-pvr-addons-Helix_rc3/COPYING \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a tools/EventClients/README.txt $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 # Final clean up.

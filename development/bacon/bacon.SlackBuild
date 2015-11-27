@@ -5,7 +5,7 @@
 # Written by Steve Pledger <spledger91@yahoo.com>
 
 PRGNAM=bacon
-VERSION=${VERSION:-1.0_build_26}
+VERSION=${VERSION:-3.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -21,26 +21,6 @@ CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
-
-# which C compiler to use:
-COMPILER="${COMPILER:-gcc}" # supported compilers: gcc, tcc, and HP's Compaq C Compiler
-
-# Version number may change, so figure out the real version
-SRCVER="$(/bin/bash $CWD/bacon.bash -v | grep version | cut -d' ' -f3-5 | tr ' ' _)"
-
-# suggested by Niels Horn:
-if [ "$VERSION" != "$SRCVER" ]; then
-  cat <<EOF
-WARNING: The source version ($SRCVER) does not match the VERSION variable ($VERSION).
-To build anyway, run the SlackBuild like this:
-
-  VERSION=$SRCVER ./$PRGNAM.SlackBuild
-
-exiting...
-EOF
-
-  exit 1
-fi
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
@@ -62,32 +42,57 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-mkdir $PRGNAM-$VERSION
-
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
-# Bacon creates a binary in the same location as the source, so copy the source files here.
-cp $CWD/bacon.bash $CWD/bacon.bac .
-
 chown -R root:root .
 find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Use the Bash version of BaCon to convert and compile the BASIC version, which is much faster.
-# (Note: Not using sh because this requires Bash >=3.2 and sh may be a symlink to another shell)
-/bin/bash bacon.bash -c $COMPILER -p -o $(echo $SLKCFLAGS | sed -e 's: : -o :g') bacon.bac
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --build=$ARCH-slackware-linux
 
+make -j1
+
+# make install doesn't understand DESTDIR
 mkdir -p $PKG/usr/bin
-install -m 0755 bacon $PKG/usr/bin
-strip --strip-unneeded $PKG/usr/bin/* 2>/dev/null || true
+/usr/bin/ginstall -c build/bacon $PKG/usr/bin
+/usr/bin/ginstall -c build/bacongui $PKG/usr/bin
+/usr/bin/ginstall -c bacon.sh $PKG/usr/bin
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}
+/usr/bin/ginstall -c -m 644 build/libbacon.a $PKG/usr/lib${LIBDIRSUFFIX}
+mkdir -p $PKG/usr/man/man1
+/usr/bin/ginstall -c -m 644 bacon.1 $PKG/usr/man/man1
+mkdir -p $PKG/usr/share/applications
+/usr/bin/ginstall -c -m 644 bacongui.desktop $PKG/usr/share/applications
+mkdir -p $PKG/usr/share/pixmaps
+/usr/bin/ginstall -c -m 644 icons/BaCon.png $PKG/usr/share/pixmaps
+mkdir -p $PKG/usr/share/enscript/hl
+/usr/bin/ginstall -c -m 644 syntax/bacon.st $PKG/usr/share/enscript/hl
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  README.1ST \
+  $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}

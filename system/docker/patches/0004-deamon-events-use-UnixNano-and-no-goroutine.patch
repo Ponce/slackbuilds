@@ -1,0 +1,72 @@
+From 67c185dea42b6d4dc8f53280446488621ab04f7c Mon Sep 17 00:00:00 2001
+From: Vincent Batts <vbatts@redhat.com>
+Date: Tue, 15 Sep 2015 15:05:17 -0400
+Subject: [PATCH 4/4] deamon/events: use UnixNano and no goroutine
+
+Signed-off-by: Vincent Batts <vbatts@redhat.com>
+---
+ daemon/events/events.go        | 24 +++++++++++-------------
+ pkg/jsonmessage/jsonmessage.go |  5 +++--
+ 2 files changed, 14 insertions(+), 15 deletions(-)
+
+diff --git a/daemon/events/events.go b/daemon/events/events.go
+index 07ee29a..aeb22e8 100644
+--- a/daemon/events/events.go
++++ b/daemon/events/events.go
+@@ -45,19 +45,17 @@ func (e *Events) Evict(l chan interface{}) {
+ // Log broadcasts event to listeners. Each listener has 100 millisecond for
+ // receiving event or it will be skipped.
+ func (e *Events) Log(action, id, from string) {
+-	go func() {
+-		e.mu.Lock()
+-		jm := &jsonmessage.JSONMessage{Status: action, ID: id, From: from, Time: time.Now().UTC().Unix()}
+-		if len(e.events) == cap(e.events) {
+-			// discard oldest event
+-			copy(e.events, e.events[1:])
+-			e.events[len(e.events)-1] = jm
+-		} else {
+-			e.events = append(e.events, jm)
+-		}
+-		e.mu.Unlock()
+-		e.pub.Publish(jm)
+-	}()
++	e.mu.Lock()
++	jm := &jsonmessage.JSONMessage{Status: action, ID: id, From: from, TimeNano: time.Now().UTC().UnixNano()}
++	if len(e.events) == cap(e.events) {
++		// discard oldest event
++		copy(e.events, e.events[1:])
++		e.events[len(e.events)-1] = jm
++	} else {
++		e.events = append(e.events, jm)
++	}
++	e.mu.Unlock()
++	e.pub.Publish(jm)
+ }
+ 
+ // SubscribersCount returns number of event listeners
+diff --git a/pkg/jsonmessage/jsonmessage.go b/pkg/jsonmessage/jsonmessage.go
+index c4b311e..8a24d9c 100644
+--- a/pkg/jsonmessage/jsonmessage.go
++++ b/pkg/jsonmessage/jsonmessage.go
+@@ -90,6 +90,7 @@ type JSONMessage struct {
+ 	ID              string        `json:"id,omitempty"`
+ 	From            string        `json:"from,omitempty"`
+ 	Time            int64         `json:"time,omitempty"`
++	TimeNano        int64         `json:"timeNano,omitempty"`
+ 	Error           *JSONError    `json:"errorDetail,omitempty"`
+ 	ErrorMessage    string        `json:"error,omitempty"` //deprecated
+ }
+@@ -109,8 +110,8 @@ func (jm *JSONMessage) Display(out io.Writer, isTerminal bool) error {
+ 	} else if jm.Progress != nil && jm.Progress.String() != "" { //disable progressbar in non-terminal
+ 		return nil
+ 	}
+-	if jm.Time != 0 {
+-		fmt.Fprintf(out, "%s ", time.Unix(jm.Time, 0).Format(timeutils.RFC3339NanoFixed))
++	if jm.Time != 0 || jm.TimeNano != 0 {
++		fmt.Fprintf(out, "%s ", time.Unix(jm.Time, jm.TimeNano).Format(timeutils.RFC3339NanoFixed))
+ 	}
+ 	if jm.ID != "" {
+ 		fmt.Fprintf(out, "%s: ", jm.ID)
+-- 
+2.4.3
+

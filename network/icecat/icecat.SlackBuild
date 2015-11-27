@@ -25,7 +25,9 @@
 # <http://www.gnu.org/licenses/>.
 
 PRGNAM="icecat"
-VERSION=${VERSION:-31.6.0}
+VERSION=${VERSION:-38.3.0}
+RELEASEVER="$VERSION"
+RELEASEVERMAJ=$(echo $RELEASEVER | cut -f 1 -d .)
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -72,6 +74,7 @@ else
   OPTIMIZE=" --enable-optimize=-O2 "
 fi
 
+# When it works, it builds much faster.
 #NUMJOBS=${NUMJOBS:-" -j7 "}
 
 set -e
@@ -83,15 +86,12 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/${PRGNAM}-$VERSION-gnu1.tar.bz2
 cd ${PRGNAM}-$VERSION
 
-# Fix a long standing bug that's prevented staying current on GTK+.
-# Thanks to the BLFS folks.  :-)
-cat << EOF >> layout/build/Makefile.in
-
-ifdef MOZ_ENABLE_CANVAS
-EXTRA_DSO_LDOPTS += \$(XLDFLAGS) -lX11 -lXrender
-endif
-
-EOF
+# Fix building with gcc-4.9.x
+# https://bugzilla.mozilla.org/show_bug.cgi?id=999496
+# Patch for freetype-2.6
+# https://bugzilla.mozilla.org/show_bug.cgi?id=1143411
+# Fix various CVEs
+for i in $CWD/patches/* ; do patch -p1 < $i ; done
 
 chown -R root:root .
 find -L . \
@@ -161,11 +161,35 @@ make -f client.mk build
 make -f client.mk install DESTDIR=$PKG
 
 # We don't need these (just symlinks anyway):
-rm -rf $PKG/usr/lib${LIBDIRSUFFIX}/firefox-devel-$RELEASEVER
+rm -rf $PKG/usr/lib${LIBDIRSUFFIX}/icecat-devel-$RELEASEVER
 
 # Nor these:
 rm -rf $PKG/usr/include
 
+# OK, this is just awkward. Only OS-dependent addons should be in the
+# OS software channel, and the rest should be installed by the user,
+# or else the user gets stuck with unremovable addons. This especially
+# affects the adblockers, since some of them are incompatible.
+( cd $PKG/usr/lib${LIBDIRSUFFIX}/icecat-$RELEASEVER/browser/extensions \
+  && rm -rf spyblock* jid1* https* html5* abouticecat* )
+
+# Desktop integration
+mkdir -p $PKG/usr/share/applications
+cat $CWD/icecat.desktop > $PKG/usr/share/applications/icecat.desktop
+# Need some default icons in the right place:
+for i in 16 22 24 32 48 256; do
+  install -m 0644 -D browser/branding/official/default${i}.png \
+    $PKG/usr/share/icons/hicolor/${i}x${i}/apps/icecat.png
+done
+mkdir -p $PKG/usr/share/pixmaps
+( cd $PKG/usr/share/pixmaps ; ln -sf /usr/share/icons/hicolor/256x256/apps/icecat.png . )
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/icecat-$RELEASEVER/chrome/icons/default
+install -m 644 browser/branding/official/default16.png \
+  $PKG/usr/lib$LIBDIRSUFFIX/icecat-$RELEASEVER/icons/
+install -m 644 browser/branding/official/default16.png \
+  $PKG/usr/lib$LIBDIRSUFFIX/icecat-$RELEASEVER/chrome/icons/default/
+
+# Stage documentation
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a Changelog.IceCat LEGAL LICENSE README.IceCat README.txt AUTHORS \
   $PKG/usr/doc/$PRGNAM-$VERSION
@@ -173,6 +197,7 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}

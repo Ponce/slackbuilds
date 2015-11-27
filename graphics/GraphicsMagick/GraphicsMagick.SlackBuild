@@ -2,10 +2,21 @@
 
 # Slackware build script for GraphicsMagick
 
-# Written by Giovanne Castro <giovannefc@terra.com.br>
+# Originally written by Giovanne Castro <giovannefc@terra.com.br>
+
+# Updated by B. Watson <yalhcru@gmail.com>, as the original author is
+# MIA. Original version had no license; I'm licensing the update under the
+# terms of the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20150803 bkw:
+# - updated for v1.3.21
+# - install docs to /usr/doc/$PRGNAM-$VERSION, not /usr/share/doc
+# - build perl bindings (PerlMagick)
+# - build Tcl bindings (TclMagick)
+# - document optional deps in README
 
 PRGNAM=GraphicsMagick
-VERSION=${VERSION:-1.3.17}
+VERSION=${VERSION:-1.3.21}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -57,6 +68,7 @@ CXXFLAGS="$SLKCFLAGS" \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
   --program-prefix= \
   --with-x \
   --with-frozenpaths=no \
@@ -71,20 +83,101 @@ CXXFLAGS="$SLKCFLAGS" \
 make INSTALLDIRS=vendor
 make install INSTALLDIRS=vendor DESTDIR=$PKG
 
+### Build the perl module
+
+# In the olden days, PerlMagick was a separate module, not part of
+# GraphicsMagick, and it had its own SlackBuild. These days, PerlMagick
+# is integrated into the GraphicsMagick source. Supposedly, PerlMagick
+# has to be built after GraphicsMagick is installed system-wide, but
+# I've come up with functional (if unattractive) way around that.
+
+cd PerlMagick
+
+# munge Makefile.PL to build using the includes/libs we just installed
+# to $PKG, instead of systemwide ones.
+sed -i \
+  -e "/magick_CFLAGS/s,=',&-I$PKG/usr/include ," \
+  -e "/magick_LDFLAGS/s,=',&-L$PKG/usr/lib$LIBDIRSUFFIX ," \
+  Makefile.PL
+
+perl Makefile.PL \
+  PREFIX=/usr \
+  INSTALLDIRS=vendor \
+  INSTALLVENDORMAN1DIR=/usr/man/man1 \
+  INSTALLVENDORMAN3DIR=/usr/man/man3
+
+make
+
+# 'make test' will attempt to display an image, if it thinks it's running
+# in X. Let's not do this. Also, use the shared libs in $PKG.
+# The rungm.sh script sets up the environment so GraphicsMagick will look
+# for its support files in the source tree instead of /usr.
+DISPLAY="" \
+LD_PRELOAD="$PKG/usr/lib$LIBDIRSUFFIX/lib$PRGNAM.so" \
+  ../rungm.sh make test
+
+make install DESTDIR=$PKG
+
+cd -
+### Done with perl module
+
+### Build the tcl module, if & only if GraphicsMagick was already
+#   installed system-wide. This means, to get tcl bindings, you have to
+#   build twice. You can thank libtool and its .la files (with hard-coded
+#   paths) for this stupidity. I could probably spend more time with
+#   this and fix it (like the perl stuff above), but I suspect nobody
+#   really cares about TclMagick.
+
+GMVER="$(pkg-config --silence-errors --modversion $PRGNAM || true)"
+if [ "$GMVER" = "$VERSION" ]; then
+  cd TclMagick
+
+# LIBS needed to avoid libTclMagick.so: undefined symbol: tclStubsPtr
+  source /usr/lib$LIBDIRSUFFIX/tclConfig.sh
+
+  LIBS="$TCL_STUB_LIB_FLAG" \
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  ./configure \
+    --prefix=/usr \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --mandir=/usr/man \
+    --with-magick=/usr/bin/${PRGNAM}Wand-config \
+    --with-tcl=/usr/lib$LIBDIRSUFFIX \
+    --with-tk=/usr/lib$LIBDIRSUFFIX
+
+  make
+  make install DESTDIR=$PKG
+
+  WITHTCL=WITH
+  cd -
+else
+  cat <<EOF
+Building without Tcl/Tk bindings. If you need TclMagick, install this
+package, then re-run the SlackBuild and reinstall the package. The 2nd
+build will include TclMagick.
+EOF
+  WITHTCL=WITHOUT
+fi
+### Done with tcl module
+
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
+find $PKG -name perllocal.pod \
+  -o -name ".packlist" \
+  -o -name "*.bs" \
+  | xargs rm -f
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  ChangeLog NEWS.txt README.txt TODO.txt \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a ChangeLog *.txt $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@WITHTCL@,$WITHTCL," $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}

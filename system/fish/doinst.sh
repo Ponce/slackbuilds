@@ -13,3 +13,5 @@ config() {
 
 config etc/fish/config.fish.new
 
+# add Fish to /etc/shells
+grep -qe '^/usr/bin/fish$' /etc/shells || echo '/usr/bin/fish' >> /etc/shells

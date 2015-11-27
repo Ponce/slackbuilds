@@ -1,0 +1,118 @@
+#!/bin/sh
+#
+# unbound       This shell script takes care of starting and stopping
+#               unbound (DNS server).
+#
+# chkconfig:   - 14 86
+# description:  unbound is a Domain Name Server (DNS) \
+#               that is used to resolve host names to IP addresses.
+
+### BEGIN INIT INFO
+# Provides: unbound
+# Required-Start: $network $local_fs
+# Required-Stop: $network $local_fs
+# Default-Start:
+# Default-Stop: 0 1 2 3 4 5 6
+# Should-Start: $syslog
+# Should-Stop: $syslog
+# Short-Description: unbound recursive Domain Name Server.
+# Description:  unbound is a Domain Name Server (DNS) 
+#               that is used to resolve host names to IP addresses.
+### END INIT INFO
+
+# Source function library.
+. /etc/rc.d/init.d/functions
+
+exec="/usr/sbin/unbound"
+config="/etc/unbound/unbound.conf"
+pidfile="/var/run/unbound/unbound.pid"
+piddir=`dirname $pidfile`
+
+[ -x /usr/sbin/dnssec-configure ] && [ -r "$config" ] &&
+  [ /etc/sysconfig/dnssec -nt "$config" ] && \
+    /usr/sbin/dnssec-configure -u --norestart --dnssec="$DNSSEC" --dlv="$DLV"
+
+start() {
+    [ -x $exec ] || exit 5
+    [ -f $config ] || exit 6
+    # /var/run could (and should) be tmpfs
+    [ -d $piddir ] || mkdir $piddir
+
+    if [ -f /var/lib/unbound/root.anchor -a -f /usr/sbin/unbound-anchor ]
+    then
+        /sbin/runuser --command="/usr/sbin/unbound-anchor -a /var/lib/unbound/root.anchor -c /etc/unbound/icannbundle.pem" --shell /bin/sh unbound
+    fi
+
+    if [ ! -f /etc/unbound/unbound_control.key ]
+    then
+        echo -n $"Generating unbound control key and certificate: "
+        /usr/sbin/unbound-control-setup -d /etc/unbound/ > /dev/null 2> /dev/null
+        chgrp unbound /etc/unbound/unbound_*key /etc/unbound/unbound_*pem
+        [ -x /usr/sbin/selinuxenabled ] && /usr/sbin/selinuxenabled && \
+            [ -x /sbin/restorecon ] && /sbin/restorecon /etc/unbound/*
+        echo
+    else
+        # old init script created these as root instead of unbound.
+        if [ -G /etc/unbound/unbound_control.key ]
+        then
+            chgrp unbound /etc/unbound/unbound_*key /etc/unbound/unbound_*pem
+            [ -x /usr/sbin/selinuxenabled ] && /usr/sbin/selinuxenabled && \
+                [ -x /sbin/restorecon ] && /sbin/restorecon /etc/unbound/*
+            echo
+        fi
+    fi
+
+
+    unbound-checkconf $config > /dev/null
+    RETVAL=$?
+    if [ $RETVAL != 0 ]
+    then
+        echo "Error in /etc/unbound/unbound.conf, aborted"
+        exit 6
+    fi
+
+    echo -n $"Starting unbound: "
+
+    # if not running, start it up here
+    daemon --pidfile=$pidfile $exec -c $config
+    echo
+}
+
+stop() {
+    echo -n $"Stopping unbound: "
+    # stop it here, often "killproc unbound"
+    killproc -p $pidfile unbound
+    echo
+}
+
+restart() {
+    unbound-checkconf $config > /dev/null
+    RETVAL=$?
+    if [ $RETVAL != 0 ]
+    then
+        echo "Error in /etc/unbound/unbound.conf, aborted"
+        exit 6
+    fi
+    stop
+    start
+}
+
+reload() {
+    restart
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        restart
+        ;;
+    *)
+        echo $"Usage: $0 {start|stop|restart}"
+        exit 2
+esac
+exit $?

@@ -1,0 +1,220 @@
+From cccc745d93a59fdbb4dd7d7562ee8dd684a00786 Mon Sep 17 00:00:00 2001
+From: Stephen J Day <stephen.day@docker.com>
+Date: Tue, 11 Aug 2015 13:47:08 -0700
+Subject: [PATCH 2/4] Avoid buffering to tempfile when pushing with V2
+
+The practice of buffering to a tempfile during a pushing contributes massively
+to slow V2 push performance perception. The protocol was actually designed to
+avoid precalculation, supporting cut-through data push. This means we can
+assemble the layer, calculate its digest and push to the remote endpoint, all
+at the same time.
+
+This should increase performance massively on systems with slow disks or IO
+bottlenecks.
+
+Signed-off-by: Stephen J Day <stephen.day@docker.com>
+---
+ graph/graph.go                          | 21 --------------
+ graph/push_v2.go                        | 51 ++++++++++++++-------------------
+ integration-cli/docker_cli_push_test.go |  2 +-
+ pkg/jsonmessage/jsonmessage.go          |  6 ++++
+ pkg/jsonmessage/jsonmessage_test.go     |  4 +--
+ 5 files changed, 31 insertions(+), 53 deletions(-)
+
+diff --git a/graph/graph.go b/graph/graph.go
+index be911b0..885de87 100644
+--- a/graph/graph.go
++++ b/graph/graph.go
+@@ -2,7 +2,6 @@ package graph
+ 
+ import (
+ 	"compress/gzip"
+-	"crypto/sha256"
+ 	"encoding/json"
+ 	"errors"
+ 	"fmt"
+@@ -329,26 +328,6 @@ func (graph *Graph) newTempFile() (*os.File, error) {
+ 	return ioutil.TempFile(tmp, "")
+ }
+ 
+-func bufferToFile(f *os.File, src io.Reader) (int64, digest.Digest, error) {
+-	var (
+-		h = sha256.New()
+-		w = gzip.NewWriter(io.MultiWriter(f, h))
+-	)
+-	_, err := io.Copy(w, src)
+-	w.Close()
+-	if err != nil {
+-		return 0, "", err
+-	}
+-	n, err := f.Seek(0, os.SEEK_CUR)
+-	if err != nil {
+-		return 0, "", err
+-	}
+-	if _, err := f.Seek(0, 0); err != nil {
+-		return 0, "", err
+-	}
+-	return n, digest.NewDigest("sha256", h), nil
+-}
+-
+ // Delete atomically removes an image from the graph.
+ func (graph *Graph) Delete(name string) error {
+ 	id, err := graph.idIndex.Get(name)
+diff --git a/graph/push_v2.go b/graph/push_v2.go
+index 92d63ca..0ec8cfd 100644
+--- a/graph/push_v2.go
++++ b/graph/push_v2.go
+@@ -2,8 +2,8 @@ package graph
+ 
+ import (
+ 	"fmt"
++	"io"
+ 	"io/ioutil"
+-	"os"
+ 
+ 	"github.com/Sirupsen/logrus"
+ 	"github.com/docker/distribution"
+@@ -199,7 +199,7 @@ func (p *v2Pusher) pushV2Tag(tag string) error {
+ func (p *v2Pusher) pushV2Image(bs distribution.BlobService, img *image.Image) (digest.Digest, error) {
+ 	out := p.config.OutStream
+ 
+-	out.Write(p.sf.FormatProgress(stringid.TruncateID(img.ID), "Buffering to Disk", nil))
++	out.Write(p.sf.FormatProgress(stringid.TruncateID(img.ID), "Preparing", nil))
+ 
+ 	image, err := p.graph.Get(img.ID)
+ 	if err != nil {
+@@ -209,52 +209,45 @@ func (p *v2Pusher) pushV2Image(bs distribution.BlobService, img *image.Image) (d
+ 	if err != nil {
+ 		return "", err
+ 	}
+-
+-	tf, err := p.graph.newTempFile()
+-	if err != nil {
+-		return "", err
+-	}
+-	defer func() {
+-		tf.Close()
+-		os.Remove(tf.Name())
+-	}()
+-
+-	size, dgst, err := bufferToFile(tf, arch)
+-	if err != nil {
+-		return "", err
+-	}
++	defer arch.Close()
+ 
+ 	// Send the layer
+-	logrus.Debugf("rendered layer for %s of [%d] size", img.ID, size)
+ 	layerUpload, err := bs.Create(context.Background())
+ 	if err != nil {
+ 		return "", err
+ 	}
+ 	defer layerUpload.Close()
+ 
++	digester := digest.Canonical.New()
++	tee := io.TeeReader(arch, digester.Hash())
++
+ 	reader := progressreader.New(progressreader.Config{
+-		In:        ioutil.NopCloser(tf),
++		In:        ioutil.NopCloser(tee), // we'll take care of close here.
+ 		Out:       out,
+ 		Formatter: p.sf,
+-		Size:      int(size),
+-		NewLines:  false,
+-		ID:        stringid.TruncateID(img.ID),
+-		Action:    "Pushing",
++		// TODO(stevvooe): This may cause a size reporting error. Try to get
++		// this from tar-split or elsewhere. The main issue here is that we
++		// don't want to buffer to disk *just* to calculate the size.
++		Size: int(img.Size),
++
++		NewLines: false,
++		ID:       stringid.TruncateID(img.ID),
++		Action:   "Pushing",
+ 	})
+-	n, err := layerUpload.ReadFrom(reader)
++
++	out.Write(p.sf.FormatProgress(stringid.TruncateID(img.ID), "Pushing", nil))
++	nn, err := io.Copy(layerUpload, reader)
+ 	if err != nil {
+ 		return "", err
+ 	}
+-	if n != size {
+-		return "", fmt.Errorf("short upload: only wrote %d of %d", n, size)
+-	}
+ 
+-	desc := distribution.Descriptor{Digest: dgst}
+-	if _, err := layerUpload.Commit(context.Background(), desc); err != nil {
++	dgst := digester.Digest()
++	if _, err := layerUpload.Commit(context.Background(), distribution.Descriptor{Digest: dgst}); err != nil {
+ 		return "", err
+ 	}
+ 
+-	out.Write(p.sf.FormatProgress(stringid.TruncateID(img.ID), "Image successfully pushed", nil))
++	logrus.Debugf("uploaded layer %s (%s), %d bytes", img.ID, dgst, nn)
++	out.Write(p.sf.FormatProgress(stringid.TruncateID(img.ID), "Pushed", nil))
+ 
+ 	return dgst, nil
+ }
+diff --git a/integration-cli/docker_cli_push_test.go b/integration-cli/docker_cli_push_test.go
+index 111e9f3..c17a0ea 100644
+--- a/integration-cli/docker_cli_push_test.go
++++ b/integration-cli/docker_cli_push_test.go
+@@ -108,7 +108,7 @@ func (s *DockerRegistrySuite) TestPushInterrupt(c *check.C) {
+ 	}
+ 
+ 	// Interrupt push (yes, we have no idea at what point it will get killed).
+-	time.Sleep(200 * time.Millisecond)
++	time.Sleep(50 * time.Millisecond) // dependent on race condition.
+ 	if err := pushCmd.Process.Kill(); err != nil {
+ 		c.Fatalf("Failed to kill push process: %v", err)
+ 	}
+diff --git a/pkg/jsonmessage/jsonmessage.go b/pkg/jsonmessage/jsonmessage.go
+index 7db1626..c4b311e 100644
+--- a/pkg/jsonmessage/jsonmessage.go
++++ b/pkg/jsonmessage/jsonmessage.go
+@@ -61,8 +61,14 @@ func (p *JSONProgress) String() string {
+ 		}
+ 		pbBox = fmt.Sprintf("[%s>%s] ", strings.Repeat("=", percentage), strings.Repeat(" ", numSpaces))
+ 	}
++
+ 	numbersBox = fmt.Sprintf("%8v/%v", current, total)
+ 
++	if p.Current > p.Total {
++		// remove total display if the reported current is wonky.
++		numbersBox = fmt.Sprintf("%8v", current)
++	}
++
+ 	if p.Current > 0 && p.Start > 0 && percentage < 50 {
+ 		fromStart := time.Now().UTC().Sub(time.Unix(int64(p.Start), 0))
+ 		perEntry := fromStart / time.Duration(p.Current)
+diff --git a/pkg/jsonmessage/jsonmessage_test.go b/pkg/jsonmessage/jsonmessage_test.go
+index 2e78fa7..889b0ba 100644
+--- a/pkg/jsonmessage/jsonmessage_test.go
++++ b/pkg/jsonmessage/jsonmessage_test.go
+@@ -3,12 +3,12 @@ package jsonmessage
+ import (
+ 	"bytes"
+ 	"fmt"
++	"strings"
+ 	"testing"
+ 	"time"
+ 
+ 	"github.com/docker/docker/pkg/term"
+ 	"github.com/docker/docker/pkg/timeutils"
+-	"strings"
+ )
+ 
+ func TestError(t *testing.T) {
+@@ -45,7 +45,7 @@ func TestProgress(t *testing.T) {
+ 	}
+ 
+ 	// this number can't be negative gh#7136
+-	expected = "[==================================================>]     50 B/40 B"
++	expected = "[==================================================>]     50 B"
+ 	jp5 := JSONProgress{Current: 50, Total: 40}
+ 	if jp5.String() != expected {
+ 		t.Fatalf("Expected %q, got %q", expected, jp5.String())
+-- 
+2.4.3
+

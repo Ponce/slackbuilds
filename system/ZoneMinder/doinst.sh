@@ -11,22 +11,10 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-preserve_perms() {
-  NEW="$1"
-  OLD="$(dirname $NEW)/$(basename $NEW .new)"
-  if [ -e $OLD ]; then
-    cp -a $OLD ${NEW}.incoming
-    cat $NEW > ${NEW}.incoming
-    mv ${NEW}.incoming $NEW
-  fi
-  config $NEW
-}
-
-config etc/rc.d/rc.zm.new
 config etc/zm/zm.conf.new
 config etc/zm/zm_apache.conf.new
 config etc/logrotate.d/zm.new
-preserve_perms etc/rc.d/rc.zm.new
+config etc/rc.d/rc.zm.new
 
 echo ""
 echo "   If this is a new installation, you will need to create a MySQL database"

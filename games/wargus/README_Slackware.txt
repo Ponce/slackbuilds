@@ -9,6 +9,18 @@ installed stratagus package. In practice this won't be a problem if
 you use SlackBuilds.org for both (because both will get updated at the
 same time).
 
+Upgrade Notes
+-------------
+
+The dependencies for in-game music have changed. wargus 2.2.x
+used TiMidity++ and eawpats. Starting with 2.3.0, fluidsynth and
+fluid-soundfont are used instead.
+
+If you're upgrading from a previous version of wargus, you may have
+to delete your old preferences directory:
+
+  rm -rf ~/.stratagus/wc2
+
 Slackware Note
 --------------
 
@@ -27,9 +39,9 @@ The general consensus seems to be, changing makepkg isn't going to happen.
 SlackBuilds.org Note
 --------------------
 
-In the .info file, stratagus, ffmpeg2theora, TiMidity++, and eawpats
-are listed as requirements. Only stratagus is a runtime requirement,
-the others are only required at build time (matters if you're deploying
+In the .info file, stratagus, ffmpeg2theora, fluidsynth, and
+fluid-soundfont are listed as requirements. ffmpeg2theora is only required
+at build time; the others required at runtime (matters if you're deploying
 on a host other than the build host).
 
 Game Data
@@ -78,13 +90,10 @@ this, and later decide to remove wargus, you'll have to manually rm -rf
 
 For game data extraction to work, you will need:
 
-- a working install of TiMidity++ configured to use eawpats (check
-/etc/timidity.cfg; freepats may work instead).
-
 - ffmpeg2theora
 
 - if you're extracting from a 7zip or rar archive, you'll need p7zip
-or unrar.
+  or unrar.
 
 Extraction takes a while, depending on your CPU speed. It renders all the
 game's MIDI music as wav files, transcodes those to .ogg, then transcodes

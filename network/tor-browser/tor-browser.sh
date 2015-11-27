@@ -4,7 +4,7 @@
 # Copyright (C) 2012 Alessio Sergi <al3hex at gmail dot com>
 # modified 2012 for tor-browser (Max Roder <maxroder at web dot de>)
 # modified 2014 by Yardena Cohen <yardenack at gmail dot com>
-# modified 2014 by Willy Sudiarto Raharjo <willysr@slackbuilds.org>
+# modified 2015 by Willy Sudiarto Raharjo <willysr@slackbuilds.org>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -52,7 +52,7 @@ update() {
 		\nCheck permissions of $INSTALL_DIRECTORY. \
 		\nThe error log can be found in $LOG_FILE."
 
-	[[ -f $INSTALL_DIRECTORY/start-tor-browser ]] && echo $VERSION > $VERSION_FILE
+	[[ -f $INSTALL_DIRECTORY/Browser/start-tor-browser ]] && echo $VERSION > $VERSION_FILE
 }
 
 usage() {
@@ -108,4 +108,4 @@ else
 fi
 
 # start tor-browser
-cd $INSTALL_DIRECTORY && ./start-tor-browser --class Tor\ Browser "${args[@]}"
+cd $INSTALL_DIRECTORY/Browser && ./start-tor-browser --class Tor\ Browser "${args[@]}"

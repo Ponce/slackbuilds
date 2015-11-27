@@ -1,13 +1,23 @@
 #!/bin/sh
 
 # Slackware build script for dia
-# Written by Matt Hayes (dominian@slackadelic.com
-# Updated for 64bit by Ash Wiren (ash@spooksoftware.com  19-08-2009
-# Currently mantained by Dugan Chen (thedoogster@gmail.com)))
+
+# Originally written by Matt Hayes <dominian at slackadelic dot com>
+# Updated for 64bit by Ash Wiren <ash at spooksoftware dot com> (19.08.2009)
+# Maintained by Dugan Chen <thedoogster at gmail dot com> (<= 18.09.2015)
+#
+# Updated and currently maintained by Philip Lacroix <slackph at posteo dot de>
+#
+# 19.09.2015:
+# - reviewed and updated for dia 0.97.3.
+# 10.10.2015:
+# - enabled HTML documentation (based on patch by Mike Gorse, SUSE);
+# - enabled python and cairo plug-ins, SWIG;
+# - disabled gnome code (deprecated).
 
 PRGNAM=dia
-VERSION=0.97.2
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-0.97.3}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -44,19 +54,18 @@ mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
   -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Fix the location of the French manpages.
-sed -i 's/$(datadir)\/man/@mandir@/' doc/fr/Makefile.in
+# Enable HTML documentation, necessary for online help functionality.
+patch configure.in < $CWD/dia-enable-html-docs.patch
 
-# apply patches from upstream
-for i in $CWD/patches/* ; do patch -p1 < $i ; done
 autoreconf -fi
 
 CFLAGS="$SLKCFLAGS" \
@@ -66,22 +75,32 @@ CXXFLAGS="$SLKCFLAGS" \
   --mandir=/usr/man \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --with-swig \
+  --with-cairo \
+  --with-python \
+  --disable-gnome \
+  --disable-static \
   --build=$ARCH-slackware-linux
 
 make
 make install DESTDIR=$PKG
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" \
+  | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+PRGMAN=$PKG/usr/man
+PRGSHR=$PKG/usr/share
+PRGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
 
-# docdir already exists :-)
-cp -a \
-  AUTHORS COPYING ChangeLog ChangeLog.pre-git KNOWN_BUGS MAINTAINERS NEWS README RELEASE-PROCESS THANKS TODO \
-    $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# Move French man page to correct location; compress both.
+mv $PRGSHR/man/fr $PRGMAN/
+gzip -9 $PRGMAN/{,fr/}man1/$PRGNAM.1
+rmdir $PRGSHR/man
+
+# Install documentation.
+cp -a AUTHORS COPYING ChangeLog* KNOWN_BUGS MAINTAINERS NEWS README \
+     \RELEASE-PROCESS THANKS TODO $PRGDOC/
+cat $CWD/$PRGNAM.SlackBuild > $PRGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
