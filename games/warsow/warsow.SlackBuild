@@ -22,14 +22,11 @@
 # Written by Andre Barboza <bmg.andre@gmail.com>
 # Updated by drhouse <housegregory299@gmail.com>
 # Updated by goarilla <goarilla@gmail.com>
-#   It now packages the unified tarball instead of compiling the source and merging the data
 
 PRGNAM=warsow
-VERSION=${VERSION:-1.51}
+VERSION=${VERSION:-2.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
-
-BASE_VERSION=${BASE_VERSION:-1.51}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -39,82 +36,102 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
+CWD=$(pwd)
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "x86_64" ]; then
-  EXESUFFIX="x86_64"
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
 else
-  EXESUFFIX="i386"
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
 fi
 
-set -e
-rm -rf $PKG $TMP/$PRGNAM-$VERSION
-mkdir -p $TMP/$PRGNAM-$VERSION $PKG $OUTPUT
-cd $TMP/$PRGNAM-$VERSION
-tar -xvvzf "$CWD"/"$PRGNAM"_"$BASE_VERSION"_unified.tar.gz
+set -eu
 
-# warsow 1.51_unified base dir is warsow_15
-cd "$PRGNAM"_"15"
+rm -rf "$PKG"
+mkdir -p "${TMP}/${PRGNAM}-${VERSION}" "$PKG"
+mkdir -p "${PKG}/install"
+mkdir -p "${PKG}/usr/games"
+mkdir -p "${PKG}/usr/share/${PRGNAM}"
+mkdir -p "${PKG}/usr/doc/${PRGNAM}-${VERSION}"
 
-# remove windows files
-find -L . -type f -iname '*.dll' -exec rm -vf -- '{}' \;
-find -L . -type f -iname '*.exe' -exec rm -vf -- '{}' \;
+# no parent directory
+SDK="warsow_20_sdk.tar.gz"
+# ./warsow_20
+DATA="warsow_20_unified.tar.gz"
 
-# correct permissions
+tar -C "${PKG}/usr/doc/${PRGNAM}-${VERSION}" -xvf "$DATA" ./warsow_20/docs/
+mv "${PKG}/usr/doc/${PRGNAM}-${VERSION}/warsow_20/docs/"* "${PKG}/usr/doc/${PRGNAM}-${VERSION}/"
+rm -rf "${PKG}/usr/doc/${PRGNAM}-${VERSION}/warsow_20/"
+tar -C "${PKG}/usr/share/${PRGNAM}" -xvf "$DATA" ./warsow_20/basewsw
+mv "${PKG}/usr/share/${PRGNAM}/warsow_20/"* "${PKG}/usr/share/${PRGNAM}"
+rm -rf "${PKG}/usr/share/${PRGNAM}/warsow_20/"
+
+# unpack sdk
+tar -C "${TMP}/${PRGNAM}-${VERSION}" -xvf "$SDK"
+
+# build
+cd "${TMP}/${PRGNAM}-${VERSION}"
+cd source/source
+cmake .
+make
+
+# copy build
+cp -rf build/ "${PKG}/usr/share/${PRGNAM}/"
+
+# shuffle some files
+cd "$PKG"
+cd "usr/share/${PRGNAM}"
+mv basewsw basewsw.old
+mv build/* .
+mv basewsw/* basewsw.old/
+rm -rf basewsw/
+mv basewsw.old/ basewsw/
+rm -rf build
+cp "${CWD}/${PRGNAM}.SlackBuild" "${PKG}/usr/doc/${PRGNAM}-${VERSION}"
+
+# fix permissions of executables
+cd "$PKG"
+chmod 755 "usr/share/${PRGNAM}/warsow.${ARCH}"
+chmod 755 "usr/share/${PRGNAM}/wswtv_server.${ARCH}"
+chmod 755 "usr/share/${PRGNAM}/wsw_server.${ARCH}"
+
+# make wrappers
+cat >> usr/games/warsow << EOF
+#! /bin/sh
+ARCH="$ARCH"
+EOF
+cat >> usr/games/warsow << "EOF"
+cd /usr/share/warsow/ && exec ./"$(basename "$0").${ARCH}"
+EOF
+
+cp usr/games/warsow usr/games/wswtv_server
+cp usr/games/warsow usr/games/wsw_server
+
+# copy icons
+mkdir -p "${PKG}/usr/share/pixmaps/"
+cat "${CWD}/warsow.png" > "${PKG}/usr/share/pixmaps/warsow.png"
+mkdir -p "${PKG}/usr/share/applications"
+cat "${CWD}/warsow.desktop" > "${PKG}/usr/share/applications/warsow.desktop"
+
+# copy description
+cp "${CWD}/slack-desc" "${PKG}/install"
+
+# set permissions
 chown -R root:root .
-# goarilla: plus 700
-find -L . \
- \( -perm 700 -o -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
-
-mkdir -p $PKG/usr/games
-
-# fix and place the wrapper scripts
-cat warsow | sed 's|^BINARY_DIR=$|BINARY_DIR=/usr/share/warsow|' > $PKG/usr/games/warsow
-cat wsw_server | sed 's|^BINARY_DIR=$|BINARY_DIR=/usr/share/warsow|' > $PKG/usr/games/wsw_server
-cat wswtv_server | sed 's|^BINARY_DIR=$|BINARY_DIR=/usr/share/warsow|' > $PKG/usr/games/wswtv_server
-(cd $PKG/usr/games; chmod 0755 *)
-
-mkdir -p $PKG/usr/share/warsow/basewsw/
-
-# copy executables
-cp -a warsow.* "$PKG"/usr/share/warsow/
-cp -a wsw_server.* "$PKG"/usr/share/warsow/
-cp -a wswtv_server.* "$PKG"/usr/share/warsow/
-
-# copy libs
-cp -ra libs "$PKG"/usr/share/warsow/
-
-# (2014/09/28)
-# fix libs' permissions in case SBo overrides the find
-# call to fix the permissions above
-#
-# Thanks to Andrew Conway for letting me know
-chmod 755  "$PKG"/usr/share/warsow/libs/
-#
-# copy data
-cp -ra basewsw/* $PKG/usr/share/warsow/basewsw/
-
-# copy icons and slacbuild
-mkdir -p $PKG/usr/share/pixmaps/
-cat $CWD/warsow.png > $PKG/usr/share/pixmaps/warsow.png
-mkdir -p $PKG/usr/share/applications
-cat $CWD/warsow.desktop > $PKG/usr/share/applications/warsow.desktop
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a docs/* $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-
-# set up install/
-mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
-cat $CWD/doinst.sh > $PKG/install/doinst.sh
+chmod 755 usr/games/{warsow,wswtv_server,wsw_server}
+find usr/doc/"${PRGNAM}-${VERSION}" -type f -print0 | xargs -0 chmod 644
+find usr/share/"${PRGNAM}"/basewsw -type f -print0 | xargs -0 chmod 644
+find usr/share/"${PRGNAM}"/basewsw -type d -print0 | xargs -0 chmod 755
 
 # build package
-cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
