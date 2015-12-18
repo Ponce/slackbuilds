@@ -12,21 +12,25 @@
 # on your setup
 
 MODULES="tun vhost_net"
-PIDFILE="/var/run/libvirt/libvirtd.pid"
 TIMEOUT=${TIMEOUT:-40}
-OPTS=${OPTS:-" -v -f /etc/libvirt/libvirtd.conf -p $PIDFILE "}
+LIBVIRTD_PIDFILE="/var/run/libvirt/libvirtd.pid"
+LIBVIRTD_OPTS=${LIBVIRT_OPTS:-" -v -f /etc/libvirt/libvirtd.conf -p $LIBVIRTD_PIDFILE "}
+VIRTLOGD_PIDFILE="/var/run/libvirt/virtlogd.pid"
+VIRTLOGD_OPTS=${VIRTLOGD_OPTS:-" -v -f /etc/libvirt/virtlogd.conf -p $VIRTLOGD_PIDFILE "}
+VIRTLOCKD_PIDFILE="/var/run/libvirt/virtlockd.pid"
+VIRTLOCKD_OPTS=${VIRTLOCKD_OPTS:-" -v -f /etc/libvirt/virtlockd.conf -p $VIRTLOCKD_PIDFILE "}
 
 check_running_machines() {
 
   count=0
 
-  for machine in $(virsh list --name --state-running | grep -v ^$) ; do
+  for machine in $(/usr/sbin/virsh list --name --state-running | grep -v ^$) ; do
     /usr/sbin/virsh shutdown $machine
   done
 
   echo -n "Waiting machines"
 
-  while [ $(virsh list --name --state-running | grep -v ^$ | wc -l) -gt "0" ]; do
+  while [ $(/usr/sbin/virsh list --name --state-running | grep -v ^$ | wc -l) -gt "0" ]; do
     if [ "$count" -ge "$TIMEOUT" ];then
       break
     fi
@@ -37,10 +41,10 @@ check_running_machines() {
 
   echo ""
 
-  if [ $(virsh list --name --state-running | grep -v ^$ | wc -l) -gt "0" ];then
+  if [ $(/usr/sbin/virsh list --name --state-running | grep -v ^$ | wc -l) -gt "0" ];then
 
     echo -n "The following machines are still running, forcing shutdown: "
-    for machine in $(virsh list --name --state-running | grep -v ^$) ; do
+    for machine in $(/usr/sbin/virsh list --name --state-running | grep -v ^$) ; do
       /usr/sbin/virsh destroy $machine
       echo -n "$machine "
     done
@@ -75,20 +79,20 @@ check_processor() {
 
 }
 
-start() {
-  if [ -f $PIDFILE ];then
+start_libvirtd() {
+  if [ -f $LIBVIRTD_PIDFILE ];then
     echo "libvirt is already running..."
     exit 1
   fi
   echo "Starting libvirtd:  /usr/sbin/libvirtd -d "
-  mkdir -p $(dirname $PIDFILE)
+  mkdir -p $(dirname $LIBVIRTD_PIDFILE)
   check_processor
   /sbin/modprobe -a $MODULES
-  /usr/sbin/libvirtd -d -l $OPTS
+  /usr/sbin/libvirtd -d -l $LIBVIRTD_OPTS
 }
 
-stop() {
-  if [ ! -f $PIDFILE ];then
+stop_libvirtd() {
+  if [ ! -f $LIBVIRTD_PIDFILE ];then
     echo "libvirt is not running..."
     exit 2
   fi
@@ -98,17 +102,61 @@ stop() {
   for network in $(/usr/sbin/virsh net-list | tail -n +3 | awk '{print $1}'); do
     /usr/sbin/virsh net-destroy "$network"
   done
-  kill -TERM $(cat $PIDFILE)
+  kill -TERM $(cat $LIBVIRTD_PIDFILE)
   sleep 3
   /sbin/modprobe -ra $MODULES 2>/dev/null
 }
 
+start_virtlogd() {
+  if [ -f $VIRTLOGD_PIDFILE ];then
+    echo "virtlogd is already running..."
+    exit 1
+  fi
+  echo "Starting virtlogd:  /usr/sbin/virtlogd -d "
+  mkdir -p $(dirname $VIRTLOGD_PIDFILE)
+  /usr/sbin/virtlogd -d $VIRTLOGD_OPTS
+}
+
+stop_virtlogd() {
+  if [ ! -f $VIRTLOGD_PIDFILE ];then
+    echo "virtlogd is not running..."
+    exit 2
+  fi
+  echo "Stopping virtlogd..."
+  kill -TERM $(cat $VIRTLOGD_PIDFILE)
+  sleep 1
+}
+
+start_virtlockd() {
+  if [ -f $VIRTLOCKD_PIDFILE ];then
+    echo "virtlockd is already running..."
+    exit 1
+  fi
+  echo "Starting virtlockd:  /usr/sbin/virtlockd -d "
+  mkdir -p $(dirname $VIRTLOCKD_PIDFILE)
+  /usr/sbin/virtlockd -d $VIRTLOCKD_OPTS
+}
+
+stop_virtlockd() {
+  if [ ! -f $VIRTLOCKD_PIDFILE ];then
+    echo "virtlockd is not running..."
+    exit 2
+  fi
+  echo "Stopping virtlockd..."
+  kill -TERM $(cat $VIRTLOCKD_PIDFILE)
+  sleep 1
+}
+
 case $1 in
 start)
-  start
+  start_virtlockd
+  start_virtlogd
+  start_libvirtd
   ;;
 stop)
-  stop
+  stop_libvirtd
+  stop_virtlogd
+  stop_virtlockd
   ;;
 restart)
   stop
