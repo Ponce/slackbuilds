@@ -1,0 +1,186 @@
+#! /bin/sh
+# Slackware build script for fcitx-mozc
+# Issued under The MIT License (MIT)
+#
+# Copyright 2015 Kuro_CODE25
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+PRGNAM=fcitx-mozc
+VERSION=${VERSION:-2.17.2102.102.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+BLDBASEDIR=$TMP/$PRGNAM-$VERSION
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+# paramater of Qt dir.
+RCC_LOC=`pkg-config QtCore --variable=rcc_location`
+QT4DIR=${RCC_LOC%%/bin/rcc}
+QT4I=`pkg-config QtGui --cflags-only-I`
+BLDTYPE=Release
+
+# source rev. and version.
+ZIPCODE_REL=201504
+PROTOBUF_REV=172019c40bf548908ab09bfd276074c929d48415
+GYP_REV=ff251c3d43eb4263d3aafa29007d6420289525d1
+JSONCPP_REV=11086dd6a7eba04289944367ca82cea71299ed70
+JAPNESE_USAGE_DICT_REV=e5b3425575734c323e1d947009dd74709437b684
+MOZC_REV=3648b9bf06d5d9b36bed2425640bfd18ae05b588
+FONTTOOLS_REV=5ba7d98a4153fad57258fca23b0bcb238717aec3
+JSR305_VER=2.0.2
+FCITX_PATCH_VER=2.17.2102.102.1
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+mkdir -p $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+echo "prepare source file..."
+# unzip packages
+unzip ${CWD}/x-ken-all-${ZIPCODE_REL}.zip
+unzip ${CWD}/jigyosyo-${ZIPCODE_REL}.zip
+tar -xvf ${CWD}/fcitx-mozc-icon.tar.gz
+unzip ${CWD}/$MOZC_REV.zip
+unzip ${CWD}/$JSONCPP_REV.zip
+unzip ${CWD}/$JAPNESE_USAGE_DICT_REV.zip
+unzip ${CWD}/$GYP_REV.zip
+unzip ${CWD}/$PROTOBUF_REV.zip
+unzip ${CWD}/$FONTTOOLS_REV.zip
+
+cp $CWD/fcitx-mozc-${FCITX_PATCH_VER}.patch .
+cp $CWD/jsr305-$JSR305_VER.jar .
+
+# rename directory
+mv mozc-$MOZC_REV mozc
+mv jsoncpp-$JSONCPP_REV jsoncpp
+mv japanese-usage-dictionary-$JAPNESE_USAGE_DICT_REV japanese_usage_dictionary
+mv gyp-$GYP_REV gyp
+mv protobuf-$PROTOBUF_REV protobuf
+mv fonttools-$FONTTOOLS_REV fonttools
+
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Apply fcitx patch
+cd $BLDBASEDIR/mozc/src
+echo "Apply fcitx patch ..."
+rm unix/fcitx -rf
+patch -Np2 -i "$BLDBASEDIR/fcitx-mozc-${FCITX_PATCH_VER}.patch"
+
+# Generate zip code seed
+echo "Generating zip code seed ..."
+python2 dictionary/gen_zip_code_seed.py --zip_code="$BLDBASEDIR/x-ken-all.csv" --jigyosyo="$BLDBASEDIR/JIGYOSYO.CSV" >> data/dictionary_oss/dictionary09.txt
+echo "Done."
+
+# Copy third party deps
+echo "Copy third party deps ..."
+cd $BLDBASEDIR
+for dep in jsoncpp gyp protobuf japanese_usage_dictionary fonttools
+do
+  cp -a $dep mozc/src/third_party/
+done
+
+install -D jsr305-$JSR305_VER.jar mozc/src/third_party/jsr305/jsr305-$JSR305_VER.jar
+
+echo "build package..."
+CFLAGS="${CFLAGS} $QT4I -fvisibility=hidden"
+CXXFLAGS="${CXXFLAGS} $QT4I -fvisibility=hidden"
+
+cd $BLDBASEDIR/mozc/src
+
+_targets="server/server.gyp:mozc_server gui/gui.gyp:mozc_tool unix/fcitx/fcitx.gyp:fcitx-mozc"
+
+QTDIR=$QT4DIR GYP_DEFINES="document_dir=/usr/share/licenses/$pkgname" python2 build_mozc.py gyp
+sed -i 's|command = $cxx -MMD -MF $out.d $defines $includes $cflags $cflags_cc $cflags_pch_cc -c $in -o $out|command = $cxx -MMD -MF $out.d $defines $includes -D__STRICT_ANSI__ $cflags $cflags_cc $cflags_pch_cc -c $in -o $out|' out_linux/Release/build.ninja
+python2 build_mozc.py build -c $BLDTYPE $_targets
+
+# Extract license part of mozc
+head -n 29 server/mozc_server.cc > LICENSE
+
+BLDTYPE=Release
+#cd mozc/src
+
+# install mozc to /usr/lib even if 64 bit
+install -D -m 755 out_linux/${BLDTYPE}/mozc_server "${PKG}/usr/lib/mozc/mozc_server"
+install    -m 755 out_linux/${BLDTYPE}/mozc_tool   "${PKG}/usr/lib/mozc/mozc_tool"
+
+install -d "${PKG}/usr/share/licenses/$pkgname/"
+install -m 644 LICENSE data/installer/*.html "${PKG}/usr/share/licenses/${pkgname}/"
+
+for mofile in out_linux/${BLDTYPE}/gen/unix/fcitx/po/*.mo
+do
+  filename=`basename $mofile`
+  lang=${filename/.mo/}
+  install -D -m 644 "$mofile" "${PKG}/usr/share/locale/$lang/LC_MESSAGES/fcitx-mozc.mo"
+done
+
+install -D -m 755 out_linux/${BLDTYPE}/fcitx-mozc.so "${PKG}/usr/lib${LIBDIRSUFFIX}/fcitx/fcitx-mozc.so"
+install -D -m 644 unix/fcitx/fcitx-mozc.conf "${PKG}/usr/share/fcitx/addon/fcitx-mozc.conf"
+install -D -m 644 unix/fcitx/mozc.conf "${PKG}/usr/share/fcitx/inputmethod/mozc.conf"
+
+install -d "${PKG}/usr/share/fcitx/mozc/icon"
+install -m 644 "$BLDBASEDIR/fcitx-mozc-icons/mozc.png" "${PKG}/usr/share/fcitx/mozc/icon/mozc.png"
+install -m 644 "$BLDBASEDIR/fcitx-mozc-icons/mozc-alpha_full.png" "${PKG}/usr/share/fcitx/mozc/icon/mozc-alpha_full.png"
+install -m 644 "$BLDBASEDIR/fcitx-mozc-icons/mozc-alpha_half.png" "${PKG}/usr/share/fcitx/mozc/icon/mozc-alpha_half.png"
+install -m 644 "$BLDBASEDIR/fcitx-mozc-icons/mozc-direct.png" "${PKG}/usr/share/fcitx/mozc/icon/mozc-direct.png"
+install -m 644 "$BLDBASEDIR/fcitx-mozc-icons/mozc-hiragana.png" "${PKG}/usr/share/fcitx/mozc/icon/mozc-hiragana.png"
+install -m 644 "$BLDBASEDIR/fcitx-mozc-icons/mozc-katakana_full.png" "${PKG}/usr/share/fcitx/mozc/icon/mozc-katakana_full.png"
+install -m 644 "$BLDBASEDIR/fcitx-mozc-icons/mozc-katakana_half.png" "${PKG}/usr/share/fcitx/mozc/icon/mozc-katakana_half.png"
+install -m 644 "$BLDBASEDIR/fcitx-mozc-icons/mozc-dictionary.png" "${PKG}/usr/share/fcitx/mozc/icon/mozc-dictionary.png"
+install -m 644 "$BLDBASEDIR/fcitx-mozc-icons/mozc-properties.png" "${PKG}/usr/share/fcitx/mozc/icon/mozc-properties.png"
+install -m 644 "$BLDBASEDIR/fcitx-mozc-icons/mozc-tool.png" "${PKG}/usr/share/fcitx/mozc/icon/mozc-tool.png"
+
+mkdir -p $PKG/install
+
+# install slack-desc
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
