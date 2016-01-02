@@ -28,7 +28,7 @@
 
 
 PRGNAM=xulrunner
-VERSION=${VERSION:-15.0.1}
+VERSION=${VERSION:-40.0.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -46,17 +46,29 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  SLKCFLAGS=""
   LIBDIRSUFFIX=""
+  OPTIMIZE=" --enable-optimize=-O2 "
+  # On IA32, use gold since GNU ld runs out of memory linking libxul.so:
+  PATH="$(pwd)/gold:$PATH"
+  export CC="gcc -B$(pwd)/gold"
+  export CXX="g++ -B$(pwd)/gold"
 elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  SLKCFLAGS=""
   LIBDIRSUFFIX=""
+  OPTIMIZE=" --enable-optimize=-O2 "
+  # On IA32, use gold since GNU ld runs out of memory linking libxul.so:
+  PATH="$(pwd)/gold:$PATH"
+  export CC="gcc -B$(pwd)/gold"
+  export CXX="g++ -B$(pwd)/gold"
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
+  OPTIMIZE=" --enable-optimize=-O2 "
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
+  OPTIMIZE=" --enable-optimize=-O2 "
 fi
 
 set -e
@@ -76,16 +88,14 @@ find -L . \
 
 # Don't use --enable-system-cairo
 # https://bugzilla.mozilla.org/show_bug.cgi?id=722975
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
+OPTIONS="\
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --mandir=/usr/man \
   --enable-default-toolkit=cairo-gtk2 \
-  --enable-optimize="${CFLAGS}"  \
+  $OPTIMIZE \
   --enable-application=xulrunner \
   --enable-javaxpcom \
   --enable-libxul \
@@ -94,23 +104,44 @@ CXXFLAGS="$SLKCFLAGS" \
   --enable-image-decoders=all \
   --enable-system-lcms \
   --with-system-zlib \
-  --with-system-jpeg \
   --with-system-bz2 \
-  --with-system-nss \
-  --with-system-nspr \
   --enable-system-ffi \
   --disable-system-sqlite \
   --disable-crashreporter \
   --disable-debug \
+  --disable-pulseaudio \
   --disable-mailnews \
   --disable-installer \
   --disable-updater  \
   --build=$ARCH-slackware-linux \
   --host=$ARCH-slackware-linux \
-  --target=$ARCH-slackware-linux
+  --target=$ARCH-slackware-linux"
 
-make
-make install DESTDIR=$PKG
+export CFLAGS="$SLKCFLAGS"
+export CXXFLAGS="$SLKCFLAGS"
+export MOZ_MAKE_FLAGS="$MAKEFLAGS"
+
+unset DBUS_SESSION_BUS_ADDRESS ORBIT_SOCKETDIR SESSION_MANAGER \
+  XDG_SESSION_COOKIE XAUTHORITY MAKEFLAGS
+
+echo ". \$topsrcdir/browser/config/mozconfig" > .mozconfig
+
+# Mozilla devs enforce using an objdir for building
+# https://developer.mozilla.org/en/Configuring_Build_Options#Building_with_an_objdir
+mkdir obj
+echo "mk_add_options MOZ_OBJDIR=$(pwd)/obj" >> .mozconfig
+
+if [ "$MOZLOCALIZE" ]; then
+  echo "mk_add_options MOZ_CO_LOCALES=\"$MOZLOCALIZE\"" >> .mozconfig
+fi
+
+# Write in it the options above
+for option in $OPTIONS; do echo "ac_add_options $option" >> .mozconfig; done
+
+echo "ac_add_options --disable-tests" >> .mozconfig
+make -f client.mk build
+
+make -f client.mk install DESTDIR=$PKG
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
