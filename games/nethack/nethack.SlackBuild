@@ -2,14 +2,15 @@
 
 # Slackware build script for nethack.
 
-# Written by Dugan Chen (thedoogster@gmail.com)
+# Written by Dugan Chen (thedoogster [at] gmail [dot] com)
+# Based on the Arch Linux PkgBuild.
 
 PRGNAM=nethack
-VERSION=${VERSION:-3.4.3}
+VERSION=${VERSION:-3.6.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-SRCVER=${SRCVER:-343}
+SRCVER=${SRCVER:-360}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -53,44 +54,48 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-sh sys/unix/setup.sh
-
-sed -e '/define HACKDIR/ s|/usr/games/lib/nethackdir|/var/games/nethack/|' \
-  -e '/^#define COMPRESS\s/ s|/usr/bin/compress|/bin/gzip|' \
-  -e '/^#define COMPRESS_EXTENSION/ s|".Z"|".gz"|' \
-  -e 's|^/\* \(#define DLB\) \*/|\1|' -i include/config.h
-
 sed -e 's|^/\* \(#define LINUX\) \*/|\1|' \
-  -e 's|^/\* \(#define TIMED_DELAY\) \*/|\1|' -i include/unixconf.h
-
-sed -e 's|^# \(WINTTYLIB = -lncurses\)|\1|' \
-  -e 's|^WINTTYLIB = -ltermlib|#&|' -i src/Makefile
+    -e 's|^/\* \(#define TIMED_DELAY\) \*/|\1|' -i include/unixconf.h
 
 # we are setting up for setgid games, so modify all necessary permissions
 # to allow full access for groups
-sed -e '/^GAMEDIR\s*=/ s|/games/.*$|/var/games/$(GAME)|' \
-  -e '/^GAMEUID\s*=/ s|games|root|' \
-  -e '/^GAMEGRP\s*=/ s|bin|games|' \
-  -e '/^GAMEPERM\s*=/ s|04755|02755|' \
-  -e '/^FILEPERM\s*=/ s|0644|0664|' \
-  -e '/^DIRPERM\s*=/ s|0755|0775|' \
-  -e '/^SHELLDIR\s*=/ s|/games|/usr/bin|' -i Makefile
 
-sed -e "/^MANDIR\s*=/s|/usr/man/man6|$PKG/usr/man/man6|" -i doc/Makefile
+sed -e '/^HACKDIR/ s|/games/lib/\$(GAME)dir|/var/games/nethack/|' \
+    -e '/^SHELLDIR/ s|/games|/usr/bin|' \
+    -e '/^VARDIRPERM/ s|0755|0775|' \
+    -e '/^VARFILEPERM/ s|0600|0664|' \
+    -e '/^GAMEPERM/ s|0755|02755|' \
+    -e 's|\(DSYSCF_FILE=\)\\"[^"]*\\"|\1\\"/var/games/nethack/sysconf\\"|' \
+    -e 's|\(DHACKDIR=\)\\"[^"]*\\"|\1\\"/var/games/nethack/\\"|' -i sys/unix/hints/linux
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-make
+sed -e 's|^#GAMEUID.*|GAMEUID = root|' \
+    -e 's|^#GAMEGRP.*|GAMEGRP = games|' \
+    -e '/^FILEPERM\s*=/ s|0644|0664|' \
+    -e '/^DIRPERM\s*=/ s|0755|0775|' -i sys/unix/Makefile.top
 
-install -dm755 $PKG/usr/man/man6
-install -dm775 $PKG/var/games/
-make PREFIX=$PKG install manpages
+sed -e "/^MANDIR\s*=/s|/usr/man/man6|$PKG/usr/man/man6|" -i sys/unix/Makefile.doc
+
+cd sys/unix
+sh setup.sh hints/linux
+cd ../..
+make install PREFIX=$PKG
+mkdir -p $PKG/usr/man/man6
+make PREFIX=$PKG -j1 install manpages # Multi-threaded builds fail.
+
 sed -e "s|HACKDIR=$PKG/|HACKDIR=/|" \
-  -e 's|HACK=$HACKDIR|HACK=/usr/lib/nethack|' \
-  -i $PKG/usr/bin/nethack
+    -e "s|HACK=\$HACKDIR|HACK=/usr/lib$LIBDIRSUFFIX/nethack|" \
+    -i $PKG/usr/bin/nethack
 
-install -dm755 $PKG/usr/lib/nethack
-mv $PKG/var/games/nethack/{nethack,recover} $PKG/usr/lib/nethack/
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/nethack
+mv $PKG/var/games/nethack/{nethack,recover} $PKG/usr/lib$LIBDIRSUFFIX/nethack/
+
+# FS#43414: /var/games should be owned by root:games.
+chown -R root:games $PKG/var/games/
+chown root:games $PKG/usr/lib$LIBDIRSUFFIX/nethack/nethack
+
+# FS#43414: /var/games should be owned by root:games.
+mkdir -p $PKG/var/games
+chown -R root:games $PKG/var/games/
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
