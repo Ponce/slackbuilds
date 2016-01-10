@@ -1,0 +1,119 @@
+From f2ea92c3ddf1d9476ef61f85ec3aa26818d094a1 Mon Sep 17 00:00:00 2001
+From: David Phillips <dbphillipsnz@gmail.com>
+Date: Thu, 12 Feb 2015 11:56:35 +1300
+Subject: [PATCH 2/9] Blank the screen with color 0, add third color for failed
+ logins
+
+- Adds another color in config.def.h, COLOR_INIT
+- Renames the colours from numerical ones to ones with meaningful names;
+  COLOR_INPUT for when there is content in the input buffer and COLOR_EMPTY
+  for when the input buffer has been cleared (backspaced or a failed attempt).
+- Ensures XFreeColors frees the right number of colours. This is now derived
+  from the size of `Lock->colors` rather than being an integer literal.
+- Makes slock exhibit the behaviour described by Markus
+
+The default colours are the same as the ones slock currently uses, with the
+exception of the new color, which I have set to red, as it indicates someone
+has either failed an attempt to unlock, or that they have entered input and
+erased it all.
+---
+ config.def.h |  7 +++++--
+ slock.c      | 27 ++++++++++++++++++---------
+ 2 files changed, 23 insertions(+), 11 deletions(-)
+
+diff --git a/config.def.h b/config.def.h
+index 89e5977..4bccb5d 100644
+--- a/config.def.h
++++ b/config.def.h
+@@ -1,2 +1,5 @@
+-#define COLOR1 "black"
+-#define COLOR2 "#005577"
++static const char *colorname[NUMCOLS] = {
++	"black",     /* after initialization */
++	"#005577",   /* during input */
++	"#CC3333",   /* failed/cleared the input */
++};
+diff --git a/slock.c b/slock.c
+index 407a540..df5c3fe 100644
+--- a/slock.c
++++ b/slock.c
+@@ -22,13 +22,20 @@
+ #include <bsd_auth.h>
+ #endif
+ 
++enum {
++	INIT,
++	INPUT,
++	EMPTY,
++	NUMCOLS
++};
++
+ #include "config.h"
+ 
+ typedef struct {
+ 	int screen;
+ 	Window root, win;
+ 	Pixmap pmap;
+-	unsigned long colors[2];
++	unsigned long colors[NUMCOLS];
+ } Lock;
+ 
+ static Lock **locks;
+@@ -162,12 +169,12 @@ readpw(Display *dpy, const char *pws)
+ 			}
+ 			if (llen == 0 && len != 0) {
+ 				for (screen = 0; screen < nscreens; screen++) {
+-					XSetWindowBackground(dpy, locks[screen]->win, locks[screen]->colors[1]);
++					XSetWindowBackground(dpy, locks[screen]->win, locks[screen]->colors[INPUT]);
+ 					XClearWindow(dpy, locks[screen]->win);
+ 				}
+ 			} else if (llen != 0 && len == 0) {
+ 				for (screen = 0; screen < nscreens; screen++) {
+-					XSetWindowBackground(dpy, locks[screen]->win, locks[screen]->colors[0]);
++					XSetWindowBackground(dpy, locks[screen]->win, locks[screen]->colors[EMPTY]);
+ 					XClearWindow(dpy, locks[screen]->win);
+ 				}
+ 			}
+@@ -185,7 +192,7 @@ unlockscreen(Display *dpy, Lock *lock)
+ 		return;
+ 
+ 	XUngrabPointer(dpy, CurrentTime);
+-	XFreeColors(dpy, DefaultColormap(dpy, lock->screen), lock->colors, 2, 0);
++	XFreeColors(dpy, DefaultColormap(dpy, lock->screen), lock->colors, NUMCOLS, 0);
+ 	XFreePixmap(dpy, lock->pmap);
+ 	XDestroyWindow(dpy, lock->win);
+ 
+@@ -197,6 +204,7 @@ lockscreen(Display *dpy, int screen)
+ {
+ 	char curs[] = {0, 0, 0, 0, 0, 0, 0, 0};
+ 	unsigned int len;
++	int i;
+ 	Lock *lock;
+ 	XColor color, dummy;
+ 	XSetWindowAttributes wa;
+@@ -213,16 +221,17 @@ lockscreen(Display *dpy, int screen)
+ 
+ 	lock->root = RootWindow(dpy, lock->screen);
+ 
++	for (i = 0; i < NUMCOLS; i++) {
++		XAllocNamedColor(dpy, DefaultColormap(dpy, lock->screen), colorname[i], &color, &dummy);
++		lock->colors[i] = color.pixel;
++	}
++
+ 	/* init */
+ 	wa.override_redirect = 1;
+-	wa.background_pixel = BlackPixel(dpy, lock->screen);
++	wa.background_pixel = lock->colors[INIT];
+ 	lock->win = XCreateWindow(dpy, lock->root, 0, 0, DisplayWidth(dpy, lock->screen), DisplayHeight(dpy, lock->screen),
+ 	                          0, DefaultDepth(dpy, lock->screen), CopyFromParent,
+ 	                          DefaultVisual(dpy, lock->screen), CWOverrideRedirect | CWBackPixel, &wa);
+-	XAllocNamedColor(dpy, DefaultColormap(dpy, lock->screen), COLOR2, &color, &dummy);
+-	lock->colors[1] = color.pixel;
+-	XAllocNamedColor(dpy, DefaultColormap(dpy, lock->screen), COLOR1, &color, &dummy);
+-	lock->colors[0] = color.pixel;
+ 	lock->pmap = XCreateBitmapFromData(dpy, lock->win, curs, 8, 8);
+ 	invisible = XCreatePixmapCursor(dpy, lock->pmap, lock->pmap, &color, &color, 0, 0);
+ 	XDefineCursor(dpy, lock->win, invisible);
+-- 
+2.6.4
+
