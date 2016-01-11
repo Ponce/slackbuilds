@@ -1,0 +1,144 @@
+#!/bin/sh
+
+# Slackware build script for Apache Kafka
+
+# Copyright 2016 Andre Barboza - Belo Horizonte Brazil
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=kafka
+VERSION=${VERSION:-0.8.2.2}
+SCALA_VERSION=2.11
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+KAFKA_USER=${KAFKA_USER:-kafka}
+KAFKA_UID=${KAFKA_UID:-323}
+KAFKA_GROUP=${KAFKA_GROUP:-kafka}
+KAFKA_GID=${KAFKA_GID:-323}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+
+bailout() {
+  echo "  You must have a $KAFKA_USER user and $KAFKA_GROUP group to run this script. "
+  echo "  Something like this should suffice for most systems: "
+  echo "    # groupadd -g $KAFKA_GID $KAFKA_GROUP "
+  echo "    # useradd -u $KAFKA_UID -g $KAFKA_GID -c \"Apache Kafka user\" -d /var/lib/kafka -s /bin/sh $KAFKA_USER "
+  echo "  Giving /bin/sh as $KAFKA_USER shell is important as the init script will try tu 'su -' to it."
+  exit 1
+}
+
+# Bail if user and/or group isn't valid on your system
+# uid=319 is suggested to avoid conflicts with other SBo packages,
+# but it's your call: http://slackbuilds.org/uid_gid.txt
+if ! grep -q "^$KAFKA_USER:" /etc/passwd; then
+  bailout
+elif ! grep -q "^$KAFKA_GROUP:" /etc/group; then
+  bailout
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "x86_64" ]; then
+  LIBDIRSUFFIX="64"
+else
+  LIBDIRSUFFIX=""
+fi
+
+set -e 
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/${PRGNAM}_${SCALA_VERSION}-$VERSION.tgz
+cd ${PRGNAM}_${SCALA_VERSION}-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/{libs,bin}
+install -m 644 libs/*.jar $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/libs
+install -m 775 bin/*.sh $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/bin
+(
+  cd $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/bin
+  sed -i "s|^base_dir=.*|base_dir=/usr/lib$LIBDIRSUFFIX/$PRGNAM/|" kafka-run-class.sh
+  sed -i '0,/^$/{s_^$_\n. /etc/kafka/kafka-env.sh\n_}' *.sh
+)
+
+mkdir -p $PKG/usr/bin 
+(
+  cd $PKG/usr/bin
+  for script in $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/bin/kafka*
+  do
+    script_name=$(basename $script)
+    ln -s ../lib${LIBDIRSUFFIX}/$PRGNAM/bin/${script_name} 
+  done
+)
+
+install -dm 750 ${PKG}/var/{lib,log}/$PRGNAM
+chown -R $KAFKA_USER:$KAFKA_GROUP $PKG/var/{lib,log}/$PRGNAM
+
+install -dm 755 ${PKG}/etc/$PRGNAM
+install -m 644 config/server.properties $PKG/etc/$PRGNAM/server.properties.new
+install -m 644 config/consumer.properties $PKG/etc/$PRGNAM/consumer.properties.new
+install -m 644 config/producer.properties $PKG/etc/$PRGNAM/producer.properties.new
+install -m 644 config/log4j.properties $PKG/etc/$PRGNAM/log4j.properties.new
+install -m 644 config/test-log4j.properties $PKG/etc/$PRGNAM/test-log4j.properties.new
+install -m 644 config/tools-log4j.properties $PKG/etc/$PRGNAM/tools-log4j.properties.new
+install -m 644 $CWD/kafka-env.sh $PKG/etc/$PRGNAM/kafka-env.sh.new
+(
+  cd $PKG/etc/$PRGNAM
+  sed -i "s|^log.dirs=/tmp/kafka-logs$|log.dirs=/var/log/${PRGNAM}|" server.properties.new
+  sed -i "s|@KAFKA_HOME@|/usr/lib$LIBDIRSUFFIX/$PRGNAM|" kafka-env.sh.new
+)
+(
+  cd $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM
+  ln -s /etc/kafka config
+)
+chown -R $KAFKA_USER:$KAFKA_GROUP $PKG/etc/$PRGNAM
+
+mkdir -p ${PKG}/etc/rc.d
+install -o root -g root -m 644 $CWD/rc.$PRGNAM $PKG/etc/rc.d/rc.${PRGNAM}.new
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  LICENSE NOTICE \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
