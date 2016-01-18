@@ -1,0 +1,243 @@
+From 76a2fc5c3fa8edb17a6e9e15d5ef519768f9ccff Mon Sep 17 00:00:00 2001
+From: Jason Graham <jason.graham@jhuapl.edu>
+Date: Wed, 18 Nov 2015 01:37:05 -0500
+Subject: [PATCH] makedepf90: Adds the '-B PATH' option to mirror src directory
+ structure in object PATH.
+
+When working on one of my projects, I wanted to preserve the directory
+structure used in the source tree within the objects PATH. The main
+issue was naming collisions with the '-b' option, since I have
+sub-directories within the source tree and some of the files have the
+same name resulting in the same objects within PATH. So '-B' behaves
+similarly to '-b', but places resulting objects within PATH using the
+same directory structure as the source files. The motivation for this
+addition is to be able to have equivalent source file names contained
+within different directories and still use the same top level objects
+PATH.
+---
+ global.h     |  3 +++
+ main.c       | 31 ++++++++++++++++++++++++-------
+ makedepf90.1 | 11 +++++++++--
+ utils.c      | 14 ++++++++++----
+ utils.h      |  3 ++-
+ 5 files changed, 48 insertions(+), 14 deletions(-)
+
+diff --git a/global.h b/global.h
+index 1704f82..64a627e 100644
+--- a/global.h
++++ b/global.h
+@@ -1,5 +1,6 @@
+ /* 
+  * Copyright (C) 2000-2005 Erik Edelmann <Erik.Edelmann@iki.fi>
++ * Copyright (C) 2015 Jason Graham <jason.graham@jhuapl.edu>
+  *
+  *     This program is free software;  you  can  redistribute  it
+  *     and/or modify it under the terms of the GNU General Public
+@@ -68,6 +69,8 @@ typedef struct {
+     char *link_rule;    
+     bool coco;          /* Look for coco set-files */
+     bool obj_dir_set;  /* Option -b obj_dir was used */
++    bool obj_dir_mirror;  /* Option -B obj_dir was used; turns on
++			     mirroring of src directory structure */
+     char *obj_dir;      /* Directory set by option -b */
+     bool src_dep;       /* List the source file in the dependencys */
+     bool src_path_set;  /* option -I was used */
+diff --git a/main.c b/main.c
+index e73bdef..d78f355 100644
+--- a/main.c
++++ b/main.c
+@@ -1,5 +1,6 @@
+ /* 
+  * Copyright (C) 2000-2006 Erik Edelmann <Erik.Edelmann@iki.fi>
++ * Copyright (C) 2015 Jason Graham <jason.graham@jhuapl.edu>
+  *
+  *     This program is free software;  you  can  redistribute  it
+  *     and/or modify it under the terms of the GNU General Public
+@@ -86,6 +87,8 @@ static const char helpstring[] =
+     "\n-coco\tLook for coco set-files.  Implies '-free'.\n"
+     "\n-D NAME\tDefine pre-processor symbol 'NAME'\n"
+     "\n-b PATH\tAssume object files are placed in PATH.\n"
++    "\n-B PATH\tAssume object files are placed in PATH using the same\n"
++	"\tdirectory structure as the source files.\n"
+     "\n-nosrc\tRemove the explicit dependency on the source file\n"
+     "\n-I PATH1:PATH2:...\n\tSearch path(s) for source files\n"
+     "\n\nReport bugs to erik.edelmann@iki.fi\n";
+@@ -143,6 +146,7 @@ int main (int argc, char **argv)
+     options.link_rule = (char *)LINK_RULE_DEFAULT;
+     options.coco = false;
+     options.obj_dir_set = false;
++    options.obj_dir_mirror = false;
+     options.obj_dir = "";
+     options.src_dep = true;
+     options.ignore_mods = NULL;
+@@ -276,9 +280,18 @@ int main (int argc, char **argv)
+             if (!list_find(macrolist, mac, &macrocmp))
+                 macrolist = list_prepend(macrolist, mac);
+ 
+-        } else if (strncmp(argv[i], "-b", 2) == 0) {
++        } else if (strncmp(argv[i], "-b", 2) == 0 ||
++		   strncmp(argv[i], "-B", 2) == 0 ) {
++	
++            /* Construct custom error message */
++            char err_msg[32];
++	    char _argv[3];
++	    
++	    strncpy(_argv,argv[i],2); _argv[2]='\0';
++	    snprintf(err_msg,sizeof(err_msg),"Option '%s' needs argument",_argv);
++
+             if (strlen(argv[i]) == 2) {
+-                if (i == argc - 1) fatal_error("Option '-b' needs argument");
++                if (i == argc - 1) fatal_error(err_msg);
+                 options.obj_dir = xstrdup(argv[++i]);
+             } else
+                 if (argv[i][2] == '=') {
+@@ -292,7 +305,11 @@ int main (int argc, char **argv)
+                 strcat(options.obj_dir, "/");
+             }
+ 
+-            options.obj_dir_set = true;
++	    options.obj_dir_set = true;
++	    /* Have to compare with '_argv' since 'i' may be modified above */
++	    if(strncmp(_argv, "-B", 2) == 0) {
++		    options.obj_dir_mirror = true;
++	    }
+ 
+         } else if (strncmp(argv[i], "-I", 2) == 0) {
+             int jp;
+@@ -383,7 +400,7 @@ int main (int argc, char **argv)
+         printf("FOBJ=");
+         for (h1 = obj; h1; h1 = h1->next)
+             if (options.obj_dir_set)
+-                printf("%s ", set_path(h1->data, options.obj_dir));
++	        printf("%s ", set_path(h1->data, options.obj_dir, options.obj_dir_mirror));
+             else
+                 printf("%s ", (char *)h1->data);
+         printf("\n\n%s: $(FOBJ)\n\t%s\n\n", options.exe_name,options.link_rule);
+@@ -402,8 +419,8 @@ int main (int argc, char **argv)
+         /* Targets */
+         for (h2 = dep->targets; h2; h2 = h2->next)  
+             if (options.obj_dir_set)
+-                printf("%s ", set_path(h2->data, options.obj_dir));
+-            else
++	        printf("%s ", set_path(h2->data, options.obj_dir, options.obj_dir_mirror));
++	    else
+                 printf("%s ", (char *)h2->data);
+ 
+         printf(": ");;
+@@ -430,7 +447,7 @@ int main (int argc, char **argv)
+                 } else {
+                     if (options.obj_dir_set)
+                         printf("%s ", 
+-                               set_path(mod->modfile_name, options.obj_dir));
++                            set_path(mod->modfile_name, options.obj_dir, options.obj_dir_mirror));
+                     else
+                         printf("%s ", mod->modfile_name);
+                 }
+diff --git a/makedepf90.1 b/makedepf90.1
+index 49bcfb7..738ce66 100644
+--- a/makedepf90.1
++++ b/makedepf90.1
+@@ -1,5 +1,6 @@
+ .\"
+ .\"    Copyright (C) 2000--2003 Erik Edelmann <eedelman@acclab.helsinki.fi>
++.\"    Copyright (C) 2015 Jason Graham <jason.graham@jhuapl.edu>
+ .\"
+ .\"    This program is free software;  you  can  redistribute  it
+ .\"    and/or modify it under the terms of the GNU General Public
+@@ -18,7 +19,7 @@
+ .\"    Boston, MA  02111-1307  USA
+ .\"
+ .\" $Format: ".TH makedepf90 1 \"$Date$\""$
+-.TH makedepf90 1 "Thu, 06 Dec 2001 23:28:54 +0200"
++.TH makedepf90 1 "Tue, 17 Nov 2015 23:21:02 -0500"
+ 
+ .SH NAME
+ makedepf90 \- creates Makefile dependency list for Fortran source files.
+@@ -45,7 +46,7 @@ makedepf90 \- creates Makefile dependency list for Fortran source files.
+ .RB [ \-coco ]
+ .RB [ \-D
+ .IR NAME ]
+-.RB [ \-b
++.RB [ \-b | \-B
+ .IR "path" ]
+ .RB [ \-I
+ .IR "PATH1:PATH2:..." ]
+@@ -211,6 +212,12 @@ Dependency tree and link rule will assume objects are placed in \fIpath\fP.
+ This is useful if the build places object files in a different directory than
+ the source files.
+ .TP
++.BI \-B " path"
++Dependency tree and link rule will assume objects are placed in \fIpath\fP using
++the same directory structure as the source files. This is useful if the build
++places object files in a different directory than the source files and the
++source directory structure is needed to avoid object name collisions.
++.TP
+ .BI \-I " list-of-paths"
+ Look for source/include files in the \fIlist-of-paths\fP, if not found in
+ current working directory.  Here, \fIlist-of-paths\fP is a colon separated
+diff --git a/utils.c b/utils.c
+index 08f6905..e5d3aff 100644
+--- a/utils.c
++++ b/utils.c
+@@ -1,5 +1,6 @@
+ /* 
+  * Copyright (C) 2000-2005 Erik Edelmann <Erik.Edelmann@iki.fi>
++ * Copyright (C) 2015 Jason Graham <jason.graham@jhuapl.edu>
+  *
+  *     This program is free software;  you  can  redistribute  it
+  *     and/or modify it under the terms of the GNU General Public
+@@ -70,22 +71,27 @@ char *replace_suffix(const char *filename, const char *new_suffix)
+ 
+ 
+ /* If filename has no path, append 'path' to the beginning of the filename,
+- * else replace the existing path (everything before the first '/') with 'path'.
++ * else replace the existing path if 'mirror=false' (everything before the first '/') with 'path' or
++ * prepend 'path' in the case that 'mirror=true'
+  */
+ 
+-char *set_path(const char *filename, const char *path)
++char *set_path(const char *filename, const char *path, const bool mirror)
+ {
+     char *rs;
+     int fl, n, pl, nl;
+ 
+     pl = strlen(path);
+ 
++
+     fl = n = strlen(filename);
+-    while (filename[n] != '/' && n >= 0)  n--;
++    if( !mirror )
++        while (filename[n] != '/' && n >= 0)  n--;
++    else
++        n=-1;
+     nl = fl - n - 1;
+ 
+     if (n == -1) {
+-        /* if there was no '/' */
++        /* if there was no '/' or 'mirror=true' */
+         rs = (char *)xmalloc((fl+pl+2)*sizeof(char));
+         strcpy(rs, path);
+         strcat(rs, filename);
+diff --git a/utils.h b/utils.h
+index 643d276..ca932ef 100644
+--- a/utils.h
++++ b/utils.h
+@@ -1,5 +1,6 @@
+ /* 
+  * Copyright (C) 2000-2005 Erik Edelmann <Erik.Edelmann@iki.fi>
++ * Copyright (C) 2015 Jason Graham <jason.graham@jhuapl.edu>
+  *
+  *     This program is free software;  you  can  redistribute  it
+  *     and/or modify it under the terms of the GNU General Public
+@@ -21,7 +22,7 @@
+ #define UTILS_H_
+ 
+ char *replace_suffix (const char *filename, const char *new_suffix);
+-char *set_path (const char *filename, const char *path);
++char *set_path (const char *filename, const char *path, const bool mirror);
+ char *remove_citation (const char *s);
+ char *expand_rule(const char *rule, const char *srcfile);
+ FILE *open_src_file (const char *fname, const List *path);
+-- 
+1.8.4
+

@@ -1,0 +1,160 @@
+#!/bin/sh
+
+# Slackware build script for Arduino
+
+# Copyright 2015  Mario Preksavec, Zagreb, Croatia
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=Arduino
+VERSION=${VERSION:-1.6.5}
+BUILD=${BUILD:-2}
+TAG=${TAG:-_SBo}
+
+REFERENCE=${REFERENCE:-1.6.0}
+GALILEO=${GALILEO:-1.6.2}
+EDISON=${EDISON:-1.6.2}
+FIRMATA=${FIRMATA:-2.4.3}
+TEMBOO=${TEMBOO:-1.1.2}
+LIBASTYLEJ=${LIBASTYLEJ:-2.05}
+
+AVRLIBC=${AVRLIBC:-1.8.0}
+AVRHEADERS=${AVRHEADERS:-6.2.0.469}
+AVRDUDE=${AVRDUDE:-6.0.1}
+BINUTILS=${BINUTILS:-2.24}
+GMP=${GMP:-5.0.2}
+MPFR=${MPFR:-3.0.0}
+MPC=${MPC:-0.9}
+GCC=${GCC:-4.8.1}
+GDB=${GDB:-7.8}
+LIBUSB=${LIBUSB:-1.0.18}
+LIBUSBCOMPAT=${LIBUSBCOMPAT:-0.1.5}
+AUTOCONF=${AUTOCONF:-2.64}
+AUTOMAKE=${AUTOMAKE:-1.11.1}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$VERSION.tar.gz || tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Use already present toolchain requirements
+tar xvf $CWD/avr-gcc-$GCC-avrdude-$AVRDUDE-arduino5.tar.gz \
+|| tar xvf $CWD/toolchain-avr-avr-gcc-$GCC-avrdude-$AVRDUDE-arduino5.tar.gz
+cp $CWD/avr-libc-$AVRLIBC.tar.bz2 \
+   $CWD/avr8-headers-$AVRHEADERS.zip \
+   $CWD/avrdude-$AVRDUDE.tar.gz \
+   $CWD/binutils-$BINUTILS.tar.bz2 \
+   $CWD/gmp-$GMP.tar.bz2 \
+   $CWD/mpfr-$MPFR.tar.bz2 \
+   $CWD/mpc-$MPC.tar.gz \
+   $CWD/gcc-$GCC.tar.bz2 \
+   $CWD/gdb-$GDB.tar.xz \
+   $CWD/libusb-$LIBUSB.tar.bz2 \
+   $CWD/libusb-compat-$LIBUSBCOMPAT.tar.bz2 \
+   $CWD/autoconf-$AUTOCONF.tar.bz2 \
+   $CWD/automake-$AUTOMAKE.tar.bz2 \
+   toolchain-avr-avr-gcc-$GCC-avrdude-$AVRDUDE-arduino5/
+
+# Build toolchain
+( cd toolchain-avr-avr-gcc-$GCC-avrdude-$AVRDUDE-arduino5 ; ./build.all.bash )
+
+# Copy toolchain to where it can be found (`mv` will preserve some space)
+mkdir -p build/linux/work/hardware/tools/
+mv toolchain-avr-avr-gcc-$GCC-avrdude-$AVRDUDE-arduino5/avr/ \
+  build/linux/work/hardware/tools/
+cp -r toolchain-avr-avr-gcc-$GCC-avrdude-$AVRDUDE-arduino5/avrdude-$AVRDUDE/* \
+  build/linux/work/hardware/tools/avr/
+echo -e "arduino.avrdude=$AVRDUDE-arduino5\narduino.avr-gcc=$GCC-arduino5" \
+  > build/linux/work/hardware/tools/avr/builtin_tools_versions.txt
+
+# Use already present toolchain and library bundles
+sed -e '/<antcall target="avr-toolchain-bundle">/,/<\/antcall>/d' \
+    -e '/<antcall target="package-library-index-json-bundle"\/>/d' \
+    -i build/build.xml
+
+# Copy documentation, help and libraries
+cp $CWD/reference-$REFERENCE.zip \
+   $CWD/Galileo_help_files-$GALILEO.zip \
+   $CWD/Edison_help_files-$EDISON.zip \
+   build/shared/
+cp $CWD/v$FIRMATA.zip build/Firmata-$FIRMATA.zip \
+|| cp $CWD/Firmata-$FIRMATA.zip build/
+cp $CWD/$TEMBOO.zip build/Temboo-$TEMBOO.zip \
+|| cp $CWD/Temboo-$TEMBOO.zip build/
+cp $CWD/libastylej-$LIBASTYLEJ.zip build/
+
+# Unpack library bundles
+mkdir -p build/linux/work/dist/
+cp $CWD/package_index.json.sig build/linux/work/dist/
+gunzip -c $CWD/package_index.json.gz > build/linux/work/dist/package_index.json
+gunzip -c $CWD/library_index.json.gz > build/linux/work/dist/library_index.json
+
+# Finally, build Arduino
+( cd build ; ant )
+
+# Our files are here
+cd build/linux/work/
+
+# Clean up
+rm -rf hardware/tmp/
+
+# Manual install ensues
+mkdir -p $PKG/opt/$PRGNAM
+mv arduino dist examples hardware lib libraries reference tools $PKG/opt/$PRGNAM
+
+# Make it a bit more user friendly
+mkdir -p $PKG/usr/{bin,share/applications}
+sed "s/FULL_PATH/\/opt\/$PRGNAM/" arduino.desktop \
+  > $PKG/usr/share/applications/$PRGNAM.desktop
+ln -s /opt/$PRGNAM/arduino $PKG/usr/bin/$PRGNAM
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a revisions.txt $TMP/$PRGNAM-$VERSION/{README.md,license.txt} \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}

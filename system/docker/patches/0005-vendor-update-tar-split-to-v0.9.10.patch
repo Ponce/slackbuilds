@@ -1,0 +1,289 @@
+From d8029ceb202fda8160855c07081dc51aae1ec1ad Mon Sep 17 00:00:00 2001
+From: Vincent Batts <vbatts@redhat.com>
+Date: Wed, 23 Sep 2015 15:50:23 -0400
+Subject: [PATCH 5/5] vendor: update tar-split to v0.9.10
+
+This addresses handling of non-utf8 file names, namely iso-8859-1.
+
+https://github.com/docker/docker/issues/16516
+
+Reported-by: @kwk
+Signed-off-by: Vincent Batts <vbatts@redhat.com>
+---
+ hack/vendor.sh                                     |  2 +-
+ .../vbatts/tar-split/archive/tar/common.go         | 28 ++++++++++++++--
+ .../vbatts/tar-split/archive/tar/reader.go         | 15 ++++++++-
+ .../vbatts/tar-split/archive/tar/writer.go         |  2 +-
+ .../vbatts/tar-split/tar/asm/assemble.go           |  4 +--
+ .../vbatts/tar-split/tar/asm/disassemble.go        | 11 +++---
+ .../vbatts/tar-split/tar/storage/entry.go          | 39 ++++++++++++++++++++++
+ .../vbatts/tar-split/tar/storage/packer.go         | 13 ++++++--
+ 8 files changed, 101 insertions(+), 13 deletions(-)
+
+diff --git a/hack/vendor.sh b/hack/vendor.sh
+index 68772ef..52ba6ef 100755
+--- a/hack/vendor.sh
++++ b/hack/vendor.sh
+@@ -36,7 +36,7 @@ clone git github.com/hashicorp/consul v0.5.2
+ 
+ # get graph and distribution packages
+ clone git github.com/docker/distribution ec87e9b6971d831f0eff752ddb54fb64693e51cd # docker/1.8 branch
+-clone git github.com/vbatts/tar-split v0.9.6
++clone git github.com/vbatts/tar-split v0.9.10
+ 
+ clone git github.com/docker/notary 8e8122eb5528f621afcd4e2854c47302f17392f7
+ clone git github.com/endophage/gotuf a592b03b28b02bb29bb5878308fb1abed63383b5
+diff --git a/vendor/src/github.com/vbatts/tar-split/archive/tar/common.go b/vendor/src/github.com/vbatts/tar-split/archive/tar/common.go
+index e363aa7..c31df06 100644
+--- a/vendor/src/github.com/vbatts/tar-split/archive/tar/common.go
++++ b/vendor/src/github.com/vbatts/tar-split/archive/tar/common.go
+@@ -139,8 +139,8 @@ func (fi headerFileInfo) Mode() (mode os.FileMode) {
+ 	}
+ 
+ 	switch fi.h.Typeflag {
+-	case TypeLink, TypeSymlink:
+-		// hard link, symbolic link
++	case TypeSymlink:
++		// symbolic link
+ 		mode |= os.ModeSymlink
+ 	case TypeChar:
+ 		// character device node
+@@ -249,6 +249,30 @@ func FileInfoHeader(fi os.FileInfo, link string) (*Header, error) {
+ 	if fm&os.ModeSticky != 0 {
+ 		h.Mode |= c_ISVTX
+ 	}
++	// If possible, populate additional fields from OS-specific
++	// FileInfo fields.
++	if sys, ok := fi.Sys().(*Header); ok {
++		// This FileInfo came from a Header (not the OS). Use the
++		// original Header to populate all remaining fields.
++		h.Uid = sys.Uid
++		h.Gid = sys.Gid
++		h.Uname = sys.Uname
++		h.Gname = sys.Gname
++		h.AccessTime = sys.AccessTime
++		h.ChangeTime = sys.ChangeTime
++		if sys.Xattrs != nil {
++			h.Xattrs = make(map[string]string)
++			for k, v := range sys.Xattrs {
++				h.Xattrs[k] = v
++			}
++		}
++		if sys.Typeflag == TypeLink {
++			// hard link
++			h.Typeflag = TypeLink
++			h.Size = 0
++			h.Linkname = sys.Linkname
++		}
++	}
+ 	if sysStat != nil {
+ 		return h, sysStat(fi, h)
+ 	}
+diff --git a/vendor/src/github.com/vbatts/tar-split/archive/tar/reader.go b/vendor/src/github.com/vbatts/tar-split/archive/tar/reader.go
+index c72e002..4168ea2 100644
+--- a/vendor/src/github.com/vbatts/tar-split/archive/tar/reader.go
++++ b/vendor/src/github.com/vbatts/tar-split/archive/tar/reader.go
+@@ -138,7 +138,13 @@ func (tr *Reader) Next() (*Header, error) {
+ 		// We actually read the whole file,
+ 		// but this skips alignment padding
+ 		tr.skipUnread()
++		if tr.err != nil {
++			return nil, tr.err
++		}
+ 		hdr = tr.readHeader()
++		if hdr == nil {
++			return nil, tr.err
++		}
+ 		mergePAX(hdr, headers)
+ 
+ 		// Check for a PAX format sparse file
+@@ -397,7 +403,7 @@ func parsePAX(r io.Reader) (map[string]string, error) {
+ 		}
+ 		// Parse the first token as a decimal integer.
+ 		n, err := strconv.ParseInt(string(buf[:sp]), 10, 0)
+-		if err != nil {
++		if err != nil || n < 5 || int64(len(buf)) < n {
+ 			return nil, ErrHeader
+ 		}
+ 		// Extract everything between the decimal and the n -1 on the
+@@ -553,6 +559,10 @@ func (tr *Reader) readHeader() *Header {
+ 	hdr.Uid = int(tr.octal(s.next(8)))
+ 	hdr.Gid = int(tr.octal(s.next(8)))
+ 	hdr.Size = tr.octal(s.next(12))
++	if hdr.Size < 0 {
++		tr.err = ErrHeader
++		return nil
++	}
+ 	hdr.ModTime = time.Unix(tr.octal(s.next(12)), 0)
+ 	s.next(8) // chksum
+ 	hdr.Typeflag = s.next(1)[0]
+@@ -895,6 +905,9 @@ func (sfr *sparseFileReader) Read(b []byte) (n int, err error) {
+ 		// Otherwise, we're at the end of the file
+ 		return 0, io.EOF
+ 	}
++	if sfr.tot < sfr.sp[0].offset {
++		return 0, io.ErrUnexpectedEOF
++	}
+ 	if sfr.pos < sfr.sp[0].offset {
+ 		// We're in a hole
+ 		n = sfr.readHole(b, sfr.sp[0].offset)
+diff --git a/vendor/src/github.com/vbatts/tar-split/archive/tar/writer.go b/vendor/src/github.com/vbatts/tar-split/archive/tar/writer.go
+index dafb2ca..9dbc01a 100644
+--- a/vendor/src/github.com/vbatts/tar-split/archive/tar/writer.go
++++ b/vendor/src/github.com/vbatts/tar-split/archive/tar/writer.go
+@@ -355,7 +355,7 @@ func paxHeader(msg string) string {
+ // hdr.Size bytes are written after WriteHeader.
+ func (tw *Writer) Write(b []byte) (n int, err error) {
+ 	if tw.closed {
+-		err = ErrWriteTooLong
++		err = ErrWriteAfterClose
+ 		return
+ 	}
+ 	overwrite := false
+diff --git a/vendor/src/github.com/vbatts/tar-split/tar/asm/assemble.go b/vendor/src/github.com/vbatts/tar-split/tar/asm/assemble.go
+index 74317cb..83d6426 100644
+--- a/vendor/src/github.com/vbatts/tar-split/tar/asm/assemble.go
++++ b/vendor/src/github.com/vbatts/tar-split/tar/asm/assemble.go
+@@ -39,7 +39,7 @@ func NewOutputTarStream(fg storage.FileGetter, up storage.Unpacker) io.ReadClose
+ 				if entry.Size == 0 {
+ 					continue
+ 				}
+-				fh, err := fg.Get(entry.Name)
++				fh, err := fg.Get(entry.GetName())
+ 				if err != nil {
+ 					pw.CloseWithError(err)
+ 					return
+@@ -56,7 +56,7 @@ func NewOutputTarStream(fg storage.FileGetter, up storage.Unpacker) io.ReadClose
+ 					// but since it's coming through the PipeReader, the context of
+ 					// _which_ file would be lost...
+ 					fh.Close()
+-					pw.CloseWithError(fmt.Errorf("file integrity checksum failed for %q", entry.Name))
++					pw.CloseWithError(fmt.Errorf("file integrity checksum failed for %q", entry.GetName()))
+ 					return
+ 				}
+ 				fh.Close()
+diff --git a/vendor/src/github.com/vbatts/tar-split/tar/asm/disassemble.go b/vendor/src/github.com/vbatts/tar-split/tar/asm/disassemble.go
+index 7986890..54ef23a 100644
+--- a/vendor/src/github.com/vbatts/tar-split/tar/asm/disassemble.go
++++ b/vendor/src/github.com/vbatts/tar-split/tar/asm/disassemble.go
+@@ -92,13 +92,16 @@ func NewInputTarStream(r io.Reader, p storage.Packer, fp storage.FilePutter) (io
+ 				}
+ 			}
+ 
+-			// File entries added, regardless of size
+-			_, err = p.AddEntry(storage.Entry{
++			entry := storage.Entry{
+ 				Type:    storage.FileType,
+-				Name:    hdr.Name,
+ 				Size:    hdr.Size,
+ 				Payload: csum,
+-			})
++			}
++			// For proper marshalling of non-utf8 characters
++			entry.SetName(hdr.Name)
++
++			// File entries added, regardless of size
++			_, err = p.AddEntry(entry)
+ 			if err != nil {
+ 				pW.CloseWithError(err)
+ 				return
+diff --git a/vendor/src/github.com/vbatts/tar-split/tar/storage/entry.go b/vendor/src/github.com/vbatts/tar-split/tar/storage/entry.go
+index 38fe7ba..c91e7ea 100644
+--- a/vendor/src/github.com/vbatts/tar-split/tar/storage/entry.go
++++ b/vendor/src/github.com/vbatts/tar-split/tar/storage/entry.go
+@@ -1,5 +1,7 @@
+ package storage
+ 
++import "unicode/utf8"
++
+ // Entries is for sorting by Position
+ type Entries []Entry
+ 
+@@ -33,7 +35,44 @@ const (
+ type Entry struct {
+ 	Type     Type   `json:"type"`
+ 	Name     string `json:"name,omitempty"`
++	NameRaw  []byte `json:"name_raw,omitempty"`
+ 	Size     int64  `json:"size,omitempty"`
+ 	Payload  []byte `json:"payload"` // SegmentType stores payload here; FileType stores crc64 checksum here;
+ 	Position int    `json:"position"`
+ }
++
++// SetName will check name for valid UTF-8 string, and set the appropriate
++// field. See https://github.com/vbatts/tar-split/issues/17
++func (e *Entry) SetName(name string) {
++	if utf8.ValidString(name) {
++		e.Name = name
++	} else {
++		e.NameRaw = []byte(name)
++	}
++}
++
++// SetNameBytes will check name for valid UTF-8 string, and set the appropriate
++// field
++func (e *Entry) SetNameBytes(name []byte) {
++	if utf8.Valid(name) {
++		e.Name = string(name)
++	} else {
++		e.NameRaw = name
++	}
++}
++
++// GetName returns the string for the entry's name, regardless of the field stored in
++func (e *Entry) GetName() string {
++	if len(e.NameRaw) > 0 {
++		return string(e.NameRaw)
++	}
++	return e.Name
++}
++
++// GetNameBytes returns the bytes for the entry's name, regardless of the field stored in
++func (e *Entry) GetNameBytes() []byte {
++	if len(e.NameRaw) > 0 {
++		return e.NameRaw
++	}
++	return []byte(e.Name)
++}
+diff --git a/vendor/src/github.com/vbatts/tar-split/tar/storage/packer.go b/vendor/src/github.com/vbatts/tar-split/tar/storage/packer.go
+index a02a19a..0c9d99b 100644
+--- a/vendor/src/github.com/vbatts/tar-split/tar/storage/packer.go
++++ b/vendor/src/github.com/vbatts/tar-split/tar/storage/packer.go
+@@ -6,6 +6,7 @@ import (
+ 	"errors"
+ 	"io"
+ 	"path/filepath"
++	"unicode/utf8"
+ )
+ 
+ // ErrDuplicatePath occurs when a tar archive has more than one entry for the
+@@ -61,7 +62,7 @@ func (jup *jsonUnpacker) Next() (*Entry, error) {
+ 
+ 	// check for dup name
+ 	if e.Type == FileType {
+-		cName := filepath.Clean(e.Name)
++		cName := filepath.Clean(e.GetName())
+ 		if _, ok := jup.seen[cName]; ok {
+ 			return nil, ErrDuplicatePath
+ 		}
+@@ -93,9 +94,17 @@ type jsonPacker struct {
+ type seenNames map[string]struct{}
+ 
+ func (jp *jsonPacker) AddEntry(e Entry) (int, error) {
++	// if Name is not valid utf8, switch it to raw first.
++	if e.Name != "" {
++		if !utf8.ValidString(e.Name) {
++			e.NameRaw = []byte(e.Name)
++			e.Name = ""
++		}
++	}
++
+ 	// check early for dup name
+ 	if e.Type == FileType {
+-		cName := filepath.Clean(e.Name)
++		cName := filepath.Clean(e.GetName())
+ 		if _, ok := jp.seen[cName]; ok {
+ 			return -1, ErrDuplicatePath
+ 		}
+-- 
+2.4.3
+

@@ -1,0 +1,140 @@
+#!/bin/sh
+
+# Slackware build script for Apache Zookeeper
+
+# Copyright 2016 Andre Barboza, Belo Horizonte - Brazil
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=zookeeper
+VERSION=${VERSION:-3.4.6}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+ZOOKEEPER_USER=${ZOOKEEPER_USER:-zookeeper}
+ZOOKEEPER_UID=${ZOOKEEPER_UID:-322}
+ZOOKEEPER_GROUP=${ZOOKEEPER_GROUP:-zookeeper}
+ZOOKEEPER_GID=${ZOOKEEPER_GID:-322}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+bailout() {
+  echo "  You must have a $ZOOKEEPER_USER user and $ZOOKEEPER_GROUP group to run this script. "
+  echo "  Something like this should suffice for most systems: "
+  echo "    # groupadd -g $ZOOKEEPER_GID $ZOOKEEPER_GROUP "
+  echo "    # useradd -u $ZOOKEEPER_UID -g $ZOOKEEPER_GID -c \"Zookeeper user\" -d /var/lib/zookeeper -s /bin/sh $ZOOKEEPER_USER "
+  echo "  Giving /bin/sh as $ZOOKEEPER_USER shell is important as the init script will try tu 'su -' to it."
+  exit 1
+}
+
+# Bail if user and/or group isn't valid on your system
+# uid=322 is suggested to avoid conflicts with other SBo packages,
+# but it's your call: http://slackbuilds.org/uid_gid.txt
+if ! grep -q "^$ZOOKEEPER_USER:" /etc/passwd; then
+  bailout
+elif ! grep -q "^$ZOOKEEPER_GROUP:" /etc/group; then
+  bailout
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "x86_64" ]; then
+  LIBDIRSUFFIX="64"
+else
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/lib
+cp lib/*.jar $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/lib
+cp $PRGNAM-$VERSION.jar $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/
+
+mkdir -p $PKG/usr/bin $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/bin
+install -m 775 bin/zkCleanup.sh \
+   bin/zkCli.sh     \
+   bin/zkEnv.sh     \
+   bin/zkServer.sh  \
+   $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/bin
+
+(
+  cd $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/bin
+  sed -i "s|^ZOOBIN=\"\$(dirname \"\${ZOOBIN}\")\"|ZOOBIN=\"/usr/lib${LIBDIRSUFFIX}/$PRGNAM/bin\"|" *.sh
+)
+
+(
+  cd $PKG/usr/bin
+  ln -s ../lib${LIBDIRSUFFIX}/$PRGNAM/bin/zkServer.sh zkServer
+  ln -s ../lib${LIBDIRSUFFIX}/$PRGNAM/bin/zkCli.sh zkCli
+  ln -s ../lib${LIBDIRSUFFIX}/$PRGNAM/bin/zkCleanup.sh zkCleanup
+)
+
+install -dm 750 ${PKG}/var/log/$PRGNAM
+install -dm 750 ${PKG}/var/lib/$PRGNAM
+chown -R $ZOOKEEPER_USER:$ZOOKEEPER_GROUP $PKG/var/{lib,log}/$PRGNAM
+
+install -dm 750 ${PKG}/etc/$PRGNAM
+install -m 644 conf/configuration.xsl $PKG/etc/$PRGNAM/configuration.xsl.new
+install -m 644 conf/log4j.properties $PKG/etc/$PRGNAM/log4j.properties.new
+install -m 644 conf/zoo_sample.cfg $PKG/etc/$PRGNAM/zoo_sample.cfg.new
+install -m 644 $CWD/zoo.cfg $PKG/etc/$PRGNAM/zoo.cfg.new
+install -m 644 $CWD/java.env $PKG/etc/$PRGNAM/java.env.new
+install -m 644 $CWD/zookeeper-env.sh $PKG/etc/$PRGNAM/zookeeper-env.sh.new
+chown -R $ZOOKEEPER_USER:$ZOOKEEPER_GROUP $PKG/etc/$PRGNAM
+(
+  cd $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM
+  ln -s /etc/zookeeper conf
+)
+
+mkdir -p ${PKG}/etc/rc.d
+install -o root -g root -m 644 $CWD/rc.$PRGNAM $PKG/etc/rc.d/rc.${PRGNAM}.new
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CHANGES.txt LICENSE.txt NOTICE.txt README.txt README_packaging.txt docs/* \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}

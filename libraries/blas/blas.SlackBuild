@@ -2,7 +2,7 @@
 
 # Slackware build script for BLAS
 
-# Copyright 2014-2015 Kyle Guinn <elyk03@gmail.com>, USA
+# Copyright 2014-2016 Kyle Guinn <elyk03@gmail.com>, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -24,8 +24,8 @@
 
 PRGNAM=blas
 SRCNAM=lapack
-VERSION=${VERSION:-3.5.0}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-3.6.0}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -45,16 +45,12 @@ DOCS="LICENSE"
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
 fi
 
 set -e
@@ -68,31 +64,30 @@ cd $SRCNAM-$VERSION
 chown -R root:root .
 chmod -R u+w,go-w,a+rX-st .
 
-# `make install` wants to compile and install the rest of lapack,
-# so install files manually instead.
-#
-# Avoid adding an RPATH entry to the shared lib.  It's unnecessary, and
-# since we're not running `make install` we don't want to end up with
-# a temporary RPATH that refers to the build directory.
-#
-# WARNING:  The SONAME is "libblas.so", not "libblas.so.0" nor
-# "libblas.so.$MAJOR" as crafted in previous versions of this script.
-# I don't know if this is intentional or an omission by upstream.
+# Fix lots of bugs with the cmake build system and .pc files.
+# More importantly, allow building only the BLAS component.
+patch -p1 < $CWD/patches/generate-pkgconfig.diff
+patch -p1 < $CWD/patches/link-dependencies.diff
+patch -p1 < $CWD/patches/target-cleanup.diff
+patch -p1 < $CWD/patches/cmake-piecewise.diff
+
+# Avoid adding an RPATH entry to the shared lib.  It's unnecessary (except for
+# running the test suite), and it's broken on 64-bit (needs LIBDIRSUFFIX).
 mkdir -p shared
 cd shared
   cmake \
     -DCMAKE_Fortran_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
-    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_RULE_MESSAGES=OFF \
     -DCMAKE_VERBOSE_MAKEFILE=TRUE \
+    -DBUILD_BLAS=ON \
+    -DBUILD_TESTING=OFF \
     -DBUILD_SHARED_LIBS=ON \
     -DCMAKE_SKIP_RPATH=YES \
     ..
-  make blas/fast
-  install -D -m0755 -s lib/libblas.so $PKG/usr/lib${LIBDIRSUFFIX}/libblas.so
-  install -D -m0644 BLAS/blas.pc $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/blas.pc
+  make
+  make install/strip DESTDIR=$PKG
 cd ..
 
 # cmake doesn't appear to let us build both shared and static libs
@@ -103,37 +98,32 @@ cd static
   cmake \
     -DCMAKE_Fortran_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
-    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_RULE_MESSAGES=OFF \
     -DCMAKE_VERBOSE_MAKEFILE=TRUE \
+    -DBUILD_BLAS=ON \
+    -DBUILD_TESTING=OFF \
     ..
-  make blas/fast
-  install -D -m0644 lib/libblas.a $PKG/usr/lib${LIBDIRSUFFIX}/libblas.a
+  make
+  make install/strip DESTDIR=$PKG
 cd ..
 
-# Fix the pkg-config file:
-# 1.  Version is missing.
-# 2.  -L is hard-coded when a variable exists.
-sed -i \
-  -e "/^Version:/cVersion: ${VERSION}" \
-  -e "/^Libs:/s/-L[^ ]*/-L\${libdir}/" \
-  $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/blas.pc
-
-# Generate man pages.  Also requires some fix-ups:
+# Generate man pages.  Requires some fix-ups:
+# 0.  Join all escaped newlines so the entire value is replaced.
 # 1.  Replace "LAPACK" with "BLAS" in headers/footers.
-# 2.  Version is wrong.
-# 3.  Only generate on the BLAS sources.
+# 2.  Only generate on the BLAS sources.
+# 3.  Turn off recursion.  Only operate on directories in INPUT.
 # 4.  Turn off some repetitive comments.
 # 5.  Turn off HAVE_DOT.  Graphs are unnecessary for this purpose.
 # 6.  Turn off MAN_LINKS.  See below.
 sed -i \
-  -e "s/^\(PROJECT_NAME *=\).*/\1 BLAS/" \
-  -e "s/^\(PROJECT_NUMBER *=\).*/\1 ${VERSION}/" \
-  -e "s/^\(INPUT *=\).*/\1 BLAS\/SRC/" \
-  -e "s/^\(REPEAT_BRIEF *=\).*/\1 NO/" \
-  -e "s/^\(HAVE_DOT *=\).*/\1 NO/" \
-  -e "s/^\(MAN_LINKS *=\).*/\1 NO/" \
+  -e ':a;/\\$/N;s/\\\n//;ta' \
+  -e 's/^\(PROJECT_NAME *=\).*/\1 BLAS/' \
+  -e 's/^\(INPUT *=\).*/\1 BLAS\/SRC/' \
+  -e 's/^\(RECURSIVE *=\).*/\1 NO/' \
+  -e 's/^\(REPEAT_BRIEF *=\).*/\1 NO/' \
+  -e 's/^\(HAVE_DOT *=\).*/\1 NO/' \
+  -e 's/^\(MAN_LINKS *=\).*/\1 NO/' \
   DOCS/Doxyfile_man
 doxygen DOCS/Doxyfile_man
 # Doxygen generates manpages on a file-by-file basis (note the .f extensions).

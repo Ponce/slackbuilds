@@ -11,5 +11,5 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/torsocks.conf.new
+config etc/tor/torsocks.conf.new
 

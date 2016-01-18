@@ -1,0 +1,120 @@
+#!/bin/sh
+
+# Slackware build script for ggmud
+# Copyright 2015 Eric Underhill <uhillem@gmail.com>
+#
+# Based on slackbuild by Michael Bueker <m.bueker@berlin.de>
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=ggmud
+VERSION=${VERSION:-0.9.3}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+# For those of you that don't install anything to /opt, be sure to change
+# the symlink creation line in doinst.sh to match to the location defined
+# here if changed.
+OPT=${OPT:-/opt}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar -xzvf $CWD/$PRGNAM-$VERSION-src.tgz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Apply patch so everything will link correctly.
+#cp $CWD/ggmud-link.diff $TMP/$PRGNAM-$VERSION
+patch -p0 < $CWD/ggmud-link.diff
+
+mkdir build && cd build
+  cmake -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_BUILD_TYPE="release" \
+    ..
+  make
+  # make install DESTDIR=$PKG
+  # No make install exists for this application. Must do it manually.
+  # Because ggmud expects it's conf files to be in the same directory as 
+  # itself, it is best to install to /opt/ggmud to keep it's files together
+  # and to keep from cluttering up /usr/bin with non binaries.
+  mkdir -p $PKG/$OPT/$PRGNAM
+  cp $TMP/$PRGNAM-$VERSION/build/$PRGNAM $PKG/$OPT/$PRGNAM
+  cp $TMP/$PRGNAM-$VERSION/gg_help.txt $PKG/$OPT/$PRGNAM
+  cp $TMP/$PRGNAM-$VERSION/leu/* $PKG/$OPT/$PRGNAM
+cd -
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+(
+ mkdir -p $PKG/usr/bin
+ cd $PKG/usr/bin
+ ln -s /opt/ggmud/ggmud .
+)
+
+mkdir -p $PKG/usr/share/{applications,pixmaps}
+cp $CWD/$PRGNAM.png $PKG/usr/share/pixmaps/
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+cp $TMP/$PRGNAM-$VERSION/pixmaps/*  $PKG/usr/share/pixmaps/
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}

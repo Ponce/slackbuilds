@@ -336,7 +336,7 @@ LDAP_LIB_TYPE=OPENLDAP2
 
 
 #------------------------------------------------------------------------------
-# The PCRE library is required for exim.  There is no longer an embedded
+# The PCRE library is required for Exim.  There is no longer an embedded
 # version of the PCRE library included with the source code, instead you
 # must use a system library or build your own copy of PCRE.
 # In either case you must specify the library link info here.  If the
@@ -441,6 +441,7 @@ WITH_CONTENT_SCAN=yes
 # By default, Exim has support for checking the AD bit in a DNS response, to
 # determine if DNSSEC validation was successful.  If your system libraries
 # do not support that bit, then set DISABLE_DNSSEC to "yes"
+# Note: Enabling EXPERIMENTAL_DANE unconditionally overrides this setting.
 
 # DISABLE_DNSSEC=yes
 
@@ -502,15 +503,21 @@ WITH_CONTENT_SCAN=yes
 # Uncomment the following line to enable Experimental Proxy Protocol
 # EXPERIMENTAL_PROXY=yes
 
-# Uncomment the following line to enable support for checking certiticate
+# Uncomment the following line to enable support for checking certificate
 # ownership
 # EXPERIMENTAL_CERTNAMES=yes
 
-# Uncomment the following line to add DSN support
-# EXPERIMENTAL_DSN=yes
-
 # Uncomment the following line to add DANE support
+# Note: Enabling this unconditionally overrides DISABLE_DNSSEC
 # EXPERIMENTAL_DANE=yes
+
+# Uncomment the following line to add SOCKS support
+# EXPERIMENTAL_SOCKS=yes
+
+# Uncomment the following to add Internationalisation features. You need to
+# have the IDN library installed.
+# EXPERIMENTAL_INTERNATIONAL=yes
+# LDFLAGS += -lidn
 
 ###############################################################################
 #                 THESE ARE THINGS YOU MIGHT WANT TO SPECIFY                  #
@@ -645,6 +652,7 @@ AUTH_DOVECOT=yes
 # AUTH_HEIMDAL_GSSAPI_PC=heimdal-gssapi
 AUTH_PLAINTEXT=yes
 AUTH_SPA=yes
+AUTH_TLS=yes
 
 
 #------------------------------------------------------------------------------
@@ -801,7 +809,7 @@ USE_OPENSSL_PC=openssl
 # with the extension "texinfo" in the doc directory. You may find that the
 # version number of the texinfo files is different to your Exim version number,
 # because the main documentation isn't updated as often as the code. For
-# example, if you have Exim version 4.43, the source tarball upacks into a
+# example, if you have Exim version 4.43, the source tarball unpacks into a
 # directory called exim-4.43, but the texinfo tarball unpacks into exim-4.40.
 # In this case, move the contents of exim-4.40/doc into exim-4.43/doc after you
 # have unpacked them. Then set INFO_DIRECTORY to the location of your info
@@ -879,8 +887,14 @@ COMPRESS_SUFFIX=gz
 # If the exigrep utility is fed compressed log files, it tries to uncompress
 # them using this command.
 
+# Leave it empty to enforce autodetection at runtime:
+# ZCAT_COMMAND=
+#
+# Omit the path if you want to use your system's PATH:
+# ZCAT_COMMAND=zcat
+#
+# Or specify the full pathname:
 ZCAT_COMMAND=/usr/bin/zcat
-
 
 #------------------------------------------------------------------------------
 # Compiling in support for embedded Perl: If you want to be able to
@@ -957,7 +971,7 @@ EXTRALIBS += -ldl
 # There is no need to install all of SASL on your system. You just need to run
 # ./configure --with-pwcheck, cd to the pwcheck directory within the sources,
 # make and make install. You must create the socket directory (default
-# /var/pwcheck) and chown it to exim's user and group. Once you have installed
+# /var/pwcheck) and chown it to Exim's user and group. Once you have installed
 # pwcheck, you should arrange for it to be started by root at boot time.
 
 # CYRUS_PWCHECK_SOCKET=/var/pwcheck/pwcheck
@@ -965,7 +979,7 @@ EXTRALIBS += -ldl
 
 #------------------------------------------------------------------------------
 # Support for authentication via the Cyrus SASL saslauthd daemon is available.
-# The Exim support, which is intented for use in conjunction with the SMTP AUTH
+# The Exim support, which is intended for use in conjunction with the SMTP AUTH
 # facilities, is included only when requested by setting the following
 # parameter to the location of the saslauthd daemon's socket.
 #
@@ -973,7 +987,7 @@ EXTRALIBS += -ldl
 # ./configure --with-saslauthd (and any other options you need, for example, to
 # select or deselect authentication mechanisms), cd to the saslauthd directory
 # within the sources, make and make install. You must create the socket
-# directory (default /var/state/saslauthd) and chown it to exim's user and
+# directory (default /var/state/saslauthd) and chown it to Exim's user and
 # group. Once you have installed saslauthd, you should arrange for it to be
 # started by root at boot time.
 
@@ -1134,7 +1148,7 @@ TMPDIR="/tmp"
 # to handle the different cases. If CONFIGURE_FILE_USE_EUID is defined, then
 # Exim will first look for a configuration file whose name is that defined
 # by CONFIGURE_FILE, with the effective uid tacked on the end, separated by
-# a period (for eximple, /usr/exim/configure.0). If this file does not exist,
+# a period (for example, /usr/exim/configure.0). If this file does not exist,
 # then the bare configuration file name is tried. In the case when both
 # CONFIGURE_FILE_USE_EUID and CONFIGURE_FILE_USE_NODE are set, four files
 # are tried: <name>.<euid>.<node>, <name>.<node>, <name>.<euid>, and <name>.
@@ -1318,7 +1332,7 @@ PID_FILE_PATH=/var/run/exim.pid
 
 
 #------------------------------------------------------------------------------
-# Expanding match_* second paramters: BE CAREFUL IF ENABLING THIS!
+# Expanding match_* second parameters: BE CAREFUL IF ENABLING THIS!
 # It has proven too easy in practice for administrators to configure security
 # problems into their Exim install, by treating match_domain{}{} and friends
 # as a form of string comparison, where the second string comes from untrusted

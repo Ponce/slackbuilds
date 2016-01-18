@@ -1,0 +1,160 @@
+#!/bin/sh
+#
+### BEGIN INIT INFO
+# Provides:          hhvm
+# Required-Start:    $remote_fs $network
+# Required-Stop:     $remote_fs $network
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Description:       Starts The HHVM FastCGI Daemon
+### END INIT INFO
+
+DAEMON=/usr/bin/hhvm
+PIDFILE=/var/run/hhvm/pid
+hhvm_SOCKET=/var/run/hhvm/sock
+hhvm_GROUP=${hhvm_GROUP:-apache}
+CONFIG_FILE="/etc/hhvm/server.ini"
+SYSTEM_CONFIG_FILE="/etc/hhvm/php.ini"
+
+DAEMON_ARGS="--config ${SYSTEM_CONFIG_FILE} \
+	--config ${CONFIG_FILE} \
+	-vPidFile=${PIDFILE}"
+
+do_stop () {
+	try=0
+
+	if [ ! -r $2 ]; then
+		echo "warning, no pid file found - HHVM is not running?"
+		exit 1
+	fi
+
+	PID=`cat $2`
+	kill $1 $PID
+
+	# Waiting for HHVM to shutdown
+	while test $try -lt 35
+	do
+		if ps -p $PID | grep -q $PID
+		then
+			echo -n .
+			try=`expr $try + 1`
+			sleep 1
+		else
+			try=''
+			break
+		fi
+	done
+
+	if [ -n "$try" ]
+	then
+		echo " failed. Use force-quit"
+		exit 1
+	else
+		rm -f $2
+		echo " done"
+	fi
+}
+
+wait_for_pid () {
+	try=0
+
+	while test $try -lt 35
+	do
+		if [ -f "$1" ] ; then
+			try=''
+			break
+		fi
+
+		echo -n .
+		try=`expr $try + 1`
+		sleep 1
+	done
+
+}
+
+case "$1" in
+	start)
+		echo -n "Starting HHVM "
+
+		if [ -r $PIDFILE ]; then
+			echo "warning, pid file found - HHVM is already running?"
+			exit 1
+		fi
+
+		echo
+		$DAEMON --mode daemon $DAEMON_ARGS
+		if [ "$?" != 0 ]
+		then
+			echo "Failed"
+			exit 1
+		fi
+
+		wait_for_pid $PIDFILE
+
+		if [ -n "$try" ] ; then
+			echo " failed"
+			exit 1
+		fi
+
+		# Set the socket permissions if HHVM uses UDS
+		if [ -S "$hhvm_SOCKET" ]
+		then
+			chgrp $hhvm_GROUP $hhvm_SOCKET
+		fi
+
+		echo " done"
+	;;
+
+	stop)
+		echo -n "Stopping HHVM "
+
+		do_stop -QUIT $PIDFILE
+	;;
+
+	force-quit)
+		echo -n "Terminating HHVM "
+
+		do_stop -TERM $PIDFILE
+	;;
+
+	status)
+		if [ ! -r $PIDFILE ]
+		then
+			echo "HHVM is stopped"
+			exit 0
+		fi
+
+		PID=`cat $PIDFILE`
+		if ps -p $PID | grep -q $PID
+		then
+			echo "HHVM (pid $PID) is running..."
+		else
+			echo "HHVM dead but pid file exists"
+		fi
+	;;
+
+	restart)
+		sh $0 stop
+		sh $0 start
+	;;
+
+	reload)
+		echo -n "Reload service HHVM "
+
+		if [ ! -r $PIDFILE ]
+		then
+			echo "warning, no pid file found - HHVM is not running?"
+			exit 1
+		fi
+
+		kill -USR2 `cat $PIDFILE`
+
+		echo " done"
+	;;
+
+	*)
+        echo "Usage: $0 {start|stop|status|restart|reload|force-quit}" >&2
+        exit 1
+	;;
+
+esac

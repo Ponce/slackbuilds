@@ -1,65 +1,109 @@
 #!/bin/sh
-# Slackware build script for broadcom-sta proprietary wireless driver
-# Written by David Matthew Jerry Koenig <koenigdavidmj@gmail.com>
-# Public domain.
+
+# Slackware build script for broadcom-sta
+
+# Copyright 2015 Andreas Voegele <andreas@andreasvoegele.com>
+#
+# Permission to use, copy, modify, and distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 PRGNAM=broadcom-sta
-VERSION=6.30.223.141
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-6.30.223.271}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-KERNEL=${KERNEL:-$(uname -r)}
-PKG_VERSION=${VERSION}_$(echo $KERNEL | tr - _)
+KERNEL=${KERNEL:-$( uname -r )}
 
-case "$( uname -m )" in
-  i?86) ARCH=i486 ;;
-  arm*) ARCH=arm ;;
-     *) ARCH=$( uname -m ) ;;
-esac
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-WORKDIR=$TMP/build-$PRGNAM
-
-# Skipped the usual set of variables since they don't apply here
-# (libdir isn't needed, and custom CFLAGS aren't wanted).
-if [ "$ARCH" = "i486" ]; then
-  MY_ARCH=""
-elif [ "$ARCH" = "x86_64" ]; then
-  MY_ARCH="_64"
-else
-  printf "\n\n$ARCH is not supported...\n"
-  exit 1
-fi
+case "$ARCH" in
+  i?86)
+    SRCNAM=hybrid-v35-nodebug-pcoem
+    ;;
+  x86_64)
+    SRCNAM=hybrid-v35_64-nodebug-pcoem
+    ;;
+  *)
+    echo "$ARCH is not supported..."
+    exit 1
+    ;;
+esac
 
 set -e
 
-rm -rf $WORKDIR $PKG
-mkdir -p $TMP $WORKDIR $PKG $OUTPUT
-cd $WORKDIR
-tar xvf $CWD/hybrid-v35${MY_ARCH}-nodebug-pcoem-$(printf $VERSION|tr . _).tar.gz
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+mkdir $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$( echo $VERSION | tr . _ ).tar.gz
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-patch -p2 < $CWD/linux-recent.patch
+patch -p1 < $CWD/001-null-pointer-fix.patch
+patch -p1 < $CWD/002-rdtscl.patch
 
-# Build the module
-make -C /lib/modules/$KERNEL/build M=$WORKDIR clean
-make -C /lib/modules/$KERNEL/build M=$WORKDIR
+make -C /lib/modules/$KERNEL/build M=$(pwd) clean
+make -C /lib/modules/$KERNEL/build M=$(pwd)
 
-# Install the module
 mkdir -p $PKG/lib/modules/$KERNEL/kernel/extra
 cp wl.ko $PKG/lib/modules/$KERNEL/kernel/extra
 
+mkdir -p $PKG/etc/modprobe.d
+cat $CWD/b43_blacklist.conf.new > $PKG/etc/modprobe.d/b43_blacklist.conf.new
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a lib/LICENSE.txt $CWD/README_$VERSION.txt $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-cat $WORKDIR/lib/LICENSE.txt > $PKG/usr/doc/$PRGNAM-$VERSION/LICENSE.txt
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-cat $CWD/doinst.sh > $PKG/install/doinst.sh
+cat << EOF > $PKG/install/doinst.sh
+config() {
+  NEW="\$1"
+  OLD="\$(dirname \$NEW)/\$(basename \$NEW .new)"
+  # If there's no config file by that name, mv it over:
+  if [ ! -r \$OLD ]; then
+    mv \$NEW \$OLD
+  elif [ "\$(cat \$OLD | md5sum)" = "\$(cat \$NEW | md5sum)" ]; then
+    # toss the redundant copy
+    rm \$NEW
+  fi
+  # Otherwise, we leave the .new copy for the admin to consider...
+}
+
+config etc/modprobe.d/b43_blacklist.conf.new
+
+# A good idea whenever kernel modules are added or changed:
+if [ -x sbin/depmod ]; then
+  chroot . /sbin/depmod -a $KERNEL 1> /dev/null 2> /dev/null
+fi
+EOF
 
 cd $PKG
-chown -R root:root .
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$PKG_VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-${VERSION}_$( echo $KERNEL | tr - _ )-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}

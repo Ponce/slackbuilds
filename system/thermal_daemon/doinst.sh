@@ -13,4 +13,3 @@ config() {
 
 config etc/thermald/thermal-conf.xml.new
 config etc/thermald/thermal-cpu-cdev-order.xml.new
-

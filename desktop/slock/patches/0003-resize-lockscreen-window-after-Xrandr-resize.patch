@@ -1,0 +1,83 @@
+From f5ef1b8eb5555da11e81d92d8d05acd4aba1ef40 Mon Sep 17 00:00:00 2001
+From: Markus Teich <markus.teich@stusta.mhn.de>
+Date: Wed, 25 Feb 2015 23:06:45 +0100
+Subject: [PATCH 3/9] resize lockscreen window after Xrandr resize
+
+---
+ config.mk |  2 +-
+ slock.c   | 18 ++++++++++++++++--
+ 2 files changed, 17 insertions(+), 3 deletions(-)
+
+diff --git a/config.mk b/config.mk
+index 067cfc7..44e41c6 100644
+--- a/config.mk
++++ b/config.mk
+@@ -11,7 +11,7 @@ X11LIB = /usr/X11R6/lib
+ 
+ # includes and libs
+ INCS = -I. -I/usr/include -I${X11INC}
+-LIBS = -L/usr/lib -lc -lcrypt -L${X11LIB} -lX11 -lXext
++LIBS = -L/usr/lib -lc -lcrypt -L${X11LIB} -lX11 -lXext -lXrandr
+ 
+ # flags
+ CPPFLAGS = -DVERSION=\"${VERSION}\" -DHAVE_SHADOW_H
+diff --git a/slock.c b/slock.c
+index df5c3fe..6502c86 100644
+--- a/slock.c
++++ b/slock.c
+@@ -13,6 +13,7 @@
+ #include <string.h>
+ #include <unistd.h>
+ #include <sys/types.h>
++#include <X11/extensions/Xrandr.h>
+ #include <X11/keysym.h>
+ #include <X11/Xlib.h>
+ #include <X11/Xutil.h>
+@@ -41,6 +42,9 @@ typedef struct {
+ static Lock **locks;
+ static int nscreens;
+ static Bool running = True;
++static Bool rr;
++static int rrevbase;
++static int rrerrbase;
+ 
+ static void
+ die(const char *errstr, ...)
+@@ -179,8 +183,15 @@ readpw(Display *dpy, const char *pws)
+ 				}
+ 			}
+ 			llen = len;
+-		}
+-		else for (screen = 0; screen < nscreens; screen++)
++		} else if (rr && ev.type == rrevbase + RRScreenChangeNotify) {
++			XRRScreenChangeNotifyEvent *rre = (XRRScreenChangeNotifyEvent*)&ev;
++			for (screen = 0; screen < nscreens; screen++) {
++				if (locks[screen]->win == rre->window) {
++					XResizeWindow(dpy, locks[screen]->win, rre->width, rre->height);
++					XClearWindow(dpy, locks[screen]->win);
++				}
++			}
++		} else for (screen = 0; screen < nscreens; screen++)
+ 			XRaiseWindow(dpy, locks[screen]->win);
+ 	}
+ }
+@@ -236,6 +247,8 @@ lockscreen(Display *dpy, int screen)
+ 	invisible = XCreatePixmapCursor(dpy, lock->pmap, lock->pmap, &color, &color, 0, 0);
+ 	XDefineCursor(dpy, lock->win, invisible);
+ 	XMapRaised(dpy, lock->win);
++	if (rr)
++		XRRSelectInput(dpy, lock->win, RRScreenChangeNotifyMask);
+ 	for (len = 1000; len; len--) {
+ 		if (XGrabPointer(dpy, lock->root, False, ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
+ 		    GrabModeAsync, GrabModeAsync, None, invisible, CurrentTime) == GrabSuccess)
+@@ -295,6 +308,7 @@ main(int argc, char **argv) {
+ 
+ 	if (!(dpy = XOpenDisplay(0)))
+ 		die("slock: cannot open display\n");
++	rr = XRRQueryExtension(dpy, &rrevbase, &rrerrbase);
+ 	/* Get the number of screens in display "dpy" and blank them all. */
+ 	nscreens = ScreenCount(dpy);
+ 	locks = malloc(sizeof(Lock *) * nscreens);
+-- 
+2.6.4
+

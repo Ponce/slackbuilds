@@ -2,7 +2,7 @@
 
 # Slackware build script for LAPACK
 
-# Copyright 2014-2015 Kyle Guinn <elyk03@gmail.com>, USA
+# Copyright 2014-2016 Kyle Guinn <elyk03@gmail.com>, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,8 +23,9 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=lapack
-VERSION=${VERSION:-3.5.0}
-BUILD=${BUILD:-2}
+SRCNAM=lapack
+VERSION=${VERSION:-3.6.0}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -40,20 +41,16 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-DOCS="LICENSE README"
+DOCS="LICENSE README DOCS/lapack.png DOCS/lawn81.tex DOCS/org2.ps"
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
 fi
 
 set -e
@@ -61,38 +58,37 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tgz
-cd $PRGNAM-$VERSION
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tgz
+cd $SRCNAM-$VERSION
 chown -R root:root .
 chmod -R u+w,go-w,a+rX-st .
 
-# `make install` compiles and installs tmglib, along with many extra tests,
-# so install files manually instead.
-#
-# Avoid adding an RPATH entry to the shared lib.  It's unnecessary, and
-# since we're not running `make install` we don't want to end up with
-# a temporary RPATH that refers to the build directory.
-#
-# WARNING:  The SONAME is "liblapack.so", not "liblapack.so.0" nor
-# "liblapack.so.$MAJOR" as crafted in previous versions of this script.
-# I don't know if this is intentional or an omission by upstream.
+# Fix lots of bugs with the cmake build system and .pc files.
+# More importantly, allow building only the LAPACK component.
+patch -p1 < $CWD/patches/generate-pkgconfig.diff
+patch -p1 < $CWD/patches/link-dependencies.diff
+patch -p1 < $CWD/patches/target-cleanup.diff
+patch -p1 < $CWD/patches/cmake-piecewise.diff
+
+# Avoid adding an RPATH entry to the shared lib.  It's unnecessary (except for
+# running the test suite), and it's broken on 64-bit (needs LIBDIRSUFFIX).
 mkdir -p shared
 cd shared
   cmake \
     -DCMAKE_Fortran_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
-    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_RULE_MESSAGES=OFF \
     -DCMAKE_VERBOSE_MAKEFILE=TRUE \
     -DUSE_OPTIMIZED_BLAS=ON \
+    -DBUILD_LAPACK=ON \
+    -DBUILD_TESTING=OFF \
     -DBUILD_SHARED_LIBS=ON \
     -DCMAKE_SKIP_RPATH=YES \
     ..
-  make lapack/fast
-  install -D -m0755 -s lib/liblapack.so $PKG/usr/lib${LIBDIRSUFFIX}/liblapack.so
-  install -D -m0644 lapack.pc $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/lapack.pc
+  make
+  make install/strip DESTDIR=$PKG
 cd ..
 
 # cmake doesn't appear to let us build both shared and static libs
@@ -103,36 +99,31 @@ cd static
   cmake \
     -DCMAKE_Fortran_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
-    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_RULE_MESSAGES=OFF \
     -DCMAKE_VERBOSE_MAKEFILE=TRUE \
     -DUSE_OPTIMIZED_BLAS=ON \
+    -DBUILD_LAPACK=ON \
+    -DBUILD_TESTING=OFF \
     ..
-  make lapack/fast
-  install -D -m0644 lib/liblapack.a $PKG/usr/lib${LIBDIRSUFFIX}/liblapack.a
+  make
+  make install/strip DESTDIR=$PKG
 cd ..
 
-# Fix the pkg-config file:
-# 1.  Version is wrong.
-# 2.  -L is hard-coded when a variable exists.
-sed -i \
-  -e "/^Version:/cVersion: ${VERSION}" \
-  -e "/^Libs:/s/-L[^ ]*/-L\${libdir}/" \
-  $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/lapack.pc
-
 # Generate man pages.  Also requires some fix-ups:
-# 1.  Version is wrong.
-# 2.  Only generate on the LAPACK sources.
+# 0.  Join all escaped newlines so the entire value is replaced.
+# 1.  Only generate on the LAPACK sources.
+# 2.  Turn off recursion.  Only operate on directories in INPUT.
 # 3.  Turn off some repetitive comments.
 # 4.  Turn off HAVE_DOT.  Graphs are unnecessary for this purpose.
 # 5.  Turn off MAN_LINKS.  See below.
 sed -i \
-  -e "s/^\(PROJECT_NUMBER *=\).*/\1 ${VERSION}/" \
-  -e "s/^\(INPUT *=\).*/\1 SRC/" \
-  -e "s/^\(REPEAT_BRIEF *=\).*/\1 NO/" \
-  -e "s/^\(HAVE_DOT *=\).*/\1 NO/" \
-  -e "s/^\(MAN_LINKS *=\).*/\1 NO/" \
+  -e ':a;/\\$/N;s/\\\n//;ta' \
+  -e 's/^\(INPUT *=\).*/\1 SRC/' \
+  -e 's/^\(RECURSIVE *=\).*/\1 NO/' \
+  -e 's/^\(REPEAT_BRIEF *=\).*/\1 NO/' \
+  -e 's/^\(HAVE_DOT *=\).*/\1 NO/' \
+  -e 's/^\(MAN_LINKS *=\).*/\1 NO/' \
   DOCS/Doxyfile_man
 doxygen DOCS/Doxyfile_man
 # Doxygen generates manpages on a file-by-file basis (note the .f extensions).
@@ -154,7 +145,7 @@ ln -s dladiv.3.gz $PKG/usr/man/man3/dladiv2.3.gz
 # select few.  Some are duplicated by BLAS (lsame.f), by LAPACK (ilaver.f),
 # are unused (slamchf77.f, dlamchf77.f), or are test programs.
 rm -rf DOCS/man
-sed -i "s/^\(INPUT *=\).*/\1 INSTALL/" DOCS/Doxyfile_man
+sed -i 's/^\(INPUT *=\).*/\1 INSTALL/' DOCS/Doxyfile_man
 doxygen DOCS/Doxyfile_man
 gzip -9c DOCS/man/man3/slamch.f.3 > $PKG/usr/man/man3/slamch.3.gz
 gzip -9c DOCS/man/man3/dlamch.f.3 > $PKG/usr/man/man3/dlamch.3.gz

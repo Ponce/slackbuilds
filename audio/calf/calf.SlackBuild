@@ -4,6 +4,15 @@
 
 # Written by B. Watson (yalhcru@gmail.com)
 
+# 20151106 bkw:
+# Switch to -master and upgrade to v0.0.60. No more LADSPA or DSSI
+# support (upstream dropped it). But if you need LADSPA, there's a
+# separate calf-ladspa build now. If there's a popular demand for
+# DSSI, I'll add it to calf-ladspa, not here.
+# fluidsynth is now required, because the build fails without it, even
+# though it's listed as experimental and there's a --disable-experimental
+# option. Since it's required anyway, might as well --enable-experimental.
+
 # 20141030 bkw:
 # Finally getting around to submitting this, there have been no code
 # changes upstream since 20140308.
@@ -14,8 +23,8 @@
 # - Added capability stuff.
 
 PRGNAM=calf
-VERSION=${VERSION:-0.0.19kx}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-0.0.60}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -45,39 +54,13 @@ else
   LIBDIRSUFFIX=""
 fi
 
-if [ "${EXPERIMENTAL:-no}" = "yes" ]; then
-  EXPOPT=enable
-else
-  EXPOPT=disable
-fi
-
-if [ "${LADSPA:-yes}" = "no" ]; then
-  LADSPA_OPT="--without-ladspa"
-else
-  LADSPA_OPT="--with-ladspa-dir=/usr/lib${LIBDIRSUFFIX}/ladspa"
-fi
-
-if [ "${DSSI:-yes}" = "no" ]; then
-  DSSI_OPT="--without-dssi"
-else
-  DSSI_OPT="--with-dssi-dir=/usr/lib${LIBDIRSUFFIX}/dssi"
-fi
-
-if [ "${LV2:-yes}" = "no" ]; then
-  LV2_OPT="--without-lv2"
-else
-  LV2_OPT="--with-lv2-dir=/usr/lib${LIBDIRSUFFIX}/lv2"
-fi
-
-echo "LADSPA_OPT: $LADSPA_OPT, DSSI_OPT: $DSSI_OPT, LV2_OPT: $LV2_OPT"
-
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz || tar xvf $VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
@@ -94,12 +77,26 @@ autoreconf -if
 # in the environment.
 if [ "${FORCE_SLACK_CFLAGS:-no}" = "yes" ]; then
   sed -i -e 's/ -O3[^"]*//' configure
+  SSE=no
 fi
+
+# Build with SSE support?
+case "${SSE:-auto}" in
+  "yes") SSEOPT="--enable-sse"  ;;
+  "no")  SSEOPT="--disable-sse" ;;
+  *)     grep sse /proc/cpuinfo >/dev/null \
+              && SSEOPT="--enable-sse" \
+              || SSEOPT="--disable-sse" ;;
+esac
+
+# For the slack-desc:
+WITHSSE="without"
+[ "$SSEOPT" = "--enable-sse" ] && WITHSSE="with"
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
-  --${EXPOPT}-experimental \
+  --enable-experimental \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
@@ -109,9 +106,7 @@ CXXFLAGS="$SLKCFLAGS" \
   --htmldir=/usr/doc/$PRGNAM-$VERSION \
   --enable-shared \
   --disable-static \
-  $LADSPA_OPT \
-  $DSSI_OPT \
-  $LV2_OPT \
+  --with-lv2-dir=/usr/lib${LIBDIRSUFFIX}/lv2 \
   --build=$ARCH-slackware-linux
 
 make
@@ -134,7 +129,7 @@ rm -f $PKG/usr/share/icons/hicolor/icon-theme.cache
 cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@WITHSSE@,$WITHSSE," $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 # Only add capability stuff if not disabled:

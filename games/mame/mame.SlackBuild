@@ -1,31 +1,25 @@
 #!/bin/sh
-#
-# Slackware build script for M.A.M.E.
-#
-# Copyright 2010-2015  Erik W. Hanson, Minneapolis, MN, USA
-# All rights reserved.
-#
-# Redistribution and use of this script, with or without modification, is
-# permitted provided that the following conditions are met:
-#
-# 1. Redistributions of this script must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-#
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
-# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
-# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# Adapted from sdlmame.SlackBuild, Written by B. Watson (yalhcru@gmail.com)
+# Slackware build script for mame
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Adapted from Erik W. Hanson's mame.SlackBuild for older mame versions,
+# which was originally adapted from sdlmame.SlackBuild by B. Watson.
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20151112 bkw:
+# - Updated for v0.167, after missing several releases (sorry!)
+# - Get rid of MESS and UME options, mame has basically turned
+#   into UME at this point (includes old mame + mess in one binary)
+# - Use shipped man pages from the source, instead of our own
+# - Add new tools: castool floptool imgtool nlwav
+# - Use icon extracted from mame.ico in the source
+# - Update .ini file slightly (sound=sdl, not sound=1)
 
 PRGNAM=mame
-VERSION=${VERSION:-0.160}
+VERSION=${VERSION:-0.167}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -42,6 +36,8 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-${PRGNAM}
 OUTPUT=${OUTPUT:-/tmp}
 
+# NB nonstandard flags here. Upstream defaults to -O3, so we'll leave
+# that as-is. Only the arch-specific stuff goes here.
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-march=i486 -mtune=i686"
   LIBDIRSUFFIX=""
@@ -49,86 +45,122 @@ elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS=""
+  SLKCFLAGS="-fPIC"
   LIBDIRSUFFIX="64"
 else
   SLKCFLAGS=""
   LIBDIRSUFFIX=""
 fi
 
+SHORTNAME=${PRGNAM}${VERSION/./}
+DIRNAME=$PRGNAM-$SHORTNAME
+
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf ${PRGNAM}-${VERSION/./}
-tar xvf $CWD/${PRGNAM}-${PRGNAM}${VERSION/./}.tar.gz || tar xvf $CWD/${PRGNAM}${VERSION/./}.tar.gz
-cd ${PRGNAM}-${PRGNAM}${VERSION/./}
+rm -rf $DIRNAME
+tar xvf $CWD/$DIRNAME.tar.gz || tar xvf $CWD/$SHORTNAME.tar.gz
+cd $DIRNAME
 chown -R root:root .
+
+# This isn't standard template code, but it executes maybe a hundred
+# times as fast, and does the same thing.
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -print0 | \
+  xargs -0 chmod 755
+find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -print0 | \
+  xargs -0 chmod 644
 
-# This makes mame look for its config file (mame.ini) in $HOME/.mame, then /etc.
-echo 'DEFS += -DINI_PATH="\"\$$HOME/.mame;/etc\""' >> makefile
+# OK, building modern mame is a bit of a PITA. It uses genie (written
+# in lua, a fork of premake), but you don't get to run genie directly,
+# you got a main makefile that builds lua, then builds genie, then runs
+# genie with arguments based on the options in the main makefile. Also,
+# it uses python to convert XML layout files to C++ code.
 
-# This is purely cosmetic.
-sed -i 's/DISTRO = generic/DISTRO = slackware/' src/osd/sdl/sdl.mak
+# Where possible, use system libraries instead of building the ones
+# bundled with the mame source. However, SBo's lua and Slackware's
+# sqlite3 are too old for mame.
+#USE_SYSTEM_LIB_SQLITE3=1 USE_SYSTEM_LIB_LUA=1 \
 
+# Not going to USE_SYSTEM_LIB_PORTAUDIO or USE_SYSTEM_LIB_PORTMIDI,
+# the bundled versions are fine and I don't want a mile-long dependency
+# tree. Using an external portmidi dep would make mame require Oracle's
+# JDK! In case you're wondering, only the C code in the bundled portmidi
+# is built (no Java needed).
+
+# The OVERRIDE_CC and OVERRIDE_CXX are there because mame's build ignores
+# $PATH when searching for gcc/g++, and won't find my ccache symlinks in
+# /usr/local/bin. On a normal (non-ccache-using) system, these options
+# do nothing (they use the compilers in /usr/bin, which is the default
+# anyway) and you can forget about them. (Mini-rant: PATH has been a
+# standard mechanism on both Unix and DOS/Windows systems for what,
+# 30 or 40 years now? Come on people...)
+
+# This is purely cosmetic, and can't be set on the make command line.
+sed -i 's,ubuntu-intrepid,slackware,g' scripts/genie.lua
+sed -i 's/DISTRO := generic/DISTRO := slackware/' makefile
+
+# SDL_INI_PATH needs to contain a $ character. I haven't figured out
+# how (or even if) I can pass this through multiple layers of make
+# calling genie which calls make again, so screw it:
+sed -i 's,\.;ini,/etc,' src/osd/sdl/sdlmain.c
+
+# Tried several variants of this, none work, ended up using sed:
+#SDL_INI_PATH='$$HOME/.mame;/etc' \
+
+# Having ARCH set in the env will break the build, hence ARCH=""
+
+make USE_SYSTEM_LIB_EXPAT=1 \
+     USE_SYSTEM_LIB_ZLIB=1 \
+     USE_SYSTEM_LIB_JPEG=1 \
+     USE_SYSTEM_LIB_FLAC=1 \
+     OPT_FLAGS="$SLKCFLAGS" \
+     OVERRIDE_CC="$( which gcc )" \
+     OVERRIDE_CXX="$( which g++ )" \
+     ARCH="" \
+     VERBOSE=1 \
+     NOWERROR=1 \
+     TOOLS=1 \
+     TARGET=$PRGNAM \
+     SUBTARGET=$PRGNAM
+
+# No 'make install' target, do it manually.
 mkdir -p $PKG/usr/games $PKG/etc $PKG/usr/man/man6 \
          $PKG/usr/share/applications $PKG/usr/share/pixmaps
 
-# Build and install mame;
-if [ "${MAME:-yes}" = "yes" ]; then
-  echo "BUILDING MAME"
-  make BUILD_FLAC=0 BUILD_JPEG=0 BUILD_EXPAT=0 SUFFIX64="" \
-       BUILD_JPEGLIB=0 BUILD_SQLITE3=0 ARCHOPTS="$SLKCFLAGS" TARGET=mame
-  cp mame $PKG/usr/games
-  cat $CWD/mame.ini > $PKG/etc/mame.ini.new
-  sed 's/@VERSION@/'$VERSION'/g' < $CWD/man/mame.6 | gzip -9c > $PKG/usr/man/man6/mame.6.gz
-  cp $CWD/desktop/mame.desktop $PKG/usr/share/applications
-  cp $CWD/desktop/mame.xpm $PKG/usr/share/pixmaps
-fi
+# Deal with upstream's executable-naming silliness.
+[ -e ${PRGNAM}64 ] && mv ${PRGNAM}64 $PRGNAM
+[ -e ${PRGNAM}32 ] && mv ${PRGNAM}32 $PRGNAM
+install -s -m0755 -oroot -groot $PRGNAM $PKG/usr/games/$PRGNAM
 
-# Optionally build and install mess:
-if [ "${MESS:-no}" = "yes" ]; then
-  echo "BUILDING MESS"
-  make BUILD_FLAC=0 BUILD_JPEG=0 BUILD_EXPAT=0 SUFFIX64="" \
-       BUILD_JPEGLIB=0 BUILD_SQLITE3=0 ARCHOPTS="$SLKCFLAGS" TARGET=mess
-  cp mess $PKG/usr/games
-  gzip -9c $CWD/man/mess.6 > $PKG/usr/man/man6/mess.6.gz
-  cp $CWD/desktop/mess.desktop $PKG/usr/share/applications
-  cp $CWD/desktop/mess.xpm $PKG/usr/share/pixmaps
-fi
+# .desktop borrowed from Ludovic Lechapt's Debian package.
+# Icon extracted from src/mame/osd/windows/mame/mame.ico with icotool.
+gzip -9c < src/osd/sdl/man/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
+cat $CWD/desktop/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+cat $CWD/desktop/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+cat $CWD/$PRGNAM.ini > $PKG/etc/$PRGNAM.ini.new
 
-# Optionally build and install ume:
-if [ "${UME:-no}" = "yes" ]; then
-  echo "BUILDING UME"
-  make BUILD_FLAC=0 BUILD_JPEG=0 BUILD_EXPAT=0 SUFFIX64="" \
-       BUILD_JPEGLIB=0 BUILD_SQLITE3=0 ARCHOPTS="$SLKCFLAGS" TARGET=ume
-  cp ume $PKG/usr/games
-  cp $CWD/desktop/ume.desktop $PKG/usr/share/applications
-  cp $CWD/desktop/ume.xpm $PKG/usr/share/pixmaps
-fi
-
-# Build and install the tools:
-echo "BUILDING TOOLS"
-make BUILD_JPEG=0 BUILD_EXPAT=0 SUFFIX64="" ARCHOPTS="$SLKCFLAGS" \
-     BUILD_JPEGLIB=0 BUILD_SQLITE3=0 tools
-cp testkeys romcmp jedutil unidasm ldresample ldverify \
+# Install the tools:
+install -s -m0755 -oroot -groot \
+   castool floptool imgtool nlwav \
+   testkeys romcmp jedutil unidasm ldresample ldverify \
    regrep srcclean src2html chdman nltool pngcmp split \
    $PKG/usr/games/
+
+# Upstream uses section 1 for their utilities' man pages, we want 6.
+for i in src/osd/sdl/man/*.1; do
+  sed '/^\.TH/s,\<1\>,6,' $i | \
+    gzip -9c > $PKG/usr/man/man6/$( basename $i .1 ).6.gz
+done
 
 # Create empty dirs for the user to populate with ROMs and such.
 for i in roms samples artwork ctrlr font cheat; do
   mkdir -p $PKG/usr/share/games/mame/$i
-done
-
-# Man pages, .desktop, and icon borrowed from Ludovic Lechapt's Debian package.
-for i in chdman jedutil ldverify romcmp testkeys; do
-  gzip -9c $CWD/man/$i.6 > $PKG/usr/man/man6/$i.6.gz
 done
 
 mkdir -p $PKG/usr/doc/${PRGNAM}-$VERSION

@@ -10,6 +10,7 @@ config() {
   fi
   # Otherwise, we leave the .new copy for the admin to consider...
 }
+
 preserve_perms() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
@@ -20,5 +21,6 @@ preserve_perms() {
   fi
   config $NEW
 }
+
 preserve_perms etc/rc.d/rc.dovecot.new
 

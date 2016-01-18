@@ -1,0 +1,72 @@
+#!/bin/sh -e
+
+# Slackware Package Build Script for munin-node (http://munin-monitoring.org)
+# SlackBuild source at https://github.com/chapmajs/munin-node-slackbuild
+
+# See LICENSE included in the project root for licensing information.
+
+# Copyright (c) 2015 Jonathan Chapman
+# glitch@glitchwrks.com
+# All rights reserved.
+
+PRGNAM=munin-node
+VERSION=${VERSION:-2.0.25}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+ARCH="noarch"
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+ARCHIVE_NAME=munin
+
+set -e
+
+# Clean up old builds
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar zxvf $CWD/$ARCHIVE_NAME-$VERSION.tar.gz
+cd $ARCHIVE_NAME-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Fix a bug in Perldoc extension detection
+patch Makefile < $CWD/patches/Makefile.patch
+
+# Patch Makefile.config for Slackware-esque install locations
+patch Makefile.config < $CWD/patches/Makefile.config.patch
+
+make LIBDIR=/usr/lib${LIBDIRSUFFIX}
+make install-common-prime install-node-prime \
+	install-plugins-prime LIBDIR=/usr/lib${LIBDIRSUFFIX} DESTDIR=$PKG
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mv $PKG/usr/local/share/ $PKG/usr/
+rm -rf $PKG/usr/local
+
+# move config files to .new
+cd $PKG/etc/munin
+for file in $(find . -type f); do
+	mv $file "$file.new"
+done
+
+install -D -m 0644 $CWD/rc.munin-node $PKG/etc/rc.d/rc.munin-node.new
+install -D -m 0644 $CWD/munin-node.logrotate $PKG/etc/logrotate.d/munin-node.new
+
+# Finish up the package
+mkdir -p $PKG/install
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}

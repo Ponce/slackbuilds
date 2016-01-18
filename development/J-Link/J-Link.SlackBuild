@@ -1,0 +1,122 @@
+#!/bin/sh
+
+# Slackware build script for SEGGER J-Link
+
+# Copyright 2015 Andrzej Telszewski, Sabadell
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=J-Link
+VERSION=${VERSION:-5.02}
+SRCNAM="JLink_Linux_V"$(echo $VERSION | tr -d .)"_"
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "x86_64" ]; then
+  LIBDIRSUFFIX="64"
+else
+  LIBDIRSUFFIX=""
+fi
+
+if [ "$ARCH" != "i486" ] && [ "$ARCH" != "x86_64" ]; then
+  echo -ne "\n\nError: \"${ARCH}\" architecture is not supported.\n\n"
+  exit 1
+fi
+
+if [ "$ARCH" = "i486" ]; then
+  SRCNAM="${SRCNAM}i386"
+else
+  SRCNAM="${SRCNAM}$ARCH"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$SRCNAM.tgz
+mv $SRCNAM $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+
+TREE_MD5=80fa37c7583e6eb366e15c1fc84e630f
+UDEV_MD5=4918ffb129c5691e8f9a01313f975fea
+TREE_MD5_NEW=( $(find . ! -name "libjlinkarm.so.*" ! -name "libedit.so.*" | sort | md5sum) )
+UDEV_MD5_NEW=( $(md5sum 99-jlink.rules) )
+
+if [ $TREE_MD5 != $TREE_MD5_NEW ] || [ $UDEV_MD5 != $UDEV_MD5_NEW ]; then
+  if [ $TREE_MD5 != $TREE_MD5_NEW ]; then
+    printf "\n\tThe directory structure for which this script has been written is different\n"
+    printf "\tfrom the provided one. Although most probably nothing wrong will happen,\n"
+    printf "\tit's possible there will be a missing file or a build failure.\n"
+  fi
+
+  if [ $UDEV_MD5 != $UDEV_MD5_NEW ]; then
+    printf "\n\tThe udev rules found in the provided source are different from the one\n"
+    printf "\tfor which this script has been written. Although most probably nothing\n"
+    printf "\twrong will happen, you might run into some device permissions problems.\n"
+  fi
+
+  sleep 5
+fi
+
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+mkdir -p $PKG/etc/udev/rules.d
+fromdos < 99-jlink.rules > $PKG/etc/udev/rules.d/99-jlink.rules
+sed -i 's/BUS!="usb", ACTION!="add", SUBSYSTEM!=="usb_device", GOTO="jlink_rules_end"/ACTION!="add", SUBSYSTEM!="usb", GOTO="jlink_rules_end"/' \
+  $PKG/etc/udev/rules.d/99-jlink.rules
+sed -i 's/MODE="666"/MODE="664", GROUP="plugdev"/' $PKG/etc/udev/rules.d/99-jlink.rules
+
+mkdir -p $PKG/usr/bin
+cp -a JFlashSPI_CL JLink{Exe,GDBServer,RemoteServer,RTTClient,STM32,SWOViewer} $PKG/usr/bin
+
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX
+cp -a libjlinkarm.so.* $PKG/usr/lib$LIBDIRSUFFIX
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a Doc/{License.txt,UM08001_JLink.pdf,ReleaseNotes/ReleaseJLink.html} \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/samples
+cp -a Samples/JLink/* $PKG/usr/doc/$PRGNAM-$VERSION/samples
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}

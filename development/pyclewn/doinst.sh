@@ -1,1 +1,1 @@
-/usr/bin/vim -c "helptags /usr/share/vim/vimfiles/doc|q"
+/usr/bin/vim -c "helptags usr/share/vim/vimfiles/doc|q"
