@@ -1,7 +1,6 @@
 #!/bin/sh
 
 # Slackware build script for OpenCASCADE
-# With some inspiration from the Arch PKGBUILD script
 
 # Copyright 2010-2012 Niels Horn, Rio de Janeiro, RJ, Brazil
 # All rights reserved.
@@ -22,15 +21,15 @@
 # WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-# revision date: 2013/11/17
+#
+# Maintained by David Spencer <baildon.research@googlemail.com>
 
 PRGNAM=OpenCASCADE
-VERSION=${VERSION:-6.6.0}
+VERSION=${VERSION:-6.9.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-SRCVERSION=$( echo $VERSION | sed "s/\.//g" )
+SRCNAM=$(echo $PRGNAM | tr '[:upper:]' '[:lower:]')
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -64,32 +63,40 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-# Source untars in current directory...
-mkdir $PRGNAM-$VERSION
-cd $PRGNAM-$VERSION
-tar xvf $CWD/${PRGNAM}${SRCVERSION}.tgz
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tgz
+cd $SRCNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
   -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-cd ros
+# Update automake config, and de-version the VTK sonames
+sed -i \
+  -e 's/INCLUDES =/AM_CPPFLAGS =/' \
+  adm/lin/amk/*/Makefile.am
+sed -i \
+  -e 's/AM_INIT_AUTOMAKE(\[foreign])/AM_INIT_AUTOMAKE([foreign subdir-objects])/' \
+  -e 's/AM_CONFIG_HEADER/AC_CONFIG_HEADERS/g' \
+  -e '/CSF_VTK_LIB/s/-6\.1//g' \
+  configure.ac
 
-autoreconf -f -i
+./build_configure
 
 CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS -DvtkFloatingPointType=double" \
 ./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --prefix=/opt/${PRGNAM} \
+  --libdir=/opt/${PRGNAM}/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --mandir=/usr/man \
   --with-tcl=/usr/lib${LIBDIRSUFFIX} \
   --with-tk=/usr/lib${LIBDIRSUFFIX} \
+  --with-vtk-library=/opt/VTK/lib${LIBDIRSUFFIX} \
+  --with-vtk-include=/opt/VTK/include \
   --disable-debug \
   --enable-production \
   --build=$ARCH-slackware-linux
@@ -100,37 +107,20 @@ sed -e "s|\$(prefix)|\$(DESTDIR)\$(prefix)|g" -i Makefile
 make
 make install DESTDIR=$PKG
 
-cd ..
-
-# Correct path of include files
-mkdir -p $PKG/usr/include
-mv $PKG/usr/inc $PKG/usr/include/$PRGNAM
-
 # Correct path of source files
-mkdir -p $PKG/usr/src/$PRGNAM
-( set -e
-  cd $PKG/usr
-  mv config.h src/$PRGNAM/
-  cd src
-  for d in *; do
-    if [ "$d" != "$PRGNAM" ]; then
-      mv $d $PRGNAM/
-    fi
-  done
-) || exit 1
-
+mv $PKG/opt/$PRGNAM/config.h $PKG/opt/$PRGNAM/src/
 # Remove unnecessary (and confusing) files
-rm -r $PKG/usr/Linux $PKG/usr/*.sh
+rm -r $PKG/opt/$PRGNAM/Linux $PKG/opt/$PRGNAM/*.sh
 
-mkdir -p $PKG/usr/share/$PRGNAM
-cp -a ros/data ros/samples $PKG/usr/share/$PRGNAM
+mkdir -p $PKG/opt/$PRGNAM/
+cp -a data samples $PKG/opt/$PRGNAM
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  ros/LICENSE ros/README \
+  LICENSE_LGPL_21.txt OCCT_LGPL_EXCEPTION.txt README.txt \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
@@ -138,7 +128,7 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 #   but be warned: we're talking about ~ 520MB of documentation...
 if [ "${INSTALL_FULL_DOCS:-no}" = "yes" ]; then
   cp -a \
-    ros/doc/* \
+    doc/* \
     $PKG/usr/doc/$PRGNAM-$VERSION
 fi
 
