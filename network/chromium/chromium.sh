@@ -13,4 +13,4 @@ CHROMIUM_FLAGS=${CHROMIUM_USER_FLAGS:-$CHROMIUM_FLAGS}
 export CHROME_WRAPPER=$(readlink -f "$0")
 export CHROME_DESKTOP=chromium.desktop
 
-exec /usr/lib64/chromium/chromium $CHROMIUM_FLAGS "$@"
+exec /usr/lib@LIBDIRSUFFIX@/chromium/chromium $CHROMIUM_FLAGS "$@"
