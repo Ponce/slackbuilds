@@ -11,5 +11,5 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/php/pdo_dblib.ini.new
+config etc/php.d/pdo_dblib.ini.new
 
