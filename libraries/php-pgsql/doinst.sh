@@ -11,6 +11,6 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/php/pgsql.ini.new
-config etc/php/pdo_pgsql.ini.new
+config etc/php.d/pgsql.ini.new
+config etc/php.d/pdo_pgsql.ini.new
 
