@@ -11,7 +11,7 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/php/graphviz.ini.new
+config etc/php.d/graphviz.ini.new
 
 # Configure plugins
 # (writes /usr/lib*/graphviz/config6 with available plugin information)
