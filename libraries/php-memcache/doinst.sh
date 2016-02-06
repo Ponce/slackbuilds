@@ -11,5 +11,8 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/php/memcache.ini.new
+config etc/php.d/memcache.ini.new
+
+/usr/bin/pecl install --nodeps --soft --force --register-only --nobuild \
+  usr/libLIBDIRSUFFIX/php/.pkgxml/memcache.xml > /dev/null
 
