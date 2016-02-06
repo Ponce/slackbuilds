@@ -11,7 +11,7 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/php/imagick.ini.new
+config etc/php.d/imagick.ini.new
 
 /usr/bin/pecl install --nodeps --soft --force --register-only --nobuild \
   usr/libLIBDIRSUFFIX/php/.pkgxml/imagick.xml > /dev/null
