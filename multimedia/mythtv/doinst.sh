@@ -11,13 +11,18 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-# Keep same perms on rc.mythbackend.new:
-if [ -e etc/rc.d/rc.mythbackend ]; then
-  cp -a etc/rc.d/rc.mythbackend etc/rc.d/rc.mythbackend.new.incoming
-  cat etc/rc.d/rc.mythbackend.new > etc/rc.d/rc.mythbackend.new.incoming
-  mv etc/rc.d/rc.mythbackend.new.incoming etc/rc.d/rc.mythbackend.new
-fi
+preserve_perms() {
+  NEW="$1"
+  OLD="$(dirname $NEW)/$(basename $NEW .new)"
+  if [ -e $OLD ]; then
+    cp -a $OLD ${NEW}.incoming
+    cat $NEW > ${NEW}.incoming
+    mv ${NEW}.incoming $NEW
+  fi
+  config $NEW
+}
 
+preserve_perms etc/rc.d/rc.mythbackend.new
 config etc/rc.d/rc.mythbackend.new
 config etc/logrotate.d/mythbackend.new
 config etc/mythtv/config.xml.new
