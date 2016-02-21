@@ -22,12 +22,11 @@ preserve_perms() {
   config $NEW
 }
 
-preserve_perms etc/rc.d/rc.xen-watchdog.new
-preserve_perms etc/rc.d/rc.xencommons.new
-preserve_perms etc/rc.d/rc.xendomains.new
+find etc/rc.d -type f -name 'rc.xen*.new' \
+  | while read new ; do preserve_perms $new ; done
 
-config etc/default/xencommons.new
-config etc/default/xendomains.new
+find etc/default -type f -name 'xen*.new' \
+  | while read new ; do config $new ; done
 
 find etc/xen etc/qemu -type f -name '*.new' \
   | while read new ; do config $new ; done
