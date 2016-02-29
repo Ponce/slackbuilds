@@ -5,7 +5,7 @@
 # Written by Eric Schultz eric at schultzter.ca
 # Taken over by Vincent Batts vbatts@hashbangbash.com
 
-# Copyright (c) 2012, 2013, 2014, 2015  Vincent Batts
+# Copyright (c) 2012, 2013, 2014, 2015, 2016  Vincent Batts
 # Copyright (c) 2012 Eric Schultz
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of
@@ -27,7 +27,7 @@
 # SOFTWARE.
 
 PRGNAM=google-go-lang
-VERSION=${VERSION:-1.4.3}
+VERSION=${VERSION:-1.6}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -45,17 +45,17 @@ fi
 
 if [ "$ARCH" = "i486" ]; then
   LIBDIRSUFFIX=""
-  GARCH="386"
+  GOARCH="386"
 elif [ "$ARCH" = "x86_64" ]; then
   LIBDIRSUFFIX="64"
-  GARCH="amd64"
+  GOARCH="amd64"
 elif [ "$ARCH" = "arm" ]; then
   LIBDIRSUFFIX=""
-  GARCH="arm"
+  GOARCH="arm"
   export GOARM="6" # can be '5' as well, to use soft float instead of hardware
 else
   LIBDIRSUFFIX=""
-  GARCH=386
+  GOARCH=386
 fi
 
 CWD=$(pwd)
@@ -66,9 +66,9 @@ OUTPUT=${OUTPUT:-/tmp}
 set -e
 
 rm -rf $PKG
-mkdir -p $TMP $PKG/usr/lib${LIBDIRSUFFIX} $OUTPUT
-cd $PKG/usr/lib${LIBDIRSUFFIX}
-tar xvf $CWD/go$VERSION.src.tar.gz
+mkdir -p $TMP $PKG/usr/lib${LIBDIRSUFFIX}/go${VERSION} $OUTPUT
+cd $PKG/usr/lib${LIBDIRSUFFIX}/go${VERSION}
+tar xvf $CWD/go${VERSION}.src.tar.gz
 cd go
 chown -R root:root .
 find -L . \
@@ -77,16 +77,15 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-export GOSRC="$(pwd)"
-export GOROOT="$(pwd)"
-export GOROOT_FINAL="/usr/lib${LIBDIRSUFFIX}/go"
-export GOOS="linux"
-export GOBIN="${PKG}/usr/bin"
-export GOARCH="${GARCH}"
-
+# as of >= go1.5, the cross-compiler does not need to be bootstrap, so the
+# compiler need only be compiled for the host OS, which it detects
+unset GOBIN GOPATH GOOS GOARCH
 unset BASH_ENV # Not sure why, but this causes run.bash to fail --rworkman
 
-mkdir -p "${GOBIN}"
+export GOROOT_BOOTSTRAP="/usr" # gcc 5+ is go1.4 API, so we'll bootstrap with it
+export GOROOT="$(pwd)"
+export GOROOT_FINAL="/usr/lib${LIBDIRSUFFIX}/go${VERSION}/go"
+
 cd src
 
 if [ "x${RUN_TEST}" = "xtrue" ] ; then
@@ -97,31 +96,22 @@ else
 	./make.bash
 fi
 
+# As of go1.5, golang supports shared libraries, so generate them for use.
+$GOROOT/bin/go install -buildmode=shared std
+
 cd ..
-
-ln -sf /usr/lib${LIBDIRSUFFIX}/go/pkg/tool/linux_${GOARCH}/cgo $PKG/usr/bin/cgo
-ln -sf /usr/lib${LIBDIRSUFFIX}/go/pkg/tool/linux_${GOARCH}/ebnflint $PKG/usr/bin/ebnflint
-
-# we'll just check for all of their compilers :-)
-for tool in 8a 8c 8g 8l 6a 6c 6g 6l 5a 5c 5g 5l ; do
-  if [ -x $PKG/usr/lib${LIBDIRSUFFIX}/go/pkg/tool/linux_${GOARCH}/${tool} ] ; then
-    ln -sf /usr/lib${LIBDIRSUFFIX}/go/pkg/tool/linux_${GOARCH}/${tool} $PKG/usr/bin/${tool}
-  fi
-done
 
 # Put the profile scripts for setting PATH and env variables
 mkdir -p $PKG/etc/profile.d
 cat > $PKG/etc/profile.d/go.csh.new << EOF
 #!/bin/csh
-setenv GOOS linux
-setenv GOARCH ${GOARCH}
-setenv GOROOT /usr/lib${LIBDIRSUFFIX}/go
+setenv GOROOT ${GOROOT_FINAL}
+export PATH="\${GOROOT}/bin:\${PATH}"
 EOF
 cat > $PKG/etc/profile.d/go.sh.new << EOF
 #!/bin/sh
-export GOOS="linux"
-export GOARCH="${GOARCH}"
-export GOROOT="/usr/lib${LIBDIRSUFFIX}/go"
+export GOROOT="${GOROOT_FINAL}"
+export PATH="\${GOROOT}/bin:\${PATH}"
 EOF
 
 chmod 0755 $PKG/etc/profile.d/go.csh.new
@@ -129,7 +119,7 @@ chmod 0755 $PKG/etc/profile.d/go.sh.new
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  AUTHORS CONTRIBUTORS LICENSE PATENTS README VERSION \
+  AUTHORS CONTRIBUTING.md CONTRIBUTORS LICENSE PATENTS README.md VERSION \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
