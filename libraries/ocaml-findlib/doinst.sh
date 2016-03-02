@@ -10,8 +10,8 @@ config() {
 }
 config etc/findlib.conf
 
-destdir=$(ocamlfind printconf destdir)/stublibs
-ldconf=$(ocamlfind printconf ldconf)
-if ! grep -q $destdir $ldconf; then
-  echo $destdir >> $ldconf
+destdir=$(chroot . /usr/bin/ocamlfind printconf destdir)/stublibs
+ldconf=$(chroot . /usr/bin/ocamlfind printconf ldconf)
+if ! grep -q -s "${destdir##/}" "$ldconf"; then
+  echo "$destdir" >> "${ldconf##/}"
 fi

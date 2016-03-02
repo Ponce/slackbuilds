@@ -11,4 +11,4 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/php/20ioncube.ini.new
+config etc/php.d/20ioncube.ini.new

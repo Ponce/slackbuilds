@@ -11,5 +11,8 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/php/ssh2.ini.new
+config etc/php.d/ssh2.ini.new
+
+/usr/bin/pecl install --nodeps --soft --force --register-only --nobuild \
+  usr/libLIBDIRSUFFIX/php/.pkgxml/ssh2.xml > /dev/null
 

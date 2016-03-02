@@ -25,9 +25,10 @@
 # 2014-02-14 Merge lib64 patch from Christoph Willing <c.willing@uq.edu.au>
 # 2014-02-16 Update to 6.1.0
 # 2014-11-16 Support VTK features
+# 2015-12-12 Update to 6.3.0, use external deps, move to /opt
 
 PRGNAM=VTK
-VERSION=${VERSION:-6.1.0}
+VERSION=${VERSION:-6.3.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -59,15 +60,16 @@ else
 fi
 
 # configure VTK features
-group_imaging="" ; [ "${IMAGING:-no}" != "no" ] && group_imaging="-DVTK_Group_Imaging=true"
+# (defaults suitable for OpenCASCADE, it's the only SBo package that depends on VTK)
+group_imaging="" ; [ "${IMAGING:-yes}" != "no" ] && group_imaging="-DVTK_Group_Imaging=true"
 group_mpi=""     ; [ "${MPI:-no}" != "no" ]     && group_mpi="-DVTK_Group_MPI=true"
 group_qt=""      ; [ "${QT:-yes}" != "no" ]     && group_qt="-DVTK_Group_Qt=true"
-group_tk=""      ; [ "${TK:-no}" != "no" ]      && group_tk="-DVTK_Group_Tk=true"
+group_tk=""      ; [ "${TK:-yes}" != "no" ]      && group_tk="-DVTK_Group_Tk=true"
 group_views=""   ; [ "${VIEWS:-no}" != "no" ]   && group_views="-DVTK_Group_Views=true"
 group_web=""     ; [ "${WEB:-no}" != "no" ]     && group_web="-DVTK_Group_Web=true"
 wrap_python=""   ; [ "${PYTHON:-yes}" != "no" ] && wrap_python="-DVTK_WRAP_PYTHON=true"
 wrap_java=""     ; [ "${JAVA:-no}" != "no" ]    && wrap_java="-DVTK_WRAP_JAVA=true"
-wrap_tcl=""      ; [ "${TCL:-no}" != "no" ]     && wrap_tcl="-DVTK_WRAP_TCL=true"
+wrap_tcl=""      ; [ "${TCL:-yes}" != "no" ]     && wrap_tcl="-DVTK_WRAP_TCL=true"
 
 set -e
 
@@ -82,20 +84,31 @@ find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
   -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 # patch CMakefile first for lib64 issue
 patch -p0 <$CWD/patch-handle-64bit.diff
+
+# -DCMAKE_INSTALL_PREFIX=/opt
+#   Installing to /usr creates /usr/plugins, /usr/src/vtk, /usr/lib64/www :-(
+# -DVTK_CUSTOM_LIBRARY_SUFFIX and -DVTK_INSTALL_INCLUDE_DIR
+#   See https://bugs.archlinux.org/task/43378?project=5&cat[0]=33&string=vtk
+# -DVTK_USE_SYSTEM_*
+#   Use external deps for everything in Slackware, but not SBo (VTK's cmake
+#   tests are broken and unable to use external jsoncpp, proj, netcdf, hdf5 and
+#   gl2ps). That just leaves python-twisted -- use SBo for that, because the
+#   internal twisted overwrites SBo's if it's already installed :O
 
 mkdir -p build
 cd build
   cmake \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/opt/$PRGNAM \
     -DLIB_SUFFIX=$LIBDIRSUFFIX \
     -DBUILD_SHARED_LIBS=ON \
+    -DVTK_CUSTOM_LIBRARY_SUFFIX="" \
+    -DVTK_INSTALL_INCLUDE_DIR:PATH=include \
     $group_imaging \
     $group_mpi \
     $group_qt \
@@ -105,16 +118,35 @@ cd build
     $wrap_python \
     $wrap_java \
     $wrap_tcl \
-    ..
+    -DVTK_USE_SYSTEM_EXPAT:BOOL=ON \
+    -DVTK_USE_SYSTEM_FREETYPE:BOOL=ON \
+    -DVTK_USE_SYSTEM_JPEG:BOOL=ON \
+    -DVTK_USE_SYSTEM_LIBXML2:BOOL=ON \
+    -DVTK_USE_SYSTEM_OGGTHEORA:BOOL=ON \
+    -DVTK_USE_SYSTEM_PNG:BOOL=ON \
+    -DVTK_USE_SYSTEM_TIFF:BOOL=ON \
+    -DVTK_USE_SYSTEM_ZLIB:BOOL=ON \
+    -DVTK_USE_SYSTEM_ZOPE:BOOL=ON \
+    -DVTK_USE_SYSTEM_TWISTED:BOOL=ON \
+    -DCMAKE_BUILD_TYPE=Release ..
 
   make
   make install DESTDIR=$PKG
 cd ..
 
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/python2.7/site-packages/
+mv \
+  $PKG/opt/VTK/lib$LIBDIRSUFFIX/python2.7/site-packages/vtk \
+  $PKG/usr/lib$LIBDIRSUFFIX/python2.7/site-packages/
+rm -rf $PKG/opt/VTK/lib$LIBDIRSUFFIX/python2.7
+
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  CONTRIBUTING.md Copyright.txt README.md \
+  $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install

@@ -32,8 +32,8 @@ config etc/elemental-ircd/ircd.motd.new
 
 # Set up user/group permissions
 groupadd -g $IRCD_GID $IRCD_UNAME 2>/dev/null
-useradd -u $IRCD_UID -g $IRCD_GID -d /var/lib/elemental-ircd $IRCD_UNAME 2>/dev/null
-chown $IRCD_UID:$IRCD_GID /var/run/elemental-ircd
-chown $IRCD_UID:$IRCD_GID /var/log/elemental-ircd
-chown $IRCD_UID:$IRCD_GID /var/lib/elemental-ircd
-chown $IRCD_UID:$IRCD_GID /var/state/elemental-ircd
+useradd -u $IRCD_UID -g $IRCD_GID -d var/lib/elemental-ircd $IRCD_UNAME 2>/dev/null
+chown $IRCD_UID:$IRCD_GID var/run/elemental-ircd
+chown $IRCD_UID:$IRCD_GID var/log/elemental-ircd
+chown $IRCD_UID:$IRCD_GID var/lib/elemental-ircd
+chown $IRCD_UID:$IRCD_GID var/state/elemental-ircd

@@ -5,7 +5,7 @@
 # $Revision: 6804ca7db709 $
 # $Date: 2015/03/13 21:57:14 $
 #
-# Copyright 2007-2015 Adis Nezirovic <adis_at_linux.org.ba>
+# Copyright 2007-2016 Adis Nezirovic <adis_at_linux.org.ba>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -30,7 +30,7 @@
 # Since version 9.3 this startup script can run multiple PostgreSQL
 # versions on different ports and with different data dirs.
 # 
-# e.g. PG_VERSION=9.4 PG_PORT=6432 /etc/rc.d/rc.@PRGNAM@ start
+# e.g. PG_VERSION=9.5 PG_PORT=6432 /etc/rc.d/rc.@PRGNAM@ start
 
 PG_VERSION=${PG_VERSION:-@PG_VERSION@}
 PG_PORT=${PG_PORT:-@PG_PORT@}
@@ -42,12 +42,12 @@ PG_CTL=/usr/lib${LIBDIRSUFFIX}/@PRGNAM@/$PG_VERSION/bin/pg_ctl
 PIDFILE=$DATADIR/postmaster.pid
 
 # oom-killer score
-# if defined and set to -1000, main postmaster wont be killed
-# by Linux OOM killer, but individual backends still could be
-# (since OOM_SCORE_ADJ in SlackBuild is set to 0)
 #
-# http://www.kernel.org/doc/Documentation/filesystems/proc.txt
-OOM_SCORE_ADJ=-1000
+# http://www.postgresql.org/docs/9.5/static/kernel-resources.html#LINUX-MEMORY-OVERCOMMIT
+PG_OOM_ADJUST_FILE=/proc/self/oom_score_adj
+PG_MASTER_OOM_SCORE_ADJ=-1000
+PG_CHILD_OOM_SCORE_ADJ=0
+PG_ENV="PG_OOM_ADJUST_FILE=$PG_OOM_ADJUST_FILE PG_OOM_ADJUST_VALUE=$PG_CHILD_OOM_SCORE_ADJ"
 
 # Return values (according to LSB):
 # 0 - success
@@ -62,7 +62,7 @@ OOM_SCORE_ADJ=-1000
 pg_ctl()
 {
 	CMD="$PG_CTL -o '-p $PG_PORT' $@"
-	su - postgres -c "$CMD"
+	su - postgres -c "$PG_ENV $CMD"
 }
 
 if [ ! -f $POSTGRES ]; then
@@ -93,7 +93,7 @@ case "$1" in
 			exit 1
 
 		else
-			test x"$OOM_SCORE_ADJ" != x && echo "$OOM_SCORE_ADJ" > /proc/self/oom_score_adj
+			test -e "$PG_OOM_ADJUST_FILE" && echo "$PG_MASTER_OOM_SCORE_ADJ" > "$PG_OOM_ADJUST_FILE"
 			pg_ctl start -w -l $LOGFILE -D $DATADIR
 			exit 0
 		fi	
@@ -120,7 +120,7 @@ case "$1" in
 
 	"restart")
 		echo "Restarting PostgreSQL..."
-		test x"$OOM_SCORE_ADJ" != x && echo "$OOM_SCORE_ADJ" > /proc/self/oom_score_adj
+		test -e "$PG_OOM_ADJUST_FILE" && echo "$PG_MASTER_OOM_SCORE_ADJ" > "$PG_OOM_ADJUST_FILE"
 		pg_ctl restart -l $LOGFILE -D $DATADIR -m smart
 	;;
 

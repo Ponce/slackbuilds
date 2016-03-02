@@ -12,3 +12,7 @@ config() {
 }
 
 config etc/php.d/redis.ini.new
+
+/usr/bin/pecl install --nodeps --soft --force --register-only --nobuild \
+  usr/libLIBDIRSUFFIX/php/.pkgxml/redis.xml > /dev/null
+

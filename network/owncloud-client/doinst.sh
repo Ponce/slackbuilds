@@ -11,7 +11,7 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config "$PKG/etc/ownCloud/sync-exclude.lst.new"
+config "etc/ownCloud/sync-exclude.lst.new"
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
