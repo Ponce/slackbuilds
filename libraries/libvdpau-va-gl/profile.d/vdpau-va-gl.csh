@@ -1,3 +1,3 @@
 #!/bin/csh
 
-setenv VDPAU_DRIVER=va_gl
+setenv VDPAU_DRIVER va_gl
