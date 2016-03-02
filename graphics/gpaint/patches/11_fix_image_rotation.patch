@@ -1,0 +1,110 @@
+Author: Goedson Teixeira Paixao <goedson@debian.org>
+Description: Fixes rotation operations
+ Implement the rotation in multiples of 90 degrees using the
+ gdk_pixbuf_rotate_simple function instead of the custom (and broken)
+ rotation algorithm
+Bug-Debian: http://bugs.debian.org/497487
+Bug-Ubuntu: https://bugs.edge.launchpad.net/ubuntu/+source/gpaint/+bug/262942
+Forwarded: https://savannah.gnu.org/patch/?6643
+
+Index: b/src/drawing.c
+===================================================================
+--- a/src/drawing.c	2009-12-19 17:12:10.000000000 -0200
++++ b/src/drawing.c	2009-12-19 17:12:11.000000000 -0200
+@@ -462,12 +462,23 @@
+ }
+ 
+ void
+-drawing_rotate(gpaint_drawing *drawing, double degrees)
++drawing_rotate(gpaint_drawing *drawing, int degrees)
+ {
+     gpaint_image *image = drawing_create_image(drawing);
+     if (image)
+     {
+-        image_rotate(image, degrees);    
++        switch (degrees)
++        {
++            case 0:
++            case 90:
++            case 180:
++            case 270:
++                image_rotate_simple(image, degrees);
++                break;
++            default:
++                image_rotate(image, degrees);
++                break;
++        }
+         
+         /* copy rotated image on the pixmap */
+         gdk_pixmap_unref(drawing->backing_pixmap);
+Index: b/src/drawing.h
+===================================================================
+--- a/src/drawing.h	2009-12-19 17:11:48.000000000 -0200
++++ b/src/drawing.h	2009-12-19 17:12:11.000000000 -0200
+@@ -58,6 +58,6 @@
+ void drawing_clear(gpaint_drawing *drawing);
+ void drawing_clear_selection(gpaint_drawing *drawing, gpaint_point_array *points);
+ gboolean drawing_prompt_to_save(gpaint_drawing *drawing);
+-void drawing_rotate(gpaint_drawing *drawing, double degrees);
++void drawing_rotate(gpaint_drawing *drawing, int degrees);
+ 
+ #endif
+Index: b/src/image.c
+===================================================================
+--- a/src/image.c	2009-12-19 17:11:48.000000000 -0200
++++ b/src/image.c	2009-12-19 17:12:11.000000000 -0200
+@@ -628,6 +628,27 @@
+     return 0;
+ }
+ 
++int
++image_rotate_simple (gpaint_image *image, int degrees)
++{
++	GdkPixbuf *newpixbuf;
++	
++	switch (degrees)
++	{
++        case GDK_PIXBUF_ROTATE_NONE:
++        case GDK_PIXBUF_ROTATE_COUNTERCLOCKWISE:
++        case GDK_PIXBUF_ROTATE_UPSIDEDOWN:
++        case GDK_PIXBUF_ROTATE_CLOCKWISE:
++            newpixbuf = gdk_pixbuf_rotate_simple (image->pixbuf, degrees);
++            gdk_pixbuf_unref (image->pixbuf);
++            image->pixbuf = newpixbuf;
++            return 0;
++            break;
++        default:
++            return 1;
++    }
++}
++
+ 
+ GdkPixbuf* image_pixbuf(gpaint_image* image) {
+     return image->pixbuf;
+Index: b/src/image.h
+===================================================================
+--- a/src/image.h	2009-12-19 17:11:48.000000000 -0200
++++ b/src/image.h	2009-12-19 17:12:11.000000000 -0200
+@@ -45,5 +45,6 @@
+ int            image_flip_x(gpaint_image *image);
+ int            image_flip_y(gpaint_image *image);
+ int            image_rotate(gpaint_image *image, double radians);
++int            image_rotate_simple(gpaint_image *image, int degrees);
+ GdkPixbuf*     image_pixbuf(gpaint_image *image);
+ #endif
+Index: b/src/menu.c
+===================================================================
+--- a/src/menu.c	2009-12-19 17:12:10.000000000 -0200
++++ b/src/menu.c	2009-12-19 17:12:11.000000000 -0200
+@@ -486,9 +486,9 @@
+ 
+     sscanf(name, "rotate_%c%d_menu", &sign, &degrees);
+     debug2("sign = %c  degrees = %d", sign, degrees);
+-    if (sign=='n')
++    if (sign=='p')
+     {
+-        degrees *= -1;
++        degrees = 360 - degrees;
+     }
+     canvas_focus_lost(canvas);
+     drawing_rotate(canvas->drawing, degrees);
