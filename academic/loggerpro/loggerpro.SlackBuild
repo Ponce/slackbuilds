@@ -1,0 +1,158 @@
+#!/bin/sh
+
+# Slackware build script for loggerpro
+
+# Copyright 2016  Robby Workman, Tuscaloosa, Alabama, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=loggerpro
+VERSION=${VERSION:-3.8.4.6}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+# Automatically determine the architecture we're building on:
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+    # Unless $ARCH is already set, use uname -m for all other archs:
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SHORTARCH="32"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SHORTARCH="32"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SHORTARCH="64"
+  LIBDIRSUFFIX="64"
+else
+  SHORTARCH="32"
+  LIBDIRSUFFIX=""
+fi
+
+set -e # Exit on most errors
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/LPL-$(printf $VERSION | tr -d .)-$SHORTARCH.tar.gz
+ar -x vstdrivers_*.deb
+tar xf data.tar.xz -C $PKG
+ar -x vstloggerpro_${VERSION}_*.deb
+tar xf data.tar.xz -C $PKG
+
+chown -R root:root $PKG
+find -L $PKG \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# /etc/udev goes to /lib/udev
+mv $PKG/etc $PKG/lib
+
+mv $PKG/usr/local/bin/* $PKG/usr/bin
+
+# Copy over icons first since their presence won't allow a clean move
+cp -a $PKG/usr/local/share/icons $PKG/usr/share
+rm -rf $PKG/usr/local/share/icons
+
+# Now move everything else
+mv $PKG/usr/local/share/* $PKG/usr/share
+
+# Move the docs over
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+mv $PKG/usr/share/doc/* $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+rmdir $PKG/usr/share/doc
+
+# Kill the /usr/local tree and remove empty /usr/sbin dir
+rm -rf $PKG/usr/local
+rmdir $PKG/usr/sbin
+
+# Fix libdir
+[ "$LIBDIRSUFFIX" = "64" ] && mv $PKG/usr/lib $PKG/usr/lib${LIBDIRSUFFIX}
+
+# Create library symlinks
+ln -s libGoIO.so.2.0.53 $PKG/usr/lib${LIBDIRSUFFIX}/libGoIO.so.2
+ln -s libGoIO.so.2 $PKG/usr/lib${LIBDIRSUFFIX}/libGoIO.so
+ln -s libNGIO.so.1.0.0 $PKG/usr/lib${LIBDIRSUFFIX}/libNGIO.so.1
+ln -s libNGIO.so.1 $PKG/usr/lib${LIBDIRSUFFIX}/libNGIO.so
+
+# Nope, we're not writing to /usr during runtime
+mkdir -p \
+  $PKG/var/lib/LoggerPro/VSTSupport \
+  $PKG/var/lib/LoggerPro/tmp \
+  $PKG/var/lib/LoggerLite/tmp
+rm -r \
+  $PKG/usr/share/LoggerPro/Linux/VSTSupport \
+  $PKG/usr/share/LoggerPro/Linux/tmp \
+  $PKG/usr/share/LoggerLite/Linux/tmp
+ln -s /var/lib/LoggerPro/VSTSupport $PKG/usr/share/LoggerPro/Linux/VSTSupport
+ln -s /var/lib/LoggerPro/tmp $PKG/usr/share/LoggerPro/Linux/tmp
+ln -s /var/lib/LoggerLite/tmp $PKG/usr/share/LoggerLite/Linux/tmp
+chmod 1777 \
+  $PKG/var/lib/LoggerPro/VSTSupport \
+  $PKG/var/lib/LoggerPro/tmp \
+  $PKG/var/lib/LoggerLite/tmp
+
+# The below points were mentioned to Vernier in their forum:
+# http://www.vernier.com/forums/logger-pro-linux/404-packaging-improvements/
+#
+# /usr/share/LoggerPro/Experiments/ will remain 0755; only the sysadmin
+# should be writing to this. TODO: Contact Vernier about this.
+# Thinking to myself here... Would be nice to have a three-tier system maybe,
+# e.g. /usr/share/LoggerPro/Experiments/, then check a sysadmin configured
+# location (e.g. /data/common/LoggerPro/Experiments/ is something like I 
+# would have), then $HOME, e.g. $HOME/LoggerPro/Experiments/, with all
+# three (if set) being check and the contents merged, and each level 
+# overrides (e.g. same-named files) the previous levels. 
+# While I'm writing, for the love of sanity, PLEASE use /tmp or /var/tmp
+# or some other place, or at least make it configurable in a systemwide
+# config file at e.g. /etc/Vernier/LoggerPro.conf (this would be a good
+# place to make the other stuff above configurable too)
+# Note the move of udev files to /lib/udev instead of /etc/udev
+
+# Work around the hardcoding of /usr/local (I can't figure out where it's
+# hardcoded or thus how to fix it)
+mkdir -p $PKG/usr/local/bin $PKG/usr/local/share
+ln -s /usr/bin/loggerpro $PKG/usr/local/bin
+ln -s /usr/share/LoggerPro $PKG/usr/local/share
+ln -s /usr/share/LoggerLite $PKG/usr/local/share
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
