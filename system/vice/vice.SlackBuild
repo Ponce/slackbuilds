@@ -22,8 +22,9 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# Initialize variables
 PRGNAM=vice
-VERSION=${VERSION:-2.4.21}
+VERSION=${VERSION:-2.4.24}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -43,6 +44,9 @@ OUTPUT=${OUTPUT:-/tmp}
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
   LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
@@ -54,11 +58,13 @@ else
   LIBDIRSUFFIX=""
 fi
 
-# Only the internal ffmpeg libraries seems to work ATM
-if [ "${FFMPEG:-no}" = "yes" ]; then ffmpeg="--enable-static-ffmpeg"; else ffmpeg=""; fi
+# Only an external ffmpeg seems to work ATM (might change from version to version)
+if [ "${FFMPEG:-no}" = "yes" ]; then ffmpeg="--enable-external-ffmpeg"; else ffmpeg=""; fi
 
-set -e 
+# Exit if errors encountered
+set -e
 
+# Setup for package creation
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
@@ -72,70 +78,81 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-# Set the help path correctly with respect to the actually installed doc
-# folder (the folder set up by "make install" is quite broken).
-patch -p1 <$CWD/patches/vice-fix-help.patch
+# Set proper paths in documentation.
+sed -i "s/\/usr\/local\/lib\//\/usr\/lib${LIBDIRSUFFIX}\//g" \
+  man/vice.1 src/geninfocontrib_h.sh src/arch/win32/utils/geninfocontrib.c
+sed -i 's/"\/vice_toc\.html"/"\/html\/vice_toc\.html"/g' \
+  src/arch/unix/gui/uicommands.c
+sed -i "s/\/usr\/local/\/usr/g" doc/vice.* doc/html/*html
+sed -i "s/\/usr\/lib\//\/usr\/lib${LIBDIRSUFFIX}\//g" doc/vice.* doc/html/*html
 
-# A small fix to avoid avoid building the pdf (broken, we use the one provided)
-patch -p1 < $CWD/patches/vice-2.4.4-no-pdf.patch
+# Disable PDF generation because it bombs
+sed -i "s/AM_CONDITIONAL(BUILD_PDF, true)/AM_CONDITIONAL(BUILD_PDF, false)/g" \
+  configure.ac
 
-# Use /usr/lib64 on 64-bit Slackware
-[ "$ARCH" = "x86_64" ] && patch -p1 < $CWD/patches/vice-2.4.18-64bit.patch
-
-sh autogen.sh || true
-
+# Configure the software
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
-  --enable-fullscreen \
-  --enable-gnomeui \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
   --mandir=/usr/man \
   --infodir=/usr/info \
   $ffmpeg \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --with-sdlsound \
+  --with-x \
+  --enable-fullscreen \
+  --enable-quicktime \
+  --enable-ethernet \
+  --enable-parsid \
+  --enable-memmap \
+  --enable-gnomeui \
   --build=$ARCH-slackware-linux
 
+# Build the software
 make
 make install DESTDIR=$PKG
 
+# Strip symbols from binaries
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
+# Compress man pages
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
+# Compress info files
 rm -f $PKG/usr/info/dir
 gzip -9 $PKG/usr/info/*
 
-# Create link to documentation folder in the place VICE expects to find it.
-( cd $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM ; ln -s /usr/doc/$PRGNAM-$VERSION doc )
-
-# Copy the CBM.ttf font to the fonts directory
-# ('make install' spits an error on this, I haven't investigated why)
-mkdir -p $PKG/usr/share/fonts/TTF
-cp data/fonts/CBM.ttf $PKG/usr/share/fonts/TTF
-
 # Install icon and menu entries
 mkdir -p $PKG/usr/share/{applications,pixmaps}
-cp $CWD/config/*.desktop $PKG/usr/share/applications
-cp $CWD/config/vice.png $PKG/usr/share/pixmaps
+install -D -m 0644 $CWD/config/*.desktop $PKG/usr/share/applications
+install -D -m 0644 $CWD/config/vice.png $PKG/usr/share/pixmaps
 
-# Remove the documentation folder installed by "make install", which
-# is a broken mess of almost unrelated files in the wrong place
-rm -rf $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM/doc
-# Copy the original documentation folder to the usual place
+# Move the original documentation folder to the usual place
+# and create a link to where vice expect it to be
 mkdir -p $PKG/usr/doc
-cp -a doc $PKG/usr/doc/$PRGNAM-$VERSION
-find $PKG/usr/doc/$PRGNAM-$VERSION -name "Makefile*" -exec rm -f {} \;
-find $PKG/usr/doc/$PRGNAM-$VERSION -name "tex*" -exec rm -f {} \;
+mv $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM/doc $PKG/usr/doc/$PRGNAM-$VERSION
+( cd $PKG/usr/doc/$PRGNAM-$VERSION
+  chmod 644 *
+  mkdir html
+  mv *.html *.png *.gif *.jpg *.css html/ )
+( cd $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM ; ln -s /usr/doc/$PRGNAM-$VERSION doc )
+
 # Copy additional program documentation
 cp -a AUTHORS ChangeLog COPYING FEEDBACK INSTALL NEWS README \
    $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
+# Setup package install directory
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
+# Create package
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
