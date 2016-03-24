@@ -1,55 +1,75 @@
 #!/bin/sh
- 
-# /etc/rc.d/rc.plexmediaserver - Start/stop/restart the plexmediaserver daemon.
-# To make plexmediaserver start automatically at boot, make this
-# file executable: chmod 0755 /etc/rc.d/rc.plexmediaserver and add it 
-# to slackware's startup scripts (ie: rc.local)
+
+# Copyright 2016 Marcel Saegebarth <marc@mos6581.de>
+# All rights reserved.
 #
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  
-PIDFILE="/var/run/plexmediaserver.pid"
+RUN_USER=plex
  
 plexmediaserver_start() {
-    echo "Starting plexmediaserver..."
-    CHECK=$(ps aux | grep "Plex Media Server" | grep -v grep)
-    STATUS=$?
- 
-    # make sure plexmediaserver isn't running yet
-    if [ "$STATUS" == "1" ]; then
-       touch $PIDFILE
-       chown plex:plex $PIDFILE
- 
-        # Start plexmediaserver
-       sudo -u plex /usr/bin/start_pms &
-    else
-        echo "plexmediaserver is already active and running under PID: $(cat $PIDFILE)"
-        echo "if you think this is wrong, remove the offending PID file"
-        echo "and restart plexmediaserver"
-        exit 1
-    fi
+  PIDOF=$(pidof "Plex Media Server")
+
+  if [ -z "$PIDOF" ]; then
+  echo "Starting plexmediaserver..."
+  /bin/su -s /bin/sh -l $RUN_USER -c '/usr/bin/start_pms &> /dev/null &'
+  else
+    echo "plexmediaserver is already active (PID: $PIDOF)."
+    exit 1
+  fi
 }
  
 plexmediaserver_stop() {
+  PIDOF=$(pidof "Plex Media Server")
+  # plugins may still running when stopping plexmediaserver on its startup
+  # process
+  PGREP_PLUGINS=$(pgrep -f "Plex Plug-in")
+
+  if [ -z "$PIDOF" ] && [ -z "$PGREP_PLUGINS" ]; then
+    echo "plexmediaserver is not running..."
+    exit 1
+  else
     echo -n "Stopping plexmediaserver..."
-    killall "Plex Media Server"
-    rm $PIDFILE
+
+    if [ -n "$PIDOF" ]; then
+      kill -9 $PIDOF
+    fi
+
+    if [ -n "$PGREP_PLUGINS" ]; then
+      for i in "$PGREP_PLUGINS"; do
+        kill -9 $i
+      done
+    fi
+
     echo "done"
+  fi
+}
+
+plexmediaserver_restart() {
+  plexmediaserver_stop
+  sleep 3
+  plexmediaserver_start
 }
  
-# Let's see how we are being called.
 case "$1" in
-  start)
-    plexmediaserver_start
-    ;;
-  stop)
-    plexmediaserver_stop
-    ;;
-  restart)
-    plexmediaserver_stop
-    sleep 3
-    plexmediaserver_start
-    ;;
-  *)
-    echo "Usage: $(basename $0) {start|stop|restart}"
-    exit 1
-    ;;
+    start) plexmediaserver_start   ;;
+     stop) plexmediaserver_stop    ;;
+  restart) plexmediaserver_restart ;;
+        *) echo "USAGE: $0 start|stop|restart"
+           exit 1 ;;
 esac
