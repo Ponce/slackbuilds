@@ -1,16 +1,25 @@
 From: Gilles Caulier <caulier.gilles@gmail.com>
-Date: Sat, 05 Sep 2015 19:20:22 +0000
-Subject: apply patch #94414 to support OpenCV3
-X-Git-Url: http://quickgit.kde.org/?p=libkface.git&a=commitdiff&h=a53bcebbfc4e6c42ee73adddc41f8c2f8f8f39c8
+Date: Sun, 06 Sep 2015 08:13:52 +0000
+Subject: use same OpenCV logic than digiKam and kipi-plugins
+X-Git-Url: http://quickgit.kde.org/?p=libkface.git&a=commitdiff&h=dc62c0e0ea55d189d918501cce4d92f4198a1a0c
 ---
-apply patch #94414 to support OpenCV3
+use same OpenCV logic than digiKam and kipi-plugins
 CCBUGS: 349601
 ---
 
 
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -9,6 +9,8 @@
+@@ -1,13 +1,16 @@
+ #
+-# Copyright (c) 2010-2014, Gilles Caulier, <caulier dot gilles at gmail dot com>
++# Copyright (c) 2010-2015, Gilles Caulier, <caulier dot gilles at gmail dot com>
+ #
+ # Redistribution and use is allowed according to the terms of the BSD license.
+ # For details see the accompanying COPYING-CMAKE-SCRIPTS file.
+ 
++cmake_minimum_required(VERSION 2.8.9)
+ project(libkface)
  
  message(STATUS "----------------------------------------------------------------------------------")
  message(STATUS "Starting CMake configuration for: libkface")
@@ -19,20 +28,48 @@ CCBUGS: 349601
  
  find_package(Qt4 4.6.0 REQUIRED)
  find_package(KDE4 REQUIRED)
-@@ -30,7 +32,12 @@
+@@ -29,7 +32,26 @@
  set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules)
  
  include(MacroOpenCV)
 -DETECT_OPENCV(2.4.9 core highgui objdetect contrib legacy imgproc)
 +
-+if (ENABLE_OPENCV3)
++if(ENABLE_OPENCV3)
++
 +    DETECT_OPENCV(3.0.0 core face highgui objdetect imgproc)
++
++    if(${OpenCV_FOUND} AND ${OpenCV_VERSION} VERSION_LESS 3.0.0)
++        message(STATUS "ENABLE_OPENCV3 option is enabled and OpenCV < 3.0.0 have been found. Disabled ENABLE_OPENCV3")
++        set(OpenCV_FOUND FALSE)
++    endif()
++
 +else()
++
 +    DETECT_OPENCV(2.4.9 core highgui objdetect contrib legacy imgproc)
++
++    if(${OpenCV_FOUND} AND ${OpenCV_VERSION} VERSION_GREATER 2.4.99)
++        message(STATUS "ENABLE_OPENCV3 option is disabled and OpenCV >= 3.0.0 have been found. Enabled ENABLE_OPENCV3")
++        set(OpenCV_FOUND FALSE)
++    endif()
++
 +endif()
  
  include_directories(${OpenCV_INCLUDE_DIRS})
  
+@@ -48,11 +70,12 @@
+     # 3.3.0 => 2.0.0     (Added a "simple" training method using image data directly for a single image)
+     # 3.4.0 => 2.0.0     (Added a "simple" training method using image data directly for an image list)
+     # 3.5.0 => 3.0.0     (Added d private internal container to reduce binary uncompatibility with Identity class)
++    # 3.5.1 => 3.0.0     (Added OpenCV3 support)
+ 
+     # Library API version
+     set(KFACE_LIB_MAJOR_VERSION "3")
+     set(KFACE_LIB_MINOR_VERSION "5")
+-    set(KFACE_LIB_PATCH_VERSION "0")
++    set(KFACE_LIB_PATCH_VERSION "1")
+ 
+     # Suffix to add at end of version string. Usual values are:
+     # "-git"   : alpha code unstable from git. Do not use in production
 
 --- a/README
 +++ b/README
@@ -59,6 +96,18 @@ CCBUGS: 349601
  # Redistribution and use is allowed according to the terms of the BSD license.
  # For details see the accompanying COPYING-CMAKE-SCRIPTS file.
 
+--- a/libkface/alignment-congealing/funnelreal.cpp
++++ b/libkface/alignment-congealing/funnelreal.cpp
+@@ -426,7 +426,7 @@
+ 
+         for(int k=0; k<numParams; k++)
+         {
+-            float dn = ((rand()%160)-80)/100.0f;
++            float dn = ((qrand()%160)-80)/100.0f;
+             if(k>1)
+             {
+                 dn /= 100.0f;
+
 --- a/libkface/detection/opencvfacedetector.cpp
 +++ b/libkface/detection/opencvfacedetector.cpp
 @@ -18,7 +18,7 @@
@@ -74,7 +123,7 @@ CCBUGS: 349601
  
      cv::Size getOriginalWindowSize() const
      {
-+#if OPENCV_VERSION <= OPENCV_MAKE_VERSION(2,4,11)
++#if OPENCV_VERSION <= OPENCV_MAKE_VERSION(2,4,99)
          // This is a HACK which may break any time. Work around the fact that getOriginalWindowSize()
          // always returns (0,0) and we need these values.
          if (oldCascade)
@@ -122,24 +171,27 @@ CCBUGS: 349601
  #endif
  
  // OpenCV includes
-@@ -51,23 +51,30 @@
+@@ -49,25 +49,32 @@
+ 
+ #define OPENCV_MAKE_VERSION(major,minor,patch) (((major) << 16) | ((minor) << 8) | (patch))
  #define OPENCV_VERSION                         OPENCV_MAKE_VERSION(CV_MAJOR_VERSION,CV_MINOR_VERSION,CV_SUBMINOR_VERSION)
- #define OPENCV_TEST_VERSION(major,minor,patch) ( OPENCV_VERSION >= OPENCV_MAKE_VERSION(major,minor,patch) )
+-#define OPENCV_TEST_VERSION(major,minor,patch) ( OPENCV_VERSION >= OPENCV_MAKE_VERSION(major,minor,patch) )
++#define OPENCV_TEST_VERSION(major,minor,patch) ( OPENCV_VERSION < OPENCV_MAKE_VERSION(major,minor,patch) )
  
 -#include <opencv2/core/core.hpp>
 -#include <opencv2/core/internal.hpp>
 -#include <opencv2/contrib/contrib.hpp>
 +#if OPENCV_TEST_VERSION(3,0,0)
-+#   include <opencv2/face.hpp>
-+#   include <opencv2/core.hpp>
-+#else
 +#   include <opencv2/core/core.hpp>
 +#   include <opencv2/core/internal.hpp>
 +#   include <opencv2/contrib/contrib.hpp>
++#else
++#   include <opencv2/face.hpp>
++#   include <opencv2/core.hpp>
 +#endif
  
  // for old-style code
-+#if OPENCV_VERSION <= OPENCV_MAKE_VERSION(2,4,11)
++#if OPENCV_VERSION <= OPENCV_MAKE_VERSION(2,4,99)
 +#   include <opencv2/legacy/compat.hpp>
 +#endif
  #include <opencv2/opencv.hpp>
@@ -175,7 +227,7 @@ CCBUGS: 349601
 -                  obj.info()->addParam(obj, "histograms", obj.m_histograms);         // modification: Make Read/Write
 -                  obj.info()->addParam(obj, "labels",     obj.m_labels);             // modification: Make Read/Write
 -                  obj.info()->addParam(obj, "statistic",  obj.m_statisticsMode));    // modification: Add parameter
-+#if OPENCV_VERSION <= OPENCV_MAKE_VERSION(2,4,11)
++#if OPENCV_VERSION <= OPENCV_MAKE_VERSION(2,4,99)
 +    CV_INIT_ALGORITHM(LBPHFaceRecognizer, "FaceRecognizer.LBPH-KFaceIface",
 +                      obj.info()->addParam(obj, "radius",     obj.m_radius);
 +                      obj.info()->addParam(obj, "neighbors",  obj.m_neighbors);
@@ -197,9 +249,9 @@ CCBUGS: 349601
  {
  
 +#if OPENCV_TEST_VERSION(3,0,0)
-+class LBPHFaceRecognizer : public cv::face::FaceRecognizer
-+#else
  class LBPHFaceRecognizer : public cv::FaceRecognizer
++#else
++class LBPHFaceRecognizer : public cv::face::FaceRecognizer
 +#endif
  {
  public:
@@ -209,20 +261,30 @@ CCBUGS: 349601
      ~LBPHFaceRecognizer() {}
  
 +#if OPENCV_TEST_VERSION(3,0,0)
-+    using cv::face::FaceRecognizer::save;
-+    using cv::face::FaceRecognizer::load;
-+#else
      using cv::FaceRecognizer::save;
      using cv::FaceRecognizer::load;
++#else
++    using cv::face::FaceRecognizer::save;
++    using cv::face::FaceRecognizer::load;
 +#endif
  
      static cv::Ptr<LBPHFaceRecognizer> create(int radius=1, int neighbors=8, int grid_x=8, int grid_y=8, double threshold = DBL_MAX, PredictionStatistics statistics = NearestNeighbor);
  
-@@ -139,6 +148,34 @@
+@@ -139,6 +148,8 @@
      /**
       * Getter functions.
       */
 +#if OPENCV_TEST_VERSION(3,0,0)
++
+     int neighbors() const { return m_neighbors; }
+     int radius()    const { return m_radius;    }
+     int grid_x()    const { return m_grid_x;    }
+@@ -146,6 +157,34 @@
+ 
+     // NOTE: Implementation done through CV_INIT_ALGORITHM macro from OpenCV.
+     cv::AlgorithmInfo* info() const;
++
++#else
 +
 +    int getNeighbors() const                             { return m_neighbors;            }
 +    void setNeighbors(int _neighbors)                    { m_neighbors = _neighbors;      }
@@ -248,16 +310,6 @@ CCBUGS: 349601
 +    void setStatistic(int _statistic)                    { m_statisticsMode = _statistic; }
 +    int getStatistic() const                             { return m_statisticsMode;       }
 +
-+#else
-+
-     int neighbors() const { return m_neighbors; }
-     int radius()    const { return m_radius;    }
-     int grid_x()    const { return m_grid_x;    }
-@@ -146,6 +183,8 @@
- 
-     // NOTE: Implementation done through CV_INIT_ALGORITHM macro from OpenCV.
-     cv::AlgorithmInfo* info() const;
-+
 +#endif
  
  private:
@@ -270,9 +322,9 @@ CCBUGS: 349601
        databaseId(0)
  {
 +#if OPENCV_TEST_VERSION(3,0,0)
-+    ptr()->setThreshold(100.0);
-+#else
      ptr()->set("threshold", 100.0);
++#else
++    ptr()->setThreshold(100.0);
 +#endif
  }
  
@@ -282,11 +334,11 @@ CCBUGS: 349601
  const LBPHFaceRecognizer* LBPHFaceModel::ptr() const
  {
 +#if OPENCV_TEST_VERSION(3,0,0)
-+    const LBPHFaceRecognizer* const ptr = cv::Ptr<LBPHFaceRecognizer>::operator KFaceIface::LBPHFaceRecognizer*();
-+#else
      const LBPHFaceRecognizer* const ptr = cv::Ptr<LBPHFaceRecognizer>::operator const KFaceIface::LBPHFaceRecognizer*();
 -
 -    if (!ptr) 
++#else
++    const LBPHFaceRecognizer* const ptr = cv::Ptr<LBPHFaceRecognizer>::operator KFaceIface::LBPHFaceRecognizer*();
 +#endif
 +
 +    if (!ptr)
@@ -298,81 +350,81 @@ CCBUGS: 349601
  int LBPHFaceModel::radius() const
  {
 +#if OPENCV_TEST_VERSION(3,0,0)
-+    return ptr()->getRadius();
-+#else
      return ptr()->get<int>("radius");
++#else
++    return ptr()->getRadius();
 +#endif
  }
  
  void LBPHFaceModel::setRadius(int radius)
  {
 +#if OPENCV_TEST_VERSION(3,0,0)
-+    ptr()->setRadius(radius);
-+#else
      ptr()->set("radius", radius);
++#else
++    ptr()->setRadius(radius);
 +#endif
  }
  
  int LBPHFaceModel::neighbors() const
  {
 +#if OPENCV_TEST_VERSION(3,0,0)
-+    return ptr()->getNeighbors();
-+#else
      return ptr()->get<int>("neighbors");
++#else
++    return ptr()->getNeighbors();
 +#endif
  }
  
  void LBPHFaceModel::setNeighbors(int neighbors)
  {
 +#if OPENCV_TEST_VERSION(3,0,0)
-+    ptr()->setNeighbors(neighbors);
-+#else
      ptr()->set("neighbors", neighbors);
++#else
++    ptr()->setNeighbors(neighbors);
 +#endif
  }
  
  int LBPHFaceModel::gridX() const
  {
 +#if OPENCV_TEST_VERSION(3,0,0)
-+    return ptr()->getGrid_x();
-+#else
      return ptr()->get<int>("grid_x");
++#else
++    return ptr()->getGrid_x();
 +#endif
  }
  
  void LBPHFaceModel::setGridX(int grid_x)
  {
 +#if OPENCV_TEST_VERSION(3,0,0)
-+    ptr()->setGrid_x(grid_x);
-+#else
      ptr()->set("grid_x", grid_x);
++#else
++    ptr()->setGrid_x(grid_x);
 +#endif
  }
  
  int LBPHFaceModel::gridY() const
  {
 +#if OPENCV_TEST_VERSION(3,0,0)
-+    return ptr()->getGrid_y();
-+#else
      return ptr()->get<int>("grid_y");
++#else
++    return ptr()->getGrid_y();
 +#endif
  }
  
  void LBPHFaceModel::setGridY(int grid_y)
  {
 +#if OPENCV_TEST_VERSION(3,0,0)
-+    ptr()->setGrid_y(grid_y);
-+#else
      ptr()->set("grid_y", grid_y);
++#else
++    ptr()->setGrid_y(grid_y);
 +#endif
  }
  
  OpenCVMatData LBPHFaceModel::histogramData(int index) const
  {
 +#if OPENCV_TEST_VERSION(3,0,0)
-+    return OpenCVMatData(ptr()->getHistograms().at(index));
-+#else
      return OpenCVMatData(ptr()->get<std::vector<cv::Mat> >("histograms").at(index));
++#else
++    return OpenCVMatData(ptr()->getHistograms().at(index));
 +#endif
  }
  
@@ -382,23 +434,23 @@ CCBUGS: 349601
      }
  
 +#if OPENCV_TEST_VERSION(3,0,0)
-+    std::vector<cv::Mat> currentHistograms = ptr()->getHistograms();
-+    cv::Mat currentLabels                  = ptr()->getLabels();
-+#else
      std::vector<cv::Mat> currentHistograms = ptr()->get<std::vector<cv::Mat> >("histograms");
      cv::Mat currentLabels                  = ptr()->get<cv::Mat>("labels");
++#else
++    std::vector<cv::Mat> currentHistograms = ptr()->getHistograms();
++    cv::Mat currentLabels                  = ptr()->getLabels();
 +#endif
 +
      currentHistograms.insert(currentHistograms.end(), newHistograms.begin(), newHistograms.end());
      currentLabels.push_back(newLabels);
 +
 +#if OPENCV_TEST_VERSION(3,0,0)
-+    ptr()->setHistograms(currentHistograms);
-+    ptr()->setLabels(currentLabels);
-+#else
      ptr()->set("histograms", currentHistograms);
 -    ptr()->set("labels", currentLabels);
 +    ptr()->set("labels",     currentLabels);
++#else
++    ptr()->setHistograms(currentHistograms);
++    ptr()->setLabels(currentLabels);
 +#endif
  
  /*
@@ -408,11 +460,24 @@ CCBUGS: 349601
      // Update local information
      // We assume new labels are simply appended
 +#if OPENCV_TEST_VERSION(3,0,0)
-+    cv::Mat currentLabels = ptr()->getLabels();
-+#else
      cv::Mat currentLabels = ptr()->get<cv::Mat>("labels");
++#else
++    cv::Mat currentLabels = ptr()->getLabels();
 +#endif
  
      for (int i = m_histogramMetadata.size() ; i < currentLabels.rows ; i++)
      {
+
+--- a/tests/preprocess.cpp
++++ b/tests/preprocess.cpp
+@@ -93,7 +93,7 @@
+         // Draw images side-by-side for later display
+         QSize size(left.cols, left.rows);
+         size.scale(uiSize, uiSize, Qt::KeepAspectRatio);
+-        cv::Size scaleSize(size.height(), size.width());
++        cv::Size scaleSize(size.width(), size.height());
+ 
+         const int top = currentRow*uiSize;
+         cv::Mat scaledLeft, scaledRight;
+
 
