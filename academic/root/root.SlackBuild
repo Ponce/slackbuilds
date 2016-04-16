@@ -18,7 +18,7 @@
 # Modified by the slackbuilds.org project
 
 PRGNAM=root
-VERSION=${VERSION:-5.34.32}
+VERSION=${VERSION:-5.34.36}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -49,8 +49,9 @@ else
   LIBDIRSUFFIX=""
 fi
 
-# GSL support
-if [[ ${GSL:-no} = "no" ]]; then
+set -e
+
+if [ ${GSL:-yes} = "no" ]; then
   GSL_FLAGS="--disable-gsl-shared"
 else
   GSL_FLAGS="--enable-gsl-shared \
@@ -61,8 +62,7 @@ else
   fi
 fi
 
-# FFTW3 support
-if [[ ${FFTW:-no} = "no" ]]; then
+if [ ${FFTW:-yes} = "no" ]; then
   FFTW_FLAGS="--disable-fftw3"
 else
   FFTW_FLAGS="--enable-fftw3 \
@@ -70,57 +70,47 @@ else
 	  --with-fftw3-libdir=/usr/lib${LIBDIRSUFFIX}"
 fi
 
-if [[ ${QT:-no} = "no" ]]; then
+if [ ${QT:-no} = "no" ]; then
 	QT_FLAGS="--disable-qt"
 else
 	QT_FLAGS="--enable-qt"
 fi
 
-# The place where our python modules are installed
-PYTHONDIR=$(python -c "import sys, os; print os.path.join('/usr/lib${LIBDIRSUFFIX}', 'python%s' % sys.version[:3], 'site-packages')")
-
-# Get the job number to use from the MAKEFLAGS
-NUMJOBS=$(expr "$(echo $MAKEFLAGS)" : '\(-j[0-9]*\)' | sed "s|-j||" )
-
-set -e
-
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvzf $CWD/$PRGNAM\_v$VERSION.source.tar.gz
-mv $PRGNAM $PRGNAM-$VERSION
-cd $PRGNAM-$VERSION
+rm -rf $PRGNAM
+tar xvf $CWD/$PRGNAM\_v$VERSION.source.tar.gz
+cd $PRGNAM
 chown -R root:root .
 find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
-
-# Fix building with gsl-2.1
-patch -p1 < $CWD/root_gsl2.patch
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 # Make sure we use system libs and headers
-rm -r graf3d/ftgl/{inc,src} || die
-rm -r graf2d/freetype/src || die
-rm -r graf3d/glew/{inc,src} || die
-rm -r core/pcre/src || die
-LANG=C LC_ALL=C find core/zip -type f -name "[a-z]*" -print0 | xargs -0 rm -f || die
-rm -r core/lzma/src/*.tar.gz || die
+rm -r graf3d/ftgl/{inc,src}
+rm -r graf2d/freetype/src
+rm -r graf3d/glew/{inc,src}
+rm -r core/pcre/src
+LANG=C LC_ALL=C find core/zip -type f -name "[a-z]*" -print0 | xargs -0 rm -f
+rm -r core/lzma/src/*.tar.gz
 
 # prefix where to install stuff
-PREFIX=/usr/ROOT
+PREFIX=/opt/ROOT
 
+# Use --with-clang to avoid gcc-5.3 internal compiler error on i586
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
+  --with-clang \
   --prefix=$PREFIX \
   --libdir=$PREFIX/lib${LIBDIRSUFFIX} \
   --incdir=$PREFIX/include \
   --mandir=$PREFIX/man/man1 \
   --etcdir=$PREFIX/etc/root \
-  --docdir=$PREFIX/doc/$PRGNAM-$VERSION \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
   --enable-roofit \
   --enable-unuran \
   --disable-builtin-freetype \
@@ -135,13 +125,17 @@ CXXFLAGS="$SLKCFLAGS" \
   --enable-shared \
   --build=$ARCH-slackware-linux
 
-make -j $NUMJOBS
+make
 make install DESTDIR=$PKG
 
 # Move some python stuff in the proper place
+PYTHONDIR=$(python -c "import sys, os; print os.path.join('/usr/lib${LIBDIRSUFFIX}', 'python%s' % sys.version[:3], 'site-packages')")/
 mkdir -p $PKG$PYTHONDIR
-mv $PKG$PREFIX/lib$LIBDIRSUFFIX/*.py* $PKG$PREFIX/lib$LIBDIRSUFFIX/python/genreflex \
-  $PKG$PYTHONDIR/
+mv \
+  $PKG$PREFIX/lib$LIBDIRSUFFIX/*.py \
+  $PKG$PREFIX/lib$LIBDIRSUFFIX/*.pyc \
+  $PKG$PREFIX/lib$LIBDIRSUFFIX/python/genreflex \
+  $PKG$PYTHONDIR
 rm -fr $PKG$PREFIX/lib$LIBDIRSUFFIX/python
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
@@ -151,17 +145,19 @@ find $PKG$PREFIX/man -type f -exec gzip -9 {} \;
 
 # Install some profile.d scripts to use the right paths
 mkdir -p $PKG/etc/profile.d
-echo "set path = ( \$path $PREFIX/bin )" > $PKG/etc/profile.d/root.csh
+echo "set path = ( \$path $PREFIX/bin )"       > $PKG/etc/profile.d/root.csh
 echo "setenv MANPATH \${MANPATH}:$PREFIX/man" >> $PKG/etc/profile.d/root.csh
-echo "PATH=\$PATH:$PREFIX/bin" > $PKG/etc/profile.d/root.sh
+echo "PATH=\$PATH:$PREFIX/bin"        > $PKG/etc/profile.d/root.sh
 echo "MANPATH=\$MANPATH:$PREFIX/man" >> $PKG/etc/profile.d/root.sh
 chmod +x $PKG/etc/profile.d/root.*
 
-cat $CWD/$PRGNAM.SlackBuild > $PKG$PREFIX/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-sed -e "s|@LIBDIRSUFFIX@|$LIBDIRSUFFIX|" -e "s|@PREFIX@|$PREFIX|" \
+sed \
+  -e "s|@LIBDIRSUFFIX@|$LIBDIRSUFFIX|" \
+  -e "s|@PREFIX@|$PREFIX|" \
   $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
