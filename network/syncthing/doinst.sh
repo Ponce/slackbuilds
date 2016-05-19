@@ -21,4 +21,5 @@ preserve_perms() {
   config $NEW
 }
 
+config etc/logrotate.d/syncthing.new
 preserve_perms etc/rc.d/rc.syncthing.new
