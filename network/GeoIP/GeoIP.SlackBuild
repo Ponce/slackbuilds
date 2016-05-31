@@ -24,10 +24,14 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# revision date 2011/08/31
+# This product includes GeoLite data created by MaxMind,
+# available from http://www.maxmind.com
+# (Creative Commons Attribution-ShareAlike 4.0 International License)
+
+# Maintained by David Spencer <baildon.research@googlemail.com>
 
 PRGNAM=GeoIP
-VERSION=${VERSION:-1.5.1}
+VERSION=${VERSION:-1.6.9}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -68,10 +72,10 @@ tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 # We need to update the configuration files in this tarball...
 autoreconf -i
@@ -91,28 +95,38 @@ CXXFLAGS="$SLKCFLAGS" \
 make
 make install DESTDIR=$PKG
 
-# Let's not clobber config files
-mv $PKG/etc/GeoIP.conf $PKG/etc/GeoIP.conf.new
-
-# Other distros (and some other software) look in /var/lib/GeoIP/
-mkdir -p $PKG/var/lib
-mv $PKG/usr/share/GeoIP $PKG/var/lib
-ln -s ../../var/lib/GeoIP $PKG/usr/share/GeoIP
-
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 
+mkdir -p $PKG/var/lib/GeoIP
+if [ "${MINIDATA:-no}" = "yes" ]; then
+  DATAFILES="GeoIP GeoIPv6"
+else
+  DATAFILES="GeoIP GeoIPv6 GeoLiteCity GeoLiteCityv6 GeoIPASNum GeoIPASNumv6"
+fi
+for datafile in $DATAFILES ; do
+  if [ -e $CWD/$datafile.dat.gz ]; then
+    zcat $CWD/$datafile.dat.gz > $PKG/var/lib/GeoIP/$datafile.dat
+  fi
+done
+# As an absolute minimum we'll package the ipv4 country data file from the source tree:
+if [ ! -e $PKG/var/lib/GeoIP/GeoIP.dat ]; then
+  cat data/GeoIP.dat > $PKG/var/lib/GeoIP/GeoIP.dat
+fi
+# It's traditional to make the data available in /usr/share/GeoIP too:
+mkdir -p $PKG/usr/share
+ln -s ../../var/lib/GeoIP $PKG/usr/share/GeoIP
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  AUTHORS COPYING ChangeLog INSTALL README TODO \
-    $PKG/usr/doc/$PRGNAM-$VERSION
+  AUTHORS COPYING ChangeLog INSTALL LICENSE NEWS.md README.md \
+  $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
