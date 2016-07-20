@@ -2,8 +2,9 @@
 
 # TeXLive build script for Slackware
 
-# Copyright 2009-2014  Robby Workman, Northport, AL, USA
 # Copyright 2009  Patrick J. Volkerding, Sebeka, MN, USA
+# Copyright 2009-2014  Robby Workman, Northport, AL, USA
+# Copyright 2016  Johannes Schoepfer, <slackbuilds[AT]schoepferi[DOT]info>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,34 +24,32 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# URL: ftp://tug.org/historic/systems/texlive/2014/
+# URL: ftp://tug.org/historic/systems/texlive/2016/
+# Testrelease 2016 ftp://tug.org/texlive/Images/test/
 
 PRGNAM=texlive
-VERSION=20140525
+VERSION=20160523
+TEXMF_VERS=20160622
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
-
-SOURCE_VERS=$VERSION
-TEXMF_VERS=$VERSION
-
-if [ -z "$ARCH" ]; then
-  case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
-    arm*) ARCH=arm ;;
-       *) ARCH=$( uname -m ) ;;
-  esac
-fi
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-texlive
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+set -e
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
@@ -60,34 +59,21 @@ else
   LIBDIRSUFFIX=""
 fi
 
-set -e
-
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf texlive-$SOURCE_VERS-source
-tar xvf $CWD/texlive-$SOURCE_VERS-source.tar.xz
-cd texlive-$SOURCE_VERS-source
+rm -rf texlive-$VERSION-source
+tar xvf $CWD/texlive-${VERSION}b-source.tar.xz
+cd texlive-$VERSION-source
 chown -R root:root .
-chmod -R a-s .
-find -L . \
-  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
-  -exec chmod 755 {} \; -o \
-  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
-  -exec chmod 644 {} \;
+chmod -R u+w,go-w,a+rX-st .
 
-# Apply patches from branch2014
-#for file in $CWD/branch2014/*.diff ; do patch -p2 < $file ; done
+export LANG=C
+export PATH="$PKG/usr/bin:$PATH" 
+export LD_LIBRARY_PATH="$PKG/usr/lib${LIBDIRSUFFIX}:$LD_LIBRARY_PATH"
 
-# Fix up some paths
-patch -p1 < $CWD/patches/source-fixup_texmf-local_tree_in_texmf_cnf.diff
-
-# http://sourceforge.net/p/xdvi/bugs/391/ 
-patch -p1 < $CWD/patches/fix-xaw3d-linkage-in-xdvik.diff
-
-unset TEXMFCNF ; export TEXMFCNF
-LANG=C ; export LANG
-KPATHSEA_WARNING=0 ; export KPATHSEA_WARNING
+# set TEXMFROOT and TEXMFLOCAL
+sed -i "s|^TEXMFROOT.*|TEXMFROOT = \$SELFAUTODIR/share|;s|^TEXMFLOCAL.*|TEXMFLOCAL = \$TEXMFROOT/texmf-local|" texk/kpathsea/texmf.cnf
 
 # --with-system-harfbuzz requires graphite2 (and harfbuzz linked to it)
 mkdir build ; cd build
@@ -101,13 +87,16 @@ mkdir build ; cd build
     --with-banner-add=' on Slackware (SlackBuilds.org)' \
     --disable-native-texlive-build \
     --enable-largefile \
-    --with-xdvi-x-toolkit=xaw3d \
     --enable-shared \
     --disable-static \
     --disable-missing \
+    --disable-multiplatform \
+    --disable-debug \
     --with-x \
-    --without-etex \
-    --disable-xindy \
+    --enable-texdoctk \
+    --enable-xindy \
+    --disable-xindy-docs \
+    --disable-xindy-rules \
     --with-clisp-runtime=system \
     --with-system-poppler \
     --with-system-xpdf \
@@ -120,15 +109,63 @@ mkdir build ; cd build
     --with-system-icu \
     --with-system-pixman \
     --with-system-cairo \
-    --without-system-harfbuzz \
+    --with-system-gmp \
+    --with-system-mpfr \
+    --with-system-fontconfig \
+    --with-system-ncurses \
+    --enable-gc=system \
     --build=$ARCH-slackware-linux
   make
-  make install DESTDIR=$PKG
+ # make check
+  make install-strip DESTDIR=$PKG 
+  # Create symlinks
+  make texlinks DESTDIR=$PKG
 cd ..
 
-# Create symlinks
-PATH="$PATH:$PKG/usr/bin" LD_LIBRARY_PATH=$PKG/usr/lib${LIBDIRSUFFIX}:$LD_LIBRARY_PATH \
-  texlinks -f $PKG/usr/share/texmf-dist/web2c/fmtutil.cnf $PKG/usr/bin
+# install the texmf stuff, overwrite partly stuff coming from the source build;
+# don't remove/separate koma-script docs as this is the wish of the author
+mkdir -p $PKG/usr/share
+tar vxf $CWD/texlive-base-$TEXMF_VERS.tar.xz -C $PKG/usr/share
+chown -R root:root $PKG
+chmod -R u+w,go-w,a+rX-st $PKG
+
+# set TEXMFROOT and TEXMFLOCAL
+sed -i \
+  "s|^TEXMFROOT.*|TEXMFROOT = \$SELFAUTODIR/share|;s|^TEXMFLOCAL.*|TEXMFLOCAL = \$TEXMFROOT/texmf-local|" \
+  $PKG/usr/share/texmf-dist/web2c/texmf.cnf
+
+# Build asymptote; take support-files from the net-archives
+cd utils/asymptote
+  CFLAGS="$SLKCFLAGS" \
+  ./configure \
+    --datarootdir=/usr/share/texmf-dist \
+    --infodir=/usr/info \
+    --mandir=/usr/man \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --enable-gc=system \
+    --with-latex=/usr/share/texmf-dist/tex/latex \
+    --with-context=/usr/share/texmf-dist/tex/context/third \
+    --build=$ARCH-slackware-linux
+  make
+  #make check
+  strip --strip-unneeded asy
+  install -m 755 asy $PKG/usr/bin/
+cd ../.. 
+
+# Remove context-stuff
+rm -rf $PKG/usr/share/texmf-dist/scripts/context
+
+## Move context script(mtxrun) to the correct place.
+## Handle the short context-helper scripts, by putting stub-scripts
+## in the texlive-extra package and delete them here, as the needed 
+## context-packages are included in the texlive-extra package.
+#(
+#cd $PKG/usr/share/texmf-dist/scripts/context/stubs/unix/
+#mv mtxrun $PKG/usr/bin/
+#rm context contextjit luatools mtxrunjit texexec texmfstart
+#cd ../../
+#rmdir -p stubs/unix
+#)
 
 # Install the docs while we're still here
 mkdir -p $PKG/usr/doc/texlive-$VERSION
@@ -137,77 +174,26 @@ cp -a ChangeLog README* $PKG/usr/doc/texlive-$VERSION
 # Put a symlink to /usr/share/texmf-dist/doc in our Slackware docdir
 ln -s ../../share/texmf-dist/doc $PKG/usr/doc/$PRGNAM-$VERSION/doc
 
+# Install biber
+if [ "$ARCH" = "x86_64" ]; then
+  tar vxf $CWD/biber.x86_64-linux.tar.xz bin/x86_64-linux/biber
+  mv bin/x86_64-linux/biber $PKG/usr/bin
+elif [ "$ARCH" = "i586" ]; then
+  tar vxf $CWD/biber.i386-linux.tar.xz bin/i386-linux/biber
+  mv bin/i386-linux/biber $PKG/usr/bin
+fi
+
 # We won't make tlmgr easily available; it's still there, but
 # we'll make it harder to void the warranty :-)
 rm -f $PKG/usr/bin/tlmgr
 cat $CWD/README.tlpkg > $PKG/usr/doc/$PRGNAM-$VERSION/README.tlpkg
 
-# Install biber
-if [ "$ARCH" = "x86_64" ]; then
-  tar xf $CWD/biber-linux_x86_64.tar.gz -C $PKG/usr/bin
-elif [ "$ARCH" = "i486" ]; then
-  tar xf $CWD/biber-linux_x86_32.tar.gz -C $PKG/usr/bin
-fi
-
 # Create some directories to make it clear that they're owned by this package
-mkdir -p $PKG/usr/share/texmf-config $PKG/usr/share/texmf-var
-
-# and now we'll install the texmf stuff
-cd $TMP
-rm -rf texlive-texmf-tetexish-$TEXMF_VERS
-tar xvf $CWD/texlive-texmf-tetexish-$TEXMF_VERS.tar.xz -C $PKG/usr/share
-cd $PKG/usr/share
-chown -R root:root .
-chmod -R a-s .
-find -L . \
-  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
-  -exec chmod 755 {} \; -o \
-  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
-  -exec chmod 644 {} \;
-
-# Fix up some paths
-patch -p1 < $CWD/patches/texmf-fixup_texmf-local_tree_in_texmf_cnf.diff
-
-# Move manual pages to the correct place
-# There's some duplicates of stuff that's already present in /usr/man
-# from the texlive source we just compiled above, but I'm going to
-# work from the assumption that they're identical - here's why:
-# http://rlworkman.net/images/barren-field.jpg
-mv $PKG/usr/share/texmf-dist/doc/man/man1/*.1 $PKG/usr/man/man1
-# No, we don't care about the pdf versions of the manual pages
-rm -rf $PKG/usr/share/texmf-dist/doc/man
+mkdir -p $PKG/usr/share/{texmf-config,texmf-var,texmf-local}
 
 # Add some perl modules, at least one of which is required by updmap
 mkdir -p $PKG/usr/share/perl5
-mv $PKG/usr/share/tlpkg/TeXLive $PKG/usr/share/perl5
-rmdir $PKG/usr/share/tlpkg
-
-# Now that we have everything in place, build xindy
-cd $TMP/texlive-$SOURCE_VERS-source/utils/xindy
-
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-LATEX="$PKG/usr/bin/latex" \
-PDFLATEX="$PKG/usr/bin/pdflatex" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --mandir=/usr/man \
-  --infodir=/usr/info \
-  --with-clisp-runtime=system \
-  --with-banner-add=' on Slackware (SlackBuilds.org)' \
-  --build=$ARCH-slackware-linux
-
-export PATH="$PATH:$PKG/usr/bin"
-export LD_LIBRARY_PATH="$PKG/usr/lib$LIBDIRSUFFIX"
-$PKG/usr/bin/texhash
-
-make
-make install DESTDIR=$PKG
-
-# Not really sure if this is necessary, but we changed the contents of
-# /usr/share/texmf-dist so let's just do it for good measure.
-$PKG/usr/bin/texhash
+mv texk/tests/TeXLive $PKG/usr/share/perl5/
 
 # Handle the man pages
 find $PKG/usr/man -type f -exec gzip -9 {} \;
@@ -221,5 +207,24 @@ mkdir -p $PKG/install
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
+###### Maybe context is better supportet by a standalone installation,
+## have a look at http://wiki.contextgarden.net/
+#
+## create profile, to make ConTEXt working
+#mkdir -p $PKG/etc/profile.d
+#cat << EOF > $PKG/etc/profile.d/texlive.sh
+##!/bin/sh
+## Add TEXMF and OSFONTDIR for ConTEXt:
+#TEXMF=/usr/share/texmf-dist
+#OSFONTDIR=~/.fonts:/usr/share/fonts
+#EOF
+#cat << EOF > $PKG/etc/profile.d/texlive.csh
+##!/bin/csh
+## Add TEXMF and OSFONTDIR for ConTEXt:
+#setenv TEXMF /usr/share/texmf-dist
+#setenv OSFONTDIR ~/.fonts:/usr/share/fonts
+#EOF
+#chmod 755 $PKG/etc/profile.d/texlive.*
+
 cd $PKG
-/sbin/makepkg -p -l y -c n $OUTPUT/texlive-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -p -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
