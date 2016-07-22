@@ -19,7 +19,6 @@ if [ -e etc/rc.d/rc.atop ]; then
 fi
 
 config etc/rc.d/rc.atop.new
-config etc/cron.daily/atop.new
 config etc/logrotate.d/psacct.new
 config etc/logrotate.d/psaccs_atop.new
 config etc/logrotate.d/psaccu_atop.new
