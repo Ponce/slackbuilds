@@ -2,10 +2,28 @@
 
 # Slackware build script for conky
 
-# Written by M.Dinslage  contact: daedra1980@gmail.com
+# Copyright 2016 Matt Dinslage (daedra1980@gmail.com), Springfield, MO, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=conky
-VERSION=1.9.0
+VERSION=${VERSION:-1.10.4}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -22,18 +40,18 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-# Pass LUA=yes if you want to build lua scripting engine support.
-LUA=${LUA:-"NO"}
+# Pass AUDACIOUS=yes if you want to build audacious player support.
+AUDACIOUS=${AUDACIOUS:-"no"}
 
 if [ "$ARCH" = "i486" ]; then
   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
-  LBIDIRSUFFIX=""
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LBIDIRSUFFIX=""
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LBIDIRSUFFIX="64"
+  LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
@@ -41,66 +59,78 @@ fi
 
 set -e
 
-if [ "${LUA:-yes}" = "yes" ]; then
-  lua_params="--enable-lua --enable-lua-cairo --enable-imlib2 --enable-lua-imlib2"
+if [ "${AUDACIOUS:-yes}" = "yes" ]; then
+  audacious="ON"
 else
-  lua_params="--disable-lua"
+  audacious="OFF"
 fi
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz || tar xvf $CWD/v$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LBIDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --mandir=/usr/man \
-  --enable-shared=yes \
-  --enable-static=no \
-  --enable-ibm \
-  --enable-hddtemp \
-  --enable-xft \
-  --enable-weather-metar \
-  --enable-weather-xoap \
-  --enable-portmon \
-  --enable-audacious \
-  --enable-mpd=yes \
-  --enable-rss=yes \
-  --enable-wlan=yes \
-  $lua_params \
-  --build=$ARCH-slackware-linux \
-  --host=$ARCH-slackware-linux
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+    -DDOC_PATH=/usr/doc/$PRGNAM-$VERSION \
+    -DMAN_INSTALL_DIR=/usr/man \
+    -DMAINTAINER_MODE=ON \
+    -DBUILD_XDBE=ON \
+    -DBUILD_AUDACIOUS=$audacious \
+    -DBUILD_CURL=ON \
+    -DBUILD_WLAN=ON \
+    -DBUILD_RSS=ON \
+    -DBUILD_WEATHER_METAR=ON \
+    -DBUILD_WEATHER_XOAP=ON \
+    -DBUILD_MPD=ON \
+    -DBUILD_IMLIB2=ON \
+    -DBUILD_LUA_CAIRO=ON \
+    -DBUILD_LUA_IMLIB2=ON \
+    -DCMAKE_BUILD_TYPE=Release ..
 
-make
-make install-strip DESTDIR=$PKG
+  make VERBOSE=1
+  make install DESTDIR=$PKG
+cd ..
 
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Conky doesn't want to honor MANDIR.  Move the man files manually
+mkdir -p $PKG/usr/man/man1
+mv $PKG/usr/share/man/man1/conky.1 $PKG/usr/man/man1
+rm -r $PKG/usr/share
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-# Move existing config files
-mv $PKG/etc/conky/conky.conf $PKG/etc/conky/conky.conf.new
-mv $PKG/etc/conky/conky_no_x11.conf $PKG/etc/conky/conky_no_x11.conf.new
+# Copy existing config files
+mkdir -p $PKG/etc/conky
+cp data/conky.conf $PKG/etc/conky/conky.conf.new
+cp data/conky_no_x11.conf $PKG/etc/conky/conky_no_x11.conf.new
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS ChangeLog COPYING INSTALL NEWS README TODO \
-  doc/*.html extras/ $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS COPYING ChangeLog LICENSE.GPL README.md NEWS TODO \
+  $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Remove duplicate config files out of the docdir.
+rm -r $PKG/usr/doc/$PRGNAM-$VERSION/*.conf
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n -p $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
