@@ -25,4 +25,5 @@ preserve_perms() {
 preserve_perms etc/rc.d/rc.sqlrelay.new
 preserve_perms etc/rc.d/rc.sqlrcachemanager.new
 config etc/sqlrelay/sqlrelay.xsd.new
-config etc/sqlrelay/sqlrelay.dtd.new
+config etc/php.d/pdo_sqlrelay.ini.new
+config etc/php.d/sql_relay.ini.new
