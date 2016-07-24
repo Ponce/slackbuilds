@@ -22,6 +22,5 @@ preserve_perms() {
   config $NEW
 }
 
-preserve_perms etc/rc.d/rc.carbon-cache.new
-config etc/logrotate.d/graphite-carbon.new
-for i in etc/carbon/*.new ; do config $i ; done
+for i in etc/rc.d/rc.carbon-*.new ; do preserve_perms $i ; done
+for i in etc/carbon/*.new etc/logrotate.d/graphite-carbon.new ; do config $i ; done
