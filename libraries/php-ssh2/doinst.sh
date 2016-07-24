@@ -14,5 +14,5 @@ config() {
 config etc/php.d/ssh2.ini.new
 
 /usr/bin/pecl install --nodeps --soft --force --register-only --nobuild \
-  usr/libLIBDIRSUFFIX/php/.pkgxml/ssh2.xml > /dev/null
+  usr/lib%LIBDIRSUFFIX%/php/.pkgxml/ssh2.xml > /dev/null
 
