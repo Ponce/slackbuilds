@@ -23,26 +23,39 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=graphite-web
-VERSION=${VERSION:-0.9.13pre1}
+VERSION=${VERSION:-0.9.15}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-SRCVER=0.9.13-pre1
-ARCH=noarch
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i486 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
+if [ "$ARCH" = "x86_64" ]; then
+  LIBDIRSUFFIX="64"
+else
+  LIBDIRSUFFIX=""
+fi
+
+PYTHON_BRANCH=$(python -V 2>&1 | cut -d" " -f2 | cut -d. -f1,2)
+
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$SRCVER
-tar xvf $CWD/$v$SRCVER.tar.gz || tar xvf $CWD/$PRGNAM-$SRCVER.tar.gz
-cd $PRGNAM-$SRCVER
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -61,19 +74,18 @@ patch -p1 <$CWD/patches/local_settings.patch
 patch -p1 <$CWD/patches/settings_debian.patch
 patch -p1 <$CWD/patches/remove_internal_logrotate.patch
 
-python setup.py install --root=$PKG
+# Installer script needs some fixing
+patch -p1 <$CWD/patches/setup.py.diff
+
+python setup.py install --root=$PKG --prefix=/usr
 
 # Need some dirs
-mkdir -p $PKG/etc/{httpd/extra,logrotate.d} $PKG/usr/share/$PRGNAM \
+mkdir -p $PKG/etc/{httpd/extra,logrotate.d} $PKG/usr/{bin,share/$PRGNAM} \
   $PKG/var/log/graphite
 chown graphite:graphite $PKG/var/log/graphite
 
 # Add apache config
 cat $CWD/$PRGNAM.conf > $PKG/etc/httpd/extra/$PRGNAM.conf.new
-
-# Cruft removal
-rm -rf $PKG/usr/{storage,examples} $PKG/usr/bin/*
-find $PKG/usr -name 'local_settings.py.example' -delete
 
 # Scripts and crontab mostly from Debian
 install -m0755 -oroot -groot -t $PKG/usr/bin $CWD/scripts/graphite-manage \
@@ -93,6 +105,14 @@ cat webapp/graphite/local_settings.py.example \
 
 # Move webapp dir
 mv $PKG/usr/webapp $PKG/usr/share/$PRGNAM/static
+
+# Python stuff
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/python$PYTHON_BRANCH
+mv $PKG/opt/graphite/webapp \
+  $PKG/usr/lib$LIBDIRSUFFIX/python$PYTHON_BRANCH/site-packages
+
+# Cruft removal
+rm -rf $PKG/opt
 
 # Manpages also from Debian
 mkdir -p $PKG/usr/man/man1
