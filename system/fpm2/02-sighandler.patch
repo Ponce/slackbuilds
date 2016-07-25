@@ -1,0 +1,115 @@
+diff -Naur fpm2-0.79orig/src/Makefile.am fpm2-0.79new/src/Makefile.am
+--- fpm2-0.79orig/src/Makefile.am	2010-08-30 10:37:05.000000000 +0200
++++ fpm2-0.79new/src/Makefile.am	2016-03-14 21:26:02.824136232 +0100
+@@ -19,7 +19,8 @@
+ 	fpm_gpw.c fpm_gpw.h \
+ 	fpm_clist.c \
+ 	bithelp.h fpm_launcher.c \
+-	rijndael.c sha256.c
++	rijndael.c sha256.c \
++	sighandler.c
+ 
+ fpm2_LDADD = @PACKAGE_LIBS@ $(INTLLIBS)
+ 
+diff -Naur fpm2-0.79orig/src/main.c fpm2-0.79new/src/main.c
+--- fpm2-0.79orig/src/main.c	2011-01-17 13:51:17.000000000 +0100
++++ fpm2-0.79new/src/main.c	2016-03-14 21:32:12.224456348 +0100
+@@ -29,11 +29,18 @@
+ 
+ #include "interface.h"
+ #include "support.h"
++#include "sighandler.h"
+ 
+ #include <libxml/parser.h>
+ 
+ #include "fpm.h"
+ 
++void
++sighandler (int signum)
++{
++  fpm_quit ();
++}
++
+ int
+ main (int argc, char *argv[])
+ {
+@@ -70,6 +77,7 @@
+ 
+   fpm_init (opt_file_name, tray_on_startup);
+ 
++  sighandler_setup ();
+   gtk_main ();
+ 
+   fpm_tr_cleanup();
+diff -Naur fpm2-0.79orig/src/sighandler.c fpm2-0.79new/src/sighandler.c
+--- fpm2-0.79orig/src/sighandler.c	1970-01-01 01:00:00.000000000 +0100
++++ fpm2-0.79new/src/sighandler.c	2016-03-14 21:02:59.000000000 +0100
+@@ -0,0 +1,57 @@
++#include <unistd.h>
++#include <fcntl.h>
++#include <signal.h>
++#include <gtk/gtk.h>
++#include "sighandler.h"
++
++#define PIPE_RD_FD(PIPE) PIPE[0]
++#define PIPE_WR_FD(PIPE) PIPE[1]
++
++static int sigpipe[2];
++
++/******************************************************************************/
++static void unixsigh(int psignum)
++/******************************************************************************/
++{
++  write(PIPE_WR_FD(sigpipe), &psignum, sizeof(psignum));
++}
++
++/******************************************************************************/
++static gboolean gtksigh(GIOChannel *psrc, GIOCondition pcond, gpointer pdata)
++/******************************************************************************/
++{
++  GIOStatus rc;
++  int snum;
++  gsize br;
++
++  (void)pcond;
++  (void)pdata;
++
++  rc = g_io_channel_read_chars(psrc, (gchar *) &snum, sizeof(snum), &br, NULL);
++  if (rc == G_IO_STATUS_NORMAL && br == sizeof(snum)) sighandler(snum);
++
++  return TRUE;
++}
++
++/******************************************************************************/
++void sighandler_setup(void)
++/******************************************************************************/
++{
++  int flags;
++  GIOChannel *gsigin;
++
++  pipe(sigpipe);
++  flags = fcntl(PIPE_WR_FD(sigpipe), F_GETFL);
++  fcntl(PIPE_WR_FD(sigpipe), F_SETFL, flags | O_NONBLOCK);
++
++  signal(SIGHUP,  unixsigh);
++  signal(SIGINT,  unixsigh);
++  signal(SIGQUIT, unixsigh);
++  signal(SIGTERM, unixsigh);
++
++  gsigin = g_io_channel_unix_new(PIPE_RD_FD(sigpipe));
++  g_io_channel_set_encoding(gsigin, NULL, NULL);
++  g_io_channel_set_flags(gsigin, g_io_channel_get_flags(gsigin) |
++                         G_IO_FLAG_NONBLOCK, NULL);
++  g_io_add_watch(gsigin, G_IO_IN | G_IO_PRI, gtksigh, NULL);
++}
+diff -Naur fpm2-0.79orig/src/sighandler.h fpm2-0.79new/src/sighandler.h
+--- fpm2-0.79orig/src/sighandler.h	1970-01-01 01:00:00.000000000 +0100
++++ fpm2-0.79new/src/sighandler.h	2016-03-14 20:59:34.000000000 +0100
+@@ -0,0 +1,7 @@
++#ifndef SIGHANDLER_H_INCLUDED
++#define SIGHANDLER_H_INCLUDED
++
++extern void sighandler(int psignum);
++void sighandler_setup(void);
++
++#endif
