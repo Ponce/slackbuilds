@@ -20,12 +20,11 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-#  V 0.3
+#  V 0.4
 #
-# get texlive-packages/texmf-tree based on texlive.tlpdb, create a tar.xz tarball out of it.
-#
-# usage:
-# ./texmf_get.sh [extra|docs] 
+#  Prepare xz-compressed tarballs of texlive-texmf-trees based on texlive.tlpdb
+#  This script takes care of dependencies(as far as these are present in texlive.tlpdb) of collections and packages,
+#  and that every texlive-package is included only once.
 
 # available packages http://mirror.ctan.org/systems/texlive/tlnet/archive/
 
@@ -37,133 +36,177 @@ mirror="http://mirror.ctan.org/systems/texlive/tlnet/"
 LANG=C 
 TMP=$PWD/tmp
 output=$TMP/texlive.packages
-output_remainder=$TMP/texlive.remainder.packages
 output_doc=$TMP/texlive.doc.packages
 errorlog=$TMP/error.log
 texmf=$TMP/texmf
 db=texlive.tlpdb
-mkdir -p $texmf
+tmpfile=$(mktemp)
+collections_done=$TMP/done
+collections_tobedone=$TMP/tobedone
 
-#mkjobtexmf
-#texinfo
-#echo $PACKAGES
-#read
-maxsize[100000]="$PACKAGES"
-[ -z "$PACKAGES" ] && \
-maxsize[100000]="
-collection-metapost
-collection-xetex
-ec
-eurosym
-lualibs
-luaotfload
-luatexbase
-revtex
-synctex
-times
-tipa
-ulem
-upquote
-zapfding
+packages () {
+# fonts-package first to make sure that big fonts like cm-super are not included elsewhere as dependency
+  PACKAGES="
+    cm-super
+    cbfonts
+    sanskrit-t1
+    cmcyr
+    cs
+    uhc
+    fonts-tlwg
+    ethiop-t1
+    ipaex
+    wadalab
+    fandol
+    arphic
+    nanumtype1" \
+  texmfget fonts
 
+# The base
+  PACKAGES="
+    collection-basic 
+    collection-latex 
+    collection-genericrecommended 
+    collection-latexrecommended 
+    collection-xetex
+    collection-metapost
+    collection-plainextra
+    collection-fontutils
+    collection-genericextra
+    collection-formatsextra
+    collection-htmlxml
+    collection-luatex
+    collection-fontsrecommended
+    collection-mathextra 
+    collection-humanities
+    lh
+    yfonts
+    doublestroke
+    was
+    xypic
+    xindy
+    asymptote
+    barcodes
+    qrcode
+    lastpage
+    datetime2
+    texdoc
+    appendix
+    changebar
+    footmisc
+    multirow
+    overpic
+    stmaryrd
+    subfigure
+    titlesec
+    csplain
+    biblatex
+    collection-langeuropean
+    collection-langenglish
+    collection-langfrench
+    collection-langgerman
+    collection-langitalian
+    collection-langpolish
+    collection-langportuguese
+    collection-langspanish
+    collection-langgreek
+    collection-langafrican
+    hyphen-czech
+    hyphen-slovak
+    hyphen-indic 
+    hyphen-sanskrit 
+    hyphen-armenian 
+    hyphen-afrikaans
+    hyphen-esperanto
+    hyphen-bulgarian 
+    hyphen-churchslavonic 
+    hyphen-mongolian 
+    hyphen-russian 
+    hyphen-serbian 
+    hyphen-ukrainian 
+    hyphen-catalan 
+    hyphen-galician 
+    hyphen-chinese 
+    hyphen-coptic 
+    hyphen-georgian 
+    hyphen-indonesian 
+    hyphen-interlingua 
+    hyphen-thai 
+    hyphen-turkmen 
+    hyphen-arabic 
+    hyphen-farsi" \
+  texmfget base
 
+# Call "fonts"-tarball again to add remaining fonts
+PACKAGES="collection-fontsextra" texmfget fonts
 
+# Put all remaining stuff in the "extra" tarball
+  PACKAGES="
+    collection-latexextra
+    collection-pictures
+    collection-games
+    collection-publishers 
+    collection-bibtexextra 
+    collection-binextra 
+    collection-science 
+    collection-omega
+    collection-music 
+    collection-langother
+    collection-pstricks
+    collection-langcyrillic
+    collection-langczechslovak
+    collection-langindic
+    collection-langjapanese
+    collection-langkorean
+    collection-langarabic
+    collection-langchinese
+    collection-langcjk" \
+  texmfget extra
 
-collection-basic
-collection-latex
-collection-genericrecommended
-collection-latexrecommended
-collection-langeuropean
-lm
-beamer
-hyphen-ancientgreek
-hyphen-greek
-hyphen-indic
-hyphen-sanskrit
-hyphen-czech
-hyphen-slovak
-hyphen-armenian
-hyphen-bulgarian
-hyphen-churchslavonic
-hyphen-mongolian
-hyphen-russian
-hyphen-serbian
-hyphen-ukrainian
-hyphen-catalan
-hyphen-galician
-hyphen-spanish
-hyphen-chinese
-hyphen-afrikaans
-hyphen-coptic
-hyphen-esperanto
-hyphen-georgian
-hyphen-indonesian
-hyphen-interlingua
-hyphen-thai
-hyphen-turkmen
-hyphen-ethiopic
-hyphen-arabic
-hyphen-farsi
+# The docs-tarball - very big (about 1300 MB)
+  texmfget docs
 
-babel-basque
-hyphen-basque
-babel-czech
-hyphen-czech
-babel-danish
-hyphen-danish
-babel-dutch
-hyphen-dutch
-babel-english
-hyphen-english
-babel-finnish
-hyphen-finnish
-babel-french
-hyphen-french
-babel-german
-hyphen-german
-dehyph-exptl
-babel-hungarian
-hyphen-hungarian
-babel-italian
-hyphen-italian
-babel-norsk
-hyphen-norwegian
-babel-polish
-hyphen-polish
-babel-portuges
-hyphen-portuguese
-babel-spanish
-hyphen-spanish
-babel-swedish
-hyphen-swedish
-"
-#maxsize[530]="collection-fontsrecommended" # max package helvetic 530kb
-#maxsize[110]="collection-fontsextra" # max packafe cmbright(scheme-tetex) 109kb
-#maxsize[99]="collection-plainextra" # max package texinfo 98kb
-#maxsize[5]="collection-latexextra" 
-#collection-langenglish
-#collection-langeuropean
-#collection-langfrench
-#collection-langgerman
-#collection-langitalian
-#collection-langpolish
-#collection-langspanish
+# Following aren't supported
+#NAME=context PACKAGES="collection-context" ./texmf_get.sh
+#NAME=texworks PACKAGES="collection-texworks" ./texmf_get.sh
+#NAME=wintools PACKAGES="collection-wintools" ./texmf_get.sh
 
-#collection-genericextra
-#collection-formatsextra
-#maxsize[1700]="collection-langgreek" # max package kerkis(1700kb), cbfonts are very(too) big(65mb), todo: split-packge pfb-fonts, provding also "./texmf-get.sh" extra"
-#maxsize[500]="collection-langcyrillic" # prevent montex(1600kb) as it depends on cbfonts(65mb), see package split
-#maxsize[100]="collection-binextra" # max package asymptote 277kb, xindy 183kb
-#maxsize[180]="collection-bibtexextra" # max package jurabib, biblatex 180kb
+# For the records:
+#
+# base-tarball:
+# hyphen-packages are for "fmtutil-sys -all" to proceed without errors
+#
+# for building dblatex:
+#   appendix
+#   changebar
+#   footmisc
+#   multirow
+#   overpic
+#   stmaryrd
+#   subfigure
+#   titlesec
 
-#maxsize[kb]="collection-name package ..."
-# These are arrays, every index(kb) can only appear once, otherwise it will be overwritten.
-# Add packages of collections only if under max $kb per package size, to ease maintenance by reducing singel-picking packages.
-# There are many small packages which give better overall support at low price in size, it's kind of random whats added though. Maybe maintain a reference list what has to be in the texmf-tree?
-# Into maxsize[100000] (100mb, there is no bigger package) come collections to be completely added, or single packages(not schemes, as depend collections are not added automatically)
+# for math masters thesis
+#   doublestroke
+#   was
 
+# decided these are commonly useful and not too big, or or small to just have it for wider support of the base-package
+#   csplain
+#   yfonts
+
+# to make biber functional
+#   biblatex
+
+}
 
 # ==== Nothing to edit beyond this line (hopefully) ====
+
+usage () {
+	echo "Prepare texmf trees based on collections and packages and their dependencies."
+	echo "./texmf_get.sh [base|docs|extra|fonts]"
+	exit
+}
+
 
 package_meta () {
 	echo "collection/package $collection"
@@ -203,7 +246,7 @@ do
 		fi
 	fi
 
-	if [ -s $texmf/$collection.meta ]
+	if [ -s "$texmf/$collection.meta" ]
 	then
 		cp $texmf/$collection.meta $tmpfile
 	else
@@ -230,7 +273,8 @@ do
 			continue
 		fi
 		# filter for max containersize to be added.
-		[ $(grep ^containersize $tmpfile | cut -d' ' -f2 ) -lt $(($kb * 1024)) ] && echo "$collection" >> $output
+		#[ $(grep ^containersize $tmpfile | cut -d' ' -f2 ) -lt $(($kb * 1024)) ] && echo "$collection" >> $output
+		echo "$collection" >> $output
 	fi
 	# add dependend packages
 	grep ^"depend " $tmpfile | grep -v "ARCH$" | cut -d' ' -f2- >> $collections_tobedone
@@ -254,7 +298,7 @@ untar () {
 			sha512="$(grep ^containerchecksum $texmf/$package.meta | cut -d' ' -f2 )"
 		fi
 		[ ! -s ${package}${flavour}.tar.xz ] && wget ${mirror}archive/${package}${flavour}.tar.xz
-		[ ! -s ${package}${flavour}.tar.xz ] && echo "Downloading ${package}${flavour}.tar.xz did not work, writting to $errorlog" && echo "Error downloading ${package}${flavour}.tar.xz" >> $errorlog && exit 1
+		[ ! -s ${package}${flavour}.tar.xz ] && echo "Downloading ${package}${flavour}.tar.xz did not work, writing to $errorlog" && echo "Error downloading ${package}${flavour}.tar.xz" >> $errorlog && exit 1
 		# check sha512, give three tries for downloading aggain(diffrent mirrors are used automatically)
 		for tillthree in 1 2 3
 		do
@@ -315,11 +359,97 @@ untar () {
 	find . -type f -size 0c -delete
 }
 
-tmpfile=$(mktemp)
+texmfget () {
 
+NAME="$1"
+# remove outputfile if already present
+[ -s "$output" ] && rm $output
+
+# check all content to make sure no package is added more than once. Docs contain every docfile
+if [ $TARBALL != docs ]
+then
+	echo "Preparing list of packages to be added the $NAME-tarball ..."
+	echo "$PACKAGES" | sed "s/[[:space:]]//g;/^$/d" >> $collections_tobedone
+	package_list 
+fi
+
+if [ $NAME = $TARBALL ]
+then
+
+cd $texmf
+
+# split packge
+#echo "Finding fonts which are present as metafont-source(.mf), move corresponding pfb to remainder-package. Be patient ..."
+##find . -type f -name '*.mf' | tee -a fontfiles
+#find texmf-dist -type f -name '*.mf' > fontfiles
+##sed -i -n "/amsfonts/!p" fontfiles
+#rev fontfiles | cut -d'.' -f2 | cut -d'/' -f1 | rev > fontnames
+#find texmf-dist -type f -name "*.pfb" > fonts.type1
+#find texmf-dist -type f -name "*.pfm" >> fonts.type1
+#find texmf-dist -type f -name "*.afm" >> fonts.type1
+#[ -f fonts.pfb ] && rm fonts.pfb
+#while read a
+#do
+#	grep -w "$a.pfb" fonts.type1 >> fonts.pfb
+#	grep -w "$a.pfm" fonts.type1 >> fonts.pfb
+#	grep -w "$a.afm" fonts.type1 >> fonts.pfb
+#       #find . -type f -name "$a.pfb" >> fonts.pfb
+#       #find . -type f -name "$a.pfm" >> fonts.pfb
+#       #find . -type f -name "$a.afm" >> fonts.pfb
+#done < fontnames
+#sort -u < fonts.pfb > $tmpfile
+#mv $tmpfile fonts.pfb
+##sed -i "/.*amsfonts.*/d" fonts.pfb
+## Only move cbfonts for now ...
+#sed -i -n "/cbfonts/p" fonts.pfb
+#rev fonts.pfb | cut -d'/' -f2- | rev > fontpathes
+##sort -u < fontpathes > $tmpfile
+##mv $tmpfile fontpathes
+#while read a; do mkdir -p remainder/$a; done < fontpathes
+#while read a; do mv $a remainder/$a; done < fonts.pfb
+#rm fontfiles fontnames fontpathes fonts.type1 fonts.pfb
+
+# cleanup tar-directory, just in case
+[ -d texmf-dist ] && rm -rf texmf-dist
+#unset flavour ; export flavour 
+mkdir texmf-dist &> /dev/null
+
+VERSION=$(cat $TMP/VERSION)
+case $TARBALL in
+	docs)
+		export flavour=".doc" 
+		untar $output_doc
+		#tar Jvcf $TMP/texlive-texmf-docs-$VERSION.tar.xz texmf-dist || exit 1
+		tar vrf $TMP/texlive-$TARBALL-$VERSION.tar texmf-dist || exit 1
+		echo "Packages-list: $output_doc"
+		rm -rf texmf-dist
+	;;
+	base|extra|fonts)
+		untar $output
+		tar vrf $TMP/texlive-$TARBALL-$VERSION.tar texmf-dist || exit 1
+		cat $output.meta >> $output.meta.$TARBALL
+		rm $output.meta 
+		echo "Packages-list: $output.meta.$TARBALL"
+		rm $output 
+		rm -rf texmf-dist
+	;;
+esac
+
+fi
+
+}
+
+# Main
+
+case "$1" in
+	base|docs|extra|fonts) TARBALL=$1; echo "Building $TARBALL tarball ..." ;;
+	*) usage ;;
+esac
+
+mkdir -p $texmf
 cd $TMP
 
-# create run.tlpkg and doc.tlpkg only if $db.orig isn't there yet/was deletet
+# create run.tlpkg and doc.tlpkg only if $db.orig isn't there yet/was deleted
 if [ ! -s $TMP/${db}.orig ]
 then
 	# Set date manually upload date from $mirror/tlpkg/texlive.tlpdb. Looking a better way for auto-detect date/get reviosn in some way
@@ -331,16 +461,14 @@ then
 	
 	wget -O $TMP/${db}.orig -c ${mirror}tlpkg/$db 
 	# shrink db to be faster on later processing
-	#sed "/^ \+./d;/^longdesc \+./d" $TMP/${db}.orig > $TMP/$db
-	#sed "/^ \+./d;/^longdesc \+./d;/^doc\+./d;/^cat\+./d;/^rev\+./d;/^short\+./d;/^rel\+./d" $TMP/${db}.orig > $TMP/$db
 	sed "/^ \+./d;/^longdesc \+./d;/^cat\+./d;/^rev\+./d;/^exe\+./d;/^bin\+./d;/^src\+./d" $TMP/${db}.orig > $TMP/$db
-
 
 	# as $db(might be) is new, remove the meta-files, be created again with pontentionally new content
 	rm -rf $texmf/*.meta
 	rm $TMP/run.tlpkg
-	[ -f $output_doc ] && rm $output_doc
+	[ -f "$output_doc" ] && rm "$output_doc"
 fi
+
 	
 # Make a list of all packages available, but exclude binary and installer/configuration packages.
 # It turns out that packagenames without '.' are what we want. Packages with '.' are all binarie-packages, which we biuld from source.
@@ -351,6 +479,7 @@ grep ^name $TMP/$db | grep -v ^"name collection-" | grep -v ^"name scheme-" | gr
 global_exclude="
 texworks
 "
+# unused variable, to be considered if these are already included by the source-tarball, or strip these of the source-tarball and add them as texlive-package?
 zglobal_exclude="
 bibtex8  
 bibtexu  
@@ -414,109 +543,19 @@ do
 	fi
 done < $TMP/allpackages
 		
-VERSION=$(cat VERSION)
 
-# remove outputfile if already present
-[ -s "$output" ] && rm $output
+[ -f "$collections_done" ] && rm "$collections_done"
+[ -f "$collections_tobedone" ] && rm "$collections_tobedone"
 
-collections_done=$TMP/done
-collections_tobedone=$TMP/tobedone
+packages 
 
-echo "Preparing list of packages to be added ..."
-# Start with the biggest maxsize. This way adding full collections can be handeld, rather than the packages are not added(added to $collection_done without processing) by the $kb limit.
-# todo: extra tobedone-queue for dependend packages, to be sure to get these and not discard by $kb limit.
-
-for kb in $(printf '%s\n' "${!maxsize[@]}"|tac)
-do
-	for maxsizecollection in ${maxsize[$kb]}
-	do
-		echo "$maxsizecollection" >> $collections_tobedone
-		package_list #$1 # use diffrent package list if $1=docs
-	done
-done
-
-#[ -f $collections_done ] && rm $collections_done
-#[ -f $collections_tobedone ] && rm $collections_tobedone
-
-#echo "Generate the remainder package-list ..."
-#cp $TMP/run.tlpkg $output_remainder
-## remove packages from remainder packages list
-#while read remove
-#do
-#	sed -i "/^${remove}$/d" $output_remainder
-#done < $output
-
-cd $texmf
-
-# split packge
-#echo "Finding fonts which are present as metafont-source(.mf), move corresponding pfb to remainder-package. Be patient ..."
-##find . -type f -name '*.mf' | tee -a fontfiles
-#find texmf-dist -type f -name '*.mf' > fontfiles
-##sed -i -n "/amsfonts/!p" fontfiles
-#rev fontfiles | cut -d'.' -f2 | cut -d'/' -f1 | rev > fontnames
-#find texmf-dist -type f -name "*.pfb" > fonts.type1
-#find texmf-dist -type f -name "*.pfm" >> fonts.type1
-#find texmf-dist -type f -name "*.afm" >> fonts.type1
-#[ -f fonts.pfb ] && rm fonts.pfb
-#while read a
-#do
-#	grep -w "$a.pfb" fonts.type1 >> fonts.pfb
-#	grep -w "$a.pfm" fonts.type1 >> fonts.pfb
-#	grep -w "$a.afm" fonts.type1 >> fonts.pfb
-#       #find . -type f -name "$a.pfb" >> fonts.pfb
-#       #find . -type f -name "$a.pfm" >> fonts.pfb
-#       #find . -type f -name "$a.afm" >> fonts.pfb
-#done < fontnames
-#sort -u < fonts.pfb > $tmpfile
-#mv $tmpfile fonts.pfb
-##sed -i "/.*amsfonts.*/d" fonts.pfb
-## Only move cbfonts for now ...
-#sed -i -n "/cbfonts/p" fonts.pfb
-#rev fonts.pfb | cut -d'/' -f2- | rev > fontpathes
-##sort -u < fontpathes > $tmpfile
-##mv $tmpfile fontpathes
-#while read a; do mkdir -p remainder/$a; done < fontpathes
-#while read a; do mv $a remainder/$a; done < fonts.pfb
-#rm fontfiles fontnames fontpathes fonts.type1 fonts.pfb
-#if [ -d remainder ]
-#then
-#	cd remainder
-#	tar Jvcf $TMP/add-to-remainder.tar.xz texmf-dist || exit 1
-#	cd -
-#	rm -rf remainder
-#fi
-
-# cleanup tar-directorie, in case
-[ -d texmf-dist ] && rm -rf texmf-dist
-#unset flavour ; export flavour 
-mkdir texmf-dist &> /dev/null
-
-
-case $1 in
-	docs)
-		export flavour=".doc" 
-		untar $output_doc
-		#untar $output
-		tar Jvcf $TMP/texlive-texmf-docs-$VERSION.tar.xz texmf-dist || exit 1
-		ls -lah $TMP/texlive-texmf-docs-$VERSION.tar.xz || exit 1
-		rm -rf texmf-dist
-		echo "Packages-list: $output_doc"
-
-	;;
-	*)
-		#XZ_OPT=-4e tar Jvcf $TMP/texlive-${scheme}${flavour}.tar.xz texmf-dist
-		untar $output
-		#tar  vcf $TMP/texlive-$NAME-$VERSION.tar texmf-dist || exit 1
-		tar vrf $TMP/texlive-$NAME-$VERSION.tar texmf-dist || exit 1
-		mv $output.meta $output.meta.$NAME
-		echo "Packages-list: $output.meta.$NAME"
-		rm $output 
-		rm -rf texmf-dist
-		#[ -f $TMP/texlive-$NAME-$VERSION.tar.xz ] && rm $TMP/texlive-$NAME-$VERSION.tar.xz
-		#xz -9 $TMP/texlive-$NAME-$VERSION.tar || exit 1
-		#ls -lah $TMP/texlive-$NAME-$VERSION.tar.xz
-	;;
-esac
+# As the demanded packages are in the tarball, compress it.
+  echo "Compressing $TMP/texlive-$TARBALL-$VERSION.tar ..."
+  if [ -s $TMP/texlive-$TARBALL-$VERSION.tar ]; then
+    [ -f $TMP/texlive-$TARBALL-$VERSION.tar.xz ] && rm $TMP/texlive-$TARBALL-$VERSION.tar.xz
+    xz -9 -T0 $TMP/texlive-$TARBALL-$VERSION.tar || exit 1
+    ls -lah $TMP/texlive-$TARBALL-$VERSION.tar.xz
+  fi
 
 # cleanup
 rm $tmpfile
