@@ -5,6 +5,12 @@
 # Originally written by Hubert Hesse (slackbuilds@hubertscorner.de).
 # Heavily modified by B. Watson (yalhcru@gmail.com).
 
+# 20160725 bkw:
+# - version bump to 1.9a.
+# - s/i486/i586/g (to match new 14.2 template).
+# - script will no longer build old versions of mupdf, too much
+#   changed upstream.
+
 # 20150915 bkw BUILD=2:
 # - add -DJBIG_NO_MEMENTO, needed for building with jbig2dec-0.12.
 
@@ -71,13 +77,13 @@
 # - Fix the man pages slightly.
 
 PRGNAM=mupdf
-VERSION=${VERSION:-1.7a}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.9a}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+    i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
@@ -88,8 +94,8 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
@@ -122,9 +128,19 @@ cd $PRGNAM-$VERSION-source
 # for the default build. If you want javascript, MUJS=yes in the env.
 
 MUJS="${MUJS:-no}"
-[ "$MUJS" = "yes" ] && mv thirdparty/mujs .keep
-rm -rf thirdparty/*
-[ "$MUJS" = "yes" ] && mv .keep thirdparty/mujs
+
+if [ "$MUJS" = "yes" ]; then
+  mv thirdparty/mujs .keep
+  rm -rf thirdparty/*
+  mv .keep thirdparty/mujs
+  WITH=with
+else
+  rm -rf thirdparty/*
+  sed -i 's,murun\.o,,' Makefile
+  sed -i 's,pdf_drop_js.*,;,' source/pdf/pdf-xref.c
+  sed -i '/murun_main/d' source/tools/mutool.c
+  WITH=without
+fi
 
 chown -R root:root .
 find -L . \
@@ -134,7 +150,7 @@ find -L . \
  -exec chmod 644 {} \;
 
 # opj_stream_set_user_data() now takes 3 args in openjpeg 2.1.
-# Patch applies to both 1.4 and 1.5.
+# Patch applies to both 1.4 and 1.5 (and later).
 patch -p1 < $CWD/openjpeg-2.1-api-change.diff
 
 # Makerules incorrectly tries to build with openjpeg-1.x system lib, while
@@ -147,8 +163,9 @@ sed -i 's,libopenjpeg1,libopenjp2,g' Makerules
 # it and spewing harmless but scary 'fatal: Not a git repository' errors.
 sed -i "/^VERSION/s,=.*,= $VERSION," Makefile
 
-make build=release prefix=/usr XCFLAGS="$SLKCFLAGS -DJBIG_NO_MEMENTO"
 make \
+  XCFLAGS="$SLKCFLAGS -DJBIG_NO_MEMENTO" \
+  HAVE_MUJS="$MUJS" \
   build=release \
   prefix=/usr \
   libdir=/usr/lib$LIBDIRSUFFIX \
@@ -156,15 +173,6 @@ make \
   docdir=/usr/doc/$PRGNAM-$VERSION \
   DESTDIR=$PKG \
   install
-
-if [ "$MUJS" = "yes" ]; then
-  # If JS support included, applications will need to link with this:
-  install -m0664 build/release/libmujs.a $PKG/usr/lib$LIBDIRSUFFIX/
-  install -m0664 thirdparty/mujs/mujs.h $PKG/usr/include/
-else
-  # Don't need mujstest if no javascript support.
-  rm -f $PKG/usr/bin/mujstest
-fi
 
 strip $PKG/usr/bin/*
 
@@ -177,6 +185,12 @@ ln -s $PRGNAM-x11 $PKG/usr/bin/$PRGNAM
 ln -s $PRGNAM.1.gz $PKG/usr/man/man1/$PRGNAM-x11.1.gz
 [ -e $PKG/usr/bin/$PRGNAM-x11-curl ] && \
   ln -s $PRGNAM.1.gz $PKG/usr/man/man1/$PRGNAM-x11-curl.1.gz
+
+# mujstest is useless if we don't have JS support. Also libmupdfthird.a
+# ends up 8 bytes long & has no object code in it.
+[ "$MUJS" = "yes" ] || \
+  rm -f $PKG/usr/bin/mujstest \
+        $PKG/usr/lib$LIBDIRSUFFIX/libmupdfthird.a
 
 # Installed permissions are atrocious (everything 755).
 find $PKG -type f | xargs chmod 644
@@ -194,7 +208,7 @@ cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
 
 # .pc file taken from debian and parameterized.
 PCLIBS="-l$PRGNAM"
-[ "$MUJS" = "yes" ] && PCLIBS="$PCLIBS -lmujs"
+[ "$MUJS" = "yes" ] && PCLIBS="$PCLIBS -lmupdfthird"
 
 mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/pkgconfig/
 sed -e "s,@LIB@,lib$LIBDIRSUFFIX,g" \
@@ -202,14 +216,11 @@ sed -e "s,@LIB@,lib$LIBDIRSUFFIX,g" \
     -e "s,@PCLIBS@,$PCLIBS,g" \
     $CWD/$PRGNAM.pc > $PKG/usr/lib$LIBDIRSUFFIX/pkgconfig/$PRGNAM.pc
 
-# slack-desc will conveniently say whether javascript is built in.
-WITH=without
-[ "$MUJS" = "yes" ] && WITH=with
-
 # 'make install' already installed most of the docs.
 cp -a CONTRIBUTORS $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
+# slack-desc will conveniently say whether javascript is built in.
 mkdir -p $PKG/install
 sed "s,@WITH@,$WITH," < $CWD/slack-desc > $PKG/install/slack-desc
 
