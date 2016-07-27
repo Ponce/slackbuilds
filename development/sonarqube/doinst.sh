@@ -22,3 +22,4 @@ preserve_perms() {
 preserve_perms etc/rc.d/rc.sonarqube.new
 config usr/share/sonarqube/conf/sonar.properties.new
 config usr/share/sonarqube/conf/wrapper.conf.new
+
