@@ -27,6 +27,12 @@ if [ "$BOOTLOADER" = lilo ] && [ ! -x /usr/bin/mbootpack ]; then
   exit
 fi
 
+if [ ! -d /usr/src/linux-$KERNEL ]; then
+  echo "Missing kernel source in /usr/src/linux-$KERNEL"
+  echo "Get it from kernel.org and rerun this script."
+  exit
+fi
+
 CWD=$(pwd)
 TMP=${TMP:-/tmp/xen}
 
@@ -34,12 +40,6 @@ set -e
 
 rm -rf $TMP
 mkdir -p $TMP
-
-if [ ! -d /usr/src/linux-$KERNEL ]; then
-  echo "Missing kernel source in /usr/src/linux-$KERNEL"
-  echo "Get it from kernel.org and rerun this script."
-  exit
-fi
 
 # Prepare kernel source
 cd /usr/src
@@ -68,32 +68,27 @@ if [ "$MENUCONFIG" = yes ]; then
   done
 fi
 
-make vmlinux modules
+make bzImage modules
 make modules_install INSTALL_MOD_PATH=$TMP
 
 # Install modules
 cp -a $TMP/lib/modules/$KERNEL-xen /lib/modules
 
-# Strip kernel symbols
-strip vmlinux -o vmlinux-stripped
-
 # Create initrd
-mkinitrd -c -k $KERNEL-xen -m $ROOTMOD -f $ROOTFS -r $ROOTDEV -o /boot/initrd-$KERNEL-xen.gz
+mkinitrd -c -k $KERNEL-xen -m $ROOTMOD -f $ROOTFS -r $ROOTDEV \
+  -o /boot/initrd-$KERNEL-xen.gz
 
-# For lilo we pack kernel up with mbootpack
+# For lilo we use mbootpack
 if [ "$BOOTLOADER" = lilo ]; then
   gzip -d -c /boot/xen-$XEN.gz > xen-$XEN
-  gzip -d -c /boot/initrd-$KERNEL-xen.gz > initrd-$KERNEL-xen
-  mbootpack -o vmlinux-stripped-mboot -m vmlinux-stripped -m initrd-$KERNEL-xen xen-$XEN
-# For lilo we need to keep kernel unpacked
-  cp -a vmlinux-stripped-mboot vmlinuz
-elif [ "$BOOTLOADER" = grub ]; then
-  gzip vmlinux-stripped -c > vmlinuz
+  mbootpack -m arch/x86/boot/bzImage -m /boot/initrd-$KERNEL-xen.gz xen-$XEN \
+    -o /boot/vmlinuz-$KERNEL-xen
+else
+  cp arch/x86/boot/bzImage /boot/vmlinuz-$KERNEL-xen
 fi
 
-install -D -m 644 vmlinuz /boot/vmlinuz-$KERNEL-xen
-install -m 644 System.map /boot/System.map-$KERNEL-xen
-install -m 644 .config /boot/config-$KERNEL-xen
+cp System.map /boot/System.map-$KERNEL-xen
+cp .config /boot/config-$KERNEL-xen
 
 cd /boot
 ln -s vmlinuz-$KERNEL-xen vmlinuz-xen
@@ -104,4 +99,4 @@ ln -s initrd-$KERNEL-xen.gz initrd-xen.gz
 # Clean up kernel sources
 cd /usr/src/linux-$KERNEL-xen
 make clean
-rm initrd-$KERNEL-xen vmlinux-stripped* vmlinuz xen-$XEN
+rm xen-$XEN

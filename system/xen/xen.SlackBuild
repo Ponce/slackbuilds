@@ -24,10 +24,11 @@
 
 PRGNAM=xen
 VERSION=${VERSION:-4.6.3}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 SEABIOS=${SEABIOS:-1.8.2}
+OVMF=${OVMF:-52a99493cce88a9d4ec8a02d7f1bd1a1001ce60d}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -72,18 +73,23 @@ else
 fi
 
 case "${USE_LIBSSH2:-no}" in
-  yes) LIBSSH2="en" ;;
-    *) LIBSSH2="dis" ;;
+  yes) CONF_LIBSSH2="en" ;;
+    *) CONF_LIBSSH2="dis" ;;
 esac
 
 case "${USE_BLUEZ:-no}" in
-  yes) BLUEZ="en" ;;
-    *) BLUEZ="dis" ;;
+  yes) CONF_BLUEZ="en" ;;
+    *) CONF_BLUEZ="dis" ;;
 esac
 
 case "${BUILD_STUBDOM:-no}" in
-  yes) STUBDOM="en" ;;
-    *) STUBDOM="dis" ;;
+  yes) CONF_STUBDOM="en" ;;
+    *) CONF_STUBDOM="dis" ;;
+esac
+
+case "${WITH_OVMF:-yes}" in
+  no) CONF_OVMF="dis" ;;
+   *) CONF_OVMF="en" ;;
 esac
 
 set -e
@@ -111,20 +117,24 @@ for i in $CWD/xsa/* ; do
 done
 
 # Tweak some things
-sed "s/@@LIBSSH2@@/$LIBSSH2/;s/@@BLUEZ@@/$BLUEZ/" \
+sed "s/@@CONF_LIBSSH2@@/$CONF_LIBSSH2/;s/@@CONF_BLUEZ@@/$CONF_BLUEZ/" \
   $CWD/patches/qemu_configure_options.diff | patch -p1
 patch -p1 <$CWD/patches/symlinks_instead_of_hardlinks.diff
 
 # Let's not download stuff during the build...
 patch -p1 <$CWD/patches/use_already_present_ipxe.diff
-patch -p1 <$CWD/patches/disable_git_checkout.diff
 cp $CWD/ipxe-git-9a93db3f0947484e30e753bbd61a10b17336e20e.tar.gz \
   tools/firmware/etherboot/_ipxe.tar.gz
 (
+  # Seabios
   cd tools/firmware
   tar -xf $CWD/seabios-$SEABIOS.tar.gz
   mv seabios-$SEABIOS seabios-dir-remote
   ln -s seabios-dir-remote seabios-dir
+  make -C seabios-dir defconfig
+  # OVMF
+  tar -xf $CWD/ovmf-git-$OVMF.tar.gz
+  cp ovmf-makefile ovmf-dir/Makefile
 )
 cp $CWD/{lwip,zlib,newlib,pciutils,grub,gmp,tpm_emulator}-*.tar.?z* \
   $CWD/polarssl-*.tgz stubdom
@@ -141,7 +151,8 @@ CXXFLAGS="$SLKCFLAGS" \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
   --disable-qemu-traditional \
   --disable-rombios \
-  --${STUBDOM}able-stubdom \
+  --${CONF_STUBDOM}able-stubdom \
+  --${CONF_OVMF}able-ovmf \
   --build=$ARCH-slackware-linux
 
 make install-xen \
@@ -158,7 +169,7 @@ make install-tools \
   MANDIR=/usr/man \
   DESTDIR=$PKG
 
-if [ "$STUBDOM" = "en" ]; then
+if [ "$CONF_STUBDOM" = "en" ]; then
   make install-stubdom \
     docdir=/usr/doc/$PRGNAM-$VERSION \
     DOCDIR=/usr/doc/$PRGNAM-$VERSION \
