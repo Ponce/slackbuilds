@@ -18,8 +18,27 @@
 # - Use icon extracted from mame.ico in the source
 # - Update .ini file slightly (sound=sdl, not sound=1)
 
+# 20160721 bkw:
+# - Updated for v0.175 (again, after missing several releases)
+# - Update ARCH stuff, i486 => i586
+# - Add missing mame.6 and mess.6 man pages (whoops!)
+# - man pages now in docs/man/ instead of src/osd/sdl/
+# - Don't modify the *.1 man pages to put them in section 6 any more
+# - Symlink mame -> mess in /usr/games (to keep old frontends working)
+# - Disable QT debugger by default, as it now requires qt5 and I don't
+#   want qt5 as a hard dep for this... how many people who install mame
+#   are *really* going to debug the game ROM code?
+# - Add QTDEBUG=yes option for people who really want the debugger,
+#   make slack-desc say whether or not it's enabled.
+# - Upstream removed 'testkeys', stop trying to install it.
+
+# 20160728 bkw:
+# - Updated for v0.176. Upstream does a release on the last Wednesday
+#   of every month. I doubt I'm going to find time to update this
+#   script 12 times a year, but maybe...
+
 PRGNAM=mame
-VERSION=${VERSION:-0.167}
+VERSION=${VERSION:-0.176}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -38,8 +57,8 @@ OUTPUT=${OUTPUT:-/tmp}
 
 # NB nonstandard flags here. Upstream defaults to -O3, so we'll leave
 # that as-is. Only the arch-specific stuff goes here.
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-march=i486 -mtune=i686"
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-march=i686 -mtune=i686"
@@ -52,6 +71,7 @@ else
   LIBDIRSUFFIX=""
 fi
 
+# Source extracts to e.g. mame-mame0175/
 SHORTNAME=${PRGNAM}${VERSION/./}
 DIRNAME=$PRGNAM-$SHORTNAME
 
@@ -83,9 +103,12 @@ find -L . \
 # it uses python to convert XML layout files to C++ code.
 
 # Where possible, use system libraries instead of building the ones
-# bundled with the mame source. However, SBo's lua and Slackware's
-# sqlite3 are too old for mame.
-#USE_SYSTEM_LIB_SQLITE3=1 USE_SYSTEM_LIB_LUA=1 \
+# bundled with the mame source. However, SBo's lua is (still!) too old
+# for mame.
+#USE_SYSTEM_LIB_LUA=1 \
+
+# Upstream dropped sqlite as a dependency, this no longer matters.
+#USE_SYSTEM_LIB_SQLITE3=1 \
 
 # Not going to USE_SYSTEM_LIB_PORTAUDIO or USE_SYSTEM_LIB_PORTMIDI,
 # the bundled versions are fine and I don't want a mile-long dependency
@@ -93,12 +116,13 @@ find -L . \
 # JDK! In case you're wondering, only the C code in the bundled portmidi
 # is built (no Java needed).
 
-# The OVERRIDE_CC and OVERRIDE_CXX are there because mame's build ignores
-# $PATH when searching for gcc/g++, and won't find my ccache symlinks in
-# /usr/local/bin. On a normal (non-ccache-using) system, these options
-# do nothing (they use the compilers in /usr/bin, which is the default
-# anyway) and you can forget about them. (Mini-rant: PATH has been a
-# standard mechanism on both Unix and DOS/Windows systems for what,
+# The OVERRIDE_CC and OVERRIDE_CXX are there because mame's build
+# ignores $PATH when searching for gcc/g++, and won't find my ccache
+# symlinks in /usr/local/bin. On a normal (non-ccache-using) system,
+# these options do nothing (they use the compilers in /usr/bin, which
+# is the default anyway) and you can forget about them... or, if you use
+# distcc, this will allow it to actually work. (Mini-rant: PATH has been
+# a standard mechanism on both Unix and DOS/Windows systems for what,
 # 30 or 40 years now? Come on people...)
 
 # This is purely cosmetic, and can't be set on the make command line.
@@ -108,14 +132,26 @@ sed -i 's/DISTRO := generic/DISTRO := slackware/' makefile
 # SDL_INI_PATH needs to contain a $ character. I haven't figured out
 # how (or even if) I can pass this through multiple layers of make
 # calling genie which calls make again, so screw it:
-sed -i 's,\.;ini,/etc,' src/osd/sdl/sdlmain.c
+sed -i 's,\.;ini,/etc,' src/osd/sdl/sdlmain.cpp
 
-# Tried several variants of this, none work, ended up using sed:
+# Tried several variants of this, none work, ended up using the sed
+# stuff above.
 #SDL_INI_PATH='$$HOME/.mame;/etc' \
+
+# Previous versions of mame used qt4 for the debugger GUI. Now it's
+# qt5, so I've made it optional (Slackware 14.2 still only has qt4).
+if [ "${QTDEBUG:-no}" = "yes" ]; then
+  QTOPT=1
+  WITHQT="with"
+else
+  QTOPT=0
+  WITHQT="without"
+fi
 
 # Having ARCH set in the env will break the build, hence ARCH=""
 
-make USE_SYSTEM_LIB_EXPAT=1 \
+make USE_QTDEBUG=$QTOPT \
+     USE_SYSTEM_LIB_EXPAT=1 \
      USE_SYSTEM_LIB_ZLIB=1 \
      USE_SYSTEM_LIB_JPEG=1 \
      USE_SYSTEM_LIB_FLAC=1 \
@@ -130,33 +166,33 @@ make USE_SYSTEM_LIB_EXPAT=1 \
      SUBTARGET=$PRGNAM
 
 # No 'make install' target, do it manually.
-mkdir -p $PKG/usr/games $PKG/etc $PKG/usr/man/man6 \
+mkdir -p $PKG/usr/games $PKG/etc $PKG/usr/man/man6 $PKG/usr/man/man1 \
          $PKG/usr/share/applications $PKG/usr/share/pixmaps
 
 # Deal with upstream's executable-naming silliness.
 [ -e ${PRGNAM}64 ] && mv ${PRGNAM}64 $PRGNAM
 [ -e ${PRGNAM}32 ] && mv ${PRGNAM}32 $PRGNAM
-install -s -m0755 -oroot -groot $PRGNAM $PKG/usr/games/$PRGNAM
 
 # .desktop borrowed from Ludovic Lechapt's Debian package.
 # Icon extracted from src/mame/osd/windows/mame/mame.ico with icotool.
-gzip -9c < src/osd/sdl/man/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
 cat $CWD/desktop/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
 cat $CWD/desktop/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
 cat $CWD/$PRGNAM.ini > $PKG/etc/$PRGNAM.ini.new
 
-# Install the tools:
+# Install the binaries:
 install -s -m0755 -oroot -groot \
-   castool floptool imgtool nlwav \
-   testkeys romcmp jedutil unidasm ldresample ldverify \
-   regrep srcclean src2html chdman nltool pngcmp split \
-   $PKG/usr/games/
+  $PRGNAM castool chdman floptool imgtool jedutil \
+  ldresample ldverify nltool nlwav pngcmp regrep \
+  romcmp split src2html srcclean unidasm \
+  $PKG/usr/games/
 
-# Upstream uses section 1 for their utilities' man pages, we want 6.
-for i in src/osd/sdl/man/*.1; do
-  sed '/^\.TH/s,\<1\>,6,' $i | \
-    gzip -9c > $PKG/usr/man/man6/$( basename $i .1 ).6.gz
-done
+ln -s $PRGNAM $PKG/usr/games/mess
+
+# Install the man pages. mame and mess still have separate man
+# pages, though the binaries are combined now.
+install -m0644 -oroot -groot docs/man/*.1 $PKG/usr/man/man1
+install -m0644 -oroot -groot docs/man/*.6 $PKG/usr/man/man6
+gzip -9 $PKG/usr/man/man?/*.?
 
 # Create empty dirs for the user to populate with ROMs and such.
 for i in roms samples artwork ctrlr font cheat; do
@@ -164,11 +200,12 @@ for i in roms samples artwork ctrlr font cheat; do
 done
 
 mkdir -p $PKG/usr/doc/${PRGNAM}-$VERSION
-cp docs/* $PKG/usr/doc/${PRGNAM}-$VERSION
+# can't just "cp docs/* ..." because man/ is a dir, set -e kills the script
+cp docs/L* docs/*.* $PKG/usr/doc/${PRGNAM}-$VERSION
 cat $CWD/${PRGNAM}.SlackBuild > $PKG/usr/doc/${PRGNAM}-$VERSION/${PRGNAM}.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@WITHQT@,$WITHQT," $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
