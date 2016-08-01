@@ -288,6 +288,11 @@ SUPPORT_MBX=yes
 # library.
 # NOTE: LDAP cannot be built as a module!
 #
+# For Redis you need to have hiredis installed on your system
+# (https://github.com/redis/hiredis).
+# Depending on where it is installed you may have to edit the CFLAGS
+# (often += -I/usr/local/include) and LDFLAGS (-lhiredis) lines.
+
 # If your system has pkg-config then the _INCLUDE/_LIBS setting can be
 # handled for you automatically by also defining the _PC variable to reference
 # the name of the pkg-config package, if such is available.
@@ -306,6 +311,7 @@ LOOKUP_DSEARCH=yes
 # LOOKUP_ORACLE=yes
 LOOKUP_PASSWD=yes
 # LOOKUP_PGSQL=yes
+# LOOKUP_REDIS=yes
 # LOOKUP_SQLITE=yes
 LOOKUP_SQLITE_PC=sqlite3
 # LOOKUP_WHOSON=yes
@@ -357,7 +363,8 @@ PCRE_CONFIG=yes
 # the command for linking Exim itself, not on any auxiliary programs. You
 # don't need to set LOOKUP_INCLUDE if the relevant directories are already
 # specified in INCLUDE. The settings below are just examples; -lpq is for
-# PostgreSQL, -lgds is for Interbase, -lsqlite3 is for SQLite.
+# PostgreSQL, -lgds is for Interbase, -lsqlite3 is for SQLite, -lhiredis
+# is for Redis.
 #
 # You do not need to use this for any lookup information added via pkg-config.
 
@@ -373,6 +380,10 @@ endif
 ifeq ($(LOOKUP_MYSQL),yes)
 LOOKUP_INCLUDE+=-I/usr/include/mysql
 LOOKUP_LIBS+=-L/usr/lib$(LIBDIRSUFFIX)/mysql -lmysqlclient_r
+endif
+
+ifeq ($(LOOKUP_REDIS),yes)
+LOOKUP_LIBS+=-lhiredis
 endif
 
 ifeq ($(LOOKUP_PGSQL),yes)
@@ -407,6 +418,7 @@ WITH_CONTENT_SCAN=yes
 
 # WITH_OLD_DEMIME=yes
 
+#------------------------------------------------------------------------------
 # If you're using ClamAV and are backporting fixes to an old version, instead
 # of staying current (which is the more usual approach) then you may need to
 # use an older API which uses a STREAM command, now deprecated, instead of
@@ -416,8 +428,9 @@ WITH_CONTENT_SCAN=yes
 #
 # WITH_OLD_CLAMAV_STREAM=yes
 
+
 #------------------------------------------------------------------------------
-# By default Exim includes code to support DKIM (DomainKeys Identified
+# If built with TLS, Exim includes code to support DKIM (DomainKeys Identified
 # Mail, RFC4871) signing and verification.  Verification of signatures is
 # turned on by default.  See the spec for information on conditionally
 # disabling it.  To disable the inclusion of the entire feature, set
@@ -445,6 +458,10 @@ WITH_CONTENT_SCAN=yes
 
 # DISABLE_DNSSEC=yes
 
+# To disable support for Events set DISABLE_EVENT to "yes"
+
+# DISABLE_EVENT=yes
+
 
 #------------------------------------------------------------------------------
 # Compiling Exim with experimental features. These are documented in
@@ -453,6 +470,7 @@ WITH_CONTENT_SCAN=yes
 
 # Uncomment the following line to add support for talking to dccifd.  This
 # defaults the socket path to /usr/local/dcc/var/dccifd.
+# Doing so will also explicitly turn on the WITH_CONTENT_SCAN option.
 
 # EXPERIMENTAL_DCC=yes
 
@@ -473,6 +491,12 @@ WITH_CONTENT_SCAN=yes
 # CFLAGS  += -I/usr/local/include
 # LDFLAGS += -lsrs_alt
 
+# Uncomment the following line to add DMARC checking capability, implemented
+# using libopendmarc libraries.  You must have SPF support enabled also.
+# EXPERIMENTAL_DMARC=yes
+# CFLAGS += -I/usr/local/include
+# LDFLAGS += -lopendmarc
+
 # Uncomment the following lines to add Brightmail AntiSpam support. You need
 # to have the Brightmail client SDK installed. Please check the experimental
 # documentation for implementation details. You need to edit the CFLAGS and
@@ -482,42 +506,12 @@ WITH_CONTENT_SCAN=yes
 # CFLAGS  += -I/opt/brightmail/bsdk-6.0/include
 # LDFLAGS += -lxml2_single -lbmiclient_single -L/opt/brightmail/bsdk-6.0/lib
 
-# Uncomment the following line to add DMARC checking capability, implemented
-# using libopendmarc libraries.
-# EXPERIMENTAL_DMARC=yes
-# CFLAGS += -I/usr/local/include
-# LDFLAGS += -lopendmarc
-
-
-# Uncomment the following line to support Events,
-# eg. for logging to a database.
-# EXPERIMENTAL_EVENT=yes
-
-# Uncomment the following line to add Redis lookup support
-# You need to have hiredis installed on your system (https://github.com/redis/hiredis).
-# Depending on where it is installed you may have to edit the CFLAGS and LDFLAGS lines.
-# EXPERIMENTAL_REDIS=yes
-# CFLAGS += -I/usr/local/include
-# LDFLAGS += -lhiredis
-
-# Uncomment the following line to enable Experimental Proxy Protocol
-# EXPERIMENTAL_PROXY=yes
-
-# Uncomment the following line to enable support for checking certificate
-# ownership
-# EXPERIMENTAL_CERTNAMES=yes
-
 # Uncomment the following line to add DANE support
 # Note: Enabling this unconditionally overrides DISABLE_DNSSEC
 # EXPERIMENTAL_DANE=yes
 
-# Uncomment the following line to add SOCKS support
-# EXPERIMENTAL_SOCKS=yes
-
-# Uncomment the following to add Internationalisation features. You need to
-# have the IDN library installed.
-# EXPERIMENTAL_INTERNATIONAL=yes
-# LDFLAGS += -lidn
+# Uncomment the following to include extra information in fail DSN message (bounces)
+# EXPERIMENTAL_DSN_INFO=yes
 
 ###############################################################################
 #                 THESE ARE THINGS YOU MIGHT WANT TO SPECIFY                  #
@@ -767,6 +761,13 @@ USE_OPENSSL_PC=openssl
 # USE_GNUTLS_PC=gnutls
 # TLS_LIBS=-lgnutls -ltasn1 -lgcrypt
 
+# The security fix we provide with the gnutls_allow_auto_pkcs11 option
+# (4.82 PP/09) introduces a compatibility regression.  The symbol is
+# not available if GnuTLS is build without p11-kit (--without-p11-kit
+# configure option).  In this case use AVOID_GNUTLS_PKCS11=yes when
+# building Exim.
+# AVOID_GNUTLS_PKCS11=yes
+
 # If you are running Exim as a server, note that just building it with TLS
 # support is not all you need to do. You also need to set up a suitable
 # certificate, and tell Exim about it by means of the tls_certificate
@@ -927,6 +928,32 @@ EXTRALIBS += -ldl
 
 # You probably need to add -lpam to EXTRALIBS, and in some releases of
 # GNU/Linux -ldl is also needed.
+
+
+#------------------------------------------------------------------------------
+# Proxying.
+#
+# If you may want to use outbound (client-side) proxying, using Socks5,
+# uncomment the line below.
+
+# SUPPORT_SOCKS=yes
+
+# If you may want to use inbound (server-side) proxying, using Proxy Protocol,
+# uncomment the line below.
+
+# SUPPORT_PROXY=yes
+
+
+#------------------------------------------------------------------------------
+# Internationalisation.
+#
+# Uncomment the following to include Internationalisation features.  This is the
+# SMTPUTF8 ESMTP extension, and associated facilities for handling UTF8 domain
+# and localparts, per RFCs 5890, 6530 and 6533.
+# You need to have the IDN library installed.
+
+SUPPORT_I18N=yes
+LDFLAGS += -lidn
 
 
 #------------------------------------------------------------------------------
@@ -1114,9 +1141,11 @@ HAVE_IPV6=yes
 # files, and thus be influenced by the value of TMPDIR. For this reason, when
 # Exim starts, it checks the environment for TMPDIR, and if it finds it is set,
 # it replaces the value with what is defined here. Commenting this setting
-# suppresses the check altogether.
+# suppresses the check altogether. Older installations call this macro
+# just TMPDIR, but this has side effects at build time. At runtime
+# TMPDIR is checked as before.
 
-TMPDIR="/tmp"
+EXIM_TMPDIR="/tmp"
 
 
 #------------------------------------------------------------------------------
