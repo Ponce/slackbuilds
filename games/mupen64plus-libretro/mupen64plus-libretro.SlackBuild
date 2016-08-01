@@ -1,0 +1,123 @@
+#!/bin/sh
+
+# Slackware build script for mupen64plus-libretro
+
+# Copyright 2016 Hunter Sezen
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=mupen64plus-libretro
+LIBNAM=$(echo $PRGNAM | tr - _)
+VERSION=${VERSION:-2016.08.01_41c40b8}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# requires patching the Makefile to properly use
+# the default CFLAGS and CXXFLAGS are probably fine
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+  DYNAREC=x86
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+  DYNAREC=x86
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+  DYNAREC=$ARCH
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+  DYNAREC=$ARCH
+fi
+
+DEBUG=${DEBUG:-0}
+VULKAN=${VULKAN:-0}
+if [ "$VULKAN" = "1" ]; then
+  LIBNAM=$(echo $LIBNAM | sed 's/mupen64plus/parallel/')
+  VULKAN_DEBUG=$DEBUG
+else
+  VULKAN_DEBUG=0
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+make WITH_DYNAREC=$DYNAREC \
+  DEBUG=$DEBUG \
+  HAVE_VULKAN=$VULKAN \
+  HAVE_VULKAN_DEBUG=$VULKAN_DEBUG
+
+install -Dm0644 $LIBNAM.so $PKG/usr/lib${LIBDIRSUFFIX}/libretro/$LIBNAM.so
+install -Dm0644 $LIBNAM.info $PKG/usr/lib${LIBDIRSUFFIX}/libretro/info/$LIBNAM.info
+
+if [ "${DEBUG:-0}" = "0" ]; then
+  find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+    | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+fi
+
+for DOCDIR in glide2gl mupen64plus-core mupen64plus-rsp-cxd4 mupen64plus-rsp-hle mupen64plus-video-angrylion; do
+  mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/$DOCDIR
+done
+cp -a README.md $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a glide2gl/todo!.txt $PKG/usr/doc/$PRGNAM-$VERSION/glide2gl
+
+CORE_DOCS="mupen64plus-core/INSTALL mupen64plus-core/LICENSES mupen64plus-core/README mupen64plus-core/RELEASE"
+CXD4_DOCS="mupen64plus-rsp-cxd4/COPYING mupen64plus-rsp-cxd4/README.md"
+HLE_DOCS="mupen64plus-rsp-hle/INSTALL mupen64plus-rsp-hle/LICENSES mupen64plus-rsp-hle/RELEASE"
+
+cp -a $CORE_DOCS $PKG/usr/doc/$PRGNAM-$VERSION/mupen64plus-core
+cp -a $CXD4_DOCS $PKG/usr/doc/$PRGNAM-$VERSION/mupen64plus-rsp-cxd4
+cp -a $HLE_DOCS $PKG/usr/doc/$PRGNAM-$VERSION/mupen64plus-rsp-hle
+
+cp -a mupen64plus-video-angrylion/*.txt $PKG/usr/doc/$PRGNAM-$VERSION/mupen64plus-video-angrylion
+
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
