@@ -3,9 +3,11 @@
 # Slackware build script for povray:
 # the Persistence of Vision Raytracer
 
+# Maintainer: Klaatu
+# Thanks to: Franzen
+
 # Copyright 2009,2011,2013 Niels Horn, Rio de Janeiro, RJ, Brazil
 # All rights reserved.
-#
 # Redistribution and use of this script, with or without modification, is
 # permitted provided that the following conditions are met:
 #
@@ -23,12 +25,12 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# revision date 2013/03/26
-
 PRGNAM=povray
 VERSION=${VERSION:-3.7.0.0}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+DOCDIR=${DOCDIR:-/usr/doc}
+MANDIR=${MANDIR:-/usr/man}
 
 # The "short" version number is needed later:
 SHORT_VERSION=$( echo $VERSION | cut -f1-2 -d. )
@@ -81,9 +83,18 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
+# make sure no bundled static libs can be used
+rm -r libraries
+
 (
   cd unix
   sed 's/automake --w/automake --add-missing --w/g' -i prebuild.sh
+  # Prevent march=nativ for compatibility
+  sed "s/native/$ARCH/g" -i configure.ac
+  # By disabling march=nativ, compatibilitybreaking optimizations like sse4 may arize by prebuild.sh
+  sed "s/ax_x86_cpuflags=.*/unset ax_x86_cpuflags/g" -i config/ax_x86_arch.m4
+  # prevent creating files in $HOME while building
+  patch prebuild.sh $CWD/prebuild.patch
   sh ./prebuild.sh
 )
 
@@ -93,7 +104,7 @@ CXXFLAGS="$SLKCFLAGS" \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --localstatedir=/var \
-  --mandir=/usr/man \
+  --mandir=$MANDIR \
   --build=$ARCH-slackware-linux \
   LIBS="-lboost_system -lboost_thread" \
   COMPILED_BY="$POVRAY_BUILDER"
@@ -104,8 +115,8 @@ make install DESTDIR=$PKG
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+find $PKG/$MANDIR -type f -exec gzip -9 {} \;
+for i in $( find $PKG/$MANDIR -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 # Rename configuration files to .new, will be checked by doinst.sh
 mv $PKG/etc/$PRGNAM/$SHORT_VERSION/$PRGNAM.conf \
@@ -113,13 +124,16 @@ mv $PKG/etc/$PRGNAM/$SHORT_VERSION/$PRGNAM.conf \
 mv $PKG/etc/$PRGNAM/$SHORT_VERSION/$PRGNAM.ini \
    $PKG/etc/$PRGNAM/$SHORT_VERSION/$PRGNAM.ini.new
 
-# ./configure does not accept "--docdir=", so we'll move the docdir manually
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-mv $PKG/usr/share/doc/$PRGNAM-$SHORT_VERSION/* $PKG/usr/doc/$PRGNAM-$VERSION/
-rm -r $PKG/usr/share/doc
-cp -a COPYING INSTALL $PKG/usr/doc/$PRGNAM-$VERSION
-find $PKG/usr/doc/$PRGNAM-$VERSION -type f -exec chmod 644 {} \;
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# ./configure does not accept docdir; move docs manually as needed
+if [ "$DOCDIR" != "/usr/share/doc" ]; then
+    mkdir -p $PKG/$DOCDIR/$PRGNAM-$VERSION
+    mv $PKG/usr/share/doc/$PRGNAM-$SHORT_VERSION/* $PKG/$DOCDIR/$PRGNAM-$VERSION/
+    rm -r $PKG/usr/share/doc
+fi
+
+cp -a COPYING INSTALL $PKG/$DOCDIR/$PRGNAM-$VERSION
+find $PKG/$DOCDIR/$PRGNAM-$VERSION -type f -exec chmod 644 {} \;
+cat $CWD/$PRGNAM.SlackBuild > $PKG/$DOCDIR/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
