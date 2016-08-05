@@ -23,5 +23,5 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.monit.new
-config etc/monit.conf.new
+config etc/monitrc.new
 
