@@ -2,7 +2,7 @@
 ..   rst2man.py guitarix.rst > guitarix.1
 .. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 0.32.3
+.. |version| replace:: 0.35.1
 .. |date| date::
 
 .. converting from pod:
@@ -56,7 +56,7 @@ OPTIONS
 All parameters are optional. Examples::
 
   guitarix
-  guitarix -r gx4-black -i system:capture_3
+  guitarix -r Guitarix_Oak -i system:capture_3
   guitarix -c -o system:playback_1 -o system:playback_2
 
 Help Options:
@@ -71,51 +71,53 @@ Help Options:
 
 GTK style configuration options
   -c, --clear                     Use 'default' GTK style
-  -r, --rcset=STYLE               Style to use, 'gx1-alloy', 'gx2-emerald', 'gx3-dezert', 'gx4-black', 'gx5-gree', 'gx6-blue', 'gx7-blues', 'gx8-dark', 'gx9-flat', 'gx9-grass'
+  -r, --rcset=<STYLE>             Style to use, case-sensitive, one of: 'Burl', 'Camouflage', 'Copper', 'Dark', 'Grandma', 'Grungy_Sun', 'Grungy_Sun_Dark', 'Guitarix', 'Guitarix_Oak', 'Hippie', 'Lavender', 'Nebula', 'Oak', 'Olive', 'Orange', 'Plain_Dark', 'Psycedelic', 'Sky', 'White_Oak'
 
 JACK configuration options
-  -i, --jack-input=PORT           Guitarix JACK input
-  -o, --jack-output=PORT          Guitarix JACK outputs
-  -m, --jack-midi=PORT            Guitarix JACK midi control
-  -J, --jack-no-conect            dissable self-connect JACK ports
-  -n, --name=NAME                 instance name (default gx_head)
-  -U, --jack-uuid=UUID            JackSession ID
-  -A, --jack-uuid2=UUID2          JackSession ID
-  -s, --server-name=NAME          JACK server name to connect to
+  -i, --jack-input=<PORT>         Guitarix JACK input
+  -o, --jack-output=<PORT>        Guitarix JACK outputs
+  -m, --jack-midi=<PORT>          Guitarix JACK midi control
+  -J, --jack-no-conect            disable self-connect JACK ports
+  -n, --name=<NAME>               instance name (default gx_head)
+  -U, --jack-uuid=<UUID>          JackSession ID
+  -A, --jack-uuid2=<UUID2>        JackSession ID
+  -s, --server-name=<NAME>        JACK server name to connect to
 
 Switch to bypass mode on overload condition
-  -I, --idle-timeout=SECONDS      starved idle thread probe (default: disabled)
+  -I, --idle-timeout=<SECONDS>    starved idle thread probe (default: disabled)
   -C, --no-convolver-overload     disable overload on convolver missed deadline
   -X, --xrun-overload             JACK xrun (default: false)
-  -S, --sporadic=SECONDS          allow single overload events per interval (default: disabled)
+  -S, --sporadic=<SECONDS>        allow single overload events per interval (default: disabled)
 
 File options
-  -f, --load-file=FILE            load state file on startup
-  -P, --plugin-dir=DIR            directory with guitarix plugins (.so files)
+  -f, --load-file=<FILE>          load state file on startup
+  -P, --plugin-dir=<DIR>          directory with guitarix plugins (.so files)
   -K, --disable-save-on-exit      disable auto save to state file when quit
   -a, --auto-save                 enable auto save (only in server mode)
 
 Debug options
-  -B, --builder-dir=DIR           directory from which .glade files are loaded
-  --style-dir=DIR                 directory with skin style definitions (.rc files)
+  -B, --builder-dir=<DIR>         directory from which .glade files are loaded
+  --style-dir=<DIR>               directory with skin style definitions (.rc files)
   -t, --log-terminal              print log on terminal
   -d, --dump-parameter            dump parameter table in json format
 
 GTK+ Options
-  --class=CLASS                   Program class as used by the window manager
-  --gtk-name=NAME                 Program name as used by the window manager
-  --screen=SCREEN                 X screen to use
+  --class=<CLASS>                 Program class as used by the window manager
+  --gtk-name=<NAME>               Program name as used by the window manager
+  --screen=<SCREEN>               X screen to use
   --sync                          Make X calls synchronous
-  --gtk-module=MODULES            Load additional GTK+ modules
+  --gtk-module=<MODULES>          Load additional GTK+ modules
   --g-fatal-warnings              Make all warnings fatal
 
 Application Options:
   -v, --version                   Print version string and exit
   -N, --nogui                     start without GUI
-  -p, --rpcport=PORT              start a JSON-RPC server listening on port PORT
-  -H, --rpchost=HOSTNAME          set hostname to connect to
+  -p, --rpcport=<PORT>            start a JSON-RPC server listening on port PORT
+  -H, --rpchost=<HOSTNAME>        set hostname to connect to
   -G, --onlygui                   start only GUI
   -L, --liveplaygui               start with Live Play GUI
   -M, --mute                      start with engine muted
-  --display=DISPLAY               X display to use
-
+  -b, --bank=<BANK:PRESET>        set bank and preset to load at startup (A:0-Z:9)
+  -t, --tuner_tet=<TEMP>          set tuner temperament at startup (12, 19, 24, 31, 53)
+  -F, --reference_pitch=<HZ>      set tuner reference pitch at startup (225 - 453)
+  --display=<DISPLAY>             X display to use
