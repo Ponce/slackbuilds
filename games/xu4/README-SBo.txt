@@ -1,4 +1,12 @@
-Optional stuff: Music, enhanced graphics, and PDF manuals.
+Notes and optional stuff: Music, enhanced graphics, and PDF manuals.
+
+Slackware Upgrade Note
+----------------------
+If you upgraded from 14.1 to 14.2, your old ~/.xu4/xu4rc needs to be
+edited, to disable XML validation (otherwise the game won't start).
+Edit the file manually, or use this:
+
+sed -i '/validateXml/s,1,0,' ~/.xu4/xu4rc
 
 Music
 -----
