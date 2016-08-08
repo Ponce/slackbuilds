@@ -6,8 +6,21 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20160808 bkw:
+# - update for 20160704_5811
+# - install samples/ to the doc dir, not the game data dir
+# - rework wrapper script to let mods like bloodcm be installed
+#   system-wide in /usr/share/games/eduke32
+# - add compilefix.diff to get the tools to build
+# - support SDL2 build, add SDL2=no to force SDL1
+# - use OPTIMIZATIONS instead of ARCH for $SLKCFLAGS, upstream
+#   changed the build a bit
+# - undocumented VPX flag now defaults to "yes", since libvpx is a
+#   core Slackware 14.2 package
+# - slack-desc shows SDL version and whether or not libvpx was used.
+
 PRGNAM=eduke32
-VERSION=${VERSION:-20150510_5182}
+VERSION=${VERSION:-20160704_5811}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -18,14 +31,14 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+    i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
 fi
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
@@ -52,9 +65,15 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-if [ "${VPX:-no}" != "yes" ]; then
+# this was always undocumented, defaulted to "no" in Slack <= 14.1.
+# should be safe to default to "yes" now that 14.2 has libvpx.
+if [ "${VPX:-yes}" != "yes" ]; then
   VPXFLAG="USE_LIBVPX=0"
+else
+  ANDVPX=" and libvpx"
 fi
+
+patch -p1 < $CWD/compilefix.diff
 
 # On some systems, the game spits out tons of warnings:
 # Error: glGetTexLevelParameteriv returned GL_FALSE!
@@ -63,12 +82,31 @@ fi
 # the log output.
 sed -i '/"Error: glGetTexLevelParameteriv/d' build/src/texcache.c
 
+# SDL2 might be preferred for some users. Specifically, those of us
+# who use a left-handed mouse (SDL1 gets the button mappings backwards).
+SDL2=${SDL2:-auto}
+if [ "$SDL2" = "auto" ]; then
+  sdl2-config --version >/dev/null && SDL_TARGET=2
+elif [ "$SDL2" = "yes" ]; then
+  SDL_TARGET=2
+else
+  SDL_TARGET=1
+fi
+
 # Mildly confusing: the Makefile uses ARCH for arch-specific cflags
-make ARCH="$SLKCFLAGS" $VPXFLAG SDL_TARGET=1
+make \
+  ARCH="" \
+  OPTIMIZATIONS="$SLKCFLAGS" \
+  SDL_TARGET=$SDL_TARGET \
+  $VPXFLAG
 
 # Build the utilities, if requested.
 if [ "${BUILD_UTILS:-yes}" = "yes" ]; then
-  make utils ARCH="$SLKCFLAGS" $VPXFLAG SDL_TARGET=1
+  make utils \
+    OPTIMIZATIONS="$SLKCFLAGS" \
+    ARCH="" \
+    $VPXFLAG \
+    SDL_TARGET=$SDL_TARGET \
 
   for i in kextract kgroup transpal wad2art wad2map; do
     install -s -D -m0755 $i $PKG/usr/games/$i
@@ -92,7 +130,6 @@ install -D -m0755 $CWD/$PRGNAM.wrapper  $PKG/usr/games/$PRGNAM
 mkdir -p $PKG/usr/share/games/$PRGNAM
 cd package/sdk
 cp *.hlp *.HLP names.h tiles.cfg $PKG/usr/share/games/$PRGNAM
-cp -r samples $PKG/usr/share/games/$PRGNAM/samples
 cd -
 
 mkdir -p $PKG/usr/share/applications
@@ -104,13 +141,16 @@ cp $CWD/$PRGNAM.png $PKG/usr/share/pixmaps
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp build/buildlic.txt source/gpl-2.0.txt $CWD/README_game_data.txt \
   $PKG/usr/doc/$PRGNAM-$VERSION
+cp -r package/sdk/samples $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 ( cd $PKG/usr/share/games/$PRGNAM
   ln -s ../../../doc/$PRGNAM-$VERSION/README_game_data.txt . )
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s,@SDL_TARGET@,$SDL_TARGET," \
+    -e "s,@ANDVPX@,$ANDVPX," \
+       $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG

@@ -1,24 +1,63 @@
 #!/bin/sh
 
-# Wrapper script for eduke32 and mapster32
-# Ensure ~/.eduke32 exists, populate with a symlink forest
-# (Need this because the game normally expects to run from its own dir)
+# Wrapper script for eduke32 and mapster32.
+# Ensure ~/.eduke32 exists, populate with a symlink forest.
+# Need this because the game normally expects to run from its own dir.
+# This version supports game mods. Currently only tested with bloodcm.
 
 SHAREDIR=/usr/share/games/eduke32
 BINDIR=/usr/libexec/eduke32
+USERDIR=$HOME/.eduke32
 
-PROG="`echo $0 | sed 's/.*\///'`"
-mkdir -p ~/.eduke32
+PROG="$( basename $0 )"
+mkdir -p $USERDIR
 
-if ! cd ~/.eduke32; then
-	echo 2>&1 "$PROG: Can't create ~/.eduke32 directory"
+if ! cd $USERDIR; then
+	echo 2>&1 "$PROG: Can't create $USERDIR directory"
 	exit 1
 fi
 
-for i in samples autoload m32help.hlp SEHELP.HLP STHELP.HLP names.h tiles.cfg; do
+# These files need to be present, but not writable, symlinks
+# to /usr/share are OK.
+for i in m32help.hlp SEHELP.HLP STHELP.HLP names.h tiles.cfg; do
 	if [ -e $SHAREDIR/$i -a ! -e $i ]; then
 		ln -s $SHAREDIR/$i $i
 	fi
 done
+
+# For directories, it's more complex.
+
+# We don't know in advance what directories might be present, since
+# packages can install game mods (e.g. bloodcm). So link them all.
+# Unfortunately it can't be a simple symlink, because the *.cfg files
+# inside mod directories need to really exist in $USERDIR, writable by
+# the user, so he can save his settings.
+
+# The autoload subdir isn't a mod, but it's treated the same way so
+# individual users can have different autoload stuff. If you install
+# eduke32_hires_pack, this means users can disable it by removing their
+# symlink in ~/.eduke32/autoload (without disturbing anything else they
+# might have in autoload).
+
+# I wish there were a simpler way to do this. The only other solution
+# would be to patch the eduke32 source, to make it save .cfg files in a
+# different location than the game data dirs... but I'd rather handle it
+# with a wrapper script because it's easier to debug.
+
+# So, here's how we handle the directories:
+for i in $SHAREDIR/*/; do
+	dir=$( basename $i )
+	if [ ! -e $dir ]; then
+		mkdir $dir
+		ln -s $SHAREDIR/$dir/* $dir
+		rm -f $dir/*.cfg
+		cp $SHAREDIR/$dir/*.cfg $dir
+	fi
+done
+
+# If this is left over in $USERDIR, it's from a previous version of this
+# script, and it doesn't belong there. samples/ isn't a mod, it's actually
+# documentation, and is now installed in /usr/doc/eduke32-$VERSION.
+rm -f samples
 
 exec $BINDIR/$PROG "$@"
