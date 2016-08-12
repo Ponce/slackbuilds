@@ -1,0 +1,178 @@
+#!/bin/sh
+
+# Slackware build script for reduce-algebra
+
+# Copyright 2016  Alexander Verbovetsky, Moscow, Russia
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=reduce-algebra
+VERSION=${VERSION:-20160806svn3771}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+SLACKVER=${SLACKVER:-$(cat /etc/slackware-version | tr --delete '[[:space:]]' | tr '[:upper:]' '[:lower:]')}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+sed --in-place "s/^echo\ \$os$/echo $SLACKVER/" scripts/findos.sh
+
+CFLAGS="$SLKCFLAGS" CXXFLAGS="$SLKCFLAGS" ./configure --with-csl
+CFLAGS="$SLKCFLAGS" CXXFLAGS="$SLKCFLAGS" ./configure --with-psl
+
+make
+
+if [ $(command -v mk4ht) ]; then
+  cd doc/manual
+  make
+  cd ../..
+  TEX4HT=yes
+else
+  cat << EOF
+TeX4ht (a part of TeX Live) is not installed.
+The HTML version of the manual will not be created.
+See README for more details.
+EOF
+  TEX4HT=no
+fi
+
+# The Makefile has no 'install' target (yet).  Let's do by hand.
+# The below code is mainly based on debianbuild/reduce/debian/rules
+
+# create target directories
+mkdir -p \
+  $PKG/usr/bin \
+  $PKG/usr/share/reduce/{packages,fonts} \
+  $PKG/usr/lib$LIBDIRSUFFIX/reduce/{pslbuild/{psl,red},cslbuild/csl} \
+  $PKG/usr/doc/$PRGNAM-$VERSION/{breduce,manual-tex} \
+  $PKG/usr/man/man1 \
+  $PKG/usr/share/emacs/site-lisp/reduce
+if [ "$TEX4HT" = "yes" ]; then
+  mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/manual-html
+fi
+
+# copy documentation files
+cp -r BUGS Contributor-Release.txt DEPENDENCY_TRACKING README README.BUILDING \
+  csl/reduce.doc/{BINARY-LICENSE.txt,BSD-LICENSE.txt,LGPL-2.1.txt} \
+  doc/manual/manual.pdf doc/projects.txt buglist/ contrib/ doc/primers/ doc/notes/ generic/texmacs/ \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cp doc/manual/*.tex $PKG/usr/doc/$PRGNAM-$VERSION/manual-tex/
+cp generic/breduce/breduce.{tex,bbl,pdf} $PKG/usr/doc/$PRGNAM-$VERSION/breduce/
+cp -r doc/primers/ $PKG/usr/doc/$PRGNAM-$VERSION/
+if [ "$TEX4HT" = "yes" ]; then
+  cp doc/manual/{redlogo.png,manual*.html,manual*.png,manual.css} $PKG/usr/doc/$PRGNAM-$VERSION/manual-html
+  for n in bild cmsy10 gnuplotex turtleeg; do cp doc/manual/${n}*.png $PKG/usr/doc/$PRGNAM-$VERSION/manual-html ; done
+  cp $PKG/usr/doc/$PRGNAM-$VERSION/manual-html/manual.html $PKG/usr/doc/$PRGNAM-$VERSION/manual-html/index.html
+fi
+chmod -R -x+X $PKG/usr/doc/$PRGNAM-$VERSION/*
+
+# copy man files
+cp debianbuild/reduce/debian/{redcsl.1,redpsl.1} generic/newfront/redfront.1 generic/breduce/breduce.1 $PKG/usr/man/man1
+chmod -x $PKG/usr/man/man1/*
+sed --in-place "s/\/usr\/share\/doc\/reduce-addons\/breduce.pdf/\/usr\/doc\/$PRGNAM-$VERSION\/breduce\/breduce.pdf/" $PKG/usr/man/man1/breduce.1
+ln -s redfront.1 $PKG/usr/man/man1/rfcsl.1
+ln -s redfront.1 $PKG/usr/man/man1/rfpsl.1
+
+# copy CSL files
+CSLBUILDDIR="cslbuild/$(scripts/findhost.sh $(./config.guess))"
+cp -r $CSLBUILDDIR/csl/{reduce.img,reduce,reduce.resources} $PKG/usr/lib$LIBDIRSUFFIX/reduce/cslbuild/csl
+RSYNC_CMD="rsync --archive --cvs-exclude --delete --delete-excluded"
+$RSYNC_CMD --chmod=Fa-x --exclude "/src/***" $CSLBUILDDIR/csl/reduce.fonts/ $PKG/usr/share/reduce/fonts
+chmod -R -x+X $PKG/usr/share/reduce/fonts/*
+
+# copy PSL files
+PSLBUILDDIR="pslbuild/$(scripts/findhost.sh $(./config.guess))"
+$RSYNC_CMD --exclude "kernel/***" --exclude "xport.*" $PSLBUILDDIR/psl/ $PKG/usr/lib$LIBDIRSUFFIX/reduce/pslbuild/psl/
+chmod -x $PKG/usr/lib$LIBDIRSUFFIX/reduce/pslbuild/psl/*.b
+$RSYNC_CMD $PSLBUILDDIR/red/ $PKG/usr/lib$LIBDIRSUFFIX/reduce/pslbuild/red/
+[ -s $PKG/usr/lib$LIBDIRSUFFIX/reduce/pslbuild/red/hugo ] || rm -f $PKG/usr/lib$LIBDIRSUFFIX/reduce/pslbuild/red/hugo
+chmod -x $PKG/usr/lib$LIBDIRSUFFIX/reduce/pslbuild/red/*
+psl/saveimage.sh $PSLBUILDDIR $(realpath -e $PKG/usr/lib$LIBDIRSUFFIX/reduce/pslbuild/red) /usr/lib$LIBDIRSUFFIX/reduce/pslbuild
+
+# copy common files
+$RSYNC_CMD --no-perms --chmod=Fa-x --exclude "/regressions/***" packages/ $PKG/usr/share/reduce/packages/
+chmod a+x $PKG/usr/share/reduce/packages/{gcref/gcref,redlog/regressions/make.sh}
+ln -fs ../../../../share/reduce/fonts $PKG/usr/lib$LIBDIRSUFFIX/reduce/cslbuild/csl/reduce.fonts
+ln -fs ../../../../doc/$PRGNAM-$VERSION $PKG/usr/lib$LIBDIRSUFFIX/reduce/cslbuild/csl/reduce.doc
+ln -fs ../../lib$LIBDIRSUFFIX/reduce/pslbuild $PKG/usr/share/reduce/pslbuild
+ln -fs ../../lib$LIBDIRSUFFIX/reduce/cslbuild $PKG/usr/share/reduce/cslbuild
+
+# copy shell scripts for running REDUCE
+cp -a debianbuild/reduce/debian/runpsl.sh $PKG/usr/bin/redpsl
+cp -a debianbuild/reduce/debian/runcsl.sh $PKG/usr/bin/redcsl
+sed --in-place "s/\/lib\/reduce\/pslbuild/\/lib$LIBDIRSUFFIX\/reduce\/pslbuild/" $PKG/usr/bin/redpsl
+sed --in-place "s/\/lib\/reduce\/cslbuild/\/lib$LIBDIRSUFFIX\/reduce\/cslbuild/" $PKG/usr/bin/redcsl
+
+# copy rest
+cp bin/{rfcsl,rfpsl} generic/breduce/breduce $PKG/usr/bin
+cp generic/emacs/* $PKG/usr/share/emacs/site-lisp/reduce
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
