@@ -18,10 +18,6 @@ if [ -e etc/rc.d/rc.lighttpd ]; then
   mv etc/rc.d/rc.lighttpd.new.incoming etc/rc.d/rc.lighttpd.new
 fi
 
-config etc/lighttpd/lighttpd.conf.new
-config etc/logrotate.d/lighttpd.new
-config etc/rc.d/rc.lighttpd.new
-
 # Create dummy logfiles, but throw them away if logfiles are already here:
 for i in access error ; do 
   if [ -e var/log/lighttpd/${i}.log ]; then
@@ -31,3 +27,7 @@ for i in access error ; do
   fi
 done
 
+config etc/logrotate.d/lighttpd.new
+config etc/rc.d/rc.lighttpd.new
+config etc/lighttpd/lighttpd.conf.new
+config etc/lighttpd/modules.conf.new
