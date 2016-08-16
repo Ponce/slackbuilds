@@ -29,3 +29,6 @@ config etc/mono/4.5/machine.config.new
 config etc/mono/4.5/settings.map.new
 config etc/mono/4.5/web.config.new
 config etc/mono/4.5/Browsers/Compat.browser.new
+
+usr/bin/mono-sgen usr/lib/mono/4.5/cert-sync.exe /etc/ssl/certs/ca-certificates.crt
+
