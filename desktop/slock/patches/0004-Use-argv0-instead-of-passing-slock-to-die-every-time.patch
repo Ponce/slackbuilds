@@ -1,0 +1,125 @@
+From b02c4d452a7942d4be3c69e6f98dafd35a2e4e78 Mon Sep 17 00:00:00 2001
+From: FRIGN <dev@frign.de>
+Date: Sun, 14 Feb 2016 02:13:54 +0100
+Subject: [PATCH 4/7] Use argv0 instead of passing "slock:" to die every time
+
+---
+ slock.c | 28 ++++++++++++++++------------
+ 1 file changed, 16 insertions(+), 12 deletions(-)
+
+diff --git a/slock.c b/slock.c
+index 4531f95..a0ffed0 100644
+--- a/slock.c
++++ b/slock.c
+@@ -46,6 +46,7 @@ static Bool failure = False;
+ static Bool rr;
+ static int rrevbase;
+ static int rrerrbase;
++static char *argv0;
+ 
+ static void
+ die(const char *errstr, ...)
+@@ -53,6 +54,7 @@ die(const char *errstr, ...)
+ 	va_list ap;
+ 
+ 	va_start(ap, errstr);
++	fprintf(stderr, "%s: ", argv0);
+ 	vfprintf(stderr, errstr, ap);
+ 	va_end(ap);
+ 	exit(1);
+@@ -88,9 +90,9 @@ getpw(void)
+ 	errno = 0;
+ 	if (!(pw = getpwuid(getuid()))) {
+ 		if (errno)
+-			die("slock: getpwuid: %s\n", strerror(errno));
++			die("getpwuid: %s\n", strerror(errno));
+ 		else
+-			die("slock: cannot retrieve password entry\n");
++			die("cannot retrieve password entry\n");
+ 	}
+ 	rval = pw->pw_passwd;
+ 
+@@ -98,7 +100,7 @@ getpw(void)
+ 	if (rval[0] == 'x' && rval[1] == '\0') {
+ 		struct spwd *sp;
+ 		if (!(sp = getspnam(getenv("USER"))))
+-			die("slock: cannot retrieve shadow entry (make sure to suid or sgid slock)\n");
++			die("cannot retrieve shadow entry (make sure to suid or sgid slock)\n");
+ 		rval = sp->sp_pwdp;
+ 	}
+ #endif
+@@ -106,7 +108,7 @@ getpw(void)
+ 	/* drop privileges */
+ 	if (geteuid() == 0 &&
+ 	    ((getegid() != pw->pw_gid && setgid(pw->pw_gid) < 0) || setuid(pw->pw_uid) < 0))
+-		die("slock: cannot drop privileges\n");
++		die("cannot drop privileges\n");
+ 	return rval;
+ }
+ #endif
+@@ -254,7 +256,7 @@ lockscreen(Display *dpy, int screen)
+ 		usleep(1000);
+ 	}
+ 	if (!len) {
+-		fprintf(stderr, "slock: unable to grab mouse pointer for screen %d\n", screen);
++		fprintf(stderr, "unable to grab mouse pointer for screen %d\n", screen);
+ 	} else {
+ 		for (len = 1000; len; len--) {
+ 			if (XGrabKeyboard(dpy, lock->root, True, GrabModeAsync, GrabModeAsync, CurrentTime) == GrabSuccess) {
+@@ -264,7 +266,7 @@ lockscreen(Display *dpy, int screen)
+ 			}
+ 			usleep(1000);
+ 		}
+-		fprintf(stderr, "slock: unable to grab keyboard for screen %d\n", screen);
++		fprintf(stderr, "unable to grab keyboard for screen %d\n", screen);
+ 	}
+ 	/* grabbing one of the inputs failed */
+ 	running = 0;
+@@ -281,24 +283,26 @@ main(int argc, char **argv)
+ 	Display *dpy;
+ 	int screen;
+ 
++	argv0 = argv[0], argc--, argv++;
++
+ #ifdef __linux__
+ 	dontkillme();
+ #endif
+ 
+ 	if (!getpwuid(getuid()))
+-		die("slock: no passwd entry for you\n");
++		die("no passwd entry for you\n");
+ 
+ #ifndef HAVE_BSD_AUTH
+ 	pws = getpw();
+ #endif
+ 
+ 	if (!(dpy = XOpenDisplay(0)))
+-		die("slock: cannot open display\n");
++		die("cannot open display\n");
+ 	rr = XRRQueryExtension(dpy, &rrevbase, &rrerrbase);
+ 	/* Get the number of screens in display "dpy" and blank them all. */
+ 	nscreens = ScreenCount(dpy);
+ 	if (!(locks = malloc(sizeof(Lock*) * nscreens)))
+-		die("slock: malloc: %s\n", strerror(errno));
++		die("Out of memory.\n");
+ 	int nlocks = 0;
+ 	for (screen = 0; screen < nscreens; screen++) {
+ 		if ((locks[screen] = lockscreen(dpy, screen)) != NULL)
+@@ -313,11 +317,11 @@ main(int argc, char **argv)
+ 		return 1;
+ 	}
+ 
+-	if (argc >= 2 && fork() == 0) {
++	if (argc >= 1 && fork() == 0) {
+ 		if (dpy)
+ 			close(ConnectionNumber(dpy));
+-		execvp(argv[1], argv+1);
+-		die("slock: execvp %s failed: %s\n", argv[1], strerror(errno));
++		execvp(argv[0], argv);
++		die("execvp %s failed: %s\n", argv[0], strerror(errno));
+ 	}
+ 
+ 	/* Everything is now blank. Now wait for the correct password. */
+-- 
+2.9.2
+
