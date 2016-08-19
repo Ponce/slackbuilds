@@ -11,6 +11,8 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/clamav-unofficial-sigs.conf.new
+config etc/clamav-unofficial-sigs/master.conf.new
+config etc/clamav-unofficial-sigs/user.conf.new
+config etc/clamav-unofficial-sigs/os.conf.new
 config etc/logrotate.d/clamav-unofficial-sigs.new
-
+printf "Please review UPGRADE_NOTICE in the docs\n"
