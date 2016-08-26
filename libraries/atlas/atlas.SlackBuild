@@ -2,7 +2,7 @@
 
 # Slackware build script for ATLAS
 
-# Copyright 2010 Serban Udrea <s.udrea@gsi.de>
+# Copyright 2010-2016 Serban Udrea <s.udrea@gsi.de>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification,
@@ -24,15 +24,15 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=atlas
-VERSION=${VERSION:-3.8.3}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-3.10.3}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+    i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
-       *) ARCH=$( uname -m ) ;;
+       *) ARCH="$( uname -m )" ;;
   esac
 fi
 
@@ -41,8 +41,8 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
   BITSize="32" # Specifically for ATLAS
 elif [ "$ARCH" = "i686" ]; then
@@ -55,26 +55,126 @@ elif [ "$ARCH" = "x86_64" ]; then
   BITSize="64" # Specifically for ATLAS
 fi
 
-# You may change this to adjust the maximal size IN BYTES(!) that ATLAS
-# is allowed to allocate. According to the ATLAS errata, a too small
-# value may strongly reduce threaded performance. The default value
-# here is 256MB. (The default value in the ATLAS source is 64MB.)
-#
-MAX_MALLOC=${MAX_MALLOC:-268435456}
-
 # If you don't want to use architectural defaults set the following to
 # something like "no".
+#
 USE_ARCH_DEFAULTS=${USE_ARCH_DEFAULTS:-yes}
 
-# The path to a reference BLAS library. By default it is assumed that you
-# have installed the netlib BLAS reference using the appropriate slackbuild
-# from slackbuilds.org.  If this is not the case, you have to run this script
-# with another value for REF_BLAS.
-REF_BLAS=${REF_BLAS:-/usr/lib${LIBDIRSUFFIX}/libblas.a}
+# If you decide to use arch defaults and have some custom ones you may
+# set the following variable to point to the directory containing these.
+#
+# If you decide to not use arch defauts and wish to create some after a build
+# with full search, set the following variable to point to the directory where
+# the file containing them should be placed.
+# IMPORTANT: In this case, the file copied to ARCH_DEF_DIR will not be part of
+#            the ATLAS package, to avoid problems in case of an upgrade on the
+#            same machine. The value of ARCH_DEF_DIR will be written for your
+#            reference to the file named ARCH_DEF_DIR within the doc directory
+#            of ATLAS.
+#
+ARCH_DEF_DIR=${ARCH_DEF_DIR:-""}
 
-# Let's do a little check (that we deal with a regular file we can read).
-[ -f "$REF_BLAS" -a -r "$REF_BLAS" ] || \
-{ echo "ERROR: Wrong path to reference BLAS library, exiting! " && exit 1; }
+# If you are on another architecture than x86 and/or don't use gcc you need to
+# set the following variable to "yes".
+#
+USE_DWALL=${USE_DWALL:-no}
+
+# You may wish to set the level 2 cache size to the proper value. The default
+# is to deduce it from /proc/cpuinfo
+#
+L2_CACHE_SIZE=${L2_CACHE_SIZE:-"auto"}
+
+if [ "$L2_CACHE_SIZE" = "auto" ]; then
+  L2_CACHE_SIZE="$(cat /proc/cpuinfo |grep "cache size"| head -n 1| cut -d ":" -s -f2| cut -d " " -s -f2)"
+  L2_SIZE_UNIT="$(cat /proc/cpuinfo |grep "cache size"| head -n 1| cut -d " " -s -f4)"
+  case "$L2_SIZE_UNIT" in
+      "KB") L2_CACHE_SIZE=$(($L2_CACHE_SIZE * 1024))
+            ;;
+      "MB") L2_CACHE_SIZE=$(($L2_CACHE_SIZE * 1024 *  1024))
+            ;;
+      "GB") L2_CACHE_SIZE=$(($L2_CACHE_SIZE * 1024 *  1024 * 1024))
+            ;;
+  esac
+fi
+
+# Check the value of L2_CACHE_SIZE
+#
+case "$L2_CACHE_SIZE" in
+    ''|'0'|*[!0-9]*) echo "ERROR: The value of L2_CACHE_SIZE is not a strictly positive integer!"
+                     exit 1
+                     ;;
+esac
+
+# Set the (maximum) number of threads. If this is 0 just the serial libs get
+# built, even on an SMP machine. By default it's set to -1 for autodetection.
+#
+NUM_THREADS=${NUM_THREADS:-"-1"}
+case "$NUM_THREADS" in
+           '-1'|'0') echo -n # Do nothing
+                     ;;
+                '1') NUM_THREADS="0" # One processor => no threading
+                     ;;
+        ''|*[!0-9]*) echo "ERROR: NUM_THREADS has an improper value!"
+                     exit 1
+                     ;;
+esac
+
+if [ $NUM_THREADS -gt 1 ]; then
+  # On SMP machines one may want to set the processors to be used (see
+  # atlas_install.pdf, p. 13). By default the list of processor ID's is empty
+  # which means that ATLAS may use whatever is available.
+  # NOTE: This is incompatible with the autodetection of the number of threads.
+  #       Therefore NUM_THREADS must be greater than 1.
+  #
+  USE_PROCESSORS=${USE_PROCESSORS:-""}
+  if [ -z "$USE_PROCESSORS" ]; then
+    MT_SWITCH="-t $NUM_THREADS"
+  else
+    MT_SWITCH="--force-tids=\"$NUM_THREADS $USE_PROCESSORS\""
+  fi
+else
+  MT_SWITCH="-t $NUM_THREADS"
+fi
+
+# Decide upon building full LAPACK or not. Set LAPACK_SOURCE to the empty
+# string, if you don't want a full LAPACK build.
+#
+LAPACK_SOURCE=${LAPACK_SOURCE:-"/usr/share/lapack-atlas/lapack.tgz"}
+if [ -z "$LAPACK_SOURCE" ]; then
+  echo
+  echo "WARNING"
+  echo "WARNING: No LAPACK source specified. Just the highly restricted LAPACK"
+  echo "         offered by ATLAS will get compiled!"
+  echo "WARNING"
+  echo
+  sleep 3
+else
+  tar -tf "$LAPACK_SOURCE" > /dev/null 2>&1 || \
+  { echo "ERROR: Improper LAPACK source archive!" \
+    && echo "       Please check $LAPACK_SOURCE" \
+    && echo "       and set it properly! " \
+    && exit 1; } # NOTE: Here we just test that we deal with a tar archive.
+  LAPACK_SOURCE="--with-netlib-lapack-tarfile=$LAPACK_SOURCE"
+
+  # Change the following to yes if you would like to run the tests for LAPACK.
+  #
+  TEST_LAPACK="${TEST_LAPACK:-no}"
+  # Make Y or N out of yes, Yes, No, no, etc.
+  #
+  TEST_LAPACK=$(echo "$TEST_LAPACK"|cut -b 1|tr a-z A-Z)
+fi
+
+# Decide upon building shared libraries or not. By default we ask for shared
+# libs too. If one doesn't want this, she has to just set SHARED_SWITCH to the
+# empty string.
+#
+SHARED_SWITCH=${SHARED_SWITCH:-"--shared"}
+
+# This is the timer to be used for LAPACK. If you stay with gfortran,
+# presently the default compiler on Slackware, you can leave the value as is.
+# Otherwise, please read LAPACK's make.inc.example for more informations.
+#
+LAPACK_TIMER="${LAPACK_TIMER:-INT_ETIME}"
 
 # This is the system destination directory. When installing the
 # package produced by this script, ATLAS's files will be written to
@@ -88,6 +188,7 @@ SYS_DESTDIR=${SYS_DESTDIR:-/usr}
 
 # Check if SYS_DESTDIR is an absolute path. If not, exit with error.
 # NOTE: The $ is used because echo adds a \n at the end of the string.
+#
 echo $SYS_DESTDIR | grep -vE '/\.\./|/\.\.$' | grep -qE '^/' || \
 { echo "ERROR: The system destination directory has no absolute path!" \
 && echo "       The value of SYS_DESTDIR is $SYS_DESTDIR" \
@@ -103,12 +204,10 @@ DEFAULT_DOCS=${DEFAULT_DOCS:-yes}
 
 # The build directory to be created within the source directory of
 # ATLAS.
-BLDdir=BuildDir
+#
+BLDdir="BuildDir"
 
-# Get the CPU frequency for good timing.
-CPU_FREQ="$(cat /proc/cpuinfo |grep "cpu MHz"| head -n 1| cut -d ":" -s -f2| tr -d [:blank:])"
-
-set -e 
+set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -118,22 +217,22 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/${PRGNAM}${VERSION}.tar.bz2
 mv ATLAS $PRGNAM-$VERSION
 cd $PRGNAM-$VERSION
-
 chown -R root:root .
-
 find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Make changes as suggested in the atlas errata.
-cat $CWD/atlas.patch | sed -e s%XXX_MaxMalloc_XXX%$MAX_MALLOC% | patch -p1
-
-# If architectural defaults are to be used, copy the file mentioned in the errata
-# to the architectural defaults directory.
+# Set the proper value to USE_ARCH_DEFAULTS, and the proper value to the
+# configure switch needed in case you want to use custom arch defaults.
+#
+ARCH_DIR_SWITCH=""
 case "$USE_ARCH_DEFAULTS" in
-  [yY]|[yY][eE]|[yY][eE][sS]) cp "$CWD/AMD64K10h64SSE3.tgz" CONFIG/ARCHS; USE_ARCH_DEFAULTS="1" ;;
+  [yY]|[yY][eE]|[yY][eE][sS]) USE_ARCH_DEFAULTS="1"
+                              [ -z "$ARCH_DEF_DIR" ] || \
+                              ARCH_DIR_SWITCH="-Ss ADdir $ARCH_DEF_DIR"
+                              ;;
                            *) USE_ARCH_DEFAULTS="0" ;;
 esac
 
@@ -141,96 +240,184 @@ mkdir -p $BLDdir
 cd $BLDdir
 
 # Configure atlas.
-# IMPORTANT: Here we assume that we are on a x86 machine (be it 32 or 64 bits)
-#            and gcc or icc is the compiler to be used. This should be presently
-#            a reasonable assumption with Slackware. Under other circumstances
-#            "-DPentiumCPS=$CPU_FREQ" has to be exchanged with "-DWALL".
 #
-../configure -Si cputhrchk 0 -Si archdef "$USE_ARCH_DEFAULTS" -b "$BITSize" -D c \
--DPentiumCPS="$CPU_FREQ" -Fa alg -fPIC
+case "$USE_DWALL" in
+  [yY]|[yY][eE]|[yY][eE][sS])
+                             # Here we assume that we aren't on a x86 machine
+                             # and/or gcc isn't the compiler to be used.
+                             #
+                             ../configure   $SHARED_SWITCH \
+                                          --prefix="$SYS_DESTDIR" \
+                                            $LAPACK_SOURCE \
+                                            $MT_SWITCH \
+                                           -Si archdef "$USE_ARCH_DEFAULTS" \
+                                            $ARCH_DIR_SWITCH \
+                                           -b "$BITSize" -D c -DWALL
+                             ;;
+                           *)
+                             # Here we assume that we are on a x86 machine
+                             # (be it 32 or 64 bits) and gcc is the compiler
+                             # to be used.
+                             #
+                             # Get the CPU frequency for good timing.
+                             #
+                             CPU_FREQ="$(cat /proc/cpuinfo |grep "cpu MHz"| head -n 1| cut -d ":" -s -f2| tr -d [:blank:])"
+                             #
+                             ../configure   $SHARED_SWITCH \
+                                          --prefix="$SYS_DESTDIR" \
+                                            $LAPACK_SOURCE \
+                                            $MT_SWITCH \
+                                           -Si archdef "$USE_ARCH_DEFAULTS" \
+                                            $ARCH_DIR_SWITCH \
+                                           -b "$BITSize" \
+                                           -D c -DPentiumCPS="$CPU_FREQ"
+                             ;;
+esac
 
-# NOTES ON THE FLAGS FOR CONFIGURE
+# NOTES ON SOME FLAGS FOR CONFIGURE
 #
-# -Si cputhrchk 0 means that configure actually does not care about CPU
-# throttling. This is to avoid false positives. Thus the full responsibility
-# stays now with the user of the script.
+#  SHARED_SWITCH = "--shared" asks for building the shared libraries too
 # -Si archdef "$USE_ARCH_DEFAULTS" means that we ignore or not architectural defaults depending
 #   upon the value of "$USE_ARCH_DEFAULTS".
 # -b "$BITSize" tells ATLAS about the platform's bitsize, 32 or 64.
-# -D c -DPentiumCPS="$CPU_FREQ" is for achieving good timing on x86 platforms with gcc or icc.
-# -Fa alg -fPIC is for beeing able to create dynamic libs too.
+# -D c -DPentiumCPS="$CPU_FREQ" is for achieving good timing on x86 platforms with gcc.
+# -D c -DWALL is for achieving good timing on non x86 platforms and/or non gcc compilers
 
-# The next two variables are set and their values are finally saved
-# for using them to compile lapack.
-# Remember the compiler name.
-ATLAS_COMPILER="$(grep "F77 =" Make.inc | cut -d "=" -f1 --complement)"
+# Write the value of L2_CACHE_SIZE to Make.inc
+#
+sed -i -r Make.inc -e \
+    "s%L2SIZE = -DL2SIZE=[0-9]+%L2SIZE = -DL2SIZE=$L2_CACHE_SIZE%"
 
-# Remember the fortran compilation flags.
-ATLAS_F77FLAGS="$(grep "F77FLAGS =" Make.inc | cut -d "=" -f1 --complement)"
+# Allow for deprecated LAPACK routines to get build in case of a full LAPACK
+# installation. Also set the LAPACK timer to the desired value and add
+# -frecursive to the compile flags, since this should help avoid problems
+# with some functions which seem otherwise to not be thread safe.
+#
+if [ "$LAPACK_SOURCE" ]; then
+  sed -i  ./src/lapack/reference/make.inc.example -e \
+      "s%^#MAKEDEPRECATED *=.*Yes%MAKEDEPRECATED = Yes%"
+  sed -i  ./interfaces/lapack/F77/src/Makefile -e \
+      "s%NONE%$LAPACK_TIMER%" -e \
+      "s%F77FLAGS)@%F77FLAGS) -frecursive@%" -e \
+      "s%F77NOOPT)@%F77NOOPT) -frecursive@%"
+fi
 
-# Set the path to the reference BLAS.
-sed -i -e '/^ \+BLASlib/s%BLASlib = .*%BLASlib = '"$REF_BLAS"% \
-         Make.inc
-
-make -j1
+make build
 make check
 
 # If parallel libraries have been compiled check them too.
+#
 if [ -f lib/libptcblas.a ]; then
   make ptcheck
-  PARALLEL_LIBS="yes" # We will use this when creating dynamic libs.
 fi
 
-# Install the static libs created during the build process.
-make install DESTDIR=$PKG$SYS_DESTDIR
+# If the full LAPACK got build one may wish to test it too.
+#
+if [ "$LAPACK_SOURCE" ]; then
+  if [ "$TEST_LAPACK" = "Y" ]; then
+    ( cd src/lapack/reference
+      [ -e ./libtmglib.a ] || make tmglib
+      # Some testers segfault when build with -frecursive if one doesn't
+      # increase the stack size limit, thus it's better to remove this flag
+      # from make.inc
+      #
+      sed -i make.inc -e "s%-frecursive%%"
 
-# Go to the ATLAS $BLDdir/lib directory and try to create and install
-# the dynamic libraries.
-# NOTE: The test for the presence of static parallel libs and the command to actually build the
-#       shared parallel libs are connected by a logical OR to make sure that the subshell
-#       does not exit with non-zero error code just because static parallel libs didn't
-#       get built. Therefore the test is successful if the variable PARALLEL_LIBS is unset or
-#       empty, i.e. when no static parallel libs got built.
-( cd lib && make shared && \
-  { [ "${PARALLEL_LIBS}1" = "1" ] || make ptshared; } && \
-  cp -p *.so "$PKG$SYS_DESTDIR/lib"
-)
+      # Now we have to set the proper library paths. Here for the serial libs.
+      #
+      ATLAS_LIBS="../../../../../lib/libf77blas.a ../../../../../lib/libcblas.a"
+      ATLAS_LIBS="$ATLAS_LIBS ../../../../../lib/libatlas.a"
+      LAPACK_LIB="../../../lib/liblapack.a"
+
+      sed -i make.inc -e \
+      "s%^BLASLIB *=.*%BLASLIB = $ATLAS_LIBS%" -e \
+      "s%^CBLASLIB *=.*%CBLASLIB =%" -e \
+      "s%^LAPACKLIB *=.*%LAPACKLIB = $LAPACK_LIB%"
+
+      # Perform the tests.
+      #
+      make lapack_testing
+
+      # Put the test results together
+      #
+      tar czf TEST_SERIAL_RESULTS.tgz TESTING/*.out
+
+      # If threaded libs got build, we repeat the tests with them.
+      #
+      if [ -e ../../../lib/libptlapack.a ]; then
+        make cleantesting
+        ATLAS_LIBS="../../../../../lib/libptf77blas.a"
+        ATLAS_LIBS="$ATLAS_LIBS ../../../../../lib/libptcblas.a"
+        ATLAS_LIBS="$ATLAS_LIBS ../../../../../lib/libatlas.a -lpthread"
+        LAPACK_LIB="../../../lib/libptlapack.a"
+        sed -i make.inc -e \
+        "s%^BLASLIB *=.*%BLASLIB = $ATLAS_LIBS%" -e \
+        "s%^LAPACKLIB *=.*%LAPACKLIB = $LAPACK_LIB%"
+        make lapack_testing
+        tar czf TEST_PT_RESULTS.tgz TESTING/*.out
+      fi
+    )
+  fi
+fi
+
+make install DESTDIR=${PKG}${SYS_DESTDIR}
+
+# The install script (sometimes) "forgets" about libptlapack.a
+#
+cp -ua lib/libptlapack.a ${PKG}${SYS_DESTDIR}/lib/ || true
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 # This is probably the easiest way to make sure that we install in the
 # proper place.
-if [ ! -z $LIBDIRSUFFIX ]; then
-  mv $PKG$SYS_DESTDIR/lib $PKG$SYS_DESTDIR/lib${LIBDIRSUFFIX}
+#
+if [ "$LIBDIRSUFFIX" ]; then
+  mv ${PKG}${SYS_DESTDIR}/lib ${PKG}${SYS_DESTDIR}/lib${LIBDIRSUFFIX}
 fi
 
 # Create the doc directory for atlas and populate it.
+#
 case "$DEFAULT_DOCS" in
  [nN]|[nN][oO]) DOC_DIR="$PKG$SYS_DESTDIR/doc/$PRGNAM-$VERSION" ;;
              *) DOC_DIR="$PKG/usr/doc/$PRGNAM-$VERSION" ;;
 esac
-
-mkdir -p $DOC_DIR
-cp -a ../INSTALL.txt ../README ../doc $DOC_DIR
-
-# The following makefiles may be needed to merge atlas and lapack.
-mkdir $DOC_DIR/MAKEFILES
-cp -p Make.inc $DOC_DIR/MAKEFILES
-cp -p lib/Makefile $DOC_DIR/MAKEFILES/Makefile.lib
-
-# Create a file with the build flags for atlas. Needed to merge
-# ATLAS and LAPACK. The LAPACK SlackBuild will just have to source
-# this file to find out the compiler used for ATLAS and the build
-# flags.
-echo "ATLAS_COMPILER=\"$ATLAS_COMPILER\"" > "$DOC_DIR/SETTINGS"
-echo "ATLAS_F77FLAGS=\"$ATLAS_F77FLAGS\"" >> "$DOC_DIR/SETTINGS"
-sed -i -e s'%=" %="%' "$DOC_DIR/SETTINGS" # Remove the extra space after the "=" sign
-echo "ATLAS_NOOPT=\"-O0\" #Eventually add more options within the quotes." >> "$DOC_DIR/SETTINGS"
+mkdir -p ${DOC_DIR}
+cp -a ../INSTALL.txt ../README ../doc ${DOC_DIR}
 
 # Add the Slackbuild script and README.SLACKWARE to the docs.
+#
 cat $CWD/$PRGNAM.SlackBuild > $DOC_DIR/$PRGNAM.SlackBuild
 cat $CWD/README.SLACKWARE > $DOC_DIR/README.SLACKWARE
+
+# Create custom arch defaults if appropriate.
+#
+if [ "$USE_ARCH_DEFAULTS" = "0"  ]; then
+  if [ "$ARCH_DEF_DIR" ]; then
+    ( cd ARCHS
+    make ArchNew
+    make tarfile
+    cp -ua *.tar.* "$ARCH_DEF_DIR"
+    )
+    echo "$ARCH_DEF_DIR" > $DOC_DIR/ARCH_DEF_DIR
+  fi
+fi
+
+# If the full LAPACK got installed add also some relevant files from its source
+# tree.
+#
+if [ "$LAPACK_SOURCE" ]; then
+  ( cd src/lapack/reference
+    LAPACK_VER=$(./INSTALL/testversion | sed -e "s% *LAPACK *%%" -e "s% *%%g")
+    LAPACK_DOC_DIR="${DOC_DIR}/lapack-$LAPACK_VER"
+    mkdir "$LAPACK_DOC_DIR"
+    cp -a LICENSE README "$LAPACK_DOC_DIR"
+
+    # Copy the test results if present (getting around "set -e" with "echo -n").
+    #
+    cp -a TEST_* "$LAPACK_DOC_DIR" 2>/dev/null || echo -n
+  )
+fi
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
