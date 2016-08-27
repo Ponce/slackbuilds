@@ -1,0 +1,273 @@
+diff -Nur i3lock-2.8-orig/LICENSE-slock i3lock-2.8/LICENSE-slock
+--- i3lock-2.8-orig/LICENSE-slock	1970-01-01 01:00:00.000000000 +0100
++++ i3lock-2.8/LICENSE-slock	2016-08-27 11:24:24.067880341 +0200
+@@ -0,0 +1,24 @@
++MIT/X Consortium License
++
++© 2015-2016 Markus Teich <markus.teich@stusta.mhn.de>
++© 2014 Dimitris Papastamos <sin@2f30.org>
++© 2006-2014 Anselm R Garbe <anselm@garbe.us>
++© 2014-2016 Laslo Hunhold <dev@frign.de>
++
++Permission is hereby granted, free of charge, to any person obtaining a
++copy of this software and associated documentation files (the "Software"),
++to deal in the Software without restriction, including without limitation
++the rights to use, copy, modify, merge, publish, distribute, sublicense,
++and/or sell copies of the Software, and to permit persons to whom the
++Software is furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in
++all copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++DEALINGS IN THE SOFTWARE.
+diff -Nur i3lock-2.8-orig/Makefile i3lock-2.8/Makefile
+--- i3lock-2.8-orig/Makefile	2016-08-27 11:24:15.313880708 +0200
++++ i3lock-2.8/Makefile	2016-08-27 11:24:24.067880341 +0200
+@@ -14,7 +14,7 @@
+ CPPFLAGS += -D_GNU_SOURCE
+ CFLAGS += $(shell $(PKG_CONFIG) --cflags cairo xcb-dpms xcb-xinerama xcb-atom xcb-image xcb-xkb xkbcommon xkbcommon-x11)
+ LIBS += $(shell $(PKG_CONFIG) --libs cairo xcb-dpms xcb-xinerama xcb-atom xcb-image xcb-xkb xkbcommon xkbcommon-x11)
+-LIBS += -lpam
++LIBS += -lcrypt
+ LIBS += -lev
+ LIBS += -lm
+ 
+@@ -37,9 +37,7 @@
+ 
+ install: all
+ 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/bin
+-	$(INSTALL) -d $(DESTDIR)$(SYSCONFDIR)/pam.d
+ 	$(INSTALL) -m 755 i3lock $(DESTDIR)$(PREFIX)/bin/i3lock
+-	$(INSTALL) -m 644 i3lock.pam $(DESTDIR)$(SYSCONFDIR)/pam.d/i3lock
+ 
+ uninstall:
+ 	rm -f $(DESTDIR)$(PREFIX)/bin/i3lock
+diff -Nur i3lock-2.8-orig/i3lock.1 i3lock-2.8/i3lock.1
+--- i3lock-2.8-orig/i3lock.1	2016-08-27 11:24:15.313880708 +0200
++++ i3lock-2.8/i3lock.1	2016-08-27 11:25:01.863878761 +0200
+@@ -45,8 +45,6 @@
+ You can specify either a background color or a PNG image which will be displayed while your screen is locked.
+ .IP \[bu]
+ You can specify whether i3lock should bell upon a wrong password.
+-.IP \[bu]
+-i3lock uses PAM and therefore is compatible with LDAP, etc.
+ 
+ 
+ .SH OPTIONS
+@@ -75,7 +73,7 @@
+ .B \-u, \-\-no-unlock-indicator
+ Disable the unlock indicator. i3lock will by default show an unlock indicator
+ after pressing keys. This will give feedback for every keypress and it will
+-show you the current PAM state (whether your password is currently being
++show you the current state (whether your password is currently being
+ verified or whether it is wrong).
+ 
+ .TP
+@@ -104,7 +102,7 @@
+ .TP
+ .B \-e, \-\-ignore-empty-password
+ When an empty password is provided by the user, do not validate
+-it. Without this option, the empty password will be provided to PAM
++it. Without this option, the empty password will be checked
+ and, if invalid, the user will have to wait a few seconds before
+ another try. This can be useful if the XF86ScreenSaver key is used to
+ put a laptop to sleep and bounce on resume or if you happen to wake up
+diff -Nur i3lock-2.8-orig/i3lock.c i3lock-2.8/i3lock.c
+--- i3lock-2.8-orig/i3lock.c	2016-08-27 11:24:15.312880708 +0200
++++ i3lock-2.8/i3lock.c	2016-08-27 11:24:24.068880341 +0200
+@@ -18,7 +18,6 @@
+ #include <xcb/xkb.h>
+ #include <err.h>
+ #include <assert.h>
+-#include <security/pam_appl.h>
+ #include <getopt.h>
+ #include <string.h>
+ #include <ev.h>
+@@ -28,6 +27,8 @@
+ #include <xkbcommon/xkbcommon-x11.h>
+ #include <cairo.h>
+ #include <cairo/cairo-xcb.h>
++#include <unistd.h>
++#include <shadow.h>
+ 
+ #include "i3lock.h"
+ #include "xcb.h"
+@@ -49,10 +50,10 @@
+ uint32_t last_resolution[2];
+ xcb_window_t win;
+ static xcb_cursor_t cursor;
+-static pam_handle_t *pam_handle;
+ int input_position = 0;
+ /* Holds the password you enter (in UTF-8). */
+ static char password[512];
++const char *pws = NULL;
+ static bool beep = false;
+ bool debug_mode = false;
+ bool unlock_indicator = true;
+@@ -80,6 +81,39 @@
+ bool ignore_empty_password = false;
+ bool skip_repeated_empty_password = false;
+ 
++/*
++ * Shamelessly stolen from slock. See LICENSE-slock.
++ * This adjusts the process' out of memory score,
++ *  so it isn't killed by the kernel under any circumstances.
++ */
++#ifdef __linux__
++#include <fcntl.h>
++#include <linux/oom.h>
++#include <errno.h>
++
++static void
++dontkillme(void)
++{
++    int fd;
++    int length;
++    char value[64];
++
++    fd = open("/proc/self/oom_score_adj", O_WRONLY);
++    if (fd < 0 && errno == ENOENT)
++        return;
++
++    /* convert OOM_SCORE_ADJ_MIN to string for writing */
++    length = snprintf(value, sizeof(value), "%d\n", OOM_SCORE_ADJ_MIN);
++
++    /* bail on truncation */
++    if (length >= sizeof(value))
++        errx(EXIT_FAILURE, "buffer too small\n");
++
++    if (fd < 0 || write(fd, value, length) != length || close(fd) != 0)
++        errx(EXIT_FAILURE, "cannot disable the out-of-memory killer for this process (make sure to suid or sgid i3lock)\n");
++}
++#endif
++
+ /* isutf, u8_dec © 2005 Jeff Bezanson, public domain */
+ #define isutf(c) (((c)&0xC0) != 0x80)
+ 
+@@ -235,17 +269,10 @@
+     unlock_state = STATE_STARTED;
+     redraw_screen();
+ 
+-    if (pam_authenticate(pam_handle, 0) == PAM_SUCCESS) {
++    if (!strcmp(crypt(password, pws), pws)) {
+         DEBUG("successfully authenticated\n");
+         clear_password_memory();
+ 
+-        /* PAM credentials should be refreshed, this will for example update any kerberos tickets.
+-         * Related to credentials pam_end() needs to be called to cleanup any temporary
+-         * credentials like kerberos /tmp/krb5cc_pam_* files which may of been left behind if the
+-         * refresh of the credentials failed. */
+-        pam_setcred(pam_handle, PAM_REFRESH_CRED);
+-        pam_end(pam_handle, PAM_SUCCESS);
+-
+         exit(0);
+     }
+ 
+@@ -580,37 +607,6 @@
+ }
+ 
+ /*
+- * Callback function for PAM. We only react on password request callbacks.
+- *
+- */
+-static int conv_callback(int num_msg, const struct pam_message **msg,
+-                         struct pam_response **resp, void *appdata_ptr) {
+-    if (num_msg == 0)
+-        return 1;
+-
+-    /* PAM expects an array of responses, one for each message */
+-    if ((*resp = calloc(num_msg, sizeof(struct pam_response))) == NULL) {
+-        perror("calloc");
+-        return 1;
+-    }
+-
+-    for (int c = 0; c < num_msg; c++) {
+-        if (msg[c]->msg_style != PAM_PROMPT_ECHO_OFF &&
+-            msg[c]->msg_style != PAM_PROMPT_ECHO_ON)
+-            continue;
+-
+-        /* return code is currently not used but should be set to zero */
+-        resp[c]->resp_retcode = 0;
+-        if ((resp[c]->resp = strdup(password)) == NULL) {
+-            perror("strdup");
+-            return 1;
+-        }
+-    }
+-
+-    return 0;
+-}
+-
+-/*
+  * This callback is only a dummy, see xcb_prepare_cb and xcb_check_cb.
+  * See also man libev(3): "ev_prepare" and "ev_check" - customise your event loop
+  *
+@@ -764,8 +760,6 @@
+     struct passwd *pw;
+     char *username;
+     char *image_path = NULL;
+-    int ret;
+-    struct pam_conv conv = {conv_callback, NULL};
+     int curs_choice = CURS_NONE;
+     int o;
+     int optind = 0;
+@@ -791,6 +785,30 @@
+     if ((username = pw->pw_name) == NULL)
+         errx(EXIT_FAILURE, "pw->pw_name is NULL.\n");
+ 
++    /*
++     * This piece of code is shamelessly stolen from slock.
++     * See LICENSE-slock.
++     */
++#ifdef __linux__
++    dontkillme();
++#endif
++
++    pws = pw->pw_passwd;
++
++    if (pws[0] == 'x' && pws[1] == '\0') {
++        struct spwd *sp;
++        if (!(sp = getspnam(getenv("USER"))))
++            errx(EXIT_FAILURE, "cannot retrieve shadow entry (make sure to suid or sgid i3lock)\n");
++        pws = sp->sp_pwdp;
++    }
++
++    /* drop privileges */
++    if (geteuid() == 0 &&
++        ((getegid() != pw->pw_gid && setgid(pw->pw_gid) < 0) || setuid(pw->pw_uid) < 0))
++        errx(EXIT_FAILURE, "cannot drop privileges\n");
++
++    /* End of stolen code */
++
+     char *optstring = "hvnbdc:p:ui:teI:f";
+     while ((o = getopt_long(argc, argv, optstring, longopts, &optind)) != -1) {
+         switch (o) {
+@@ -862,13 +880,6 @@
+      * the unlock indicator upon keypresses. */
+     srand(time(NULL));
+ 
+-    /* Initialize PAM */
+-    if ((ret = pam_start("i3lock", username, &conv, &pam_handle)) != PAM_SUCCESS)
+-        errx(EXIT_FAILURE, "PAM: %s", pam_strerror(pam_handle, ret));
+-
+-    if ((ret = pam_set_item(pam_handle, PAM_TTY, getenv("DISPLAY"))) != PAM_SUCCESS)
+-        errx(EXIT_FAILURE, "PAM: %s", pam_strerror(pam_handle, ret));
+-
+ /* Using mlock() as non-super-user seems only possible in Linux. Users of other
+  * operating systems should use encrypted swap/no swap (or remove the ifdef and
+  * run i3lock as super-user). */
+diff -Nur i3lock-2.8-orig/i3lock.pam i3lock-2.8/i3lock.pam
+--- i3lock-2.8-orig/i3lock.pam	2016-08-27 11:24:15.313880708 +0200
++++ i3lock-2.8/i3lock.pam	1970-01-01 01:00:00.000000000 +0100
+@@ -1,6 +0,0 @@
+-#
+-# PAM configuration file for the i3lock screen locker. By default, it includes
+-# the 'login' configuration file (see /etc/pam.d/login)
+-#
+-
+-auth include login
