@@ -23,4 +23,4 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.sslh.new
-config etc/sslh/sslh.conf.new
+config etc/sslh/sslh.cfg.new
