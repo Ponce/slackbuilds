@@ -5,8 +5,8 @@
 # Written by Chris Abela <chris.abela@maltats.com>, 20100515
 # Modified by Mario Preksavec <mario@slackware.hr>
 
-KERNEL=${KERNEL:-4.4.14}
-XEN=${XEN:-4.6.3}
+KERNEL=${KERNEL:-4.4.19}
+XEN=${XEN:-4.7.0}
 BOOTLOADER=${BOOTLOADER:-lilo}
 
 ROOTMOD=${ROOTMOD:-ext4}
