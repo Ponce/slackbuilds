@@ -1,0 +1,213 @@
+#!/bin/sh
+
+# Slackware build script for PaleMoon
+
+# Copyright 2016 Vasily Sora USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Modified by SlackBuilds.org
+
+PRGNAM=PaleMoon
+VERSION=${VERSION:-26.4.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# You can try changing the optimization level to simply "-O2" if your processor
+# doesn't support sse2 instructions.
+# "-Os" might help if you experience segfaults.
+OPTIMIZE=${OPTIMIZE:-"-O2 -msse2 -mfpmath=sse"}
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+rm -rf $PKG $TMP/pmbuild $TMP/gold
+mkdir -p $TMP $PKG $OUTPUT $TMP/pmbuild $TMP/gold
+
+DEBUG=" --enable-strip --disable-debug --disable-debug-symbols "
+if [ "${ENABLE_DEBUG:-no}" = "yes" ]; then
+  DEBUG=" --disable-strip --disable-install-strip --enable-debug --enable-debug-symbols "
+  # On IA32, use gold since GNU ld runs out of memory linking libxul.so
+  # when debug is turned on
+  if [ "$ARCH" = "i586" -o "$ARCH" = "i686" ]; then
+    echo "#!/bin/bash" >> $TMP/gold/gold
+    echo "/usr/bin/ld.gold \"\$@\"" >> $TMP/gold/gold
+    cp $TMP/gold/gold $TMP/gold/ld
+    chmod +x $TMP/gold/*
+    PATH="$TMP/gold:$PATH"
+    export CC="gcc -B$TMP/gold"
+    export CXX="g++ -B$TMP/gold"
+  fi
+fi
+  
+set -e
+
+# We need to use the incredibly ancient autoconf-2.13 for this  :/
+# (Taken from Slackware's Firefox build Script)
+cd $TMP
+rm -rf autoconf-2.13
+tar xvf $CWD/autoconf-2.13.tar.xz
+cd autoconf-2.13
+zcat $CWD/autoconf-2.13-consolidated_fixes-1.patch.gz | patch -p1 --verbose
+chown -R root:root .
+find . \
+  \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+  -exec chmod 755 {} \; -o \
+  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+  -exec chmod 644 {} \;
+
+# Build a temporary copy of autoconf-2.13 only to be used to compile
+# PaleMoon, since it somewhat inexplicably requires this ancient version:
+rm -rf $TMP/autoconf-tmp
+mkdir -p $TMP/autoconf-tmp
+# This will be at the beginning of the $PATH, so protect against nonsense
+# happening in $TMP:
+chmod 700 $TMP/autoconf-tmp
+rm -rf $TMP/autoconf-tmp/*
+mkdir -p $TMP/autoconf-tmp/usr
+
+./configure \
+  --prefix=$TMP/autoconf-tmp/usr \
+  --program-suffix=-2.13 \
+  --infodir=$TMP/autoconf-tmp/usr/info \
+  --mandir=$TMP/autoconf-tmp/usr/man \
+  --build=$ARCH-slackware-linux
+
+make || make -j1
+make install
+PATH=$TMP/autoconf-tmp/usr/bin:$PATH
+
+# Build palemoon
+cd $TMP
+rm -rf Pale-Moon-${VERSION}_Release
+tar xzvf $CWD/${VERSION}_Release.tar.gz
+cd Pale-Moon-${VERSION}_Release
+chown -R root:root .
+ find -L . \
+  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Crude hack so that /usr/lib/mozilla/plugins points to 
+# /usr/lib64/mozilla/plugins on 64 bit systems
+if [ "$LIBDIRSUFFIX" = "64" ]; then
+  sed -i 's:/usr/lib/mozilla/plugins:/usr/lib64/mozilla/plugins:g' \
+    xpcom/io/nsAppFileLocationProvider.cpp
+else
+  echo "Oh, we're on a 32 bit system, nothing to do here!"
+fi
+
+export MOZBUILD_STATE_PATH="$TMP/Pale-Moon-${VERSION}_Release/moz.build"
+export MOZCONFIG="$TMP/Pale-Moon-${VERSION}_Release/.mozconfig"
+export MOZILLA_OFFICIAL=1
+export MOZ_MAKE_FLAGS=$MAKEFLAGS
+export CFLAGS="$SLKCFLAGS"
+export CXXFLAGS="$SLKCFLAGS"
+
+# Please see https://www.palemoon.org/redist.shtml for restrictions when using the official branding.
+# Our building options, in a configure-like display ;)
+OPTIONS="\
+  --enable-official-branding \
+  --enable-application=browser \
+  --disable-installer \
+  --disable-updater \
+  --disable-tests \
+  --disable-mochitests \
+  --enable-jemalloc \
+  --with-pthreads \
+  $DEBUG \
+  --x-libraries=/usr/lib${LIBDIRSUFFIX} \
+  --with-default-mozilla-five-home=/usr/lib${LIBDIRSUFFIX}/palemoon-$VERSION \
+  --prefix=/usr \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man"
+
+echo "mk_add_options MOZ_CO_PROJECT=browser" >> .mozconfig
+echo "mk_add_options MOZ_OBJDIR=$TMP/pmbuild" >> .mozconfig
+
+# Write in the .mozconfig the options above
+for option in $OPTIONS; do echo "ac_add_options $option" >> .mozconfig; done
+echo "ac_add_options --enable-optimize=\"$OPTIMIZE\"" >> .mozconfig
+
+python2 mach build || echo "Next =>"
+python2 mach build
+
+cd $TMP/pmbuild
+make package
+
+cd dist
+
+mkdir -p $PKG/usr/bin
+mkdir -p $PKG/usr/share/icons/hicolor/{16x16,32x32,48x48,128x128}/apps
+mkdir -p $PKG/usr/share/applications
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}
+
+# Install palemoon into /usr/lib${LIBDIRSUFFIX}
+cp -r palemoon $PKG/usr/lib${LIBDIRSUFFIX}/palemoon-$VERSION
+
+cd $PKG
+
+ln -s /usr/lib${LIBDIRSUFFIX}/palemoon-$VERSION/palemoon usr/bin/palemoon-$VERSION
+# Icons
+ln -s /usr/lib${LIBDIRSUFFIX}/palemoon-$VERSION/browser/chrome/icons/default/default16.png \
+  usr/share/icons/hicolor/16x16/apps/${PRGNAM}-$VERSION.png
+ln -s /usr/lib${LIBDIRSUFFIX}/chrome/icons/default/default32.png \
+  usr/share/icons/hicolor/32x32/apps/${PRGNAM}-$VERSION.png
+ln -s /usr/lib${LIBDIRSUFFIX}/chrome/icons/default/default48.png \
+  usr/share/icons/hicolor/48x48/apps/${PRGNAM}-$VERSION.png
+ln -s /usr/lib${LIBDIRSUFFIX}/palemoon-$VERSION/browser/icons/mozicon128.png \
+  usr/share/icons/hicolor/128x128/apps/${PRGNAM}-$VERSION.png
+
+# Install .desktop file
+sed "s|@VERSION@|$VERSION|" $CWD/$PRGNAM.desktop \
+  > $PKG/usr/share/applications/$PRGNAM.desktop
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
