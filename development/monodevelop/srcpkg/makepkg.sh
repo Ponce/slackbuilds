@@ -20,7 +20,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=monodevelop
-VERSION=${VERSION:-6.0.2.73}
+VERSION=${VERSION:-6.1.1.15}
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo/sources}
@@ -68,6 +68,10 @@ pushd main
       done
     popd #$top_dir
   done
+
+  pushd external/fsharpbinding
+    mono .paket/paket.bootstrapper.exe
+  popd
 popd #main
 
 cd $TMP
