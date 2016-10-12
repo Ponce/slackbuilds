@@ -32,6 +32,7 @@ fi
 preserve_perms etc/rc.d/rc.privoxy.new
 config etc/privoxy/config.new
 config etc/privoxy/match-all.action.new
+config etc/privoxy/regression-tests.action.new
 config etc/privoxy/trust.new
 config etc/privoxy/user.action.new
 config etc/privoxy/user.filter.new
