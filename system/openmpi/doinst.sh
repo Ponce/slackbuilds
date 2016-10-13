@@ -12,5 +12,5 @@ config() {
 }
 
 config etc/openmpi-default-hostfile.new
-config etc/openmpi-totalview.tcl.new
 config etc/openmpi-mca-params.conf.new
+config etc/openmpi-totalview.tcl.new
