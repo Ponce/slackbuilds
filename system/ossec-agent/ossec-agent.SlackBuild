@@ -1,0 +1,152 @@
+#!/bin/sh
+
+# Slackware build script for ossec-agent
+
+# Copyright 2016  Mario Preksavec, Zagreb, Croatia
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=ossec-agent
+VERSION=${VERSION:-2.9rc3}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+SRCNAM=ossec-hids
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+USERID=${USERID:-333}
+USERID_MAIL=${USERID_MAIL:-334}
+USERID_REMOTE=${USERID_REMOTE:-335}
+GROUPID=${GROUPID:-333}
+
+if ! grep ^ossec: /etc/group 2>&1 > /dev/null \
+|| ! grep -E '^(ossec|ossecm|ossecr):' /etc/passwd 2>&1 > /dev/null; then
+  echo -e "\n  You must have ossec users and a group to run this script\n"
+fi
+
+if ! grep ^ossec: /etc/group 2>&1 > /dev/null; then
+  echo "  # groupadd -g $GROUPID ossec"
+fi
+
+if ! grep ^ossec: /etc/passwd 2>&1 > /dev/null; then
+  echo "  # useradd -u $USERID -d /var/ossec -s /bin/false -g ossec ossec"
+  echo "  # passwd -l ossec"
+fi
+
+if ! grep ^ossecm: /etc/passwd 2>&1 > /dev/null; then
+  echo "  # useradd -u $USERID_MAIL -d /var/ossec -s /bin/false -g ossec ossecm"
+  echo "  # passwd -l ossecm"
+fi
+
+if ! grep ^ossecr: /etc/passwd 2>&1 > /dev/null; then
+  echo "  # useradd -u $USERID_REMOTE -d /var/ossec -s /bin/false -g ossec ossecr"
+  echo "  # passwd -l ossecr"
+fi
+
+if ! grep ^ossec: /etc/group 2>&1 > /dev/null \
+|| ! grep -E '^(ossec|ossecm|ossecr):' /etc/passwd 2>&1 > /dev/null; then
+  echo
+  exit
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Makefile fixes
+sed -e 's|\(./init/adduser.sh.*\)|#\1|' \
+    -e 's|\(DEFINES+=-DDEFAULTDIR=\).*|\1\\"/var/ossec\\"|' \
+    -i src/Makefile
+
+# There is no configure script and install.sh is a bit limited
+( cd src
+  make PREFIX=$PKG/var/ossec TARGET=agent build
+  make PREFIX=$PKG/var/ossec TARGET=agent install
+)
+
+# Prepare system /etc
+mkdir -p $PKG/etc/{logrotate.d,rc.d}
+cat << EOF > $PKG/etc/ossec-init.conf.new
+DIRECTORY="/var/ossec"
+VERSION="$(cat src/VERSION)"
+DATE="$(date)"
+TYPE="agent"
+EOF
+chmod 600 $PKG/etc/ossec-init.conf.new
+cat src/init/ossec-hids.init > $PKG/etc/rc.d/rc.ossec.new
+cat $CWD/ossec.logrotate > $PKG/etc/logrotate.d/ossec.new
+
+# Stock ossec.conf is just an example - we prefer our own
+mv $PKG/var/ossec/etc/ossec.conf $PKG/var/ossec/etc/ossec.conf.example
+cat $CWD/ossec-agent.conf > $PKG/var/ossec/etc/ossec.conf.new
+touch $PKG/var/ossec/etc/shared/agent.conf.new
+chmod 640 $PKG/var/ossec/etc/{ossec,shared/agent}.conf.new
+chown root:ossec $PKG/var/ossec/etc/{ossec,shared/agent}.conf.new
+for i in $PKG/var/ossec/etc/*.{conf,keys} ; do mv $i $i.new ; done
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a BUGS CHANGELOG CONFIG CONTRIBUTORS LICENSE README.md doc/{*.txt,README.*} \
+  $CWD/README.SLACKWARE $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
