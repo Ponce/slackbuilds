@@ -1,12 +1,6 @@
 #!/bin/sh
 
 # Slackware build script for fbida
-# Modified by Luis Henrique <lmello.009@gmail.com>
-
-# Modified again on 20140915 by B. Watson <yalhcru@gmail.com>
-# - Took over maintenance, minor script cleanup
-
-# 20150508 bkw: update for v2.10
 
 # (C) 2007 Michael Wagner <lapinours@web.de>
 # All rights reserved.
@@ -28,8 +22,24 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# Modified by Luis Henrique <lmello.009@gmail.com>
+
+# Modified again on 20140915 by B. Watson <yalhcru@gmail.com>
+# - Took over maintenance, minor script cleanup
+
+# 20150508 bkw: update for v2.10
+
+# 20161015 bkw:
+# - update for v2.12
+# - add optional motif support, since Slack 14.2 has real Motif. Also
+#   add .desktop and icon, if motif was included.
+# - actually apply SLKCFLAGS
+# - 2.12 has a new fbpdf command, which I've renamed to
+#   fbipdf to avoid conflicting with the fbpdf package
+# - include French man pages, which aren't installed by default
+
 PRGNAM=fbida
-VERSION=${VERSION:-2.10}
+VERSION=${VERSION:-2.12}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -46,7 +56,7 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-DOCS="COPYING Changes INSTALL README TODO"
+DOCS="COPYING Changes README TODO"
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
@@ -77,10 +87,41 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-CFLAGS="$SLKCFLAGS" make HAVE_MOTIF=no
-prefix=/usr make install DESTDIR=$PKG mandir=$PKG/usr/man HAVE_MOTIF=no
+MOTIF_OPT="HAVE_MOTIF=${MOTIF:-yes}"
+sed -i "/^CFLAGS/s,-g *-O2,$SLKCFLAGS," mk/Variables.mk
+make $MOTIF_OPT prefix=/usr
+strip fbpdf # not stripped for some reason
+make install prefix=/usr DESTDIR=$PKG mandir=$PKG/usr/man $MOTIF_OPT
 
 gzip -9 $PKG/usr/man/man1/*
+FR_MAN="exiftran fbgs fbi"
+
+# upstream's .desktop file doesn't validate, we ship a corrected one,
+# but only include it if motif support was built in. PNG icon was
+# converted from mallard_48.xpm in the src.
+if [ "${MOTIF:-yes}" = "yes" ]; then
+  mkdir -p $PKG/usr/share/applications $PKG/usr/share/pixmaps
+  cat $CWD/ida.desktop > $PKG/usr/share/applications/ida.desktop
+  cat $CWD/ida.png > $PKG/usr/share/pixmaps/ida.png
+  FR_MAN="$FR_MAN ida"
+fi
+
+# /usr/bin/fbpdf conflicts with office/fbpdf, so rename it
+mv $PKG/usr/bin/fbpdf $PKG/usr/bin/fbipdf
+
+# French man pages. I don't see a way to get make to install these. Hope
+# they're useful, I can't actually read French. They're UTF-8, and display
+# poorly with Slackware's old man command... so I convert them to 8859-1
+# and hope for the best. They look OK with LANG set to either fr_FR
+# or fr_FR.UTF-8. They also look OK with the man command from man-db.
+# iconv chokes on the unicode ellipsis character (U+2026), the sed stuff
+# converts it back to three periods as Bemer intended!
+mkdir -p $PKG/usr/man/fr/man1
+for i in $FR_MAN; do
+  LANG=C sed 's,\xe2\x80\xa6,...,g' < $i.man.fr | \
+    iconv -c -f UTF-8 -t ISO-8859-1 | \
+    gzip -9c > $PKG/usr/man/fr/man1/$i.1.gz
+done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
