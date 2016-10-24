@@ -1,0 +1,121 @@
+#!/bin/bash
+####################################################
+# partimaged-passwd
+# Copyright (C) 2006 Michael Bieb <biebl@debian.org>
+####################################################
+
+DB_LOAD=""
+DB_DUMP=""
+PASSWD_FILE="/etc/partimaged/passwd.db"
+
+if [ $UID -ne 0 ] ; then
+	:
+	echo "This program has to be run as root!"
+	exit 1
+fi
+
+# Check for a version of db_load/db_dump
+check_db_utils() {
+	for i in 5.1 4.8 4.7; do
+		if [ -x /usr/bin/db${i}_load ] ; then
+			DB_LOAD=/usr/bin/db${i}_load
+			DB_DUMP=/usr/bin/db${i}_dump
+			return 0
+		fi
+	done
+	return 1
+}
+
+help() {
+	echo "Manage partimaged user database."
+	echo 
+	echo "Usage:"
+	echo "  $0 [-Dhl] username password"
+	echo "  $0 [-Dhl] username"
+	echo
+	echo "  -D Delete user."
+	echo "  -h Display this help message."
+	echo "  -l List existing users."
+	echo
+}
+
+delete_user() {
+	echo "Deleting user $1..."
+	$DB_DUMP -p $PASSWD_FILE | sed -e '1,/HEADER=END/d' -e '/DATA=END/,$d' | sed 's/^[ \t]*//' | sed "/^$1$/{n;d}" | sed "/^$1$/d" | $DB_LOAD -T -t hash ${PASSWD_FILE}.new
+	mv ${PASSWD_FILE}.new $PASSWD_FILE
+	fix_rights
+}
+
+add_user() {
+	echo "Adding user $1..."
+	echo -e "$1\n$2" | $DB_LOAD -T -t hash $PASSWD_FILE
+	fix_rights
+}
+
+list_users() {
+	[ -f $PASSWD_FILE ] || exit 0
+	echo "Users:"
+	$DB_DUMP -p $PASSWD_FILE | sed -e '1,/HEADER=END/d' -e '/DATA=END/,$d' | sed 's/^[ \t]*//' | sed -n '1~2p'
+}
+
+fix_rights() {
+	chmod 640 $PASSWD_FILE
+	chown partimag:partimag $PASSWD_FILE
+}
+
+if ! check_db_utils ; then
+	echo "Could not find db_load/db_dump!"
+	echo "Please install the db5.1-util package."
+	exit 1
+fi
+
+
+
+while getopts D:hl opt 
+do
+	case "$opt" in
+		D) 
+			delete_user $OPTARG
+			exit 0
+			;;
+		h) 
+			help 
+			exit 0
+			;;
+		l)	
+			list_users
+			exit 0
+			;;
+		[?])
+			help
+			exit 1
+			;;
+	esac
+done
+
+shift $((${OPTIND}-1))
+
+if [ $# -eq 1 ] ; then
+	echo -n "New password: "
+	read -s passwd1
+	echo
+	echo -n "Re-type new password: "
+	read -s passwd2
+	echo
+	if [ "$passwd1" != "$passwd2" ] ; then
+		echo "Passwords do not match!"
+		exit 1
+	elif [ -z $passwd1 ] ; then
+		echo "Please supply a valid password!"
+		exit 1
+	else
+		add_user $1 $passwd1
+	fi
+elif [ $# -eq 2 ] ; then
+	add_user $1 $2
+else
+	help
+	exit 1
+fi
+
+exit 0
