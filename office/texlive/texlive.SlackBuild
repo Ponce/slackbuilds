@@ -4,7 +4,7 @@
 
 # Copyright 2009  Patrick J. Volkerding, Sebeka, MN, USA
 # Copyright 2009-2014  Robby Workman, Northport, AL, USA
-# Copyright 2016  Johannes Schoepfer, Herrenberg, BW, Germany
+# Copyright 2016  Johannes Schoepfer
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -29,8 +29,8 @@
 
 PRGNAM=texlive
 VERSION=20160523
-TEXMF_VERS=20160622
-BUILD=${BUILD:-2}
+TEXMF_VERS=20161023
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
 
 CWD=$(pwd)
@@ -78,6 +78,11 @@ sed -i "s|^TEXMFROOT.*|TEXMFROOT = \$SELFAUTODIR/share|;s|^TEXMFLOCAL.*|TEXMFLOC
 # Fix a segfault in upmendex, thanks to the lfs-folks.
 patch -Np1 -i $CWD/patches/texlive-20160523b-source-upstream_fixes-1.patch
 
+# allow the tex4ht binary to process the updated xdv id byte in xetex
+# for tl'2016 (i.e., 0.99996).  Without this, htxelatex and the like
+# simply bail out.
+patch -p0 < $CWD/patches/tex4ht.patch
+
 # --with-system-harfbuzz requires graphite2 (and harfbuzz linked to it)
 mkdir build ; cd build
   CFLAGS="$SLKCFLAGS" \
@@ -117,8 +122,8 @@ mkdir build ; cd build
     --with-system-ncurses \
     --enable-gc=system \
     --build=$ARCH-slackware-linux
-  make
- # make check
+  make 
+  # make check
   make install-strip DESTDIR=$PKG 
   # Create symlinks
   make texlinks DESTDIR=$PKG
@@ -130,29 +135,21 @@ mkdir -p $PKG/usr/share
 tar vxf $CWD/texlive-base-$TEXMF_VERS.tar.xz -C $PKG/usr/share
 chown -R root:root $PKG
 chmod -R u+w,go-w,a+rX-st $PKG
+(
+# Move biber binary to $PATH
+cd $PKG/usr/share/texmf-dist
+case $ARCH in
+	"x86_64") mv bin/x86_64-linux/biber $PKG/usr/bin ;;
+	"i586") mv bin/i386-linux/biber $PKG/usr/bin ;;
+esac
+rm -rf $PKG/usr/share/texmf-dist/bin
+)
+
 
 # set TEXMFROOT and TEXMFLOCAL
 sed -i \
   "s|^TEXMFROOT.*|TEXMFROOT = \$SELFAUTODIR/share|;s|^TEXMFLOCAL.*|TEXMFLOCAL = \$TEXMFROOT/texmf-local|" \
   $PKG/usr/share/texmf-dist/web2c/texmf.cnf
-
-# Build asymptote; take support-files from the net-archives
-cd utils/asymptote
-  CFLAGS="$SLKCFLAGS" \
-  ./configure \
-    --datarootdir=/usr/share/texmf-dist \
-    --infodir=/usr/info \
-    --mandir=/usr/man \
-    --libdir=/usr/lib${LIBDIRSUFFIX} \
-    --enable-gc=system \
-    --with-latex=/usr/share/texmf-dist/tex/latex \
-    --with-context=/usr/share/texmf-dist/tex/context/third \
-    --build=$ARCH-slackware-linux
-  make
-  #make check
-  strip --strip-unneeded asy
-  install -m 755 asy $PKG/usr/bin/
-cd ../.. 
 
 # Remove context-stuff
 rm -rf $PKG/usr/share/texmf-dist/scripts/context
@@ -175,15 +172,6 @@ cp -a ChangeLog README* $PKG/usr/doc/texlive-$VERSION
 
 # Put a symlink to /usr/share/texmf-dist/doc in our Slackware docdir
 ln -s ../../share/texmf-dist/doc $PKG/usr/doc/$PRGNAM-$VERSION/doc
-
-# Install biber
-if [ "$ARCH" = "x86_64" ]; then
-  tar vxf $CWD/biber.x86_64-linux.tar.xz bin/x86_64-linux/biber
-  mv bin/x86_64-linux/biber $PKG/usr/bin
-elif [ "$ARCH" = "i586" ]; then
-  tar vxf $CWD/biber.i386-linux.tar.xz bin/i386-linux/biber
-  mv bin/i386-linux/biber $PKG/usr/bin
-fi
 
 # We won't make tlmgr easily available; it's still there, but
 # we'll make it harder to void the warranty :-)

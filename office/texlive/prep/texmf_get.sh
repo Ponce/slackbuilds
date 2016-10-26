@@ -20,7 +20,7 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-#  V 0.4
+#  V 0.5
 #
 #  Prepare xz-compressed tarballs of texlive-texmf-trees based on texlive.tlpdb
 #  This script takes care of dependencies(as far as these are present in texlive.tlpdb) of collections and packages,
@@ -85,7 +85,6 @@ packages () {
     was
     xypic
     xindy
-    asymptote
     barcodes
     qrcode
     lastpage
@@ -101,6 +100,8 @@ packages () {
     titlesec
     csplain
     biblatex
+    biber.x86_64-linux
+    biber.i386-linux
     collection-langeuropean
     collection-langenglish
     collection-langfrench
@@ -258,22 +259,13 @@ do
 	# If $collection is a singel package, add it here
 	if [ -n "$(head -n1 $tmpfile | fgrep -v "name collection" )" ]
 	then
-		# Add only run packages (collection = package)
-		#if [ -z "$(grep -w "^${collection}$" $TMP/run.tlpkg)" ]
-		#if [ "$1" = docs ]
-		#then
-		#	packagelist="$output_doc"
-		#else
-			packagelist="$TMP/run.tlpkg"
-		#fi
+		packagelist="$TMP/run.tlpkg"
 		if [ -z "$(grep -w "^${collection}$" $packagelist)" ]
 		then
 			sed -i "/^$collection$/d" $collections_tobedone
 			echo "$collection" >> $collections_done
 			continue
 		fi
-		# filter for max containersize to be added.
-		#[ $(grep ^containersize $tmpfile | cut -d' ' -f2 ) -lt $(($kb * 1024)) ] && echo "$collection" >> $output
 		echo "$collection" >> $output
 	fi
 	# add dependend packages
@@ -329,6 +321,8 @@ untar () {
 		else
 			tar vxf ${package}${flavour}.tar.xz --exclude tlpkg  || exit 1
 		fi
+		# in case a binary package was decompressed, put it in texmf-dist
+		[ -d bin ] && cp -a bin texmf-dist && rm -rf bin
 		if [ "$flavour" = ".doc" ]
 		then
 			size=$(( $(grep ^doccontainersize $texmf/$package.meta | cut -d' ' -f2 ) / 1024 ))
@@ -336,7 +330,6 @@ untar () {
 			size=$(( $(grep ^containersize $texmf/$package.meta | cut -d' ' -f2 ) / 1024 ))
 		fi
 		shortdesc="$(grep ^shortdesc $texmf/$package.meta | cut -d' ' -f2- )"
-		#echo "$package: $shortdesc, Kb $size" >> $1.meta
 		echo "$size Kb, $package: $shortdesc" >> $1.meta
 	done < $1
 	# copy packages-list to texmf-dist, so included packages are known in later installation
@@ -473,6 +466,12 @@ fi
 # Make a list of all packages available, but exclude binary and installer/configuration packages.
 # It turns out that packagenames without '.' are what we want. Packages with '.' are all binarie-packages, which we biuld from source.
 grep ^name $TMP/$db | grep -v ^"name collection-" | grep -v ^"name scheme-" | grep -v '\.' | cut -d' ' -f2 > $TMP/allpackages
+
+# add biber (perl)binaries as special exception.
+cat << EOF >> $TMP/allpackages
+biber.x86_64-linux
+biber.i386-linux
+EOF
 	
 	# further globaly excluded packages, which does not make sense without tlpkg-installer, or are non-linux specific, or are already covered by the sourcebuild.
 
@@ -527,7 +526,7 @@ done
 	
 # get linenumbers of empty lines
 [ -z "$emptylines" ] && emptylines="$(grep -n ^$ $TMP/$db | cut -d':' -f1)"
-# sort doc- and run- packages out to avaoid binfiles and sourcfile in the texmf-tree
+# sort doc- and run- packages out to avoid binfiles and sourcfile in the texmf-tree
 while read collection
 do
 	if [ ! -s $texmf/$collection.meta ]
@@ -542,6 +541,12 @@ do
 		mv $tmpfile $texmf/$collection.meta
 	fi
 done < $TMP/allpackages
+
+# handle biber binaries to be add-able 
+cat << EOF >> $TMP/run.tlpkg
+biber.x86_64-linux
+biber.i386-linux
+EOF
 		
 
 [ -f "$collections_done" ] && rm "$collections_done"
