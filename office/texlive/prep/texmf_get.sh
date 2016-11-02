@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# texmf_get.sh (c) 2016 Johannes Schoepfer, slackbuilds@schoepfer.info
+# texmf_get.sh (c) 2016 Johannes Schoepfer, slackbuilds[at]schoepfer[dot]info
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -20,20 +20,23 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-#  V 0.5
+#  V 0.6
 #
 #  Prepare xz-compressed tarballs of texlive-texmf-trees based on texlive.tlpdb
 #  This script takes care of dependencies(as far as these are present in texlive.tlpdb) of collections and packages,
 #  and that every texlive-package is included only once.
+#
+#  Policy from texlive-netarchive: Every package is included as dependency in exactly one collection. A package may have dependecies on other packages from any collection.
 
-# available packages http://mirror.ctan.org/systems/texlive/tlnet/archive/
+# packages source: http://mirror.ctan.org/systems/texlive/tlnet/archive/
 
 #set -e
+MAJORVERSION=2016
 # release mirror
 mirror="http://mirror.ctan.org/systems/texlive/tlnet/"
 # pre-test mirror 2016
 # mirror="http://ftp.cstug.cz/pub/tex/local/tlpretest/"
-LANG=C 
+LANG=C
 TMP=$PWD/tmp
 output=$TMP/texlive.packages
 output_doc=$TMP/texlive.doc.packages
@@ -64,10 +67,10 @@ packages () {
 
 # The base
   PACKAGES="
-    collection-basic 
-    collection-latex 
-    collection-genericrecommended 
-    collection-latexrecommended 
+    collection-basic
+    collection-latex
+    collection-genericrecommended
+    collection-latexrecommended
     collection-xetex
     collection-metapost
     collection-plainextra
@@ -77,8 +80,9 @@ packages () {
     collection-htmlxml
     collection-luatex
     collection-fontsrecommended
-    collection-mathextra 
+    collection-mathextra
     collection-humanities
+    collection-context
     lh
     yfonts
     doublestroke
@@ -98,7 +102,17 @@ packages () {
     stmaryrd
     subfigure
     titlesec
+    siunitx
+    combelow
     csplain
+    csquotes
+    etoolbox
+    etextools
+    glossaries
+    imakeidx
+    idxlayout
+    bidi
+    filecontents
     biblatex
     biber.x86_64-linux
     biber.i386-linux
@@ -114,27 +128,27 @@ packages () {
     collection-langafrican
     hyphen-czech
     hyphen-slovak
-    hyphen-indic 
-    hyphen-sanskrit 
-    hyphen-armenian 
+    hyphen-indic
+    hyphen-sanskrit
+    hyphen-armenian
     hyphen-afrikaans
     hyphen-esperanto
-    hyphen-bulgarian 
-    hyphen-churchslavonic 
-    hyphen-mongolian 
-    hyphen-russian 
-    hyphen-serbian 
-    hyphen-ukrainian 
-    hyphen-catalan 
-    hyphen-galician 
-    hyphen-chinese 
-    hyphen-coptic 
-    hyphen-georgian 
-    hyphen-indonesian 
-    hyphen-interlingua 
-    hyphen-thai 
-    hyphen-turkmen 
-    hyphen-arabic 
+    hyphen-bulgarian
+    hyphen-churchslavonic
+    hyphen-mongolian
+    hyphen-russian
+    hyphen-serbian
+    hyphen-ukrainian
+    hyphen-catalan
+    hyphen-galician
+    hyphen-chinese
+    hyphen-coptic
+    hyphen-georgian
+    hyphen-indonesian
+    hyphen-interlingua
+    hyphen-thai
+    hyphen-turkmen
+    hyphen-arabic
     hyphen-farsi" \
   texmfget base
 
@@ -146,12 +160,12 @@ PACKAGES="collection-fontsextra" texmfget fonts
     collection-latexextra
     collection-pictures
     collection-games
-    collection-publishers 
-    collection-bibtexextra 
-    collection-binextra 
-    collection-science 
+    collection-publishers
+    collection-bibtexextra
+    collection-binextra
+    collection-science
     collection-omega
-    collection-music 
+    collection-music
     collection-langother
     collection-pstricks
     collection-langcyrillic
@@ -166,6 +180,16 @@ PACKAGES="collection-fontsextra" texmfget fonts
 
 # The docs-tarball - very big (about 1300 MB)
   texmfget docs
+
+  if [ "$TARBALL" != docs ]
+  then
+	echo "Packages-list: $output.meta.$TARBALL"
+	while read collection
+	do
+		grep -w "$collection" $collections_done &> /dev/null
+		[ $? != 0 ] && echo "WARNING: $collection was not processed, please edit packages-function."
+	done < $TMP/allcollections
+  fi
 
 # Following aren't supported
 #NAME=context PACKAGES="collection-context" ./texmf_get.sh
@@ -214,7 +238,7 @@ package_meta () {
 	# collection start linenumer
 	start_n="$(grep -n ^"name ${collection}$" $TMP/$db | cut -d':' -f1)"
 	[ -z "$start_n" ] && echo "$collection was not found in $TMP/$db, bye." && exit 1
-	
+
 	# find end of package/collection
 	for emptyline in $emptylines
 	do
@@ -224,12 +248,9 @@ package_meta () {
 			break
 		fi
 	done
-	
+
 	sed "${start_n},${end_n}!d" $TMP/$db > $tmpfile
 }
-
-
-
 
 package_list () {
 # Only do something if $collection wasn't already done before
@@ -239,7 +260,7 @@ do
 	# continue with next collection if collection was already done
 	if [ -s "$collections_done" ]
 	then
-		grep -w "^${collection}$" $collections_done &> /dev/null 
+		grep -w "^${collection}$" $collections_done &> /dev/null
 		if [ $? = 0 ]
 		then
 			sed -i "/^$collection$/d" $collections_tobedone
@@ -251,11 +272,11 @@ do
 	then
 		cp $texmf/$collection.meta $tmpfile
 	else
-		package_meta 
+		package_meta
 	fi
 
 	# ignore dependend collections generally, as this adds far too much and therefore reduces controll over what packages to be added
-	sed -i "/^depend collection/d" $tmpfile 
+	sed -i "/^depend collection/d" $tmpfile
 	# If $collection is a singel package, add it here
 	if [ -n "$(head -n1 $tmpfile | fgrep -v "name collection" )" ]
 	then
@@ -276,7 +297,6 @@ done
 
 }
 
-
 untar () {
 	# download packages, if not already available. Not for all packages a corresponding .doc package exists
 	rm $1.meta
@@ -289,7 +309,9 @@ untar () {
 		else
 			sha512="$(grep ^containerchecksum $texmf/$package.meta | cut -d' ' -f2 )"
 		fi
-		[ ! -s ${package}${flavour}.tar.xz ] && wget ${mirror}archive/${package}${flavour}.tar.xz
+		# try two times if package isn't present, with -t1 to get another mirror the second time
+		[ ! -s ${package}${flavour}.tar.xz ] && wget -t1 -c ${mirror}archive/${package}${flavour}.tar.xz
+		[ ! -s ${package}${flavour}.tar.xz ] && wget -t1 -c ${mirror}archive/${package}${flavour}.tar.xz
 		[ ! -s ${package}${flavour}.tar.xz ] && echo "Downloading ${package}${flavour}.tar.xz did not work, writing to $errorlog" && echo "Error downloading ${package}${flavour}.tar.xz" >> $errorlog && exit 1
 		# check sha512, give three tries for downloading aggain(diffrent mirrors are used automatically)
 		for tillthree in 1 2 3
@@ -297,8 +319,8 @@ untar () {
 			if [ "$(sha512sum ${package}${flavour}.tar.xz | cut -d' ' -f1 )" != "$sha512" ]
 			then
 				# Download (hopefully) newer file
-				rm ${package}${flavour}.tar.xz 
-				wget ${mirror}archive/${package}${flavour}.tar.xz
+				rm ${package}${flavour}.tar.xz
+				wget -t1 -c ${mirror}archive/${package}${flavour}.tar.xz
 			else
 				break
 			fi
@@ -315,7 +337,7 @@ untar () {
 
 		# exclude the tlpkg-stuff, TLUtils.pm(needed tu run texlive) comes from source installation
 		grep -w ^"relocated 1" $texmf/$package.meta &>/dev/null
-		if [ $? = 0 ] 
+		if [ $? = 0 ]
 		then
 			tar vxf ${package}${flavour}.tar.xz --exclude tlpkg -C texmf-dist || exit 1
 		else
@@ -335,20 +357,25 @@ untar () {
 	# copy packages-list to texmf-dist, so included packages are known in later installation
 	sort -n $1.meta > TMPFILE
 	mv TMPFILE $1.meta
-	cp $1.meta texmf-dist/ 
+	cp $1.meta texmf-dist/
 
-	# remove uneeded sources
-	rm -rf texmf-dist/scripts/context/stubs/source/
+}
+
+remove_cruft () {
+	# Remove m$-stuff, ConTeXt single-user-system stuff, KOMA-Script sources and pdf-manpages
 	rm -rf texmf-dist/source
-	# Remove m$-stuff
-	find . -type d -name 'win32' -exec rm -rf {} +
-	find . -type d -name 'win64' -exec rm -rf {} +
-	find . -type d -name 'mswin' -exec rm -rf {} + 
-	find . -type d -name 'win'   -exec rm -rf {} + 
-	find . -type f -name '*.bat' -delete 
-	find . -type f -name '*win32*' -delete
-	find . -type f -name 'winansi*' -delete
-	# remove zero-length files, as these appear e.g. in hyph-utf8 tex-package. 
+	rm -rf texmf-dist/scripts/context/stubs/source/
+	find texmf-dist/ -type d -name 'win32'		-exec rm -rf {} +
+	find texmf-dist/ -type d -name 'win64'		-exec rm -rf {} +
+	find texmf-dist/ -type d -name 'mswin'		-exec rm -rf {} +
+	find texmf-dist/ -type d -name 'win'		-exec rm -rf {} +
+	find texmf-dist/ -type d -name 'setup'		-exec rm -rf {} +
+	find texmf-dist/ -type d -name 'install'	-exec rm -rf {} +
+	find texmf-dist/ -type f -name '*.bat'		-delete
+	find texmf-dist/ -type f -name '*win32*'	-delete
+	find texmf-dist/ -type f -name 'winansi*'	-delete
+	find texmf-dist/ -type f -name '*-man.pdf'	-delete
+	# remove zero-length files, as these appear e.g. in hyph-utf8 tex-package.
 	find . -type f -size 0c -delete
 }
 
@@ -363,7 +390,7 @@ if [ $TARBALL != docs ]
 then
 	echo "Preparing list of packages to be added the $NAME-tarball ..."
 	echo "$PACKAGES" | sed "s/[[:space:]]//g;/^$/d" >> $collections_tobedone
-	package_list 
+	package_list
 fi
 
 if [ $NAME = $TARBALL ]
@@ -404,26 +431,26 @@ cd $texmf
 
 # cleanup tar-directory, just in case
 [ -d texmf-dist ] && rm -rf texmf-dist
-#unset flavour ; export flavour 
+#unset flavour ; export flavour
 mkdir texmf-dist &> /dev/null
 
 VERSION=$(cat $TMP/VERSION)
 case $TARBALL in
 	docs)
-		export flavour=".doc" 
+		export flavour=".doc"
 		untar $output_doc
-		#tar Jvcf $TMP/texlive-texmf-docs-$VERSION.tar.xz texmf-dist || exit 1
+		remove_cruft
 		tar vrf $TMP/texlive-$TARBALL-$VERSION.tar texmf-dist || exit 1
 		echo "Packages-list: $output_doc"
 		rm -rf texmf-dist
 	;;
 	base|extra|fonts)
 		untar $output
+		remove_cruft
 		tar vrf $TMP/texlive-$TARBALL-$VERSION.tar texmf-dist || exit 1
 		cat $output.meta >> $output.meta.$TARBALL
-		rm $output.meta 
-		echo "Packages-list: $output.meta.$TARBALL"
-		rm $output 
+		rm $output.meta
+		rm $output
 		rm -rf texmf-dist
 	;;
 esac
@@ -443,16 +470,10 @@ mkdir -p $texmf
 cd $TMP
 
 # create run.tlpkg and doc.tlpkg only if $db.orig isn't there yet/was deleted
-if [ ! -s $TMP/${db}.orig ]
+if [ ! -s $TMP/${db}.orig -o ! -s $TMP/${db} ]
 then
-	# Set date manually upload date from $mirror/tlpkg/texlive.tlpdb. Looking a better way for auto-detect date/get reviosn in some way
-	#echo 20160405 > VERSION
-	date +%Y%m%d > VERSION
-	# get VERSION from texlive.tlpdb upload date. Not the best approach ...
-#	date -d $(curl -L -s ${mirror}/tlpkg/ | grep -w texlive.tlpdb | head -n1 | rev | cut -d':' -f2 | cut -d' ' -f2 | cut -d'>' -f1 | rev ) | date -f - +%Y%m%d > VERSION
-
-	
-	wget -O $TMP/${db}.orig -c ${mirror}tlpkg/$db 
+	echo $MAJORVERSION.$(date +%y%m%d) > VERSION
+	wget -c -O $TMP/${db}.orig -c ${mirror}tlpkg/$db 
 	# shrink db to be faster on later processing
 	sed "/^ \+./d;/^longdesc \+./d;/^cat\+./d;/^rev\+./d;/^exe\+./d;/^bin\+./d;/^src\+./d" $TMP/${db}.orig > $TMP/$db
 
@@ -460,42 +481,45 @@ then
 	rm -rf $texmf/*.meta
 	rm $TMP/run.tlpkg
 	[ -f "$output_doc" ] && rm "$output_doc"
+
+	# Make a list of all packages available, but exclude binary and installer/configuration packages.
+	# It turns out that packagenames without '.' are what we want. Packages with '.' are all binarie-packages, which are build from source.
+	grep ^name $TMP/$db | grep -v ^"name collection-" | grep -v ^"name scheme-" | grep -v '\.' | cut -d' ' -f2 > $TMP/allpackages
+
+	# Make a list of all collections
+	grep ^"name collection-" $TMP/$db | cut -d' ' -f2 > $TMP/allcollections
+
+	# add biber (perl)binaries as special exception.
+	cat <<- EOF >> $TMP/allpackages
+	biber.x86_64-linux
+	biber.i386-linux
+	EOF
+
 fi
 
-	
-# Make a list of all packages available, but exclude binary and installer/configuration packages.
-# It turns out that packagenames without '.' are what we want. Packages with '.' are all binarie-packages, which we biuld from source.
-grep ^name $TMP/$db | grep -v ^"name collection-" | grep -v ^"name scheme-" | grep -v '\.' | cut -d' ' -f2 > $TMP/allpackages
-
-# add biber (perl)binaries as special exception.
-cat << EOF >> $TMP/allpackages
-biber.x86_64-linux
-biber.i386-linux
-EOF
-	
-	# further globaly excluded packages, which does not make sense without tlpkg-installer, or are non-linux specific, or are already covered by the sourcebuild.
+# globaly excluded packages, which does not make sense without tlpkg-installer, or are non-linux specific, or are already covered by the sourcebuild,
+# or are covered by an external package(asymptote), or obsolete packages(datetime replaced by datetime2, anysize replaced by geometry)
 
 global_exclude="
-texworks
 "
-# unused variable, to be considered if these are already included by the source-tarball, or strip these of the source-tarball and add them as texlive-package?
+# currently unused variable, to be considered if these are already included by the source-tarball, or strip these of the source-tarball and add them as texlive-package?
 zglobal_exclude="
-bibtex8  
-bibtexu  
-chktex   
-cjkutils 
-detex    
-dtl      
-dvi2tty  
-dvidvi   
-dviljk   
-dvipdfmx 
-dvipng 
+bibtex8
+bibtexu
+chktex
+cjkutils
+detex
+dtl
+dvi2tty
+dvidvi
+dviljk
+dvipdfmx
+dvipng
 dvipos
 dvisvgm
 gsftopk
 pdftools
-synctex  
+synctex
 texconfig
 texlive-docindex
 texlive-msg-translations
@@ -512,9 +536,9 @@ luatex
 
 for i in $global_exclude
 do
-	if [ -z "$(grep -w ^"$i"$ $TMP/allpackages)" ] 
+	if [ -z "$(grep -w ^"$i"$ $TMP/allpackages)" ]
 	then
-		echo "\"$i\" seems not to be a tex-package listet in $db, correct the"
+		echo "\"$i\" seems not to be a tex-package listet in $db, edit the"
 		echo "global_exclude variable in this script, bye."
 		exit 1
 	else
@@ -523,7 +547,7 @@ do
 		[ -s $output_doc ] && sed -i "/^${i}$/d" $output_doc
 	fi
 done
-	
+
 # get linenumbers of empty lines
 [ -z "$emptylines" ] && emptylines="$(grep -n ^$ $TMP/$db | cut -d':' -f1)"
 # sort doc- and run- packages out to avoid binfiles and sourcfile in the texmf-tree
@@ -542,25 +566,25 @@ do
 	fi
 done < $TMP/allpackages
 
-# handle biber binaries to be add-able 
+# handle biber binaries to be add-able
 cat << EOF >> $TMP/run.tlpkg
 biber.x86_64-linux
 biber.i386-linux
 EOF
-		
 
 [ -f "$collections_done" ] && rm "$collections_done"
 [ -f "$collections_tobedone" ] && rm "$collections_tobedone"
 
-packages 
+packages
 
 # As the demanded packages are in the tarball, compress it.
-  echo "Compressing $TMP/texlive-$TARBALL-$VERSION.tar ..."
-  if [ -s $TMP/texlive-$TARBALL-$VERSION.tar ]; then
-    [ -f $TMP/texlive-$TARBALL-$VERSION.tar.xz ] && rm $TMP/texlive-$TARBALL-$VERSION.tar.xz
-    xz -9 -T0 $TMP/texlive-$TARBALL-$VERSION.tar || exit 1
-    ls -lah $TMP/texlive-$TARBALL-$VERSION.tar.xz
-  fi
+echo "Compressing $TMP/texlive-$TARBALL-$VERSION.tar ..."
+if [ -s $TMP/texlive-$TARBALL-$VERSION.tar ]
+then
+	[ -f $TMP/texlive-$TARBALL-$VERSION.tar.xz ] && rm $TMP/texlive-$TARBALL-$VERSION.tar.xz
+	xz -9 -T0 $TMP/texlive-$TARBALL-$VERSION.tar || exit 1
+	ls -lah $TMP/texlive-$TARBALL-$VERSION.tar.xz
+fi
 
 # cleanup
 rm $tmpfile
