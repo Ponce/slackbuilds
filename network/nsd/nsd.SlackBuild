@@ -1,0 +1,153 @@
+#!/bin/sh
+
+# Slackware build script for YADIFA, Authoritative DNS server
+
+# Copyright (c) 2016, Sergey Fedosov <eleksir@gmail.com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=nsd
+USER=$PRGNAM
+GROUP=$PRGNAM
+VERSION=${VERSION:-4.1.13}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if ! grep -q "^nsd:" /etc/group; then
+        echo "$0: Error: $PRGNAM group ($GROUP) doesn't exist."
+        echo "$0: Try creating one with:"
+        echo " # groupadd -g 336 $GROUP"
+        exit 1
+fi
+
+if ! grep -q "^nsd:" /etc/passwd; then
+        echo "$0: Error: $PRGNAM user ($GROUP) doesn't exist."
+        echo "$0: Try creating one with:"
+        echo " # useradd -u 336 -d /var/lib/$USER -g $GROUP -s /bin/false $USER"
+        exit 1
+fi
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf "$PKG"
+mkdir -p "$TMP" "$PKG" "$OUTPUT"
+cd "$TMP"
+rm -rf "$PRGNAM-$VERSION"
+tar xvf "$CWD/$PRGNAM-$VERSION.tar.gz"
+cd "$PRGNAM-$VERSION"
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+--prefix=/usr \
+--bindir=/usr/bin \
+--sbindir=/usr/sbin \
+--libexecdir=/usr/libexec \
+--sysconfdir=/etc \
+--localstatedir=/var \
+--libdir=/usr/lib \
+--enable-ratelimit \
+--enable-ratelimit-default-is-off \
+--with-nsd_conf_file="/etc/$PRGNAM/$PRGNAM.conf" \
+--with-configdir="/var/lib/$USER" \
+--with-logfile="/var/log/$PRGNAM/$PRGNAM.log" \
+--with-pidfile="/var/run/$PRGNAM/$PRGNAM.pid" \
+--with-dbfile="/var/lib/$USER/$PRGNAM.db" \
+--with-zonesdir="/var/lib/$USER/zones" \
+--with-xfrdfile="/var/lib/$USER/$PRGNAM.xfrd" \
+--with-zonelistfile="/var/lib/$USER/$PRGNAM.zones" \
+--with-xfrdir="/var/lib/$USER/xfrd" \
+--with-user=$USER
+
+make
+make install DESTDIR="$PKG"
+
+find "$PKG" -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mv $PKG/usr/share/man $PKG/usr/
+find "$PKG/usr/man" -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s "$( readlink $i ).gz" "$i.gz" ; rm "$i" ; done
+
+mkdir -p "$PKG/usr/doc/$PRGNAM-$VERSION"
+install --mode=644 "$CWD/$PRGNAM.SlackBuild" "$PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild"
+
+mkdir -p "$PKG/install"
+install --mode=644 "$CWD/slack-desc" "$PKG/install/slack-desc"
+install --mode=644 "$CWD/doinst.sh"  "$PKG/install/doinst.sh"
+
+mkdir -p "$PKG/etc/rc.d"
+install --mode=644 "$CWD/rc.$PRGNAM"  "$PKG/etc/rc.d/rc.$PRGNAM.new"
+
+mkdir -p "$PKG/var/run/$PRGNAM"
+chown $USER:$GROUP "$PKG/var/run/$PRGNAM"
+
+mkdir -p "$PKG/var/log/$PRGNAM"
+chown $USER:$GROUP "$PKG/var/log/$PRGNAM"
+
+chown -R $USER:$GROUP "$PKG/var/lib/$USER"
+
+mkdir -p "$PKG/etc/$PRGNAM"
+install --mode=644 "$CWD/$PRGNAM.conf" "$PKG/etc/$PRGNAM/${PRGNAM}.conf.new"
+
+mkdir -p $PKG/etc/logrotate.d
+install --mode=644 $CWD/nsd.logrotate $PKG/etc/logrotate.d/nsd.new
+
+# remove empty file
+rm -rf "$PKG/etc/$PRGNAM/$PRGNAM.conf.sample"
+
+# add sample zone
+mkdir -p "$PKG/var/lib/$USER/zones/master"
+install --mode=644 "$CWD/localhost.zone" "$PKG/var/lib/$USER/zones/master/localhost.zone.new"
+
+cd "$PKG"
+/sbin/makepkg -l y -c n "$OUTPUT/$PRGNAM-${VERSION}-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}"
