@@ -1,13 +1,5 @@
 #!/bin/sh
 
-# Short-Description:  Create lightweight, portable, self-sufficient containers.
-# Description:
-#  Docker is an open-source project to easily create lightweight, portable,
-#  self-sufficient containers from any application. The same container that a
-#  developer builds and tests on a laptop can run at scale, in production, on
-#  VMs, bare metal, OpenStack clusters, public clouds and more.
-
-
 PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
 
 BASE=nix-daemon
@@ -53,7 +45,7 @@ nix_stop() {
   rm -f ${NIX_PIDFILE}
 }
 
-# Restart docker:
+# Restart nix:
 nix_restart() {
 	nix_stop
 	nix_start
