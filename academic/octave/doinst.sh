@@ -8,3 +8,8 @@ if [ -e usr/share/icons/hicolor/icon-theme.cache ]; then
   fi
 fi
 
+if [ -x /usr/bin/install-info ]; then
+  chroot . /usr/bin/install-info --info-dir=/usr/info /usr/info/octave.info.gz 2> /dev/null
+  chroot . /usr/bin/install-info --info-dir=/usr/info /usr/info/liboctave.info.gz 2> /dev/null
+fi
+
