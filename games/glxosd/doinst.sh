@@ -11,7 +11,7 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/glxosd.new
+config etc/glxosd.conf.new
 
 # Update the X font indexes:
 if [ -x /usr/bin/mkfontdir ]; then
