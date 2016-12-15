@@ -10,4 +10,4 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config opt/sqlmap/sqlmap.conf.new
+config etc/sqlmap.conf.new
