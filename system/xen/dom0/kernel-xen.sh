@@ -5,7 +5,7 @@
 # Written by Chris Abela <chris.abela@maltats.com>, 20100515
 # Modified by Mario Preksavec <mario@slackware.hr>
 
-KERNEL=${KERNEL:-4.4.29}
+KERNEL=${KERNEL:-4.4.38}
 XEN=${XEN:-4.7.1}
 BOOTLOADER=${BOOTLOADER:-lilo}
 
@@ -15,7 +15,7 @@ ROOTDEV=${ROOTDEV:-/dev/sda2}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-      i?86) ARCH=i486 ;;
+      i?86) ARCH=i686 ;;
     x86_64) ARCH=x86_64 ;;
          *) echo "Unsupported architecture detected ($ARCH)"; exit ;;
   esac
