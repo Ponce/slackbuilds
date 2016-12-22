@@ -1,0 +1,168 @@
+#!/bin/sh
+
+# Slackware build script for mspgcc-legacy
+
+# Copyright 2016 Renan C. A. Alves, Sao Paulo, Brazil
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=mspgcc-legacy
+VERSION=${VERSION:-20120406}
+
+MSPGCCVERSION=$VERSION
+BINUTILSVERSIONFILE=2.21.1a
+BINUTILSVERSION=2.21.1
+GCCVERSION=4.6.4
+GCCPATCHVERSION=4.6.3
+MSP430MCUVERSION=20120406
+MSP430LIBCVERSION=20120224
+
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+PREFIX=${PREFIX:-/opt/$PRGNAM}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf mspgcc-$MSPGCCVERSION
+
+tar xvf $CWD/mspgcc-$MSPGCCVERSION.tar.bz2
+tar xvf $CWD/binutils-$BINUTILSVERSIONFILE.tar.bz2  -C mspgcc-$MSPGCCVERSION
+tar xvf $CWD/gcc-$GCCVERSION.tar.bz2                -C mspgcc-$MSPGCCVERSION
+tar xvf $CWD/msp430mcu-$MSP430MCUVERSION.tar.bz2    -C mspgcc-$MSPGCCVERSION
+tar xvf $CWD/msp430-libc-$MSP430LIBCVERSION.tar.bz2 -C mspgcc-$MSPGCCVERSION
+
+cd mspgcc-$MSPGCCVERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+PATH=$PKG/$PREFIX/bin:$PATH
+
+# Apply patch, configure, build and install binutils
+(
+  patch -p1 -d binutils-$BINUTILSVERSION < msp430-binutils-$BINUTILSVERSIONFILE-$MSPGCCVERSION.patch
+  mkdir binutils-build
+  cd binutils-build
+
+  ../binutils-$BINUTILSVERSION/configure \
+    --target=msp430 \
+    --program-prefix="msp430-" \
+    --prefix=$PREFIX
+
+  # this avoids errors about compiling documentation
+  echo "MAKEINFO = :" >> Makefile
+  make CFLAGS="-Wno-error $SLKCFLAGS"
+  make install DESTDIR=$PKG
+)
+
+# Apply patch, configure, build and install gcc
+(
+  patch -p1 -d gcc-$GCCVERSION < msp430-gcc-$GCCPATCHVERSION-$MSPGCCVERSION.patch
+  mkdir gcc-build
+  cd gcc-build
+
+  ../gcc-$GCCVERSION/configure \
+    --target=msp430 \
+    --program-prefix="msp430-" \
+    --prefix=$PREFIX \
+    --enable-languages=c
+
+  # this avoids errors about compiling the documentation
+  echo "MAKEINFO = :" >> Makefile
+  make CFLAGS="-Wno-error $SLKCFLAGS"
+  make install DESTDIR=$PKG
+)
+
+# Install msp430mcu
+(
+  cd msp430mcu-$MSP430MCUVERSION
+  export MSP430MCU_ROOT=$(pwd)
+  # Install the msp430mcu files wherever you installed mspgcc
+  scripts/install.sh $PKG/$PREFIX
+  sed -i -e "s#$PKG/##g" $PKG/$PREFIX/bin/msp430mcu-config
+)
+
+# Configure and install msp430-libc
+(
+  cd msp430-libc-$MSP430LIBCVERSION
+  ./configure \
+    --prefix=$PREFIX
+  cd src
+  make CFLAGS="$SLKCFLAGS"
+  make PREFIX=$PKG/$PREFIX install
+)
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/man
+mv $PKG/$PREFIX/share/man/man1 $PKG/usr/man
+# we don't want the other manpages in $PREFIX/share/man/man7
+rm -rf $PKG/$PREFIX/share/man
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/etc/profile.d
+cp $CWD/$PRGNAM.sh  $PKG/etc/profile.d/
+cp $CWD/$PRGNAM.csh $PKG/etc/profile.d/
+chmod 0755 $PKG/etc/profile.d/*
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README RELEASES.TXT $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
