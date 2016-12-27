@@ -9,7 +9,7 @@
 set -e
 
 PRGNAM=virtualbox-kernel-addons
-VERSION=$(VBoxControl --help 2>/dev/null | grep OSE | rev | cut -d " " -f 1 | rev | cut -d "_" -f 1)
+VERSION=$(VBoxControl -V | grep -e '^[0-9].[0-9].[0-9]*r[0-9]*' | cut -d "r" -f 1)
 
 mkdir $PRGNAM
 
