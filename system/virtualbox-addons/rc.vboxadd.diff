@@ -1,6 +1,6 @@
---- vboxadd.sh.orig	2016-01-19 17:40:04.000000000 +0100
-+++ vboxadd.sh	2016-01-23 15:46:17.000000000 +0100
-@@ -146,42 +146,9 @@
+--- vboxadd.sh.orig	2016-11-23 16:24:46.000000000 +0100
++++ vboxadd.sh	2016-12-27 16:06:46.413895799 +0100
+@@ -154,42 +154,9 @@
  
  dev=/dev/vboxguest
  userdev=/dev/vboxuser
@@ -43,7 +43,7 @@
  running_vboxguest()
  {
      lsmod | grep -q "vboxguest[^_-]"
-@@ -253,13 +220,6 @@
+@@ -261,13 +228,6 @@
  start()
  {
      begin "Starting the VirtualBox Guest Additions ";
@@ -57,10 +57,32 @@
      uname -r | grep -q -E '^2\.6|^3|^4' 2>/dev/null &&
          ps -A -o comm | grep -q '/*udevd$' 2>/dev/null ||
          no_udev=1
-@@ -331,202 +291,16 @@
+@@ -378,218 +338,16 @@
      return 0
  }
  
+-## Update the initramfs.  Debian and Ubuntu put the graphics driver in, and
+-# need the touch(1) command below.  Everyone else that I checked just need
+-# the right module alias file from depmod(1) and only use the initramfs to
+-# load the root filesystem, not the boot splash.  update-initramfs works
+-# for the first two and dracut for every one else I checked.  We are only
+-# interested in distributions recent enough to use the KMS vboxvideo driver.
+-## @param $1  kernel version to update for.
+-update_module_dependencies()
+-{
+-    depmod "${1}"
+-    rm -f "/lib/modules/${1}/initrd/vboxvideo"
+-    test -d "/lib/modules/${1}/initrd" &&
+-        test -f "/lib/modules/${1}/misc/vboxvideo.ko" &&
+-        touch "/lib/modules/${1}/initrd/vboxvideo"
+-    test -n "${QUICKSETUP}" && return
+-    if type dracut >/dev/null 2>&1; then
+-        dracut -f "/boot/initramfs-${1}.img" "${1}"
+-    elif type update-initramfs >/dev/null 2>&1; then
+-        update-initramfs -u -k "${1}"
+-    fi
+-}
+-
 -# Remove any existing VirtualBox guest kernel modules from the disk, but not
 -# from the kernel as they may still be in use
 -cleanup_modules()
@@ -113,21 +135,15 @@
 -        return 1
 -    fi
 -    succ_msg
--    if expr `uname -r` '<' '2.6.27' > /dev/null; then
--        echo "Not building the VirtualBox advanced graphics driver as this Linux version is"
--        echo "too old to use it."
--    else
--        begin "Building the OpenGL support module"
--        if ! $BUILDINTMP \
--            --use-module-symvers /tmp/vboxguest-Module.symvers \
--            --module-source $MODULE_SRC/vboxvideo \
--            --no-print-directory install >> $LOG 2>&1; then
--            show_error "Look at $LOG to find out what went wrong. The module is not built but the others are."
--        else
--            succ_msg
--        fi
+-    begin "Building the graphics driver module"
+-    if ! $BUILDINTMP \
+-        --use-module-symvers /tmp/vboxguest-Module.symvers \
+-        --module-source $MODULE_SRC/vboxvideo \
+-        --no-print-directory install >> $LOG 2>&1; then
+-        show_error "Look at $LOG to find out what went wrong"
 -    fi
--    depmod
+-    succ_msg
+-    update_module_dependencies "${KERN_VER}"
 -    return 0
 -}
 -
@@ -179,21 +195,15 @@
 -    # And an rc file to re-build the kernel modules and re-set-up the X server.
 -    ln -sf "$lib_path/$PACKAGE/vboxadd" /sbin/rcvboxadd
 -    ln -sf "$lib_path/$PACKAGE/vboxadd-x11" /sbin/rcvboxadd-x11
--    # At least Fedora 11 and Fedora 12 require the correct security context when
--    # executing this command from service scripts. Shouldn't hurt for other
--    # distributions.
--    chcon -u system_u -t mount_exec_t "$lib_path/$PACKAGE/mount.vboxsf" > /dev/null 2>&1
--    # And at least Fedora 15 needs this for the acceleration support check to
--    # work
--    redhat_release=`cat /etc/redhat-release 2> /dev/null`
--    case "$redhat_release" in Fedora\ release\ 15* )
--        for i in "$lib_path"/*.so
--        do
--            restorecon "$i" >/dev/null
--        done
--        ;;
--    esac
--
+-    # SELinux security context for the mount helper.
+-    if test -e /etc/selinux/config; then
+-        # This is correct.  semanage maps this to the real path, and it aborts
+-        # with an error, telling you what you should have typed, if you specify
+-        # the real path.  The "chcon" is there as a back-up in case this is
+-        # different on old guests.
+-        semanage fcontext -a -t mount_exec_t "/usr/lib/$PACKAGE/mount.vboxsf"
+-        chcon -t mount_exec_t "$lib_path/$PACKAGE/mount.vboxsf"
+-    fi
 -    succ_msg
 -}
 -
@@ -246,18 +256,24 @@
 -
 -    # Delete old versions of VBox modules.
 -    cleanup_modules
--    depmod
+-    for i in /lib/modules/*; do
+-        update_module_dependencies "${i#/lib/modules/}"
+-    done
 -
 -    # Remove old module sources
 -    for i in $OLDMODULES; do
 -      rm -rf /usr/src/$i-*
 -    done
 -
+-    # Clean-up X11-related bits
+-    /sbin/rcvboxadd-x11 cleanup
+-
 -    # Remove other files
 -    rm /sbin/mount.vboxsf 2>/dev/null
 -    rm /sbin/rcvboxadd 2>/dev/null
 -    rm /sbin/rcvboxadd-x11 2>/dev/null
 -    rm /etc/udev/rules.d/60-vboxadd.rules 2>/dev/null
+-    rm -f /lib/modules/*/initrd/vboxvideo
 +    echo "Not implemented! Please use removepkg or pkgtool to remove virtualbox-addons and/or virtualbox-kernel-addons instead."
  }
  
