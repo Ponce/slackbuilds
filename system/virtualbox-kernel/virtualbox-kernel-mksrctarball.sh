@@ -9,7 +9,7 @@
 set -e
 
 PRGNAM=virtualbox-kernel
-VERSION=$(VBoxManage -v | grep -e ^[0-9].*_OSE | cut -d "_" -f 1)
+VERSION=$(VBoxManage -v | grep -e '^[0-9].[0-9].[0-9]*r[0-9]*' | cut -d "r" -f 1)
 
 MODULE_SRC=$(grep "MODULE_SRC=" /etc/vbox/vbox.cfg | cut -d "=" -f 2 | cut -d "\"" -f 2)
 
