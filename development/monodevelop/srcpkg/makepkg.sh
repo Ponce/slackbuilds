@@ -20,7 +20,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=monodevelop
-VERSION=${VERSION:-6.1.1.15}
+VERSION=${VERSION:-6.1.3.19}
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo/sources}
@@ -46,6 +46,7 @@ fi
 cd $PRGNAM
 git submodule update --init --recursive
 git checkout tags/${PRGNAM}-${VERSION}
+git cherry-pick e403724
 scripts/configure.sh gen-buildinfo main
 
 ./configure \
