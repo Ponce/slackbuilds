@@ -23,4 +23,3 @@ preserve_perms() {
 
 preserve_perms etc/rc.d/rc.barnyard2.new
 config etc/barnyard2.conf.new
-
