@@ -28,6 +28,6 @@ find etc/rc.d -type f -name 'rc.xen*.new' \
 find etc/default -type f -name 'xen*.new' \
   | while read new ; do config $new ; done
 
-find etc/xen etc/qemu -type f -name '*.new' \
+find etc/xen -type f -name '*.new' \
   | while read new ; do config $new ; done
 
