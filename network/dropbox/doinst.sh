@@ -4,6 +4,6 @@ fi
 
 if [ -e usr/share/icons/hicolor/icon-theme.cache ]; then
   if [ -x /usr/bin/gtk-update-icon-cache ]; then
-    /usr/bin/gtk-update-icon-cache usr/share/pixmaps >/dev/null 2>&1
+    /usr/bin/gtk-update-icon-cache -f usr/share/pixmaps >/dev/null 2>&1
   fi
 fi
