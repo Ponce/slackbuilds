@@ -8,13 +8,13 @@ fi
 
 if [ -e usr/share/icons/Paper/icon-theme.cache ]; then
   if [ -x /usr/bin/gtk-update-icon-cache ]; then
-    /usr/bin/gtk-update-icon-cache usr/share/icons/Paper>/dev/null 2>&1
+    /usr/bin/gtk-update-icon-cache -f usr/share/icons/Paper>/dev/null 2>&1
   fi
 fi
 
 if [ -e usr/share/icons/Paper-Mono-Dark/icon-theme.cache ]; then
   if [ -x /usr/bin/gtk-update-icon-cache ]; then
-    /usr/bin/gtk-update-icon-cache usr/share/icons/Paper-Mono-Dark >/dev/null 2>&1
+    /usr/bin/gtk-update-icon-cache -f usr/share/icons/Paper-Mono-Dark >/dev/null 2>&1
   fi
 fi
 
