@@ -8,6 +8,6 @@ fi
 
 if [ -e usr/share/icons/hicolor/icon-theme.cache ]; then
   if [ -x /usr/bin/gtk-update-icon-cache ]; then
-    /usr/bin/gtk-update-icon-cache usr/share/icons/hicolor
+    /usr/bin/gtk-update-icon-cache -f usr/share/icons/hicolor
   fi
 fi
