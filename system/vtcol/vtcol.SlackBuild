@@ -24,7 +24,9 @@
 
 PRGNAM=vtcol
 GITREV=${GITREV:-3592d70fd18686ca984db32204e6dcccd05731eb}
-VERSION=${VERSION:-git3592d70}
+VERSION=${VERSION:-git$(echo "$GITREV" | sed 's/^\(.\{7\}\).*$/\1/')}
+VERSION_GETOPTS=${VERSION_GETOPTS:-0.2.14}
+VERSION_LIBC=${VERSION_LIBC:-0.2.19}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -40,16 +42,6 @@ CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
-
-if [ "$ARCH" = "i586" ]; then
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  LIBDIRSUFFIX="64"
-else
-  LIBDIRSUFFIX=""
-fi
 
 set -e
 
@@ -67,6 +59,35 @@ find -L . \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 zcat $CWD/0001-Fix-building-against-current-rust-versions.patch.gz | patch -p1
+
+# build offline
+# configuration tells cargo to use the configured directory
+# for dependencies intead of downloading from crates.io
+mkdir .cargo
+cat << EOF >> .cargo/config
+[source.crates-io]
+registry = 'https://github.com/rust-lang/crates.io-index'
+replace-with = 'vendored-sources'
+
+[source.vendored-sources]
+directory = '$(pwd)/vendor'
+EOF
+
+mkdir vendor
+(
+  cd vendor
+  tar -xf $CWD/getopts-$VERSION_GETOPTS.crate
+  tar -xf $CWD/libc-$VERSION_LIBC.crate
+
+  mv getopts-$VERSION_GETOPTS getopts
+  mv libc-$VERSION_LIBC libc
+
+  touch getopts/.cargo-ok
+  touch libc/.cargo-ok
+
+  zcat $CWD/getopts-cargo-checksum.json.gz > getopts/.cargo-checksum.json
+  zcat $CWD/libc-cargo-checksum.json.gz > libc/.cargo-checksum.json
+)
 
 cargo build --release
 
