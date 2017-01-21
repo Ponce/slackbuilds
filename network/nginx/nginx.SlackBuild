@@ -5,7 +5,7 @@
 # Copyright 2008 Cherife Li <cherife-#-dotimes.com>
 # Copyright 2011 Diogo Leal <diogo@diogoleal.com>
 # Copyright 2012-13 Francisco Ambrozio <sbo@franciscoambrozio.com>
-# Copyright 2014-2015 Larry Hajali <larryhaja[at]gmail[dot]com>
+# Copyright 2014-2017 Larry Hajali <larryhaja[at]gmail[dot]com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -28,13 +28,13 @@
 # Special thanks to Thomas Morper for some configuration adjustments tips
 
 PRGNAM=nginx
-VERSION=${VERSION:-1.8.0}
+VERSION=${VERSION:-1.10.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+    i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
@@ -45,8 +45,8 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i486" ]; then
-   SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+if [ "$ARCH" = "i586" ]; then
+   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
    LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
    SLKCFLAGS="-O2 -march=i686 -mtune=i686"
@@ -79,22 +79,29 @@ sed -i \
   -e '/root[ ]*html/s|html;|/var/www/&|' \
   -e '$s|.*|    include /etc/nginx/conf.d/\*.conf;\n&|' conf/$PRGNAM.conf
 
+# Add if dynamic modules are used.
+if [ "${DYNAMIC:-no}" == "yes" ]; then
+  DYNAMIC_MODULE=${DYNAMIC_MODULE:-=dynamic}
+  sed -i 's|^events.*|include /etc/nginx/modules/\*.conf;\n\n&|' conf/$PRGNAM.conf
+else
+  DYNAMIC_MODULE=""
+fi
+
 # Enable GeoIP support.
 if [ "${GEOIP:-no}" == "yes" ]; then
-  GEOIP_MOD="--with-http_geoip_module"
+  GEOIP_MOD="--with-http_geoip_module${DYNAMIC_MODULE}"
 else
   GEOIP_MOD=""
 fi
 
-# Endable libatomic_ops support.
-if [ "${LIBATOMIC:-no}" == "yes" ]; then
-  LIBATOMIC_MOD="--with-libatomic"
-else
-  LIBATOMIC_MOD=""
-fi
-
 # Add extra modules not included in nginx.
 ADDMODULE=${ADDMODULE:-}
+if [ "$DYNAMIC" == "yes" ]; then
+  ADD_MODULE="--add-dynamic-module=$ADDMODULE
+              --modules-path=/usr/lib${LIBDIRSUFFIX}/$PRGNAM/modules"
+else
+  ADD_MODULE="--add-module=$ADDMODULE"
+fi
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -115,14 +122,14 @@ CXXFLAGS="$SLKCFLAGS" \
   --http-scgi-temp-path=/var/lib/nginx/scgi \
   --with-file-aio \
   --with-ipv6 \
-  --with-rtsig_module \
   --with-select_module \
   --with-poll_module \
   --with-http_ssl_module \
+  --with-http_v2_module \
   --with-http_realip_module \
   --with-http_addition_module \
-  --with-http_xslt_module \
-  --with-http_image_filter_module \
+  --with-http_xslt_module${DYNAMIC_MODULE} \
+  --with-http_image_filter_module${DYNAMIC_MODULE} \
   --with-http_sub_module \
   --with-http_dav_module \
   --with-http_flv_module \
@@ -132,15 +139,19 @@ CXXFLAGS="$SLKCFLAGS" \
   --with-http_random_index_module \
   --with-http_secure_link_module \
   --with-http_degradation_module \
+  --with-http_slice_module \
   --with-http_stub_status_module \
-  --with-http_perl_module \
+  --with-http_perl_module${DYNAMIC_MODULE} \
   --with-http_auth_request_module \
-  --with-mail \
+  --with-mail${DYNAMIC_MODULE} \
   --with-mail_ssl_module \
-  --with-http_spdy_module \
+  --with-stream${DYNAMIC_MODULE} \
+  --with-stream_ssl_module \
+  --with-pcre \
+  --with-pcre-jit \
+  --with-libatomic \
   $GEOIP_MOD \
-  $LIBATOMIC_MOD \
-  --add-module="$ADDMODULE"
+  $ADD_MODULE
 
 make
 make install \
@@ -148,20 +159,25 @@ make install \
   INSTALLDIRS=vendor \
   INSTALLVENDORMAN3DIR=/usr/man/man3
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | \
-  grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/usr/man/man8
 install -m 0644 objs/$PRGNAM.8 $PKG/usr/man/man8
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 
-find $PKG -name perllocal.pod -o -name ".packlist" -o -name "*.bs" | xargs rm -f || true
+find $PKG -name perllocal.pod \
+  -o -name ".packlist" \
+  -o -name "*.bs" \
+  | xargs rm -f
+
 find $PKG -perm 444 -exec chmod 0644 {} \;
 find $PKG -perm 555 -exec chmod 0755 {} \;
 
 # Make the temp path.
 mkdir -p $PKG/var/lib/$PRGNAM
 chmod 0700 $PKG/var/lib/$PRGNAM
+chown $NGINXUSER $PKG/var/lib/$PRGNAM
 
 # Move html directory
 mkdir -p $PKG/var/www
@@ -174,11 +190,6 @@ cat $CWD/rc.nginx > $PKG/etc/rc.d/rc.nginx.new
 mkdir -p $PKG/etc/logrotate.d
 sed -e "s,@USER@,$NGINXUSER," -e "s,@GROUP@,$NGINXGROUP," $CWD/nginx.logrotate \
   > $PKG/etc/logrotate.d/nginx.new
-
-# Don't clobber config files
-for i in $(find $PKG/etc/$PRGNAM -type f ! -name "*\.default"); do
-  mv "$i" "$i".new
-done
 
 # Set the permissions for the log directory.
 chown $NGINXUSER $PKG/var/log/$PRGNAM
@@ -194,6 +205,29 @@ cat $CWD/nginx.SlackBuild > $PKG/usr/doc/nginx-$VERSION/nginx.SlackBuild
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+# Create modules directory and config files.
+# Unfortunately, we have to use full paths rather then relative paths
+# for nginx dynamic modules, or else we get the following error:
+# $ sudo /usr/sbin/nginx -t
+# nginx: [emerg] dlopen() "/usr/modules/ngx_stream_module.so" failed (/usr/modules/ngx_stream_module.so: cannot open shared object file: No such file or directory) in /etc/nginx/modules/mod-stream.conf:1
+# nginx: configuration file /etc/nginx/nginx.conf test failed
+# Source: https://trac.nginx.org/nginx/ticket/961
+if [ "$DYNAMIC" == "yes" ]; then
+  mkdir $PKG/etc/$PRGNAM/modules
+  for module in $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/modules/*; do
+    MODULE_NAME=$(basename $module | sed 's|\.so||' | tr _ -)
+    MODULE_DIR=$(dirname $module | sed "s|$PKG||")
+    echo "load_module \"${MODULE_DIR}/$(basename $module)\";" > \
+      $PKG/etc/$PRGNAM/modules/${MODULE_NAME}.conf
+    echo "config etc/$PRGNAM/modules/${MODULE_NAME}.conf.new" >> $PKG/install/doinst.sh
+  done
+fi
+
+# Don't clobber config files
+for i in $(find $PKG/etc/$PRGNAM -type f ! -name "*\.default"); do
+  mv "$i" "$i".new
+done
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
