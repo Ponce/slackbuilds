@@ -27,7 +27,7 @@
 
 PRGNAM=mendeleydesktop
 VERSION=${VERSION:-1.17.6}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -70,31 +70,49 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# remove the bundled qt since it should be present in the system already
-rm -rf lib/qt
-# rm lib/mendeleydesktop/libexec/qt.conf
-rm -rf lib/mendeleydesktop/plugins
+# removing QT5 bundled libraries
+if [ "${SYSTEM_QT5:-no}" != "no" ]; then
+  rm -rf lib/qt
+  rm bin/qt.conf
+  rm -rf lib/$PRGNAM/plugins
+  (
+   cd lib/$PRGNAM/libexec/
+   rm QtWeb* icudtl.dat qtwebengine*
+  )
+fi
 
-[ $ARCH = 'x86_64' ] && mv lib lib$LIBDIRSUFFIX
+# Using /opt for installation and prevent conflicts with QT5 applications
+mkdir -p $PKG/opt/$PRGNAM
+cp -r bin lib share $PKG/opt/$PRGNAM
 
-rm bin/mendeleydesktop
-ln -s ../lib${LIBDIRSUFFIX}/mendeleydesktop/libexec/mendeleydesktop.$ARCH \
-      bin/mendeleydesktop
+# make symlinks and moving some important files
+mkdir -p $PKG/usr/{bin,share}
+mv $PKG/opt/$PRGNAM/share/{applications,icons} $PKG/usr/share
+if [ "${SYSTEM_QT5:-no}" != "no" ]; then
+# configure all for use System QT installation
+  cat <<-EOF > $PKG/usr/bin/$PRGNAM
+#!/bin/sh
+MENDELEY_BASE=/opt/mendeleydesktop
+MENDELEY_LIB=lib
 
-mkdir $PKG/usr
+LD_LIBRARY_PATH=\${LD_LIBRARY_PATH}:\${MENDELEY_BASE}/\${MENDELEY_LIB}
+export LD_LIBRARY_PATH
+cd /opt/mendeleydesktop/lib/mendeleydesktop/libexec
+./mendeleydesktop.$ARCH \$@
+EOF
+  chmod 755 $PKG/usr/bin/$PRGNAM
+else
+  (
+   cd $PKG/usr/bin
+   ln -s ../../opt/$PRGNAM/bin/$PRGNAM $PRGNAM
+  )
+fi
 
-# some docs lay on the top folder, so install them first
-mkdir -p $PKG/usr/doc
-mv share/doc/mendeleydesktop $PKG/usr/doc/$PRGNAM-$VERSION
-mv LICENSE README $PKG/usr/doc/$PRGNAM-$VERSION
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a share/doc/mendeleydesktop INSTALL LICENSE README \
+    $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-rm INSTALL
-rmdir share/doc
-
-mv * $PKG/usr
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/install
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
