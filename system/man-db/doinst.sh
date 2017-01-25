@@ -26,7 +26,12 @@ config etc/man_db.conf.new
 # db is corrupted and the user is trying to fix it by reinstalling
 # this package).
 
-[ -x /bin/readlink ] && \
-[ "$( /bin/readlink -f $( pwd ) )" = "/" ] && \
-( [ -x /opt/man-db/bin/mandb ] && /opt/man-db/bin/mandb -c -q ) || \
-( [ -x /usr/bin/mandb ] && /usr/bin/mandb -c -q )
+# the 2>/dev/null was added for 2.7.6 because it complains about
+# missing CACHEDIR.TAG files... which don't matter, because we've
+# got NOCACHE in the config file.
+( \
+  [ -x /bin/readlink ] && \
+  [ "$( /bin/readlink -f $( pwd ) )" = "/" ] && \
+  ( [ -x /opt/man-db/bin/mandb ] && /opt/man-db/bin/mandb -c -q ) || \
+  ( [ -x /usr/bin/mandb ] && /usr/bin/mandb -c -q ) \
+) 2>/dev/null
