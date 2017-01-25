@@ -2,7 +2,7 @@
 
 # Slackware build script for qt5-webkit
 
-# Copyright 2016 Larry Hajali <larryhaja[at]gmail[dot]com>
+# Copyright 2016-2017 Larry Hajali <larryhaja[at]gmail[dot]com>
 # All rights reserved.
 #
 # Some part of this SlackBuild is adapted from SBo and AlienBOB's qt5{-webkit} SlackBuild
@@ -27,7 +27,7 @@
 
 PRGNAM=qt5-webkit
 SRCNAM=qtwebkit-opensource-src
-VERSION=${VERSION:-5.6.1}
+VERSION=${VERSION:-5.7.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -79,33 +79,40 @@ export OPENSOURCE_CXXFLAGS="$SLKCFLAGS"
 export QTDIR="/usr/lib$LIBDIRSUFFIX/qt5"
 export LD_LIBRARY_PATH="${QTDIR}/qtbase/lib:${QTDIR}/qttools/lib:${LD_LIBRARY_PATH}"
 
-mkdir -p build
-cd build
-  qmake-qt5 ..
-  make
-  make install INSTALL_ROOT=$PKG
-cd ..
+# Install path fix for libplatformplugin.so.
+# https://bugs.webkit.org/show_bug.cgi?id=117077
+patch -p2 < $CWD/platformplugin-install-path-fix.patch
+
+if [ -d include ]; then
+  syncqt.pl -version $VERSION Source/sync.profile
+fi
+
+qmake-qt5 PREFIX="/usr" QMAKE_CFLAGS+="$SLKCFLAGS" QMAKE_CXXFLAGS+="$SLKCFLAGS" \
+  -o Makefile WebKit.pro
+
+make
+make install INSTALL_ROOT=$PKG
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 # Fix internal linking for Qt5WebKit.pc
 sed -i \
-  -e "s|-Wl,-whole-archive -lWebKit1 -Wl,-no-whole-archive -L${PWD}/qtwebkit/Source/WebKit[^ ]* ||" \
-  -e "s|-Wl,-whole-archive -lWebKit2 -Wl,-no-whole-archive -L${PWD}/qtwebkit/Source/WebKit2[^ ]* ||" \
-  -e "s|-Wl,-whole-archive -lWebCore -Wl,-no-whole-archive -L${PWD}/qtwebkit/Source/WebCore[^ ]* ||" \
-  -e "s|-Wl,-whole-archive -lANGLE -Wl,-no-whole-archive -L${PWD}/qtwebkit/Source/ThirdParty/ANGLE[^ ]* ||" \
-  -e "s|-Wl,-whole-archive -lJavaScriptCore -Wl,-no-whole-archive -L${PWD}/qtwebkit/Source/JavaScriptCore[^ ]* ||" \
-  -e "s|-Wl,-whole-archive -lWTF -Wl,-no-whole-archive -L${PWD}/qtwebkit/Source/WTF[^ ]* ||" \
-  -e "s|-Wl,-whole-archive -lleveldb -Wl,-no-whole-archive -L${PWD}/qtwebkit/Source/ThirdParty/leveldb[^ ]* ||" \
+  -e "s|-Wl,-whole-archive -lWebKit1 -Wl,-no-whole-archive -L${PWD}/Source/WebKit[^ ]* ||" \
+  -e "s|-Wl,-whole-archive -lWebKit2 -Wl,-no-whole-archive -L${PWD}/Source/WebKit2[^ ]* ||" \
+  -e "s|-Wl,-whole-archive -lWebCore -Wl,-no-whole-archive -L${PWD}/Source/WebCore[^ ]* ||" \
+  -e "s|-Wl,-whole-archive -lANGLE -Wl,-no-whole-archive -L${PWD}/Source/ThirdParty/ANGLE[^ ]* ||" \
+  -e "s|-Wl,-whole-archive -lleveldb -Wl,-no-whole-archive -L${PWD}/Source/ThirdParty/leveldb[^ ]* ||" \
+  -e "s|-Wl,-whole-archive -lJavaScriptCore -Wl,-no-whole-archive -L${PWD}/Source/JavaScriptCore[^ ]* ||" \
+  -e "s|-Wl,-whole-archive -lWTF -Wl,-no-whole-archive -L${PWD}/Source/WTF[^ ]* ||" \
   $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/Qt5WebKit.pc
 
 # Fix the path in prl files:
 find "$PKG/usr/lib${LIBDIRSUFFIX}" -type f -name '*.prl' \
-  -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d;s/\(QMAKE_PRL_LIBS =\).*/\1/' {} \;
+  -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d' {} \;
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a ChangeLog* VERSION $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a ChangeLog* LICENSE* VERSION $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
