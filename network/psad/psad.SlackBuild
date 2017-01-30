@@ -1,0 +1,126 @@
+#!/bin/sh
+
+# Slackware build script for psad
+
+# Copyright 2017 Boris V. <david.cla2@gmail.com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=psad
+VERSION=${VERSION:-2.4.3}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+ALERTSEMAIL=${ALERTSEMAIL:-root@localhost}
+
+SRCNAM="$(printf $PRGNAM | cut -d- -f2-)"
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.bz2
+mkdir -p $PKG/etc/rc.d
+mkdir -p $PKG/usr/bin
+cd $SRCNAM-$VERSION
+chown -R root:root .
+cat > install.answers <<EOF
+Would you like alerts sent to a different address:        y;
+Email addresses:        $ALERTSEMAIL;
+Would you like psad to only parse specific strings in iptables messages:        n;
+FW search strings:        psad;
+First is it ok to leave the HOME_NET setting as any:        y;
+Would you like to enable DShield alerts:        n;
+Would you like to install the latest signatures from http www cipherdyne org psad signatures:        n;
+Enable psad at boot time:        n;
+EOF
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+mkdir -p $PKG/var/log
+mkdir -p $PKG/var/lib
+mkdir -p $PKG/var/run
+
+sed -i 's/ENABLE_PSADWATCHD           N;/ENABLE_PSADWATCHD           Y;/g' psad.conf
+sed -i "s|usr/share/man|usr/man|g" install.pl
+
+perl install.pl \
+  --install-root $PKG \
+  --init-dir $PKG/etc/rc.d \
+  --init-name rc.psad.new \
+  --no-rm-lib-dir \
+  --no-syslog-test \
+  -U \
+  -a $TMP/$SRCNAM-$VERSION/install.answers
+
+
+SRCPATH=${PKG//\//\\\/}
+SRCPATH2="$SRCPATH\/"
+DSTPATH="\/"
+
+echo $SRCPATH
+echo $SRCPATH2
+find $PKG/ -type f -name '*.conf' -exec sed -i "s/$SRCPATH/$DSTPATH/g" {} +
+find $PKG/ -type f -regex '.*\.\(pod\|conf\|packlist\)' -exec sed -i "s/$SRCPATH2/$DSTPATH/g" {} +
+
+mkdir -p $PKG/etc/logrotate.d
+cp logrotate.psad $PKG/etc/logrotate.d/
+
+mv $PKG/etc/psad/auto_dl $PKG/etc/psad/auto_dl.new
+mv $PKG/etc/psad/icmp6_types $PKG/etc/psad/icmp6_types.new
+mv $PKG/etc/psad/icmp_types $PKG/etc/psad/icmp_types.new
+mv $PKG/etc/psad/ip_options $PKG/etc/psad/ip_options.new
+mv $PKG/etc/psad/pf.os $PKG/etc/psad/pf.os.new
+mv $PKG/etc/psad/posf $PKG/etc/psad/posf.new
+mv $PKG/etc/psad/protocols $PKG/etc/psad/protocols.new
+mv $PKG/etc/psad/psad.conf $PKG/etc/psad/psad.conf.new
+mv $PKG/etc/psad/signatures $PKG/etc/psad/signatures.new
+mv $PKG/etc/psad/snort_rule_dl $PKG/etc/psad/snort_rule_dl.new
+
+sed -i 's/start)/start)\n    mkdir -p \/var\/run\/psad/g' $PKG/etc/rc.d/rc.psad.new
+sed -i 's/\/var\/log\/messages;/\/var\/log\/syslog;/g' $PKG/etc/psad/psad.conf.new
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a BENCHMARK CREDITS ChangeLog FW_EXAMPLE_RULES FW_HELP LICENSE README* \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
