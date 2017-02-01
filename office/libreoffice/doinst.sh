@@ -13,4 +13,3 @@ if [ -x /usr/bin/gtk-update-icon-cache ]; then
     fi
   done
 fi
-
