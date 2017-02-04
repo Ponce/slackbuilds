@@ -2,7 +2,7 @@
 
 # Slackware build script for RetroArch
 
-# Copyright 2016 Hunter Sezen California, USA
+# Copyright 2016-2017 Hunter Sezen California, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,7 +23,7 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=RetroArch
-VERSION=${VERSION:-1.3.6}
+VERSION=${VERSION:-1.4.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -65,7 +65,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz || tar xvf $CWD/v$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
@@ -74,34 +74,70 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Needed for python3 in the 14.1 SBo branch.
-if ! pkg-config --exists python3 && pkg-config --exists python-3.5; then
-  sed -i 's/python3/python-3.5/' qb/config.libs.sh
+if [ "$PYTHON" = "1" ]; then
+  python="--enable-python"
+  # Needed for python3 in the 14.1 SBo branch.
+  if ! pkg-config --exists python3 && pkg-config --exists python-3.5; then
+    sed -i 's/python3/python-3.5/' qb/config.libs.sh
+  fi
+fi
+
+if [ "$GLES" = "1" ]; then
+  gles="--enable-opengles"
+elif [ "$GLES3" = "1" ]; then
+  gles="--enable-opengles --enable-opengles3"
+fi
+
+if [ "$BUILDBOT" != "1" ]; then
+  update_cores="--disable-update_cores"
+  SED_CORE="s|# libretro_directory =|libretro_directory = /usr/lib${LIBDIRSUFFIX}/libretro|"
+  SED_INFO="s|# libretro_info_path =|libretro_info_path = /usr/lib${LIBDIRSUFFIX}/libretro/info|"
+
+  # Disable downloading cores with the online updater
+  # https://github.com/libretro/RetroArch/issues/3237
+  zcat $CWD/disable_core_update.patch.gz | patch -p1
 fi
 
 # Set the config file default directories to be consistent with the installation.
-sed -e "s|# libretro_directory =|libretro_directory = /usr/lib${LIBDIRSUFFIX}/libretro|" \
-    -e "s|# libretro_info_path =|libretro_info_path = /usr/lib${LIBDIRSUFFIX}/libretro/info|" \
-    -e "s|# audio_filter_dir =|audio_filter_dir = /usr/lib${LIBDIRSUFFIX}/retroarch/filters/audio|" \
+sed -e "s|# audio_filter_dir =|audio_filter_dir = /usr/lib${LIBDIRSUFFIX}/retroarch/filters/audio|" \
     -e "s|# video_filter_dir =|video_filter_dir = /usr/lib${LIBDIRSUFFIX}/retroarch/filters/video|" \
+    -e "$SED_CORE;$SED_INFO" \
     -i retroarch.cfg
+
+# Fix ./configure --enable-python
+# https://github.com/libretro/RetroArch/commit/a06380e9cab1e5a59c70826fb2735566221e4149
+zcat $CWD/python3.diff.gz | patch -p1
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure --prefix=/usr \
-  --with-man_dir=/usr/man
+  --with-bin_dir=/usr/games \
+  --with-man_dir=/usr/man \
+  --with-assets_dir=/usr/share/games \
+  --disable-dbus \
+  --disable-update_assets \
+  $gles $python $update_cores
 
 make GL_DEBUG=$DEBUG VULKAN_DEBUG=$DEBUG
-make -C audio/audio_filters
-make -C gfx/video_filters
 make install DESTDIR=$PKG
 
-install -dm0755 $PKG/usr/lib${LIBDIRSUFFIX}/retroarch/filters/audio
-install -dm0755 $PKG/usr/lib${LIBDIRSUFFIX}/retroarch/filters/video
-install -m0644 audio/audio_filters/*.dsp $PKG/usr/lib${LIBDIRSUFFIX}/retroarch/filters/audio
-install -m0644 audio/audio_filters/*.so $PKG/usr/lib${LIBDIRSUFFIX}/retroarch/filters/audio
-install -m0644 gfx/video_filters/*.filt $PKG/usr/lib${LIBDIRSUFFIX}/retroarch/filters/video
-install -m0644 gfx/video_filters/*.so $PKG/usr/lib${LIBDIRSUFFIX}/retroarch/filters/video
+for filter in audio video; do
+  case "$filter" in
+    audio )
+      EXT='dsp'
+      DIR="libretro-common/$filter/dsp_filters"
+    ;;
+    video )
+      EXT='filt'
+      DIR="gfx/${filter}_filters"
+    ;;
+  esac
+  make -C "$DIR"
+  install -dm0755 $PKG/usr/lib${LIBDIRSUFFIX}/retroarch/filters/$filter
+  for ext in "$EXT" so; do
+    install -m0644 $DIR/*.$ext $PKG/usr/lib${LIBDIRSUFFIX}/retroarch/filters/$filter
+  done
+done
 
 mv $PKG/etc/retroarch.cfg $PKG/etc/retroarch.cfg.new
 
@@ -115,6 +151,7 @@ for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; r
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a CONTRIBUTING.md COPYING README* $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a media/assets/COPYING $PKG/usr/doc/$PRGNAM-$VERSION/COPYING.assets
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
