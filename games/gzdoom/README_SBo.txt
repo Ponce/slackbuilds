@@ -8,7 +8,11 @@ and Strife.  Place the .wad file(s) in /usr/share/games/doom.
 If you don't own any of the supported games, you can install one or more
 of these slackbuilds.org packages to get a playable game:
 
-freedoom, doom_shareware_data, heretic_shareware_data, hexen_demo_data
+- freedoom
+- doom_shareware_data
+- heretic_shareware_data
+- hexen_demo_data
+- chexquest3
 
 Sound Backend
 -------------
