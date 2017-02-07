@@ -6,6 +6,12 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20170207 bkw:
+# - BUILD=2
+# - Get rid of private fmodapi, now that the SBo fmodapi has been updated
+#   to a new enough version. Re-add fmodapi to REQUIRES.
+# - Fix download link so we always get the correct filename.
+
 # 20170113 bkw:
 # - Updated for 2.3.2. 1.9.1 and 1.8.09 still work, too.
 # - Use newer version of fmodapi. Due to licensing confusion, the
@@ -44,7 +50,7 @@
 
 PRGNAM=gzdoom
 VERSION=${VERSION:-2.3.2}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -85,56 +91,14 @@ tar xvf $CWD/$PRGNAM-g$VERSION.tar.gz || \
   tar xvf $CWD/$PRGNAM-$VERSION.tar.gz || \
   tar xvf $CWD/$VERSION.tar.gz
 cd $PRGNAM-g$VERSION || cd $PRGNAM-$VERSION
-
-# See if fmodapi tarball is in script dir. If so, use it. We
-# currently support 2 versions of it: 4.44.50 and 4.44.61. These
-# are newer than the SBo fmodapi package, which is 4.28.17. You
-# could try a different fmodapi here (by editing the 'for' args),
-# but only for recent-ish fmodapi versions because this stuff
-# depends on both x86 and x86_64 being included in the fmodapi
-# tarball (which wasn't the case for 4.28.17 and earlier).
-for i in 44450 44461; do
-  [ -e $CWD/fmodapi${i}linux.tar.gz ] && fmodver=$i
-done
-
-[ -n "$fmodver" ] && tar xvf $CWD/fmodapi${fmodver}linux.tar.gz
-
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
+ -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+ -exec chmod 644 {} \+
 
-# Set up fmodapi, if present.
-if [ -n "$fmodver" ]; then
-  fmoddir=fmodapi${fmodver}linux
-
-  mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM $PKG/usr/include/tmp
-
-  mv $fmoddir/api/lib/libfmodex$LIBDIRSUFFIX-*.so \
-     $fmoddir/api/lib/libfmodexL$LIBDIRSUFFIX-*.so \
-     $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM
-
-  mv $fmoddir/api/inc/* $PKG/usr/include/tmp
-
-  cd $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM
-    ln -s libfmodex$LIBDIRSUFFIX-*.so libfmodex$LIBDIRSUFFIX.so
-    ln -s libfmodexL$LIBDIRSUFFIX-*.so libfmodexL$LIBDIRSUFFIX.so
-  cd -
-
-  # These cmake args will cause cmake to ignore any fmodapi installed in
-  # the standard system locations. The -Wl,-rpath stuff is needed to get
-  # gzdoom to use the fmod we include here (at runtime), instead of the
-  # system-wide one in /usr/lib$LIBDIRSUFFIX.
-  fmod_cmake="\
-    -DFMOD_INCLUDE_DIR=$PKG/usr/include/tmp \
-    -DFMOD_LIBRARY=$PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM/libfmodex$LIBDIRSUFFIX.so \
-    -DCMAKE_EXE_LINKER_FLAGS='-Wl,-rpath=/usr/lib$LIBDIRSUFFIX/$PRGNAM'
-    -DCMAKE_MODULE_LINKER_FLAGS='-Wl,-rpath=/usr/lib$LIBDIRSUFFIX/$PRGNAM'"
-fi
-
-# fmodapi MIDI support tries to find its lib in the current dir, fix it:
+# fmodapi support tries to find its lib in the current dir, fix it:
 sed -i \
   "s,setPluginPath(progdir),setPluginPath(\"/usr/lib$LIBDIRSUFFIX/$PRGNAM\")," \
   src/sound/fmodsound.cpp
@@ -157,12 +121,12 @@ sed -i "/#define *VERSIONSTR/s,\"[^\"]*\",\"$VERSION\"," src/version.h
 mkdir -p build
 cd build
   cmake \
-    $fmod_cmake \
     -DCMAKE_C_FLAGS_RELEASE:STRING="$SLKCFLAGS -DSHARE_DIR=\\\"/usr/share/games/doom\\\"" \
     -DCMAKE_CXX_FLAGS_RELEASE:STRING="$SLKCFLAGS -DSHARE_DIR=\\\"/usr/share/games/doom\\\"" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DLIB_SUFFIX=${LIBDIRSUFFIX} \
     -DMAN_INSTALL_DIR=/usr/man \
+	 -DFMOD_LIBRARY=/usr/lib${LIBDIRSUFFIX}/libfmodex${LIBDIRSUFFIX}.so \
     -DCMAKE_BUILD_TYPE=Release ..
   make VERBOSE=1
   mkdir -p $PKG/usr/games $PKG/usr/share/games/doom
@@ -175,9 +139,6 @@ cd build
     install -m0755 -s liboutput_sdl.so $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM/liboutput_sdl.so
   fi
 cd ..
-
-# gzdoom doesn't install any headers; this is for the fmod hackery.
-rm -rf $PKG/usr/include
 
 # .desktop written for this SlackBuild
 mkdir -p $PKG/usr/share/applications
@@ -192,7 +153,7 @@ cp -a docs/* $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 cat $CWD/README_SBo.txt > $PKG/usr/doc/$PRGNAM-$VERSION/README_SBo.txt
 
-# Fix DOS CRLF line endings. The stuff in licenses/ is already OK, for 2.2.0.
+# Fix DOS CRLF line endings. The stuff in licenses/ is already OK, for 2.3.2.
 sed -i 's/\r//' $PKG/usr/doc/$PRGNAM-$VERSION/*.*
 
 mkdir -p $PKG/install
