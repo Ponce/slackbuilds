@@ -1,0 +1,446 @@
+diff -Naur qiv-2.3.1/Changelog qiv-648ed5a/Changelog
+--- qiv-2.3.1/Changelog	2013-12-19 19:50:37.000000000 -0500
++++ qiv-648ed5a/Changelog	2016-07-14 23:26:53.000000000 -0400
+@@ -21,7 +21,7 @@
+   al: Adrian Lopez            <adrian2@caribe.net>
+   yf: Y Furuhashi             <y_furuhashi@ot.olympus.co.jp>
+   wd: Wayne Davison           <wayne@opencoder.net>
+-  js: Johannes Stezenbach     <js@convergence.de>
++  js: Johannes Stezenbach     <js@sig21.net>
+   ok: OEyvind Kolaas          <pippin@users.sourceforge.net>
+   mc: Matthieu Castet         <castet.matthieu@free.fr>
+   jd: Geoffrey T. Dairik      <dairiki@dairiki.org>
+@@ -34,6 +34,27 @@
+   pw: Peter deWachter         <pdewacht@gmail.com>
+   ap: Akos Pasztory           <akos.pasztory@gmail.com>
+ 
++2.3.2pre
++========
++  30.05.2016        [tw] Fix occasionally erratic behaviour of qiv statusbar
++                    [tw] Fix xpm autodetection with libmagic
++  26.05.2016        [tw] Fix small artefacts in pictures which might 
++                         happen when running remote over slow link
++                         (patch by Derek Schrock)
++  20.05.2016        [tw] update image after it is exposed in window mode
++  12.05.2016        [js/tw] fix broken "-no-filter" option
++                            libmagic filter now works on symlinks
++  07.11.2015        [tw] fix linking order in "make debug", did not
++                         work in some newer gcc versions 
++  18.06.2015        [as] turn on EXIF autorotation by default
++  13.09.2014        [tw] Add option to sort files by modification time.
++                         (patch by Stefan Rüger)
++  23.04.2014        [tw] In case of "watch" option, check image only every 1/10 sec,
++                         instead of every 200us. This was way too short for
++                         devices like RasPi etc. (Hamish)
++                    [tw] Leave jumping mode on invalid input and process input key
++                         as if it was entered in non jumping mode (Sergey Pinaev)
++
+ 2.3.1
+ =====
+   25.11.2013        [tw] Add libXext to libraries for linking in Makefile.
+diff -Naur qiv-2.3.1/Makefile qiv-648ed5a/Makefile
+--- qiv-2.3.1/Makefile	2013-12-19 19:50:37.000000000 -0500
++++ qiv-648ed5a/Makefile	2016-07-14 23:26:53.000000000 -0400
+@@ -122,7 +122,7 @@
+ debug: $(PROGRAM_G)
+ 
+ $(PROGRAM_G): $(OBJS_G)
+-	$(CC) -g $(CFLAGS) $(DEFINES_G) $(LIBS) $(OBJS_G) -o $(PROGRAM_G)
++	$(CC) -g $(CFLAGS) $(DEFINES_G) $(OBJS_G) $(LIBS) -o $(PROGRAM_G)
+ 
+ $(OBJS_G): %.g: %.c $(HEADERS)
+ 	$(CC) -c -g $(CFLAGS) $(DEFINES_G) $(INCLUDES) $< -o $@
+diff -Naur qiv-2.3.1/event.c qiv-648ed5a/event.c
+--- qiv-2.3.1/event.c	2013-12-19 19:50:37.000000000 -0500
++++ qiv-648ed5a/event.c	2016-07-14 23:26:53.000000000 -0400
+@@ -193,10 +193,15 @@
+         q->exposed = 1;
+         qiv_set_cursor_timeout(q);
+       }
+-      if(fullscreen) {
+-        if(center) center_image(q);
++      if(center) center_image(q);
++      if(fullscreen)
++      {
+         update_image(q, FULL_REDRAW);
+       }
++      else
++      {
++        update_image(q, MIN_REDRAW);
++      }
+       break;
+ 
+     case GDK_LEAVE_NOTIFY:
+@@ -223,26 +228,6 @@
+         // printf("GDK_CONFIGURE get_root_origin  %d %d\n",
+         //        magnify_img.frame_x, magnify_img.frame_y);
+       }
+-      // gdk_draw_rectangle(q->win, q->status_gc, 1, 10, 10, 50, 50);
+-      if (statusbar_window && !fullscreen) {
+-#ifdef DEBUG
+-        g_print("*** print statusbar at (%d, %d)\n", MAX(2,q->win_w-q->text_w-10), MAX(2,q->win_h-q->text_h-10));
+-#endif
+-        // printf(">>> statusbar_w %d %d %d %d\n",
+-        //        MAX(2,q->win_w-text_w-10), MAX(2,q->win_h-text_h-10), text_w+5, text_h+5);
+-
+-        gdk_draw_rectangle(q->win, q->bg_gc, 0,
+-                           MAX(2,q->win_w-q->text_w-10), MAX(2,q->win_h-q->text_h-10),
+-                           q->text_w+5, q->text_h+5);
+-        gdk_draw_rectangle(q->win, q->status_gc, 1,
+-                           MAX(3,q->win_w-q->text_w-9), MAX(3,q->win_h-q->text_h-9),
+-                           q->text_w+4, q->text_h+4);
+-
+-        pango_layout_set_text(layout, q->win_title, -1);
+-        pango_layout_get_pixel_size (layout, &(q->text_w), &(q->text_h));
+-        gdk_draw_layout (q->win, q->text_gc, MAX(5,q->win_w-q->text_w-7),  MAX(5,q->win_h-7-q->text_h), layout);
+-      }
+-
+       break;
+ 
+     case GDK_BUTTON_PRESS:
+@@ -418,9 +403,9 @@
+           jcmd[jidx] = '\0';
+           if (jumping) {
+             jump2image(jcmd);
+-          qiv_load_image(q);
+-          jumping=0;
+-        }
++            qiv_load_image(q);
++            jumping=0;
++          }
+           else {      // extcommand=1
+             int numlines = 0;
+             const char **lines;
+@@ -436,6 +421,23 @@
+         }
+         /* else record keystroke if not null */
+         else if(ev->key.string && *(ev->key.string) != '\0') {
++	  if (jumping) {
++            /* leave jumping mode on invalid input and process
++	     * input key as if it entered in non jumping mode */
++	    if((jidx == 0 &&
++	        (*(ev->key.string) != 'f' &&
++		 *(ev->key.string) != 'F' &&
++		 *(ev->key.string) != 'b' &&
++		 *(ev->key.string) != 'B' &&
++		 *(ev->key.string) != 't' &&
++		 *(ev->key.string) != 'T')) ||
++	       (jidx > 0 &&
++		(*(ev->key.string) < '0' || *(ev->key.string) > '9'))) {
++	      jumping = 0;
++	      qiv_handle_event(ev, data);
++	      return;
++	    }
++	  }
+           jcmd[jidx++]=*(ev->key.string);
+           jcmd[jidx] = '\0';
+           if (extcommand)
+@@ -915,7 +917,8 @@
+                      "(File watching: on)" : "(File watching: off)");
+             update_image(q, REDRAW);
+             if(watch_file){
+-              g_idle_add (qiv_watch_file, q);
++              // check every 100ms
++              g_timeout_add_full(G_PRIORITY_DEFAULT_IDLE, 100, qiv_watch_file, q, NULL);
+             }
+             break;
+ 
+diff -Naur qiv-2.3.1/image.c qiv-648ed5a/image.c
+--- qiv-2.3.1/image.c	2013-12-19 19:50:37.000000000 -0500
++++ qiv-648ed5a/image.c	2016-07-14 23:26:53.000000000 -0400
+@@ -262,7 +262,6 @@
+ 
+   if (first) {
+     setup_win(q);
+-    first = 0;
+   }
+   
+   check_size(q, TRUE);
+@@ -366,7 +365,7 @@
+       gdk_window_resize(q->win, q->win_w, q->win_h);
+     }
+    if (!(to_root || to_root_t || to_root_s))
+-    gdk_window_show(q->win);
++    gdk_window_lower(q->win);
+ 
+   } else { /* fullscreen */
+ 
+@@ -771,6 +770,12 @@
+     };
+     gdk_window_set_geometry_hints(q->win, &geometry,
+       GDK_HINT_MIN_SIZE | GDK_HINT_MAX_SIZE | GDK_HINT_WIN_GRAVITY);
++
++    if(first) {
++      gdk_window_show(q->win);
++      first = 0;
++    }
++
+     gdk_window_move_resize(q->win, q->win_x, q->win_y, q->win_w, q->win_h);
+ 
+     if (!q->error) {
+@@ -791,6 +796,24 @@
+       }
+     }
+     gdk_window_clear(q->win);
++
++    if(statusbar_window)
++    {
++#ifdef DEBUG
++        g_print("*** print statusbar at (%d, %d)\n", MAX(2,q->win_w-q->text_w-10), MAX(2,q->win_h-q->text_h-10));
++#endif
++    gdk_draw_rectangle(q->win, q->bg_gc, 0,
++                       MAX(2,q->win_w-q->text_w-10), MAX(2,q->win_h-q->text_h-10),
++                       q->text_w+5, q->text_h+5);
++    gdk_draw_rectangle(q->win, q->status_gc, 1,
++                       MAX(3,q->win_w-q->text_w-9), MAX(3,q->win_h-q->text_h-9),
++                       q->text_w+4, q->text_h+4);
++
++    pango_layout_set_text(layout, q->win_title, -1);
++    pango_layout_get_pixel_size (layout, &(q->text_w), &(q->text_h));
++    gdk_draw_layout (q->win, q->text_gc, MAX(5,q->win_w-q->text_w-7),  MAX(5,q->win_h-7-q->text_h), layout);
++    }
++
+   } // if (!fullscreen)
+   else
+   {
+@@ -859,6 +882,12 @@
+     q->text_ow = q->text_w;
+     q->text_oh = q->text_h;
+     q->statusbar_was_on = statusbar_fullscreen;
++
++    if(first) {
++      gdk_window_show(q->win);
++      first = 0;
++    }
++
+     gdk_window_move_resize(q->win, monitor[q->mon_id].x, monitor[q->mon_id].y,
+         monitor[q->mon_id].width, monitor[q->mon_id].height);
+   }
+diff -Naur qiv-2.3.1/main.c qiv-648ed5a/main.c
+--- qiv-2.3.1/main.c	2013-12-19 19:50:37.000000000 -0500
++++ qiv-648ed5a/main.c	2016-07-14 23:26:53.000000000 -0400
+@@ -192,7 +192,7 @@
+   qiv_load_image(&main_img);
+ 
+   if(watch_file){
+-    g_idle_add (qiv_watch_file, &main_img);
++    g_timeout_add_full(G_PRIORITY_DEFAULT_IDLE, 100, qiv_watch_file, &main_img, NULL);
+   }
+ 
+   g_main_run(qiv_main_loop); /* will never return */
+@@ -272,7 +272,7 @@
+ #ifdef HAVE_MAGIC
+   magic_t cookie;
+ 
+-  cookie = magic_open(MAGIC_NONE);
++  cookie = magic_open(MAGIC_SYMLINK);
+   magic_load(cookie,NULL);
+ #endif
+ 
+diff -Naur qiv-2.3.1/main.h qiv-648ed5a/main.h
+--- qiv-2.3.1/main.h	2013-12-19 19:50:37.000000000 -0500
++++ qiv-648ed5a/main.h	2016-07-14 23:26:53.000000000 -0400
+@@ -65,7 +65,7 @@
+ int magnify = 0; /* [lc] */
+ int user_screen = 0; /* preferred (by user) monitor */
+ int browse = 0; /* scan directory of file for browsing */
+-int autorotate = 0; /* autorotate JPEGs according to EXIF tag */
++int autorotate = 1; /* autorotate JPEGs according to EXIF tag */
+ int rotation = 0; /* rotation x degrees clockwise, 1=90degrees 2=180degrees 3=270degrees */
+ int vikeys = 0; /* option to give us some vi-like keys (for movement) */
+ 
+diff -Naur qiv-2.3.1/options.c qiv-648ed5a/options.c
+--- qiv-2.3.1/options.c	2013-12-19 19:50:37.000000000 -0500
++++ qiv-648ed5a/options.c	2016-07-14 23:26:53.000000000 -0400
+@@ -25,7 +25,7 @@
+ 
+ #define LONGOPT_VIKEYS 128
+ 
+-static char *short_options = "ab:c:Cd:efg:hilLmno:pq:rstuvw:xyzA:BDF:GIMNPRSTW:X:Y:Z:";
++static char *short_options = "ab:c:Cd:efg:hilLmno:pq:rstuvw:xyzA:BDF:GIKMNPRSTW:X:Y:Z:";
+ static struct option long_options[] =
+ {
+     {"do_grab",          0, NULL, 'a'},
+@@ -62,6 +62,7 @@
+     {"file",             1, NULL, 'F'},
+     {"disable_grab",     0, NULL, 'G'},
+     {"statusbar",        0, NULL, 'I'},
++    {"mtime_sort",       0, NULL, 'K'},
+     {"merged_case_sort", 0, NULL, 'M'},
+     {"numeric_sort",     0, NULL, 'N'},
+     {"ignore_path_sort", 0, NULL, 'P'},
+@@ -78,7 +79,7 @@
+     {0,                  0, NULL, 0}
+ };
+ 
+-static int numeric_sort = 0, merged_case_sort = 0, ignore_path_sort = 0;
++static int mtime_sort = 0, numeric_sort = 0, merged_case_sort = 0, ignore_path_sort = 0;
+ 
+ /* This array makes it easy to sort filenames into merged-case order
+  * (e.g. AaBbCcDdEeFf...). */
+@@ -117,6 +118,17 @@
+     0xF8,0xF9,0xFA,0xFB,0xFC,0xFD,0xFE,0xFF
+ };
+ 
++
++static time_t get_mtime(unsigned char *fn) {
++    struct stat attrib;
++
++    if(stat((char *) fn, &attrib) == 0)
++      return attrib.st_mtime;
++
++    return 0;
++}
++
++
+ static int my_strcmp(const void *v1, const void *v2)
+ {
+     unsigned char *cp1 = *(unsigned char **)v1;
+@@ -129,6 +141,15 @@
+     sufptr2 = cp2 + strlen((char *)cp2);
+     while (--sufptr2 > cp2 && *sufptr2 != '.') {}
+ 
++    if(mtime_sort) {
++        time_t diff = get_mtime(cp1) - get_mtime(cp2);
++        if(diff < 0)
++            return -1;
++        if(diff > 0)
++            return 1;
++        // fall through in case of same time stamp
++    }
++
+     if (ignore_path_sort) {
+         unsigned char *slash;
+         if ((slash = (unsigned char *)strrchr((char *)cp1, '/')) != NULL)
+@@ -244,7 +265,7 @@
+             case 'i': force_statusbar=0;
+                 break;
+ #if GDK_PIXBUF_MINOR >= 12
+-            case 'l': autorotate=1;
++            case 'l': autorotate=0;           /* turn autorotation OFF, default is ON */
+                 break;
+ #endif
+             case 'm': maxpect=1;
+@@ -297,6 +318,8 @@
+                 break;
+             case 'I': force_statusbar=1;
+                 break;
++            case 'K': mtime_sort = 1;
++                break;
+             case 'M': merged_case_sort = 1;
+                 break;
+             case 'N': numeric_sort = 1;
+@@ -305,7 +328,7 @@
+                 break;
+             case 'R': readonly=1;
+                 break;
+-            case 'S': shuffle=1;need_sort=0;
++            case 'S': shuffle=1; need_sort=0;
+                 break;
+             case 'T': watch_file=1;
+                 break;
+@@ -330,8 +353,8 @@
+         }
+     }
+ 
+-    /* In case user specified -D and -P, -M, or -N */
+-    need_sort = need_sort | ignore_path_sort | merged_case_sort | numeric_sort;
++    /* In case user specified -D and -K, -P, -M, or -N */
++    need_sort = need_sort | mtime_sort | ignore_path_sort | merged_case_sort | numeric_sort;
+ 
+     /* default: show statusbar only in fullscreen mode */
+     /* user wants to override? */
+@@ -382,14 +405,16 @@
+             strcpy(tmp,image_names[0]);
+         }
+         rreaddir(dirname(image_names[0]),0);
+-        filter_images(&images,image_names);
++        if(filter)
++            filter_images(&images,image_names);
+         if(need_sort)
+             qsort(image_names, images, sizeof *image_names, my_strcmp);
+         image_idx = find_image(images,image_names,tmp);
+         free(tmp);
+     }
+     else {
+-        filter_images(&images,image_names);
++        if(filter)
++            filter_images(&images,image_names);
+         if(need_sort)
+             qsort(image_names, images, sizeof *image_names, my_strcmp);
+     }
+diff -Naur qiv-2.3.1/qiv.1 qiv-648ed5a/qiv.1
+--- qiv-2.3.1/qiv.1	2013-12-19 19:50:37.000000000 -0500
++++ qiv-648ed5a/qiv.1	2016-07-14 23:26:53.000000000 -0400
+@@ -144,6 +144,9 @@
+ .B \-M, \-\-merged_case_sort
+ Sort all the image files in merged-case order (AaBbCc...).
+ .TP
++.B \-K, \-\-mtime_sort
++Sort files by their modification time
++.TP
+ .B \-N, \-\-numeric_sort
+ A "smart" numeric sort that attempts to sort filenames with numbers in
+ a logical manner.  For instance: 2.jpg sorts before 10.jpg; 1foo.jpg
+@@ -168,7 +171,7 @@
+ a tall image is too tall to fit on the screen, it will be rotated.
+ .TP
+ .B \-l, \-\-autorotate
+-Autorotate JPEGs according to EXIF rotation tag.
++Do NOT autorotate JPEGs according to EXIF rotation tag.  Default is ON.
+ .TP
+ .B \-X, \-\-xineramascreen \fIx\fB
+ Use monitor \fIx\fR as preferred screen
+@@ -180,8 +183,8 @@
+ Use color profile file x as display profile for all images
+ .TP
+ .B \-B, \-\-browse
+-This option is useful when configuring qiv to be used with a file manager. qiv 
+-will scan the directory of the clicked image and allow you to scroll
++This option is useful when configuring qiv to be used with a file manager.
++qiv will scan the directory of the clicked image and allow you to scroll
+ through those images.
+ .TP
+ .B \-\-vikeys
+diff -Naur qiv-2.3.1/qiv.h qiv-648ed5a/qiv.h
+--- qiv-2.3.1/qiv.h	2013-12-19 19:50:37.000000000 -0500
++++ qiv-648ed5a/qiv.h	2016-07-14 23:26:53.000000000 -0400
+@@ -25,8 +25,8 @@
+ #include <X11/extensions/xf86vmode.h> // for XF86VidModeGetModeLine
+ */
+ 
+-#define VERSION "2.3.1"
+-#define VERSION_FULL "QIV - Quick Image Viewer v2.3.1 - http://qiv.spiegl.de/"
++#define VERSION "2.3.2pre"
++#define VERSION_FULL "QIV - Quick Image Viewer v2.3.2pre - http://qiv.spiegl.de/"
+ #define TRASH_DIR ".qiv-trash"
+ #define SELECT_DIR ".qiv-select"
+ #define SLIDE_DELAY 3000 /* milliseconds */
+diff -Naur qiv-2.3.1/utils.c qiv-648ed5a/utils.c
+--- qiv-2.3.1/utils.c	2013-12-19 19:50:37.000000000 -0500
++++ qiv-648ed5a/utils.c	2016-07-14 23:26:53.000000000 -0400
+@@ -492,6 +492,7 @@
+           "    --readonly, -R         Disable the deletion feature\n"
+           "    --maxpect, -m          Zoom to screen size and preserve aspect ratio\n"
+           "    --merged_case_sort, -M Sort filenames with AaBbCc... alpha order\n"
++          "    --mtime_sort, -K       Sort files by their modification time\n"
+           "    --no_filter, -n        Do not filter images by extension\n"
+           "    --no_statusbar, -i     Disable statusbar\n"
+           "    --statusbar, -I        Enable statusbar\n"
+@@ -507,7 +508,7 @@
+           "    --followlinks, -L      Follow symlinks to directories (requires --recursivedir)\n"
+           "    --select_dir, -A x     Store the selected files in dir x (default is .qiv-select)\n"
+ #if GDK_PIXBUF_MINOR >= 12
+-          "    --autorotate, -l       Autorotate JPEGs according to EXIF rotation tag\n"
++          "    --autorotate, -l       Do NOT autorotate JPEGs according to EXIF rotation tag\n"
+ #endif
+           "    --rotate, -q x         Rotate 90(x=1),180(x=2),270(x=3) degrees clockwise (11 & 13 for conditional)\n"
+           "    --xineramascreen, -X x Use monitor x as preferred screen\n"
+@@ -722,7 +723,6 @@
+               update_image(q, REDRAW);
+           }
+   }
+-  usleep(200);  /* avoid eating 100% cpu */
+ 
+   return TRUE;
+ }
