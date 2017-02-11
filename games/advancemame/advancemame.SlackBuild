@@ -2,16 +2,29 @@
 
 # Slackware build script for "advancemame"
 
-# Written by seb (sebastien.serre33@laposte.net)
+# Originally written by seb (email removed)
+
+# Now maintained by B. Watson <yalhcru@gmail.com>. Original version
+# had no license, modified version released under the WTFPL. See
+# http://www.wtfpl.net/txt/copying/ for details.
+
+# 20170211 bkw:
+# - Take over maintenance
+# - Update for v3.2
+# - i486 => i586
+# - install man pages to section 6, since this is a game
+# - major script cleanup/simplification (use 'make install')
+# - add .desktop, icon, doinst
+# - document optional SDL2 dep, add SDL2 env var to control it
 
 PRGNAM=advancemame
-VERSION=0.106.0
+VERSION=${VERSION:-3.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+    i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
@@ -22,12 +35,10 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-DOC="BUILD COPYING HISTORY RELEASE README $CWD/$PRGNAM.SlackBuild"
-
 set -e
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
@@ -53,46 +64,70 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
+if [ "${SDL2:-yes}" != "yes" ]; then
+   SDL2OPT="--enable-sdl --disable-sdl2"
+fi
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
+  $SDL2OPT \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --bindir=/usr/games \
   --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
   --build=$ARCH-slackware-linux
 
 make
 
-/usr/bin/ginstall -d -m 755 $PKG/usr/games
-/usr/bin/ginstall -d -m 755 $PKG/usr/share/advance
-/usr/bin/ginstall -d -m 755 $PKG/usr/doc/$PRGNAM-$VERSION
-/usr/bin/ginstall -d -m 755 $PKG/usr/man/man1
-/usr/bin/ginstall -d -m 755 $PKG/usr/share/advance/{rom,sample,artwork,image,crc}
-/usr/bin/ginstall -m 755 obj/mame/linux/blend/advmame $PKG/usr/games
-/usr/bin/ginstall -m 755 obj/cfg/linux/blend/advcfg $PKG/usr/games
-/usr/bin/ginstall -m 755 obj/v/linux/blend/advv $PKG/usr/games
-/usr/bin/ginstall -m 755 obj/s/linux/blend/advs $PKG/usr/games
-/usr/bin/ginstall -m 755 obj/k/linux/blend/advk $PKG/usr/games
-/usr/bin/ginstall -m 755 obj/j/linux/blend/advj $PKG/usr/games
-/usr/bin/ginstall -m 755 obj/m/linux/blend/advm $PKG/usr/games
-/usr/bin/ginstall -m 644 ./support/*.dat $PKG/usr/share/advance
-/usr/bin/ginstall -m 644 ./doc/{*.html,*.txt} $PKG/usr/doc/$PRGNAM-$VERSION
-/usr/bin/ginstall -m 644 $DOC $PKG/usr/doc/$PRGNAM-$VERSION
-/usr/bin/ginstall -m 644 ./doc/*.1 $PKG/usr/man/man1
+# Please don't remove the -j1 from the make install command. Without it,
+# the directories don't always get created before files are installed
+# into them, resulting in a mess.
+make -j1 install prefix=$PKG/usr bindir=$PKG/usr/games docdir=$PKGDOC
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# Binaries are installed stripped. Man pages are in the wrong section!
+mv $PKG/usr/man/man1 $PKG/usr/man/man6
+sed -i '/^\.TH.* 1$/s,1$,6,' $PKG/usr/man/man6/*.1
+rename .1 .6 $PKG/usr/man/man6/*.1
+gzip -9 $PKG/usr/man/man6/*.6
 
-( cd $PKG/usr/man
-  find . -type f -exec gzip -9 {} \;
-  for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-)
+# This one works better as a symlink:
+rm -f $PKG/usr/man/man6/advmess.6.gz
+ln -s advmame.6.gz $PKG/usr/man/man6/advmess.6.gz
+
+# Easier to fix this after the fact than hack it to work right:
+mv $PKGDOC/advance/* $PKGDOC
+rmdir $PKGDOC/advance
+
+# HISTORY, README, RELEASE are identical to history.txt, readme.txt,
+# release.txt which are already installed, but the license doesn't have
+# a lowercase.txt equivalent:
+cp -a COPYING $PKGDOC
+
+# Icon is a resized version of contrib/logo/megaman.png, which is the
+# same as the Windows icon.
+mkdir -p $PKG/usr/share/pixmaps
+cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# .desktop file written by SlackBuild author.
+mkdir -p $PKG/usr/share/applications
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+# see if we were built with SDL2.
+if ldd $PKG/usr/games/advmame | grep -q SDL2; then
+  SDLVER="2.0"
+else
+  SDLVER="1.2"
+fi
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@SDLVER@,$SDLVER,g" $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
