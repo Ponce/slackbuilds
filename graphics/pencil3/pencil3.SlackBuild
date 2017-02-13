@@ -1,0 +1,160 @@
+#!/bin/sh
+
+# Slackware build script for pencil3
+
+# Copyright 2017 Dhaby Xiloj <slack.dhabyx@gmail.com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=pencil3
+PKGNAM=pencil
+VERSION=${VERSION:-3.0.0_rc2}
+RELEASE=${RELEASE:-3.0.0-rc.2}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  NPMARCH="ia32"
+elif [ "$ARCH" = "i686" ]; then
+  NPMARCH="ia32"
+elif [ "$ARCH" = "x86_64" ]; then
+  NPMARCH="x64"
+fi
+
+
+# Use the electron installed on system instead of
+# the version used with this application
+ELECTRON=${ELECTRON:-no}
+
+# Create binary package
+BINARY=${BINARY:-no}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PKGNAM-$RELEASE
+tar xvf $CWD/$PKGNAM-$RELEASE.tar.gz || tar xvf $CWD/v$RELEASE
+cd $PKGNAM-$RELEASE
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# remove package generation
+sed -i -e 's/"target": \["deb", "rpm", "tar.gz"\]/"target": []/g' package.json
+
+# preparing some places for installation
+mkdir -p $PKG/usr/share/$PRGNAM
+mkdir -p $PKG/usr/bin
+
+echo '********************************************************************'
+echo '* The installation process will download some modules for pencil3. *'
+echo '********************************************************************'
+
+# Generating binary app
+if [ "${BINARY}" != "no" ]; then
+  if [ "${ELECTRON}" != "no" ]; then
+    # test if electron is installed
+    ELECTRON_VERSION=$(electron --version | tr -d 'v')
+    if [ "${ELECTRON_VERSION}" != "" ]; then
+      # change electron version in package.json
+      sed -i -E -e 's/"electron": "[0-9.]+"/"electron": "'${ELECTRON_VERSION}'"/g' package.json
+      # test if electron zip is installed
+      ELECTRON_ZIP="/usr/share/electron/release/electron-v${ELECTRON_VERSION}-linux-${NPMARCH}.zip"
+      if [ -f ${ELECTRON_ZIP} ]; then
+        sed -i -e 's#".electron-cache"#"/usr/share/electron/release/"#g' package.json
+      fi
+    fi
+  fi
+
+  npm install
+  ./node_modules/.bin/build --linux
+
+  EXEC_COMMAND="./pencil"
+  # Manual installation
+  pushd dist/linux-unpacked
+    cp -r *.pak icudtl.dat libffmpeg.so libnode.so locales \
+         natives_blob.bin pencil resources snapshot_blob.bin \
+         $PKG/usr/share/$PRGNAM
+  popd
+  PACKAGE_LICENSES="dist/linux-unpacked/LICENSE*"
+else # install as node script style
+  pushd app
+    # install all dependencies of the application
+    npm install
+  popd
+  # Use system electron
+  if [ "${ELECTRON}" != "no" ]; then
+    EXEC_COMMAND="electron ./app"
+    cp -r app package.json $PKG/usr/share/$PRGNAM
+  else
+    npm install
+    EXEC_COMMAND="./node_modules/.bin/electron ./app"
+    cp -r app node_modules package.json $PKG/usr/share/$PRGNAM
+  fi
+fi
+
+# Making shell script to load pencil
+cat <<EOF > $PKG/usr/bin/$PRGNAM
+#!/bin/sh
+cd /usr/share/$PRGNAM
+$EXEC_COMMAND
+EOF
+chmod a+x $PKG/usr/bin/$PRGNAM
+
+# Installing icons and .desktop file
+pushd build/icons
+  for IMG in *.png
+  do
+    DIR_NAME=${IMG%.*}
+    install -D $IMG $PKG/usr/share/icons/hicolor/$DIR_NAME/apps/$PRGNAM.png
+  done
+popd
+
+mkdir -p $PKG/usr/share/applications
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+# Documentation
+mkdir -p $PKG/usr/doc/$PRGNAM-${VERSION}
+cp -a LICENSE.md README.md $PACKAGE_LICENSES $PKG/usr/doc/$PRGNAM-${VERSION}
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-${VERSION}/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-${VERSION}-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
