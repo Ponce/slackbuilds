@@ -8,7 +8,7 @@ config() {
   fi
 }
 
-for conf in /opt/fgo/data/config/* ; do
+for conf in /opt/fgo/data/config/*.new ; do
   config ${conf}
 done
 
