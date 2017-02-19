@@ -22,10 +22,11 @@ preserve_perms() {
   config $NEW
 }
 
-preserve_perms etc/rc.d/rc.heimdal.new
-config etc/krb5.conf-sample.new
-config var/heimdal/kdc.conf-sample.new
-config etc/profile.d/heimdal.sh.new
-config etc/profile.d/heimdal.csh.new
-
-
+preserve_perms etc/rc.d/rc.kdc.new
+preserve_perms etc/rc.d/rc.kadmind.new
+preserve_perms etc/rc.d/rc.kpasswdd.new
+preserve_perms etc/rc.d/rc.ipropd-master.new
+preserve_perms etc/rc.d/rc.ipropd-slave.new
+config etc/krb5.conf.new
+config var/heimdal/kdc.conf.new
+config var/heimdal/kadmind.acl.new
