@@ -37,12 +37,14 @@ for file in "${openrc_accessibility[@]}" "${openrc_base[@]}" "${openrc_desktop[@
 done
 
 BACKUP_FILE=(logrotate.d/jenkins)
-
 for file in "${BACKUP_FILE[@]}"; do
   config "etc/${file}.new"
 done
 
-preserve_perms etc/local.d/rcM.start.new
+BACKUP_LOCAL=(rcM.start rcd_net.start)
+for file in "${BACKUP_LOCAL[@]}"; do
+  preserve_perms etc/local.d/${file}.new
+done
 
 # disable udev-postmount
 [ -e etc/runlevels/sysinit/udev-postmount ] && rm etc/runlevels/sysinit/udev-postmount
