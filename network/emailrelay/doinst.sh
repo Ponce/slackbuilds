@@ -1,8 +1,5 @@
 #!/bin/sh
 
-spool="var/spool/emailrelay"
-submit="usr/sbin/emailrelay-submit"
-
 config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
@@ -12,8 +9,6 @@ config() {
     rm $NEW
   fi
 }
-
-fix_permissions
 
 config etc/rc.d/rc.emailrelay.new
 config etc/emailrelay.conf.new
