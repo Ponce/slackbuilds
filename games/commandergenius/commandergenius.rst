@@ -2,8 +2,8 @@
 ..   rst2man.py commandergenius.rst > commandergenius.6
 .. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 1.9.5.3-Beta
-.. |dotlessversion| replace:: 1953beta
+.. |version| replace:: 1.9.8.7-Beta
+.. |dotlessversion| replace:: 1987beta
 .. |date| date::
 
 .. converting from pod:
@@ -28,7 +28,7 @@ SYNOPSIS
 
 commandergenius [*dir=dir*] [*finale=<on|off>*]
 
-CGeniusExe [*dir=dir*] [*finale=<on|off>*]
+CGeniusExe [*dir=dir*] [*finale=<on|off>*] [*level=level*]
 
 DESCRIPTION
 ===========
@@ -58,6 +58,10 @@ OPTIONS
 
 *finale=<on|off>*
    Skip directly to the finale (ending) of the game.
+
+*level=<level>*
+   Starting level. Only valid if *dir* is given, and only if the given
+   game is episode 4, 5, or 6.
 
 FILES
 =====
@@ -97,7 +101,7 @@ See the file /usr/doc/commandergenius-|dotlessversion|/COPYRIGHT for license inf
 AUTHORS
 =======
 
-commandergenius was written by Gerstrong <gerstrong@gmail.com>.
+commandergenius was written by Gerhard Stein <gerstrong@gmail.com>.
 
 This man page written for the SlackBuilds.org project
 by B. Watson, and is licensed under the WTFPL.
