@@ -6,6 +6,19 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20170307 bkw:
+# - BUILD=2
+# - add missing mkdir -p $TMP $PKG $OUTPUT (wtf did I do?!)
+# - binaries in /usr/games, not /usr/bin.
+# - man pages in section 6, not 1.
+# - install missing doc/fr/clavier-exemple.txt.
+# - previously SDL2 was optional and undocumented, add SDL2=no option
+#   and document in README.
+# - stop spamming icon symlinks to /usr (they belong in $PKG/usr of course)
+# - update mime and desktop stuff. upstream started including a mime XML
+#   package, but it's missing some of the stuff from my hatari.xml. The
+#   new hatari.xml incorporates upstream's new stuff.
+
 # 20170122 bkw:
 # - updated for v2.0.0.
 
@@ -28,7 +41,7 @@
 
 PRGNAM=hatari
 VERSION=${VERSION:-2.0.0}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -57,34 +70,55 @@ fi
 set -e
 
 rm -rf $PKG $TMP/$PRGNAM-$VERSION
-
+mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
 cd $PRGNAM-$VERSION
 
 # configure script is really a wrapper for cmake, doesn't support
-# --libdir, --mandir, --docdir. cheat a little.
+# --bindir, --mandir, --docdir. cheat a little.
 sed -i \
-  -e 's,share/man/man1,man/man1,' \
+  -e 's,BINDIR *bin,BINDIR games,' \
+  -e 's,share/man/man1,man/man6,' \
   -e "s,share/doc/$PRGNAM,doc/$PRGNAM-$VERSION," \
   CMakeLists.txt
+
+# man pages should be in section 6
+sed -i '/\.TH/s,"1","6",' doc/*.1 doc/fr/*.1 tools/*.1 python-ui/*.1
 
 # Hard-code the doc path in the UI (we don't use /usr/share/doc/hatari)
 sed -i \
   -e "/path *= *path *+/s,=.*,= \"/usr/doc/$PRGNAM-$VERSION/\"," \
   python-ui/uihelpers.py
 
-./configure --prefix=/usr
+# see if we're building with SDL2 or not.
+if pkg-config --exists sdl2 && [ "${SDL2:-yes}" != "no" ]; then
+  SDL2OPT=""
+  WITHSDL=2.0
+else
+  SDL2OPT="--disable-sdl2"
+  WITHSDL=1.2
+fi
+
+./configure $SDL2OPT --prefix=/usr
+
+# Hard-coded paths for icon symlinks, they end up getting created in the
+# real /usr, not $PKG/usr.
+sed -i 's,\(^\t*\)\(/usr/share\),\1'$PKG'\2,' share/cmake_install.cmake
 
 make
 make install/strip DESTDIR=$PKG
+
+# man pages are in the right dir, but with .1
+rename .1. .6. $PKG/usr/man/man6/*.1.gz
 
 DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $DOCDIR/$PRGNAM.SlackBuild
 
 # These docs don't get installed for some reason:
 cp tools/hmsa/readme-hmsa.txt readme.txt gpl.txt \
-   doc/changelog.txt doc/coding.txt doc/toc.js doc/video-recording.txt \
+   doc/changelog.txt doc/coding.txt doc/toc.js \
+   doc/video-recording.txt doc/fr/clavier-exemple.txt \
    $DOCDIR
 
 # The UI has its own docs:
@@ -95,21 +129,29 @@ for i in README TODO release-notes.txt; do
 done
 
 # Someone might find the French man page useful:
-mkdir -p $PKG/usr/man/fr/man1
-gzip -9c < doc/fr/$PRGNAM.1 > $PKG/usr/man/fr/man1/$PRGNAM.1.gz
+mkdir -p $PKG/usr/man/fr/man6
+gzip -9c < doc/fr/$PRGNAM.1 > $PKG/usr/man/fr/man6/$PRGNAM.6.gz
 
 # Replace .desktop with modified one, auto-associates ST disks/executables.
 cat $CWD/${PRGNAM}ui.desktop > $PKG/usr/share/applications/${PRGNAM}ui.desktop
 
-# Custom MIME types for ST disk images and executables, by script author.
+# Custom MIME types for ST disk images and executables. Based on hatari.xml
+# from upstream, with x-st-executable type added by script author.
 mkdir -p $PKG/usr/share/mime/packages
 cat $CWD/$PRGNAM.xml > $PKG/usr/share/mime/packages/$PRGNAM.xml
+
+for i in $PKG/usr/share/icons/hicolor/[0-9]*; do
+  ln -s application-x-st-disk-image.png $i/mimetypes/x-st-executable.png
+done
+
+ln -s application-x-st-disk-image.svg \
+      $PKG/usr/share/icons/hicolor/scalable/mimetypes/x-st-executable.png
 
 # Don't symlink emutos to tos here, do it conditionally in doinst.sh.
 ( cd $PKG/usr/share/$PRGNAM && mv tos.img emutos.img )
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@WITHSDL@,$WITHSDL," $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh  > $PKG/install/doinst.sh
 
 cd $PKG
