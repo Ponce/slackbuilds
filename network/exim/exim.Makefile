@@ -616,7 +616,7 @@ FIXED_NEVER_USERS=root
 # That shim can set macros before .include'ing your main configuration file.
 #
 # As a strictly transient measure to ease migration to 4.73, the
-# WHITELIST_D_MACROS value definies a colon-separated list of macro-names
+# WHITELIST_D_MACROS value defines a colon-separated list of macro-names
 # which are permitted to be overridden from the command-line which will be
 # honoured by the Exim user.  So these are macros that can persist to delivery
 # time.
@@ -648,9 +648,14 @@ AUTH_DOVECOT=yes
 # AUTH_GSASL_PC=libgsasl
 # AUTH_HEIMDAL_GSSAPI=yes
 # AUTH_HEIMDAL_GSSAPI_PC=heimdal-gssapi
+# AUTH_HEIMDAL_GSSAPI_PC=heimdal-gssapi heimdal-krb5
 AUTH_PLAINTEXT=yes
 AUTH_SPA=yes
 AUTH_TLS=yes
+
+# Heimdal through 1.5 required pkg-config 'heimdal-gssapi'; Heimdal 7.1
+# requires multiple pkg-config files to work with Exim, so the second example
+# above is needed.
 
 
 #------------------------------------------------------------------------------
@@ -704,6 +709,13 @@ HEADERS_CHARSET="ISO-8859-1"
 #
 # but of course there may need to be other things in CFLAGS and EXTRALIBS_EXIM
 # as well.
+#
+# nb: FreeBSD as of 4.89 defines LIBICONV_PLUG to pick up the system iconv
+# more reliably.  If you explicitly want the libiconv Port then as well
+# as adding -liconv you'll want to unset LIBICONV_PLUG.  If you actually need
+# this, let us know, but for now the Exim Maintainers are assuming that this
+# is uncommon and so you'll need to edit OS/os.h-FreeBSD yourself to remove
+# the define.
 
 
 #------------------------------------------------------------------------------
@@ -957,11 +969,15 @@ EXTRALIBS += -ldl
 #
 # Uncomment the following to include Internationalisation features.  This is the
 # SMTPUTF8 ESMTP extension, and associated facilities for handling UTF8 domain
-# and localparts, per RFCs 5890, 6530 and 6533.
+# and localparts, per RFC 3490 (IDNA2003).
 # You need to have the IDN library installed.
+# If you want IDNA2008 mappings per RFCs 5890, 6530 and 6533, you additionally
+# need libidn2 and SUPPORT_I18N_2008.
 
 SUPPORT_I18N=yes
 LDFLAGS += -lidn
+# SUPPORT_I18N_2008=yes
+# LDFLAGS += -lidn -lidn2
 
 
 #------------------------------------------------------------------------------
