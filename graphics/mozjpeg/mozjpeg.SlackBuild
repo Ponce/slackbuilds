@@ -2,7 +2,10 @@
 
 # Slackware build script for mozjpeg
 
+# Originally written by:
 # Ryan P.C. McQuen | Everett, WA | ryanpcmcquen@member.fsf.org
+
+# Now maintained by B. Watson (yalhcru@gmail.com)
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,14 +25,23 @@
 # with this program (most likely, a file named COPYING).  If not, see
 # <http://www.gnu.org/licenses/>.
 
+# 20170310 bkw:
+# - take over maintenance
+# - i486 => i586
+# - build static lib also
+# - expand README and slack-desc
+# - add JAVA=yes option
+# - add API=7 and API=8 options
+# - BUILD=2
+
 PRGNAM=mozjpeg
 VERSION=${VERSION:-3.1}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+    i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
@@ -40,8 +52,8 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
@@ -60,11 +72,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-if [ -e $CWD/v$VERSION.tar.gz ]; then
-  tar xvf $CWD/v$VERSION.tar.gz
-else
-  tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-fi
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
@@ -73,24 +81,93 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
+# JAVA=yes only tested with openjdk and openjdk6. We source the profile.d
+# script here in case someone's *just* installed jdk|openjdk, so they
+# won't have to log out & back in to get this built. This mostly helps
+# out sbopkg users.
+JAVA="${JAVA:-no}"
+if [ "$JAVA" = "yes" ]; then
+  EXTRAOPTS="--with-java "
+
+  # Find a JDK. Presumably a sane admin will only have one of these
+  # profile scripts executable, even if he's installed all of them.
+  # TODO: maybe let the user specify the JDK to use instead? I'm not
+  # sure it actually matters that much ("write once, run anywhere" should
+  # mean a .jar built with openjdk will run with Oracle's jdk, right? But
+  # there's JNI (native code) involved...)
+  for i in jdk openjdk8 openjdk openjdk6; do
+    if [ -x /etc/profile.d/$i.sh ]; then
+      source /etc/profile.d/$i.sh
+      break
+    fi
+  done
+
+  # Whichever jdk we decided to use, use its JAVA_HOME. Unfortunately
+  # mozjpeg ignores the *standard* JAVA_HOME env var, so we persuade
+  # it thus:
+  sed -i "s,/usr/java,$JAVA_HOME,g" configure.ac
+fi
+
+
 autoreconf -fiv
+
+# TODO: really, there should be a way to build multiple API versions, with
+# file paths that don't clash: /opt/mozjpeg/jpeg$API/(bin|lib|include).
+# I'll save this for the 3.2 release. Had a look at 3.2-pre, it has
+# pkg-config support, which would make this job easier I think.
+API="${API:-6b}"
+case "$API" in
+  6b) ;; # do nothing, this is the default
+  7|8)  EXTRAOPTS="$EXTRAOPTS --with-jpeg$API" ;;
+  *)    echo "Invalid API version, supported versions are 6b 7 8" 1>&2
+        exit 1
+        ;;
+esac
+
+# 20170310 bkw: This stuff needs documenting, or I'll forget why
+# I did it this way.
+
+# Leaving off all the --prefix and related options below, since the
+# default prefix is already /opt/mozjpeg.
+
+# Ryan's version of this script had --disable-static, but I'm leaving
+# that off, because sometimes static libs are easier to deal with when
+# you're linking with libraries outside the system /usr/lib(64) dir.
+
+# The LDFLAGS gibberish below is to force the binaries in /opt/mozjpeg/bin
+# to use the libraries in /opt/mozjpeg/lib(64), otherwise they use the
+# system libjpeg in /usr/lib(64) which partly defeats the purpose of
+# having optimized jpeg libs...
+
+LDFLAGS="-Wl,-rpath,/opt/$PRGNAM/lib$LIBDIRSUFFIX" \
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
 ./configure \
-  --disable-static
+  $EXTRAOPTS \
+  --build=$ARCH-slackware-linux
 
-make CFLAGS="$SLKCFLAGS"
-make install DESTDIR=$PKG
+# the java stuff chokes without -j1, everything else is OK.
+if [ "$JAVA" = "yes" ]; then
+  make -j1 -C java
+fi
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+make # V=1
+make install-strip DESTDIR=$PKG
+gzip $PKG/opt/$PRGNAM/man/man?/*.?
 
-find $PKG/opt/${PRGNAM}/man/ -type f -exec gzip -9 {} \;
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/
-cp -a BUILDING.txt LICENSE.txt README $PKG/usr/doc/$PRGNAM-$VERSION
+# docs are installed in /opt already (except the license)
+mkdir -p $PKG/usr/doc
+mv $PKG/opt/$PRGNAM/doc $PKG/usr/doc/$PRGNAM-$VERSION
+ln -s ../../../usr/doc/$PRGNAM-$VERSION $PKG/opt/$PRGNAM/doc
+cp -a LICENSE.txt $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
+[ "$JAVA" = "yes" ] && cp -a java/doc $PKG/usr/doc/$PRGNAM-$VERSION/javadoc
+
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s,@API@,$API," -e "s,@JAVA@,$JAVA," \
+  $CWD/slack-desc > \
+  $PKG/install/slack-desc
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
