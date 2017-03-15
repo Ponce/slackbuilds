@@ -25,7 +25,7 @@
 # based on bitcoin.SlackBuild by nomnombtc <nomnombtc@arcor.de>
 
 PRGNAM=dobbscoin
-VERSION=${VERSION:-0.8.7.0}
+VERSION=${VERSION:-0.10.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -77,49 +77,42 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# build dobbscoin-qt
-qmake \
-  QMAKE_CFLAGS+="$SLKCFLAGS" \
-  QMAKE_CXXFLAGS+="$SLKCFLAGS -DBOOST_VARIANT_USE_RELAXED_GET_BY_DEFAULT=1" \
-  USE_UPNP="$UPNP" \
-  USE_QRCODE="$QRCODE" \
-  USE_SSL=1
+# Fix for miniupnpc >= 1.9.20150730.
+# Source: https://github.com/dogecoin/dogecoin/issues/1292
+patch -p1 < $CWD/miniupnpc-1.9-api.patch
+
+./autogen.sh
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --disable-silent-rules \
+  --enable-static=no \
+  --with-gui="${QTGUI:-qt4}" \
+  --build=$ARCH-slackware-linux
 
 make
-
-# build dobbscoind
-cd src
-
-  if [ "$UPNP" = "-" ]; then
-    # disable UPNP
-    sed -i 's/USE_UPNP:=0/USE_UPNP:=/g' makefile.unix
-  fi
-
-  # disable static linking, not supported by boost in slackware
-  sed -i 's/Bstatic/Bdynamic/g' makefile.unix
-
-  CFLAGS="$SLKCFLAGS" \
-  CXXFLAGS="$SLKCFLAGS -DBOOST_VARIANT_USE_RELAXED_GET_BY_DEFAULT=1" \
-  make -f makefile.unix \
-    dobbscoind \
-    USE_SSL=1
-
-cd -
-
-mkdir -p $PKG/usr/bin
-mkdir -p $PKG/usr/share/{applications,pixmaps}
-
-install -m 0755 dobbscoin-qt $PKG/usr/bin/
-install -m 0755 src/dobbscoind $PKG/usr/bin/
-
-install -m 0644 src/qt/res/icons/dobbscoin.png $PKG/usr/share/pixmaps/
-install -m 0644 $CWD/dobbscoin-qt.desktop $PKG/usr/share/applications/
+make install DESTDIR=$PKG
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
+
+mkdir -p $PKG/usr/man/man{1,5}
+install -m 0644 contrib/debian/manpages/*.1 $PKG/usr/man/man1/
+install -m 0644 contrib/debian/manpages/*.5 $PKG/usr/man/man5/
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+
+mkdir -p $PKG/usr/share/{applications,pixmaps}
+install -m 0644 contrib/debian/dobbscoin-qt.desktop $PKG/usr/share/applications/
+install -m 0644 share/pixmaps/dobbscoin128.xpm $PKG/usr/share/pixmaps/
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a doc/README.md COPYING $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a doc/* COPYING contrib/debian/examples/dobbscoin.conf $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
