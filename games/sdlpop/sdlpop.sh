@@ -3,6 +3,10 @@
 # 20160812 bkw:
 # wrapper script for sdlpop, for slackbuilds.org
 
+# 20170317 bkw: updated for v1.17, mods dir has to be writable by users,
+# so we can't just symlink it from /usr/share. however, if any mods are
+# in /usr/share, we copy them (again, need to be writable)
+
 EXE=/usr/libexec/sdlpop/prince
 USERDIR=$HOME/.sdlpop
 SHAREDIR=/usr/share/games/sdlpop
@@ -11,11 +15,14 @@ INI=SDLPoP.ini
 [ ! -e $USERDIR ] && mkdir -p $USERDIR
 cd $USERDIR || exit 1
 
-for file in $SHAREDIR/*; do
+[ -e data ] || ln -s $SHAREDIR/data data
+
+mkdir -p mods
+for file in $SHAREDIR/mods/*; do
 	base="$( basename "$file" )"
-	[ -e "$base" ] || ln -s "$file" "$base"
+	[ -e mods/"$base" ] || cp -a "$file" mods/"$base"
 done
 
-[ -L $INI ] && ( rm -f $INI ; cp $SHAREDIR/$INI . )
+[ -e $INI ] || cp $SHAREDIR/$INI .
 
 exec $EXE "$@"

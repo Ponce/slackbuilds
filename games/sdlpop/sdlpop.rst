@@ -2,7 +2,7 @@
 ..   rst2man.py sdlpop.rst > sdlpop.6
 .. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 1.16
+.. |version| replace:: 1.17
 .. |date| date::
 
 ======
@@ -21,7 +21,7 @@ open source port of Prince of Persia 1
 SYNOPSIS
 ========
 
-sdlpop [megahit [*level*]] [draw] [full] [demo] [record] [replay | *filename*.PIR]
+sdlpop [megahit [*level*]] [draw] [full] [demo] [record] [replay | *filename.PIR*] [validate *filename.PIR*] [mod *mod_name*] [debug] [seed=number]
 
 DESCRIPTION
 ===========
@@ -36,12 +36,7 @@ Full documentation can be found in\:
 OPTIONS
 =======
 
-**Note**: options are NOT preceded by **-**.
-
-.. notice the **-opt** *param* stuff? rst's option recognition
-.. can't handle non-GNU-style options like -option (it thinks the
-.. option is -o, and the ption is the parameter). So we have to help
-.. it out a little.
+**Note**: options are NOT preceded by **-**, except for *--help* and *--version*.
 
 *megahit*   Enable cheats.
 
@@ -61,12 +56,29 @@ OPTIONS
             Filenames not beginning with **/** are interpreted as relative paths
             from the *~/.sdlpop* directory, not the current directory.
 
+*validate* **replays/filename.p1r**
+            Print out information about a replay file and quit.
+
+*mod* **mod_name**
+            Run with custom data files from **~/.sdlpop/mods/mod_name**.
+
+*debug*
+            Enable debug cheats.
+
+*seed=number*
+            Set initial random seed, for testing.
+
+*--version*, *-v*
+            Display SDLPoP version and quit.
+
+*--help*, *-h*, *-?*
+            Display help and quit.
+
 KEYBOARD
 ========
 
 Controlling the kid
 -------------------
-
 
 *left*
      turn or run left
@@ -97,7 +109,6 @@ You can also use the numeric keypad.
 Gamepad equivalents
 -------------------
 
-
 *left/right*
      left/right
 
@@ -116,112 +127,126 @@ Gamepad equivalents
 Controlling the game
 --------------------
 
-
 *Esc*
-     pause game
+     Pause game.
 
 *space*
-     show time left
+     Show time left.
 
 *Ctrl-A*
-     restart level
+     Restart level.
 
 *Ctrl-G*
-     save game (on levels 3..13)
+     Save game (on levels 3..13).
 
 *Ctrl-J*
-     joystick/gamepad mode (implemented by segrax)
+     Joystick/gamepad mode (implemented by segrax).
 
 *Ctrl-K*
-     keyboard mode
+     Keyboard mode.
 
 *Ctrl-R*
-     return to intro
+     Return to intro.
 
 *Ctrl-S*
-     sound on/off
+     Sound on/off.
 
 *Ctrl-V*
-     show version
+     Show version.
 
 *Ctrl-Q*
-     quit game
+     Quit game.
 
 *Ctrl-L*
-     load game (when in the intro)
+     Load game (when in the intro).
 
 *Alt-Enter*
-     toggle fullscreen
+     Toggle fullscreen.
 
 *F6*
-     quicksave
+     Quicksave.
 
 *F9*
-     quickload
+     Quickload.
 
 Viewing or recording replays
 ----------------------------
 
-
 *Ctrl+Tab (in game)*
-     start or stop recording
+     start or stop recording.
 
 *Tab (on title screen)*
-     view/cycle through the saved replays in the SDLPoP directory
+     View/cycle through the saved replays in the **~/.sdlpop/replays** directory.
+
+*F (while viewing a replay)*
+     Skip forward to the next room.
+
+*Shift-F (while viewing a replay)*
+     Skip forward to the next level.
 
 Cheats
 ------
 
 
 *Shift-L*
-     go to next level
+     Go to next level.
 
 *c*
-     show numbers of current and adjacent rooms
+     Show numbers of current and adjacent rooms.
 
 *Shift-C*
-     show numbers of diagonally adjacent rooms
+     Show numbers of diagonally adjacent rooms.
 
 *-*
-     less remaining time
+     Less remaining time.
 
 *+*
-     more remaining time
+     More remaining time.
 
 *r*
-     resurrect kid
+     Resurrect kid.
 
 *k*
-     kill guard
+     Kill guard.
 
 *Shift-I*
-     flip screen upside-down
+     Flip screen upside-down.
 
 *Shift-W*
-     slow falling
+     Slow falling.
 
 *h*
-     look at room to the left
+     Look at room to the left.
 
 *j*
-     look at room to the right
+     Look at room to the right.
 
 *u*
-     look at room above
+     Look at room above.
 
 *n*
-     look at room below
+     Look at room below.
 
 *Shift-B*
-     toggle hiding of non-animated objects
+     Toggle hiding of non-animated objects.
 
 *Shift-S*
-     Restore lost hit-point. (Like a small red potion.)
+     Restore lost hit-point (like a small red potion).
 
 *Shift-T*
-     Give more hit-points. (Like a big red potion.)
+     Give more hit-points (like a big red potion).
 
-.. other sections we might want, uncomment as needed.
+Debug cheats
+------------
+
+*[*
+    Shift kid 1 pixel to the left.
+
+*]*
+    Shift kid 1 pixel to the right.
+
+*t*
+    Toggle timer.
 
 FILES
 =====
@@ -238,18 +263,6 @@ FILES
      Config file for sdlpop. Copied (not symlinked) from the data directory,
      so it can be edited as desired. See the comments in **SDLPoP.ini** itself
      for a description.
-
-.. ENVIRONMENT
-.. ===========
-
-.. EXIT STATUS
-.. ===========
-
-.. BUGS
-.. ====
-
-.. EXAMPLES
-.. ========
 
 COPYRIGHT
 =========
