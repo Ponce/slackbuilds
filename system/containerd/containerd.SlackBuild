@@ -1,10 +1,31 @@
 #!/bin/sh
 
 # Slackware build script for containerd
-# Written by Asaf Ohayon <asaf@sysbind.co.il>
+
+# Copyright 2016 Asaf Ohayon <asaf@sysbind.co.il>
+# Copyright 2017 Audrius Kažukauskas <audrius@neutrino.lt>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=containerd
-VERSION=${VERSION:-0.2.3}
+VERSION=${VERSION:-0.2.3_977c511}
+GITHASH=${GITHASH:-977c511eda0925a723debdc94d09459af49d082a}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -21,59 +42,36 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
-fi
-
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/containerd-${VERSION}.tar.gz || tar xvf $CWD/v$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+rm -rf $PRGNAM-$GITHASH
+tar xvf $CWD/$PRGNAM-$GITHASH.tar.gz
+cd $PRGNAM-$GITHASH
 chown -R root:root .
-# the have symlinks in their testdata that goes outside the context of this build
-find -L . ! -type l \
+find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o ! -type l \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-source /etc/profile.d/go.sh
+ln -sfn $TMP/$PRGNAM-$GITHASH vendor/src/github.com/docker/containerd
 
-unset GOPATH
-export GOPATH="${TMP}/${PRGNAM}-${VERSION}"
-mkdir -p src/github.com/docker
-cd src/github.com/docker/
-ln -rsf "${TMP}/${PRGNAM}-${VERSION}" containerd
-cd containerd
-LDFLAGS= make
+make \
+  BUILDTAGS="seccomp" \
+  GIT_COMMIT="$GITHASH" \
+  GOPATH=$TMP/$PRGNAM-$GITHASH:$TMP/$PRGNAM-$GITHASH/vendor
 
-cd src/github.com/docker/containerd/bin
-for file in $(find . -type f -print); do
-    echo ${file}
-    install -Dm755 ${file} ${PKG}/usr/bin/${file}
-    file=$(echo ${file} | sed 's/\.\///g')
-    if [[ "${file}" == "ctr" ]]; then
-        ln -s ${file} ${PKG}/usr/bin/docker-containerd-${file}
-    else
-        ln -s ${file} ${PKG}/usr/bin/docker-${file}
-    fi
-done
+# Install executables.
+mkdir -p $PKG/usr/bin
+install -D -m 0755 bin/containerd $PKG/usr/bin/containerd
+install -D -m 0755 bin/containerd-shim $PKG/usr/bin/containerd-shim
+install -D -m 0755 bin/ctr $PKG/usr/bin/ctr
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README.md LICENSE.code LICENSE.docs NOTICE $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
