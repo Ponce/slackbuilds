@@ -1,81 +1,86 @@
 #!/bin/sh
-
-# Short-Description:  Create lightweight, portable, self-sufficient containers.
-# Description:
-#  Docker is an open-source project to easily create lightweight, portable,
-#  self-sufficient containers from any application. The same container that a
-#  developer builds and tests on a laptop can run at scale, in production, on
-#  VMs, bare metal, OpenStack clusters, public clouds and more.
-
+#
+# Docker startup script for Slackware Linux
+#
+# Docker is an open-source project to easily create lightweight, portable,
+# self-sufficient containers from any application.
 
 PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
 
-BASE=docker
+BASE=dockerd
 
 UNSHARE=/usr/bin/unshare
-DOCKER=/usr/bin/$BASE
-DOCKER_PIDFILE=/var/run/$BASE.pid
+DOCKER=/usr/bin/${BASE}
+DOCKER_PIDFILE=/var/run/${BASE}.pid
 DOCKER_LOG=/var/log/docker.log
-DOCKER_OPTS=
+DOCKER_OPTS=""
 
-if [ -f /etc/default/$BASE ]; then
-	. /etc/default/$BASE
+# Default options.
+if [ -f /etc/default/${BASE} ]; then
+  . /etc/default/${BASE}
 fi
 
-# Check docker is present
-if [ ! -x $DOCKER ]; then
-	echo "$DOCKER not present or not executable"
-	exit 1
+# Check if docker is present.
+if [ ! -x ${DOCKER} ]; then
+  echo "${DOCKER} not present or not executable"
+  exit 1
 fi
 
 docker_start() {
-  echo "starting $BASE ..."
-  if [ -x ${DOCKER} ]; then
-    # If there is an old PID file (no docker running), clean it up:
-    if [ -r ${DOCKER_PIDFILE} ]; then
-      if ! ps axc | grep docker 1> /dev/null 2> /dev/null ; then
-        echo "Cleaning up old ${DOCKER_PIDFILE}."
-        rm -f ${DOCKER_PIDFILE}
-      fi
-    fi
-    nohup "${UNSHARE}" -m -- ${DOCKER} -d -p ${DOCKER_PIDFILE} ${DOCKER_OPTS} >> ${DOCKER_LOG} 2>&1 &
-  fi
-}
-
-# Stop docker:
-docker_stop() {
-  echo "stopping $BASE ..."
-  # If there is no PID file, ignore this request...
+  echo "Starting ${BASE} ..."
+  # If there is an old PID file (no dockerd running), clean it up.
   if [ -r ${DOCKER_PIDFILE} ]; then
-    kill $(cat ${DOCKER_PIDFILE})
+    if ! ps axc | grep ${BASE} 1> /dev/null 2> /dev/null ; then
+      echo "Cleaning up old ${DOCKER_PIDFILE}."
+      rm -f ${DOCKER_PIDFILE}
+    fi
   fi
+
+  nohup "${UNSHARE}" -m -- ${DOCKER} -p ${DOCKER_PIDFILE} ${DOCKER_OPTS} >> ${DOCKER_LOG} 2>&1 &
 }
 
-# Restart docker:
+docker_stop() {
+  echo -n "Stopping ${BASE} ..."
+  if [ -r ${DOCKER_PIDFILE} ]; then
+    DOCKER_PID=$(cat ${DOCKER_PIDFILE})
+    kill ${DOCKER_PID}
+    while [ -d /proc/${DOCKER_PID} ]; do
+      sleep 1
+      echo -n "."
+    done
+  fi
+  echo " done"
+}
+
 docker_restart() {
-	docker_stop
-	docker_start
+  docker_stop
+  sleep 1
+  docker_start
+}
+
+docker_status() {
+  if [ -f ${DOCKER_PIDFILE} ] && ps -o cmd $(cat ${DOCKER_PIDFILE}) | grep -q ${BASE} ; then
+    echo "Status of ${BASE}: running"
+  else
+    echo "Status of ${BASE}: stopped"
+  fi
 }
 
 case "$1" in
-'start')
-  docker_start
-  ;;
-'stop')
-  docker_stop
-  ;;
-'restart')
-  docker_restart
-  ;;
-'status')
-  if [ -f ${DOCKER_PIDFILE} ] && ps -o cmd $(cat ${DOCKER_PIDFILE}) | grep -q $BASE ; then
-	  echo "status of $BASE: running"
-  else
-	  echo "status of $BASE: stopped"
-  fi
-  ;;
-*)
-  echo "usage $0 start|stop|restart|status"
+  'start')
+    docker_start
+    ;;
+  'stop')
+    docker_stop
+    ;;
+  'restart')
+    docker_restart
+    ;;
+  'status')
+    docker_status
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart|status}"
 esac
 
 exit 0

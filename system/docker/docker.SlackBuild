@@ -2,18 +2,38 @@
 
 # Slackware build script for docker
 
-# Written by Vincent Batts <vbatts@hashbangbash.com>
+# Copyright 2014-2015 Vincent Batts <vbatts@hashbangbash.com>
+# Copyright 2017 Audrius Kažukauskas <audrius@neutrino.lt>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=docker
-VERSION=${VERSION:-1.8.2}
+VERSION=${VERSION:-17.03.0}
+GITHASH=${GITHASH:-60ccb22}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-GITHASH=${GITHASH:-0a8c2e3}
+SRCVERSION=$VERSION-ce
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+    i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
@@ -24,68 +44,50 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
-fi
-
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/v${VERSION}.tar.gz || tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+rm -rf $PRGNAM-$SRCVERSION
+tar xvf $CWD/$PRGNAM-$SRCVERSION.tar.gz
+cd $PRGNAM-$SRCVERSION
 chown -R root:root .
-# the have symlinks in their testdata that goes outside the context of this build
-find . ! -type l \
+find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o ! -type l \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
-
-unset GOPATH
-
-# back out this commit, which causes btrfs headers to not be found on slackware
-# since btrfs-progs removes the <btrfs/ioctl.h> header.
-# https://github.com/docker/docker/commit/6922f1be08111d889b0585b763b08f92d7a55e05
-patch -p1 -R < $CWD/docker-btrfs.patch
-
-# a couple of patches that missed the 1.8.2 release window, but are essential
-for patch in ${CWD}/patches/*.patch
-do
-	patch -p1 < ${patch}
-done
-
-mkdir -p ${PKG}/usr/share/gocode/src/github.com/docker/docker
-cp -a .  ${PKG}/usr/share/gocode/src/github.com/docker/docker/
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 AUTO_GOPATH=1 \
 DOCKER_GITCOMMIT="$GITHASH" \
-	./hack/make.sh dynbinary
+DOCKER_BUILDTAGS="seccomp" \
+./hack/make.sh dynbinary
 
-# do not strip these binaries. they have a SHA1 baked into them.
-mkdir -p ${PKG}/usr/libexec/docker ${PKG}/usr/bin
-mv bundles/${VERSION}/dynbinary/dockerinit-${VERSION} ${PKG}/usr/libexec/docker/dockerinit
-mv bundles/${VERSION}/dynbinary/docker-${VERSION} ${PKG}/usr/bin/docker
+install -D -m 0755 bundles/$SRCVERSION/dynbinary-client/docker-$SRCVERSION $PKG/usr/bin/docker
+install -D -m 0755 bundles/$SRCVERSION/dynbinary-daemon/dockerd-$SRCVERSION $PKG/usr/bin/dockerd
 
-install -D --mode 0644 $CWD/config/docker.default $PKG/etc/default/docker.new
-install -D --mode 0644 $CWD/config/docker.logrotate $PKG/etc/logrotate.d/docker.new
-install -D --mode 0755 $CWD/config/rc.docker $PKG/etc/rc.d/rc.docker.new
+# Integrate required components.
+ln -s runc $PKG/usr/bin/docker-runc
+ln -s containerd $PKG/usr/bin/docker-containerd
+ln -s containerd-shim $PKG/usr/bin/docker-containerd-shim
+ln -s ctr $PKG/usr/bin/docker-containerd-ctr
+ln -s tini-static $PKG/usr/bin/docker-init
+
+# Completion.
+install -D -m 0644 contrib/completion/bash/docker $PKG/usr/share/bash-completion/completions/docker
+install -D -m 0644 contrib/completion/zsh/_docker $PKG/usr/share/zsh/site-functions/_docker
+install -D -m 0644 contrib/completion/fish/docker.fish $PKG/usr/share/fish/vendor_completions.d/docker.fish
+
+install -D -m 0644 $CWD/config/docker.default $PKG/etc/default/docker.new
+install -D -m 0644 $CWD/config/docker.logrotate $PKG/etc/logrotate.d/docker.new
+install -D -m 0755 $CWD/config/rc.docker $PKG/etc/rc.d/rc.docker.new
+
+# Install udev rules.
+install -D -m 0644 contrib/udev/80-docker.rules $PKG/lib/udev/rules.d/80-docker.rules
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS CONTRIBUTING.md CHANGELOG.md LICENSE README.md NOTICE VERSION \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS CHANGELOG.md LICENSE NOTICE README.md $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
