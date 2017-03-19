@@ -26,3 +26,7 @@ preserve_perms etc/rc.d/rc.docker.new
 config etc/default/docker.new
 config etc/logrotate.d/docker.new
 
+if [ -x /sbin/udevadm ]; then
+  /sbin/udevadm control --reload-rules
+fi
+
