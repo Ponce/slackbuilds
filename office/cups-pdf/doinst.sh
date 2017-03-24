@@ -11,4 +11,3 @@ config() {
 }
 
 config etc/cups/cups-pdf.conf.new
-
