@@ -39,3 +39,5 @@ config etc/dahdi/genconf_parameters.new
 config etc/bash_completion.d/dahdi.new
 config etc/modprobe.d/dahdi.conf.new
 config etc/modprobe.d/dahdi.blacklist.conf.new
+
+chroot . /sbin/depmod -a
