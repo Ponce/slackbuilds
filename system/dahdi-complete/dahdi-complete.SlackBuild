@@ -1,4 +1,4 @@
-#!/bin/sh -e
+#!/bin/sh
 
 # Slackware Package Build Script for DAHDI complete package (http://www.asterisk.org/downloads/dahdi)
 # SlackBuild source at https://github.com/chapmajs/dahdi-complete-slackbuild
@@ -16,11 +16,14 @@ TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+    i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
 fi
+
+KERNEL=${KERNEL:-$(uname -r)}
+PKGKERNEL=$(echo $KERNEL | tr - _)
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
@@ -29,8 +32,8 @@ OUTPUT=${OUTPUT:-/tmp}
 
 ARCHIVE_NAME=dahdi-linux-complete
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
@@ -43,11 +46,12 @@ else
   LIBDIRSUFFIX=""
 fi
 
-# Clean up old builds
+set -e
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
+rm -rf $ARCHIVE_NAME-$VERSION+$VERSION
 tar zxvf $CWD/$ARCHIVE_NAME-$VERSION+$VERSION.tar.gz
 cd $ARCHIVE_NAME-$VERSION+$VERSION
 chown -R root:root .
@@ -57,8 +61,15 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
+sed -i -e 's/ -Werror//' tools/acinclude.m4 tools/xpp/Makefile
+sed -i -e 's/-Werror //' tools/Makefile
+
+# Fix Perl install location (otherwise it installs to /usr/local/share/perl5)
+sed -i -e 's/sitelib/vendorlib/' linux/build_tools/live_dahdi tools/xpp/Makefile
+
 cd linux
 make all
+
 cd ../tools
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -88,20 +99,17 @@ install -D -m 0644 $TMP/$ARCHIVE_NAME-$VERSION+$VERSION/tools/dahdi.init $PKG/et
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-mv $PKG/usr/share/man $PKG/usr/
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 # Clean up zero-length firmware files
-(
-	cd $PKG/lib/firmware
-	find . -size 0 | xargs rm
-)
+find $PKG/lib/firmware -size 0 -delete
+# Remove unused directory
+rm -rf $PKG/usr/lib
 
-# Finish up the package
 mkdir -p $PKG/install
-cat $CWD/doinst.sh > $PKG/install/doinst.sh
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-${VERSION}_$PKGKERNEL-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
