@@ -2,7 +2,9 @@
 
 # Slackware build script for dina-font
 
-# Ryan P.C. McQuen | Everett, WA | ryanpcmcquen@member.fsf.org
+# Originally written by Binh Nguyen <email removed>.
+# Formerly maintained by Ryan P.C. McQuen <email removed>.
+# Now maintained by B. Watson <yalhcru@gmail.com>.
 
 # Copyright 2010  Binh Nguyen <binhvng@gmail.com>
 # All rights reserved.
@@ -24,9 +26,24 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20170326 bkw:
+# - take over maintenance.
+# - get rid of spurious 'mkdir -p $CWD/Dina-PCF'.
+# - extract to $PRGNAM-$VERSION, not Dina-PCF.
+# - install fonts to /usr/share/fonts/misc (not in a subdir of it).
+# - convert fonts to .pcf.gz
+# - stop installing Windows .fon files (X can't use them).
+# - if psftools is installed, create console fonts & install them.
+# - make slack-desc say whether console fonts are included.
+# - update doinst.sh so it works with installpkg --root /somedir.
+# - add font aliases to doinst.sh (to match the console font names).
+# - document the above in README.
+# - install the docs in /usr/doc/$PRGNAM-$VERSION.
+# - BUILD=2
+
 PRGNAM=dina-font
 VERSION=${VERSION:-2.92}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 ARCH=noarch
@@ -36,15 +53,17 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-set -eu
+SRCNAM=Dina
+
+set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf Dina-PCF
-mkdir -p $CWD/Dina-PCF
-unzip $CWD/Dina.zip -d Dina-PCF/
-cd Dina-PCF
+rm -rf $PRGNAM-$VERSION
+mkdir -p $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+unzip $CWD/$SRCNAM.zip
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -53,13 +72,42 @@ find -L . \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 mkdir -p $PKG/usr/share/fonts/misc
-cp -a * $PKG/usr/share/fonts/misc
+
+# compile the fonts. makes them slightly faster to load, plus they take
+# up less disk space. also, all the other fonts in misc/ are .pcf.gz.
+for i in BDF/*.bdf; do
+  bdftopcf $i | \
+    gzip -9 > $PKG/usr/share/fonts/misc/$( basename $i .bdf ).pcf.gz
+done
+
+# create console fonts, if we can. only care about regular, not
+# bold, italic, bold-italic. note that 3rd party fonts don't appear
+# in the 'setconsolefont' menu of fonts, because it uses a hard-coded
+# list.
+if which fnt2psf 2>/dev/null; then
+  echo "=== psftools found, creating console fonts"
+  ANDCONSOLE="and console "
+  mkdir -p $PKG/usr/share/kbd/consolefonts
+  fon2fnts DinaR.fon
+  for i in 6 8 9 10; do
+    fnt2psf --codepage=1252 \
+            Dina_$i.fnt \
+            $PKG/usr/share/kbd/consolefonts/Dina_$i.psf
+  done
+  gzip -9 $PKG/usr/share/kbd/consolefonts/*.psf
+else
+  echo "=== psftools missing, NOT creating console fonts"
+  ONLY=" only"
+fi
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE NEWS README.md $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s,@ANDCONSOLE@,$ANDCONSOLE," \
+    -e "s,@ONLY@,$ONLY," \
+    $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
