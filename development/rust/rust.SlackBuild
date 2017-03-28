@@ -2,7 +2,6 @@
 
 # Slackware build script for rust
 
-# Copyright 2014-2015 Dmitrii Sosedov, United States
 # Copyright 2017 Andrew Clemons, Wellington New Zealand
 # All rights reserved.
 #
@@ -24,36 +23,93 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=rust
-PRGNAM2=cargo
+SRCNAM="$PRGNAM"c
 VERSION=${VERSION:-1.16.0}
-BUILD=${BUILD:-1}
+RSTAGE0_VERSION=${RSTAGE0_VERSION:-1.15.1}
+RSTAGE0_DIR=${RSTAGE0_DIR:-2017-02-09}
+CSTAGE0_VERSION=${CSTAGE0_VERSION:-nightly}
+CSTAGE0_DIR=${CSTAGE0_DIR:-6e0c18cccc8b0c06fba8a8d76486f81a792fb420}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
-ARCH=${ARCH:-$(uname -m)}
-case "$ARCH" in
-  i?86)   ARCH=i686
-          LIBDIRSUFFIX=""
-          ;;
-  x86_64) LIBDIRSUFFIX="64"
-          ;;
-  *)      echo "$ARCH is not supported"
-          exit 1
-          ;;
-esac
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i686) ARCH=i686 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
+if [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  echo "$ARCH is unsupported"
+  exit 1
+fi
+
 set -e
 
 rm -rf $PKG
-mkdir -p $TMP $PKG $PKG/usr $OUTPUT
+mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION-$ARCH-unknown-linux-gnu
-tar xvf $CWD/$PRGNAM-$VERSION-$ARCH-unknown-linux-gnu.tar.gz
-cd $PRGNAM-$VERSION-$ARCH-unknown-linux-gnu
+rm -rf $SRCNAM-$VERSION-src
+tar xvf $CWD/$SRCNAM-$VERSION-src.tar.gz
+cd $SRCNAM-$VERSION-src
+
+# if you already have rust and cargo installed, you can bootstrap from the
+# previous version.
+if [ "$LOCAL_BOOTSTRAP" = "" ] && [ -x /usr/bin/cargo ] && [ -x /usr/bin/rustc ] ; then
+  LOCAL_BOOTSTRAP=yes
+fi
+
+if [ "$LOCAL_BOOTSTRAP" != "yes" ] ; then
+  # rust requires bootstrapping with the previous rust version.
+  # versions are defined in src/stage0.txt
+  mkdir -p build/cache/$RSTAGE0_DIR
+  cp $CWD/$PRGNAM-std-$RSTAGE0_VERSION-$ARCH-unknown-linux-gnu.tar.gz \
+     $CWD/$SRCNAM-$RSTAGE0_VERSION-$ARCH-unknown-linux-gnu.tar.gz \
+     build/cache/$RSTAGE0_DIR
+
+  mkdir -p build/cache/$CSTAGE0_DIR
+  cp $CWD/cargo-$CSTAGE0_VERSION-$ARCH-unknown-linux-gnu.tar.gz build/cache/$CSTAGE0_DIR
+fi
+
+# src/bootstrap/config.toml.example
+cat <<EOF > config.toml
+[build]
+vendor = true
+extended = false
+submodules = false
+
+[install]
+prefix = "$PKG/usr"
+libdir = "lib$LIBDIRSUFFIX"
+mandir = "man"
+
+[rust]
+channel = "stable"
+rpath = false
+codegen-tests = false
+
+[target.$ARCH-unknown-linux-gnu]
+llvm-config = "/usr/bin/llvm-config"
+# build fails using the system jemalloc
+# jemalloc = "/usr/lib$LIBDIRSUFFIX/libjemalloc_pic.a"
+EOF
+
+if [ "$LOCAL_BOOTSTRAP" = "yes" ] ; then
+  sed -i "s|^\(vendor = true\)$|\1\nrustc = \"/usr/bin/rustc\"\ncargo = \"/usr/bin/cargo\"|" config.toml
+fi
+
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -61,33 +117,44 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-chmod 755 ${PRGNAM}c/{bin,lib,share}
-chmod 755 ${PRGNAM2}/{bin,etc,lib,share}
+export RUSTFLAGS="$RUSTFLAGS -C link-args=-lffi"
+export CC=clang
+export CXX=clang++
 
-mv ${PRGNAM}c/bin $PKG/usr/
-mv ${PRGNAM}c/lib $PKG/usr/lib${LIBDIRSUFFIX}
-mv ${PRGNAM}c/share $PKG/usr/
-mv ${PRGNAM2}/bin/* $PKG/usr/bin/
-mv ${PRGNAM2}/etc $PKG/usr/
-mv ${PRGNAM2}/lib/* $PKG/usr/lib${LIBDIRSUFFIX}
-cp -rf ${PRGNAM2}/share/* $PKG/usr/share
-mv $PRGNAM-std-$ARCH-unknown-linux-gnu/lib/rustlib/$ARCH-unknown-linux-gnu $PKG/usr/lib$LIBDIRSUFFIX/rustlib/
-find -L $PKG -type d -exec chmod 755 {} \;
-chmod 755 $PKG/usr/bin/*
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+python x.py build --verbose
+
+python x.py dist --verbose
+
+for dist in rustc rust-std rust-docs ; do
+  mkdir unpack
+  (
+    cd unpack
+
+    tar xvf ../build/dist/$dist-$VERSION-$ARCH-unknown-linux-gnu.tar.gz
+
+    cd $dist-$VERSION-$ARCH-unknown-linux-gnu
+    ./install.sh --prefix="$PKG/usr" --mandir="$PKG/usr/man"
+  )
+  rm -rf unpack
+done
+
+if [ "$ARCH" = "x86_64" ]; then
+  mv $PKG/usr/lib $PKG/usr/lib$LIBDIRSUFFIX
+fi
+
+mv $PKG/usr/share/doc $PKG/usr/
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-mv $PKG/usr/share/man $PKG/usr/
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-mv $PRGNAM-docs/share/* $PKG/usr/doc/$PRGNAM-$VERSION/
+cp -a *.md COPYRIGHT LICENSE-APACHE LICENSE-MIT $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-rm -rf $PKG/usr/doc/$PRGNAM-$VERSION/doc/$PRGNAM/html
-cp -rf $PKG/usr/share/doc $PKG/usr/
-rm -rf $PKG/usr/share/doc $PKG/usr/doc/$PRGNAM-$VERSION/doc
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
