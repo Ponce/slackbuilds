@@ -1,0 +1,97 @@
+#!/bin/sh
+
+# Slackware build script for gohu-font
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20170328 bkw: anyone looking to convert BDF fonts for use with the
+# console might be interested in this.
+
+PRGNAM=gohu-font
+VERSION=${VERSION:-2.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+ARCH=noarch
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+SRCNAM=${PRGNAM/-/}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# bdftopcf is in a full install of core Slackware.
+mkdir -p $PKG/usr/share/fonts/misc
+for i in *.bdf; do
+  bdftopcf $i | \
+    gzip -9 > $PKG/usr/share/fonts/misc/$( basename $i .bdf ).pcf.gz
+done
+
+# I *really* want to use this font on the console. It's purdy.
+# bdf2psf is a PITA to use. This works, and results in usable console
+# fonts that work OK in the framebuffer console with either UTF-8 or
+# Latin-1 encoding.
+if which bdf2psf 2>/dev/null; then
+  echo "=== found bdf2psf, creating console fonts"
+
+  PSFDIR=$PKG/usr/share/kbd/consolefonts
+  mkdir -p $PSFDIR
+
+  SETDIR=/usr/share/bdf2psf
+
+  # Admins, please don't "fix" the indentation of this next stanza, or
+  # you'll add embedded spaces, which will break everything.
+  SETS="\
+$SETDIR/ascii.set+\
+$SETDIR/linux.set+\
+$SETDIR/fontsets/Lat2.256+\
+$SETDIR/fontsets/Uni1.512+\
+$SETDIR/useful.set\
+"
+
+# Trying to squeeze these in actually hurts more than it helps IMO.
+#$SETDIR/fontsets/Lat7.256+\
+#$SETDIR/fontsets/Lat15.256+\
+
+  # $BDF.log will be full of "no glyph defined" warnings.
+  for BDF in *.bdf; do
+    bdf2psf --fb $BDF $SETDIR/standard.equivalents $SETS 512 \
+      $PSFDIR/$( basename $BDF .bdf ).psfu \
+		2>$BDF.log
+  done
+
+  gzip -9 $PSFDIR/*.psfu
+  FONTTYPES="X and console fonts"
+else
+  echo "=== no bdf2psf, skipping console fonts"
+  FONTTYPES="X fonts only"
+fi
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a COPYING-LICENSE README.md $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+sed "s,@FONTTYPES@,$FONTTYPES," $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
