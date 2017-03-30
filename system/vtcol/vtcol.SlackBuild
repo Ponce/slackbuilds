@@ -24,9 +24,7 @@
 
 PRGNAM=vtcol
 VERSION=${VERSION:-0.42.2}
-VERSION_GETOPTS=${VERSION_GETOPTS:-0.2.14}
-VERSION_LIBC=${VERSION_LIBC:-0.2.19}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -70,30 +68,38 @@ replace-with = 'vendored-sources'
 directory = '$(pwd)/vendor'
 EOF
 
-mkdir vendor
-(
-  cd vendor
-  tar -xf $CWD/getopts-$VERSION_GETOPTS.crate
-  tar -xf $CWD/libc-$VERSION_LIBC.crate
+if [ -e $CWD/$PRGNAM-$VERSION-vendor.tar.gz ] ; then
+  tar xvf $CWD/$PRGNAM-$VERSION-vendor.tar.gz
+else
+  # deps and versions come from Cargo.lock
+  # cargo vender can be used to generate the checksums
+  mkdir vendor
+  (
+    cd vendor
 
-  mv getopts-$VERSION_GETOPTS getopts
-  mv libc-$VERSION_LIBC libc
+    for dependency in getopts=0.2.14 \
+                      libc=0.2.19 ; do
+      dep="$(echo "$dependency" | cut -d= -f1)"
+      ver="$(echo "$dependency" | cut -d= -f2)"
 
-  touch getopts/.cargo-ok
-  touch libc/.cargo-ok
+      tar xvf $CWD/$dep-$ver.crate
 
-  zcat $CWD/getopts-cargo-checksum.json.gz > getopts/.cargo-checksum.json
-  zcat $CWD/libc-cargo-checksum.json.gz > libc/.cargo-checksum.json
-)
+      mv $dep-$ver $dep
+
+      touch $dep/.cargo-ok
+      zcat $CWD/checksums/$dep-cargo-checksum.json.gz > $dep/.cargo-checksum.json
+    done
+  )
+fi
 
 cargo build --release
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/usr/bin/
 
 install -m 755 target/release/vtcol $PKG/usr/bin
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a COPYING doc $PKG/usr/doc/$PRGNAM-$VERSION
