@@ -2,14 +2,27 @@
 
 # Slackware build script for fbterm
 
-# Written by vvoody <ydoovv@gmail.com>
+# Originally written by vvoody <email removed>
+# Now maintained by B. Watson <yalhcru@gmail.com>
+
+# Original vvoody version of this script had no license. Modified version
+# is licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/
+# for details.
+
+# 20170403 bkw:
+# - take over maintenance
+# - upgrade for v1.8
+# - use new github homepage
+# - stop installing empty NEWS
+# - fix and simplify script
+# - write compiled terminfo stuff to $PKG, not /usr...
+# - add checkfb.c, from Trolltech by way of Slint
+# - add capability stuff
 
 PRGNAM=fbterm
-VERSION=${VERSION:-1.7}
+VERSION=${VERSION:-1.8}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
-
-TARBALL_VERSION=1.7.0
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -43,8 +56,8 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $TOPDIR
-tar xvf $CWD/$PRGNAM-$TARBALL_VERSION.tar.gz
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
@@ -52,6 +65,12 @@ find -L . \
   -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# without this, /usr gets spammed by 'tic', and the terminfo stuff
+# doesn't become part of the package.
+TERMINFO=$PKG/usr/share/terminfo
+export TERMINFO
+mkdir -p $TERMINFO
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -62,26 +81,34 @@ CXXFLAGS="$SLKCFLAGS" \
     --localstatedir=/var \
     --mandir=/usr/man \
     --infodir=/usr/info \
-    --build=$ARCH-slackware-linux \
-    || true
+    --build=$ARCH-slackware-linux
 
 make
 make install DESTDIR=$PKG
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+strip $PKG/usr/bin/$PRGNAM
+gzip -9 $PKG/usr/man/man1/$PRGNAM.1
 
-( cd $PKG/usr/man
-  find . -type f -exec gzip -9 {} \;
-  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
-)
-
+# don't install NEWS, it's empty.
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a README ChangeLog AUTHORS NEWS COPYING $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README ChangeLog AUTHORS COPYING $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# previous maintainer of this build, Didier Spaier, said he intended
+# to bundle this with fbterm, for use in Slint. it looks like a useful
+# little utility.
+gcc $SLKCFLAGS -Wl,-s -o $PKG/usr/bin/checkfb $CWD/checkfb.c
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+
+# Only add capability stuff if not disabled:
+if [ "${SETCAP:-yes}" = "yes" ]; then
+  cat $CWD/setcap.sh >> $PKG/install/doinst.sh
+  # Only allow execution by video group
+  chown root:video $PKG/usr/bin/$PRGNAM
+  chmod 0750 $PKG/usr/bin/$PRGNAM
+fi
 
 cd $PKG
 /sbin/makepkg -p -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
