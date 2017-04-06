@@ -1,0 +1,141 @@
+From 66bdbbc41a45d2bf59ddb4ff26c52c1cc546f720 Mon Sep 17 00:00:00 2001
+From: Thomas Sanders <thomas.sanders@citrix.com>
+Date: Thu, 23 Mar 2017 14:25:16 +0000
+Subject: [PATCH 09/15] oxenstored: discard old commit-history on txn end
+
+The history of commits is to be used for working out which historical
+commit(s) (including atomic writes) caused conflicts with a
+currently-failing commit of a transaction. Any commit that was made
+before the current transaction started cannot be relevant. Therefore
+we never need to keep history from before the start of the
+longest-running transaction that is open at any given time: whenever a
+transaction ends (with or without a commit) then if it was the
+longest-running open transaction we can delete history up until start
+of the the next-longest-running open transaction.
+
+Some transactions might stay open for a very long time, so if any
+transaction exceeds conflict_max_history_seconds then we remove it
+from consideration in this context, and will not guarantee to keep
+remembering about historical commits made during such a transaction.
+
+We implement this by keeping a list of all open transactions that have
+not been open too long. When a transaction ends, we remove it from the
+list, along with any that have been open longer than the maximum; then
+we delete any history from before the start of the longest-running
+transaction remaining in the list.
+
+Reported-by: Juergen Gross <jgross@suse.com>
+Signed-off-by: Thomas Sanders <thomas.sanders@citrix.com>
+Reviewed-by: Jonathan Davies <jonathan.davies@citrix.com>
+Reviewed-by: Christian Lindig <christian.lindig@citrix.com>
+---
+ tools/ocaml/xenstored/history.ml     | 17 +++++++++++++++++
+ tools/ocaml/xenstored/process.ml     |  4 ++--
+ tools/ocaml/xenstored/transaction.ml | 29 +++++++++++++++++++++++++----
+ 3 files changed, 44 insertions(+), 6 deletions(-)
+
+diff --git a/tools/ocaml/xenstored/history.ml b/tools/ocaml/xenstored/history.ml
+index e4b4d70..6f7a282 100644
+--- a/tools/ocaml/xenstored/history.ml
++++ b/tools/ocaml/xenstored/history.ml
+@@ -36,6 +36,23 @@ let mark_symbols () =
+ 		)
+ 		!history
+ 
++(* Keep only enough commit-history to protect the running transactions that we are still tracking *)
++(* There is scope for optimisation here, replacing List.filter with something more efficient,
++ * probably on a different list-like structure. *)
++let trim () =
++	history := match Transaction.oldest_short_running_transaction () with
++	| None -> [] (* We have no open transaction, so no history is needed *)
++	| Some (_, txn) -> (
++		(* keep records with finish_count recent enough to be relevant *)
++		List.filter (fun r -> r.finish_count > txn.Transaction.start_count) !history
++	)
++
++let end_transaction txn con tid commit =
++	let success = Connection.end_transaction con tid commit in
++	Transaction.end_transaction txn;
++	trim ();
++	success
++
+ let push (x: history_record) =
+ 	let dom = x.con.Connection.dom in
+ 	match dom with
+diff --git a/tools/ocaml/xenstored/process.ml b/tools/ocaml/xenstored/process.ml
+index b435a4a..6f4d118 100644
+--- a/tools/ocaml/xenstored/process.ml
++++ b/tools/ocaml/xenstored/process.ml
+@@ -313,7 +313,7 @@ let transaction_replay c t doms cons =
+ 		false
+ 	| Transaction.Full(id, oldstore, cstore) ->
+ 		let tid = Connection.start_transaction c cstore in
+-		let new_t = Transaction.make tid cstore in
++		let new_t = Transaction.make ~internal:true tid cstore in
+ 		let con = sprintf "r(%d):%s" id (Connection.get_domstr c) in
+ 		let perform_exn (request, response) =
+ 			write_access_log ~ty:request.Packet.ty ~tid ~con ~data:request.Packet.data;
+@@ -370,7 +370,7 @@ let do_transaction_end con t domains cons data =
+ 		in
+ 	let success =
+ 		let commit = if commit then Some (fun con trans -> transaction_replay con trans domains cons) else None in
+-		Connection.end_transaction con (Transaction.get_id t) commit in
++		History.end_transaction t con (Transaction.get_id t) commit in
+ 	if not success then
+ 		raise Transaction_again;
+ 	if commit then begin
+diff --git a/tools/ocaml/xenstored/transaction.ml b/tools/ocaml/xenstored/transaction.ml
+index b1791b3..edd1178 100644
+--- a/tools/ocaml/xenstored/transaction.ml
++++ b/tools/ocaml/xenstored/transaction.ml
+@@ -87,12 +87,29 @@ type t = {
+ 	mutable read_lowpath: Store.Path.t option;
+ 	mutable write_lowpath: Store.Path.t option;
+ }
++let get_id t = match t.ty with No -> none | Full (id, _, _) -> id
+ 
+ let counter = ref 0L
+ 
+-let make id store =
++(* Scope for optimisation: different data-structure and functions to search/filter it *)
++let short_running_txns = ref []
++
++let oldest_short_running_transaction () =
++	let rec last = function
++		| [] -> None
++		| [x] -> Some x
++		| x :: xs -> last xs
++	in last !short_running_txns
++
++let end_transaction txn =
++	let cutoff = Unix.gettimeofday () -. !Define.conflict_max_history_seconds in
++	short_running_txns := List.filter
++		(function (start_time, tx) -> start_time >= cutoff && tx != txn)
++		!short_running_txns
++
++let make ?(internal=false) id store =
+ 	let ty = if id = none then No else Full(id, Store.copy store, store) in
+-	{
++	let txn = {
+ 		ty = ty;
+ 		start_count = !counter;
+ 		store = if id = none then store else Store.copy store;
+@@ -101,9 +118,13 @@ let make id store =
+ 		operations = [];
+ 		read_lowpath = None;
+ 		write_lowpath = None;
+-	}
++	} in
++	if id <> none && not internal then (
++		let now = Unix.gettimeofday () in
++		short_running_txns := (now, txn) :: !short_running_txns
++	);
++	txn
+ 
+-let get_id t = match t.ty with No -> none | Full (id, _, _) -> id
+ let get_store t = t.store
+ let get_paths t = t.paths
+ 
+-- 
+2.1.4
+

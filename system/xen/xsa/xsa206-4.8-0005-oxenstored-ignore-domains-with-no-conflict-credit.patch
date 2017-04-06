@@ -1,0 +1,219 @@
+From e0f02f8fb5a5130a37bd7efdc80d7f0dd46db41e Mon Sep 17 00:00:00 2001
+From: Thomas Sanders <thomas.sanders@citrix.com>
+Date: Tue, 14 Mar 2017 12:15:52 +0000
+Subject: [PATCH 05/15] oxenstored: ignore domains with no conflict-credit
+
+When processing connections, skip those from domains with no remaining
+conflict-credit.
+
+Also, issue a point of conflict-credit at regular intervals, the
+period being set by the configuration option "conflict-max-history-
+seconds".  When issuing conflict-credit, we give a point either to
+every domain at once (one each) or only to the single domain at the
+front of the queue, depending on the configuration option
+"conflict-rate-limit-is-aggregate".
+
+Reported-by: Juergen Gross <jgross@suse.com>
+Signed-off-by: Thomas Sanders <thomas.sanders@citrix.com>
+Reviewed-by: Jonathan Davies <jonathan.davies@citrix.com>
+Reviewed-by: Christian Lindig <christian.lindig@citrix.com>
+---
+ tools/ocaml/xenstored/connections.ml     | 14 ++++---
+ tools/ocaml/xenstored/define.ml          |  1 +
+ tools/ocaml/xenstored/domains.ml         |  4 +-
+ tools/ocaml/xenstored/oxenstored.conf.in |  2 +-
+ tools/ocaml/xenstored/xenstored.ml       | 65 +++++++++++++++++++++++---------
+ 5 files changed, 60 insertions(+), 26 deletions(-)
+
+diff --git a/tools/ocaml/xenstored/connections.ml b/tools/ocaml/xenstored/connections.ml
+index f9bc225..ae76928 100644
+--- a/tools/ocaml/xenstored/connections.ml
++++ b/tools/ocaml/xenstored/connections.ml
+@@ -44,12 +44,14 @@ let add_domain cons dom =
+ 	| Some p -> Hashtbl.add cons.ports p con;
+ 	| None -> ()
+ 
+-let select cons =
+-	Hashtbl.fold
+-		(fun _ con (ins, outs) ->
+-		 let fd = Connection.get_fd con in
+-		 (fd :: ins,  if Connection.has_output con then fd :: outs else outs))
+-		cons.anonymous ([], [])
++let select ?(only_if = (fun _ -> true)) cons =
++	Hashtbl.fold (fun _ con (ins, outs) ->
++		if (only_if con) then (
++			let fd = Connection.get_fd con in
++			(fd :: ins,  if Connection.has_output con then fd :: outs else outs)
++		) else (ins, outs)
++	)
++	cons.anonymous ([], [])
+ 
+ let find cons =
+ 	Hashtbl.find cons.anonymous
+diff --git a/tools/ocaml/xenstored/define.ml b/tools/ocaml/xenstored/define.ml
+index 816b493..5a604d1 100644
+--- a/tools/ocaml/xenstored/define.ml
++++ b/tools/ocaml/xenstored/define.ml
+@@ -30,6 +30,7 @@ let maxtransaction = ref (20)
+ let maxrequests = ref (-1)   (* maximum requests per transaction *)
+ 
+ let conflict_burst_limit = ref 5.0
++let conflict_max_history_seconds = ref 0.05
+ let conflict_rate_limit_is_aggregate = ref true
+ 
+ let domid_self = 0x7FF0
+diff --git a/tools/ocaml/xenstored/domains.ml b/tools/ocaml/xenstored/domains.ml
+index 3d29cc8..99f68c7 100644
+--- a/tools/ocaml/xenstored/domains.ml
++++ b/tools/ocaml/xenstored/domains.ml
+@@ -39,12 +39,12 @@ type domains = {
+ 	mutable n_paused: int;
+ }
+ 
+-let init eventchn = {
++let init eventchn on_first_conflict_pause = {
+ 	eventchn = eventchn;
+ 	table = Hashtbl.create 10;
+ 	doms_conflict_paused = Queue.create ();
+ 	doms_with_conflict_penalty = Queue.create ();
+-	on_first_conflict_pause = (fun () -> ()); (* Dummy value for now, pending subsequent commit. *)
++	on_first_conflict_pause = on_first_conflict_pause;
+ 	n_paused = 0;
+ }
+ let del doms id = Hashtbl.remove doms.table id
+diff --git a/tools/ocaml/xenstored/oxenstored.conf.in b/tools/ocaml/xenstored/oxenstored.conf.in
+index edd4335..536611e 100644
+--- a/tools/ocaml/xenstored/oxenstored.conf.in
++++ b/tools/ocaml/xenstored/oxenstored.conf.in
+@@ -22,7 +22,7 @@ conflict-burst-limit = 5.0
+ # The conflict-credit is replenished over time:
+ # one point is issued after each conflict-max-history-seconds, so this
+ # is the minimum pause-time during which a domain will be ignored.
+-# conflict-max-history-seconds = 0.05
++conflict-max-history-seconds = 0.05
+ 
+ # If the conflict-rate-limit-is-aggregate flag is true then after each
+ # tick one point of conflict-credit is given to just one domain: the
+diff --git a/tools/ocaml/xenstored/xenstored.ml b/tools/ocaml/xenstored/xenstored.ml
+index 20473d5..f562f59 100644
+--- a/tools/ocaml/xenstored/xenstored.ml
++++ b/tools/ocaml/xenstored/xenstored.ml
+@@ -53,14 +53,16 @@ let process_connection_fds store cons domains rset wset =
+ 
+ let process_domains store cons domains =
+ 	let do_io_domain domain =
+-		if not (Domain.is_bad_domain domain) then
+-			let io_credit = Domain.get_io_credit domain in
+-			if io_credit > 0 then (
+-				let con = Connections.find_domain cons (Domain.get_id domain) in
+-				Process.do_input store cons domains con;
+-				Process.do_output store cons domains con;
+-				Domain.decr_io_credit domain;
+-			) in
++		if Domain.is_bad_domain domain
++		|| Domain.get_io_credit domain <= 0
++		|| Domain.is_paused_for_conflict domain
++		then () (* nothing to do *)
++		else (
++			let con = Connections.find_domain cons (Domain.get_id domain) in
++			Process.do_input store cons domains con;
++			Process.do_output store cons domains con;
++			Domain.decr_io_credit domain
++		) in
+ 	Domains.iter domains do_io_domain
+ 
+ let sigusr1_handler store =
+@@ -90,6 +92,7 @@ let parse_config filename =
+ 	let options = [
+ 		("merge-activate", Config.Set_bool Transaction.do_coalesce);
+ 		("conflict-burst-limit", Config.Set_float Define.conflict_burst_limit);
++		("conflict-max-history-seconds", Config.Set_float Define.conflict_max_history_seconds);
+ 		("conflict-rate-limit-is-aggregate", Config.Set_bool Define.conflict_rate_limit_is_aggregate);
+ 		("perms-activate", Config.Set_bool Perms.activate);
+ 		("quota-activate", Config.Set_bool Quota.activate);
+@@ -262,7 +265,22 @@ let _ =
+ 
+ 	let store = Store.create () in
+ 	let eventchn = Event.init () in
+-	let domains = Domains.init eventchn in
++	let next_frequent_ops = ref 0. in
++	let advance_next_frequent_ops () =
++		next_frequent_ops := (Unix.gettimeofday () +. !Define.conflict_max_history_seconds)
++	in
++	let delay_next_frequent_ops_by duration =
++		next_frequent_ops := !next_frequent_ops +. duration
++	in
++	let domains = Domains.init eventchn advance_next_frequent_ops in
++
++	(* For things that need to be done periodically but more often
++	 * than the periodic_ops function *)
++	let frequent_ops () =
++		if Unix.gettimeofday () > !next_frequent_ops then (
++			Domains.incr_conflict_credit domains;
++			advance_next_frequent_ops ()
++		) in
+ 	let cons = Connections.create () in
+ 
+ 	let quit = ref false in
+@@ -394,23 +412,34 @@ let _ =
+ 			     gc.Gc.heap_words gc.Gc.heap_chunks
+ 			     gc.Gc.live_words gc.Gc.live_blocks
+ 			     gc.Gc.free_words gc.Gc.free_blocks
+-		)
+-		in
++		);
++		let elapsed = Unix.gettimeofday () -. now in
++		delay_next_frequent_ops_by elapsed
++	in
+ 
+-		let period_ops_interval = 15. in
+-		let period_start = ref 0. in
++	let period_ops_interval = 15. in
++	let period_start = ref 0. in
+ 
+ 	let main_loop () =
+-
++		let is_peaceful c =
++			match Connection.get_domain c with
++			| None -> true (* Treat socket-connections as exempt, and free to conflict. *)
++			| Some dom -> not (Domain.is_paused_for_conflict dom)
++		in
++		frequent_ops ();
+ 		let mw = Connections.has_more_work cons in
++		let peaceful_mw = List.filter is_peaceful mw in
+ 		List.iter
+ 			(fun c ->
+ 			 match Connection.get_domain c with
+ 			 | None -> () | Some d -> Domain.incr_io_credit d)
+-			mw;
++			peaceful_mw;
++		let start_time = Unix.gettimeofday () in
+ 		let timeout =
+-			if List.length mw > 0 then 0. else period_ops_interval in
+-		let inset, outset = Connections.select cons in
++			let until_next_activity = min (max 0. (!next_frequent_ops -. start_time)) period_ops_interval in
++			if peaceful_mw <> [] then 0. else until_next_activity
++		in
++		let inset, outset = Connections.select ~only_if:is_peaceful cons in
+ 		let rset, wset, _ =
+ 		try
+ 			Select.select (spec_fds @ inset) outset [] timeout
+@@ -420,6 +449,7 @@ let _ =
+ 			List.partition (fun fd -> List.mem fd spec_fds) rset in
+ 		if List.length sfds > 0 then
+ 			process_special_fds sfds;
++
+ 		if List.length cfds > 0 || List.length wset > 0 then
+ 			process_connection_fds store cons domains cfds wset;
+ 		if timeout <> 0. then (
+@@ -427,6 +457,7 @@ let _ =
+ 			if now > !period_start +. period_ops_interval then
+ 				(period_start := now; periodic_ops now)
+ 		);
++
+ 		process_domains store cons domains
+ 		in
+ 
+-- 
+2.1.4
+
