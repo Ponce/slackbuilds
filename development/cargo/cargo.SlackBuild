@@ -26,7 +26,7 @@ PRGNAM=cargo
 VERSION=${VERSION:-0.17.0}
 VERSION_BOOTSTRAP=${VERSION_BOOTSTRAP:-0.16.0}
 VERSION_RUST_INSTALLER=${VERSION_RUST_INSTALLER:-4f994850808a572e2cc8d43f968893c8e942e9bf}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -87,27 +87,6 @@ else
   local_cargo="$(pwd)/cargo-nightly-$ARCH-unknown-linux-gnu/cargo/bin/cargo"
 fi
 
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
-
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --rustc=/usr/bin/rustc \
-  --rustdoc=/usr/bin/rustdoc \
-  --local-rust-root=/usr \
-  --cargo="$local_cargo"
-
 # build offline
 # configuration tells cargo to use the configured directory
 # for dependencies intead of downloading from crates.io.
@@ -125,7 +104,6 @@ if [ -e $CWD/$PRGNAM-$VERSION-vendor.tar.gz ] ; then
   tar xvf $CWD/$PRGNAM-$VERSION-vendor.tar.gz
 else
   # deps and versions come from Cargo.lock
-  # cargo vender can be used to generate the checksums
   mkdir vendor
   (
     cd vendor
@@ -200,19 +178,54 @@ else
                       winapi=0.2.8 \
                       winapi-build=0.1.1 \
                       ws2_32-sys=0.2.1 ; do
-
       dep="$(echo "$dependency" | cut -d= -f1)"
       ver="$(echo "$dependency" | cut -d= -f2)"
 
       tar xvf $CWD/$dep-$ver.crate
 
-      mv $dep-$ver $dep
+      touch $dep-$ver/.cargo-ok
 
-      touch $dep/.cargo-ok
-      zcat $CWD/checksums/$dep-cargo-checksum.json.gz > $dep/.cargo-checksum.json
+      # generate checksum
+      {
+        printf "{\n"
+        printf '    "files": {\n'
+
+        (
+          cd $dep-$ver
+          find . -type f -print0 | xargs -0 sha256sum | sed -n '/\.cargo-checksum\.json/!p' | sed 's/\.\///;s/^\([^ ]*\)[[:space:]][[:space:]]*\(.*\)$/"\2":"\1",/'
+        ) | sed '$ s/,$//'
+
+        printf "    },\n"
+        printf '    "package": "'
+
+        sha256sum "$CWD/$dep-$ver.crate" | cut -f1 -d' ' | sed 's/$/"/'
+
+        printf "}\n"
+      } | python -c "import sys, json; data = sys.stdin.read(); print json.dumps(json.loads(data), sort_keys=True, indent=4, separators=(',', ' : '))" > $dep-$ver/.cargo-checksum.json
     done
   )
 fi
+
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --rustc=/usr/bin/rustc \
+  --rustdoc=/usr/bin/rustdoc \
+  --local-rust-root=/usr \
+  --cargo="$local_cargo"
 
 make
 make install DESTDIR=$PKG
