@@ -11,12 +11,16 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-# Keep same perms on rc.vnstat.new:
-if [ -e etc/rc.d/rc.vnstat ]; then
-  cp -a etc/rc.d/rc.vnstat etc/rc.d/rc.vnstat.new.incoming
-  cat etc/rc.d/rc.vnstat.new > etc/rc.d/rc.vnstat.new.incoming
-  mv etc/rc.d/rc.vnstat.new.incoming etc/rc.d/rc.vnstat.new
-fi
+preserve_perms() {
+  NEW="$1"
+  OLD="$(dirname $NEW)/$(basename $NEW .new)"
+  if [ -e $OLD ]; then
+    cp -a $OLD ${NEW}.incoming
+    cat $NEW > ${NEW}.incoming
+    mv ${NEW}.incoming $NEW
+  fi
+  config $NEW
+}
 
-config etc/rc.d/rc.vnstat.new
+preserve_perms etc/rc.d/rc.vnstat.new
 config etc/vnstat.conf.new
