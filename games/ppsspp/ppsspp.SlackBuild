@@ -23,10 +23,10 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=ppsspp
-VERSION=${VERSION:-2016.10.26_cc37528}
-SRCNAM=$(echo $PRGNAM | tr [a-z] [A-Z])
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.4}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+QT=${QT:-OFF}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -61,8 +61,19 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
+
+# The submodules are in a separate archive. This is equivalent to
+# git submodule update --init --recursive
+tar xvf $CWD/${PRGNAM}_submodules-${VERSION}.tar.xz
+mv ${PRGNAM}_submodules-${VERSION}/ext/* ext
+rmdir ${PRGNAM}_submodules-${VERSION}/ext
+mv ${PRGNAM}_submodules-${VERSION}/assets/* assets
+rmdir ${PRGNAM}_submodules-${VERSION}/assets
+mv ${PRGNAM}_submodules-${VERSION}/* .
+rmdir ${PRGNAM}_submodules-${VERSION}
+
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -70,48 +81,53 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# cmake 3.6 is required.
-# https://github.com/hrydgard/ppsspp/issues/9087
-sed -i 's/VERSION 3.6/VERSION 2.8.12/' CMakeLists.txt
+# This does build with Slackware 14.2's CMake.
+sed -i 's/VERSION 3.6/VERSION 3.5.2/' CMakeLists.txt
+
+# Don't force explicit ccache invocation.
+sed -i -e '/include(ccache)/d' CMakeLists.txt
 
 mkdir -p build
 cd build
+cmake \
+  -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+  -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+  -DCMAKE_INSTALL_PREFIX=/usr \
+  -DCMAKE_SKIP_RPATH=TRUE \
+  -Wno-dev \
+  -DCMAKE_BUILD_TYPE=Release ..
+make
+cd ..
+
+if [ "$QT" = "ON" ]; then
+  mkdir build_qt
+  cd build_qt
   cmake \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_SKIP_RPATH=TRUE \
     -Wno-dev \
+    -DUSING_QT_UI=ON \
     -DCMAKE_BUILD_TYPE=Release ..
   make
-
-  # No install target
-  install -Dm0755 ${SRCNAM}SDL $PKG/usr/games/$PRGNAM
-  mkdir -p $PKG/usr/share/$PRGNAM
-  cp -a assets $PKG/usr/share/$PRGNAM
-cd ..
+  cd ..
+fi
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-# Install hicolor
-for dir in icons/hicolor/* ; do
-  if [ -f $dir/apps/$PRGNAM.png ]; then
-    install -Dm0644 $dir/apps/$PRGNAM.png $PKG/usr/share/$dir/apps/$PRGNAM.png
-  fi
-done
-install -Dm0644 icons/icon-512.svg $PKG/usr/share/pixmaps/$PRGNAM.svg
+mkdir -p $PKG/usr/{games,share/{applications,icons/hicolor,pixmaps,ppsspp}}
+cp build/PPSSPPSDL $PKG/usr/games/ppsspp
+cp $CWD/ppsspp.desktop $PKG/usr/share/applications
+cp -r assets $PKG/usr/share/ppsspp
+cp -r icons/hicolor/* $PKG/usr/share/icons/hicolor
+cp icons/icon-512.svg $PKG/usr/share/pixmaps/ppsspp.svg
 
-# Write a desktop file
-mkdir -p $PKG/usr/share/applications
-cat > $PKG/usr/share/applications/$PRGNAM.desktop <<EOF
-[Desktop Entry]
-Name=$SRCNAM
-Exec=$PRGNAM
-Icon=$PRGNAM
-Type=Application
-Comment=$SRCNAM (fast and portable PSP emulator)
-Categories=Game
-EOF
+if [ "$QT" = "ON" ]; then
+  cp build_qt/PPSSPPQt $PKG/usr/games/ppsspp-qt
+  cp $CWD/ppsspp-qt.desktop $PKG/usr/share/applications
+fi
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a LICENSE.TXT README.md korean.txt chinese.txt $PKG/usr/doc/$PRGNAM-$VERSION
