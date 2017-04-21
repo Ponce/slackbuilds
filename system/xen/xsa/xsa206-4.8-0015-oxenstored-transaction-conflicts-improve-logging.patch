@@ -1,0 +1,153 @@
+From d7d0c021115d40177035a0626ed47681b034b584 Mon Sep 17 00:00:00 2001
+From: Thomas Sanders <thomas.sanders@citrix.com>
+Date: Mon, 27 Mar 2017 14:36:34 +0100
+Subject: [PATCH 15/15] oxenstored transaction conflicts: improve logging
+
+For information related to transaction conflicts, potentially frequent
+logging at "info" priority has been changed to "debug" priority, and
+once per two minutes there is an "info" priority summary.
+
+Additional detailed logging has been added at "debug" priority.
+
+Reported-by: Juergen Gross <jgross@suse.com>
+Signed-off-by: Thomas Sanders <thomas.sanders@citrix.com>
+---
+ tools/ocaml/xenstored/domain.ml      | 8 ++++++++
+ tools/ocaml/xenstored/domains.ml     | 5 +++++
+ tools/ocaml/xenstored/process.ml     | 6 +++++-
+ tools/ocaml/xenstored/transaction.ml | 5 +++++
+ tools/ocaml/xenstored/xenstored.ml   | 6 ++++++
+ 5 files changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/tools/ocaml/xenstored/domain.ml b/tools/ocaml/xenstored/domain.ml
+index e677aa3..4515650 100644
+--- a/tools/ocaml/xenstored/domain.ml
++++ b/tools/ocaml/xenstored/domain.ml
+@@ -34,6 +34,7 @@ type t =
+ 	mutable conflict_credit: float; (* Must be positive to perform writes; a commit
+ 	                                   that later causes conflict with another
+ 	                                   domain's transaction costs credit. *)
++	mutable caused_conflicts: int64;
+ }
+ 
+ let is_dom0 d = d.id = 0
+@@ -93,4 +94,11 @@ let make id mfn remote_port interface eventchn = {
+ 	bad_client = false;
+ 	io_credit = 0;
+ 	conflict_credit = !Define.conflict_burst_limit;
++	caused_conflicts = 0L;
+ }
++
++let log_and_reset_conflict_stats logfn dom =
++	if dom.caused_conflicts > 0L then (
++		logfn dom.id dom.caused_conflicts;
++		dom.caused_conflicts <- 0L
++	)
+diff --git a/tools/ocaml/xenstored/domains.ml b/tools/ocaml/xenstored/domains.ml
+index 61d1e2e..fdae298 100644
+--- a/tools/ocaml/xenstored/domains.ml
++++ b/tools/ocaml/xenstored/domains.ml
+@@ -146,8 +146,10 @@ let create0 doms =
+ 	dom
+ 
+ let decr_conflict_credit doms dom =
++	dom.Domain.caused_conflicts <- Int64.add 1L dom.Domain.caused_conflicts;
+ 	let before = dom.Domain.conflict_credit in
+ 	let after = max (-1.0) (before -. 1.0) in
++	debug "decr_conflict_credit dom%d %F -> %F" (Domain.get_id dom) before after;
+ 	dom.Domain.conflict_credit <- after;
+ 	let newly_penalised =
+ 		before >= !Define.conflict_burst_limit
+@@ -178,7 +180,9 @@ let decr_conflict_credit doms dom =
+ let incr_conflict_credit_from_queue doms =
+ 	let process_queue q requeue_test =
+ 		let d = pop q in
++		let before = d.Domain.conflict_credit in (* just for debug-logging *)
+ 		d.Domain.conflict_credit <- min (d.Domain.conflict_credit +. 1.0) !Define.conflict_burst_limit;
++		debug "incr_conflict_credit_from_queue: dom%d: %F -> %F" (Domain.get_id d) before d.Domain.conflict_credit;
+ 		if requeue_test d.Domain.conflict_credit then (
+ 			push d q (* Make it queue up again for its next point of credit. *)
+ 		)
+@@ -200,6 +204,7 @@ let incr_conflict_credit doms =
+ 			let before = dom.Domain.conflict_credit in
+ 			let after = min (before +. 1.0) !Define.conflict_burst_limit in
+ 			dom.Domain.conflict_credit <- after;
++			debug "incr_conflict_credit dom%d: %F -> %F" (Domain.get_id dom) before after;
+ 
+ 			if before <= 0.0 && after > 0.0
+ 			then doms.n_paused <- doms.n_paused - 1;
+diff --git a/tools/ocaml/xenstored/process.ml b/tools/ocaml/xenstored/process.ml
+index adfc7a4..8a688c4 100644
+--- a/tools/ocaml/xenstored/process.ml
++++ b/tools/ocaml/xenstored/process.ml
+@@ -330,6 +330,7 @@ let transaction_replay c t doms cons =
+ 				Transaction.commit ~con replay_t
+ 			with
+ 			| Transaction_again -> (
++				Transaction.failed_commits := Int64.add !Transaction.failed_commits 1L;
+ 				let victim_domstr = Connection.get_domstr c in
+ 				debug "Apportioning blame for EAGAIN in txn %d, domain=%s" id victim_domstr;
+ 				let punish guilty_con =
+@@ -351,7 +352,10 @@ let transaction_replay c t doms cons =
+ 					else false
+ 				) in
+ 				let guilty_cons = History.filter_connections ~ignore:c ~since:t.Transaction.start_count ~f:judge_and_sentence in
+-				if Hashtbl.length guilty_cons = 0 then debug "Found no culprit for conflict in %s: must be self or not in history." con;
++				if Hashtbl.length guilty_cons = 0 then (
++					debug "Found no culprit for conflict in %s: must be self or not in history." con;
++					Transaction.failed_commits_no_culprit := Int64.add !Transaction.failed_commits_no_culprit 1L
++				);
+ 				false
+ 			)
+ 			| e ->
+diff --git a/tools/ocaml/xenstored/transaction.ml b/tools/ocaml/xenstored/transaction.ml
+index 8f95301..da4a3e3 100644
+--- a/tools/ocaml/xenstored/transaction.ml
++++ b/tools/ocaml/xenstored/transaction.ml
+@@ -90,6 +90,11 @@ type t = {
+ let get_id t = match t.ty with No -> none | Full (id, _, _) -> id
+ 
+ let counter = ref 0L
++let failed_commits = ref 0L
++let failed_commits_no_culprit = ref 0L
++let reset_conflict_stats () =
++	failed_commits := 0L;
++	failed_commits_no_culprit := 0L
+ 
+ (* Scope for optimisation: different data-structure and functions to search/filter it *)
+ let short_running_txns = ref []
+diff --git a/tools/ocaml/xenstored/xenstored.ml b/tools/ocaml/xenstored/xenstored.ml
+index 06387a8..05ace4d 100644
+--- a/tools/ocaml/xenstored/xenstored.ml
++++ b/tools/ocaml/xenstored/xenstored.ml
+@@ -376,6 +376,7 @@ let _ =
+ 	let last_scan_time = ref 0. in
+ 
+ 	let periodic_ops now =
++		debug "periodic_ops starting";
+ 		(* we garbage collect the string->int dictionary after a sizeable amount of operations,
+ 		 * there's no need to be really fast even if we got loose
+ 		 * objects since names are often reuse.
+@@ -395,7 +396,11 @@ let _ =
+ 
+ 		(* make sure we don't print general stats faster than 2 min *)
+ 		if now > (!last_stat_time +. 120.) then (
++			info "Transaction conflict statistics for last %F seconds:" (now -. !last_stat_time);
+ 			last_stat_time := now;
++			Domains.iter domains (Domain.log_and_reset_conflict_stats (info "Dom%d caused %Ld conflicts"));
++			info "%Ld failed transactions; of these no culprit was found for %Ld" !Transaction.failed_commits !Transaction.failed_commits_no_culprit;
++			Transaction.reset_conflict_stats ();
+ 
+ 			let gc = Gc.stat () in
+ 			let (lanon, lanon_ops, lanon_watchs,
+@@ -415,6 +420,7 @@ let _ =
+ 			     gc.Gc.free_words gc.Gc.free_blocks
+ 		);
+ 		let elapsed = Unix.gettimeofday () -. now in
++		debug "periodic_ops took %F seconds." elapsed;
+ 		delay_next_frequent_ops_by elapsed
+ 	in
+ 
+-- 
+2.1.4
+

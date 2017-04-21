@@ -1,0 +1,59 @@
+From f45ce51771c7e96c8ac8179c44476f8fc6168636 Mon Sep 17 00:00:00 2001
+From: Thomas Sanders <thomas.sanders@citrix.com>
+Date: Fri, 24 Mar 2017 16:16:10 +0000
+Subject: [PATCH 13/15] oxenstored: do not commit read-only transactions
+
+The packet telling us to end the transaction has always carried an
+argument telling us whether to commit.
+
+If the transaction made no modifications to the tree, now we ignore
+that argument and do not commit: it is just a waste of effort.
+
+This makes read-only transactions immune to conflicts, and means that
+we do not need to store any of their details in the history that is
+used for assigning blame for conflicts.
+
+We count a transaction as a read-only transaction only if it contains
+no operations that modified the tree.
+
+This means that (for example) a transaction that creates a new node
+then deletes it would NOT count as read-only, even though it makes no
+change overall. A more sophisticated algorithm could judge the
+transaction based on comparison of its initial and final states, but
+this would add complexity and computational cost.
+
+Reported-by: Juergen Gross <jgross@suse.com>
+Signed-off-by: Thomas Sanders <thomas.sanders@citrix.com>
+Reviewed-by: Jonathan Davies <jonathan.davies@citrix.com>
+---
+ tools/ocaml/xenstored/process.ml     | 1 +
+ tools/ocaml/xenstored/transaction.ml | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/tools/ocaml/xenstored/process.ml b/tools/ocaml/xenstored/process.ml
+index b56e3fc..adfc7a4 100644
+--- a/tools/ocaml/xenstored/process.ml
++++ b/tools/ocaml/xenstored/process.ml
+@@ -393,6 +393,7 @@ let do_transaction_end con t domains cons data =
+ 		| x :: _   -> raise (Invalid_argument x)
+ 		| _        -> raise Invalid_Cmd_Args
+ 		in
++	let commit = commit && not (Transaction.is_read_only t) in
+ 	let success =
+ 		let commit = if commit then Some (fun con trans -> transaction_replay con trans domains cons) else None in
+ 		History.end_transaction t con (Transaction.get_id t) commit in
+diff --git a/tools/ocaml/xenstored/transaction.ml b/tools/ocaml/xenstored/transaction.ml
+index edd1178..8f95301 100644
+--- a/tools/ocaml/xenstored/transaction.ml
++++ b/tools/ocaml/xenstored/transaction.ml
+@@ -128,6 +128,7 @@ let make ?(internal=false) id store =
+ let get_store t = t.store
+ let get_paths t = t.paths
+ 
++let is_read_only t = t.paths = []
+ let add_wop t ty path = t.paths <- (ty, path) :: t.paths
+ let add_operation ~perm t request response =
+ 	if !Define.maxrequests >= 0
+-- 
+2.1.4
+

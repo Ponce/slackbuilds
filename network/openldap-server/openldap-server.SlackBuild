@@ -1,0 +1,255 @@
+#!/bin/sh
+
+# Slackware build script for OpenLDAP server
+
+# Copyright 2015-2017 Giuseppe Di Terlizzi <giuseppe.diterlizzi@gmail.com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=openldap-server
+VERSION=${VERSION:-2.4.42}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) export ARCH=i586 ;;
+    arm*) export ARCH=arm ;;
+       *) export ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+if ! grep ^ldap: /etc/group 2>&1 > /dev/null; then
+  echo "  You must have a ldap group to run this script."
+  echo "    # groupadd -r -g 330 ldap"
+  echo "  Or something similar."
+  exit 1
+elif ! grep ^ldap: /etc/passwd 2>&1 > /dev/null; then
+  echo "  You must have a ldap user to run this script."
+  echo "    # useradd -r -u 330 -g ldap -d /var/lib/openldap -s /bin/false -c \"OpenLDAP server\" ldap"
+  echo "  Or something similar."
+  exit 1
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG
+cd $TMP
+rm -rf openldap-$VERSION
+tar xvf $CWD/openldap-$VERSION.t*z*
+cd openldap-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+
+# Change the location of run directory into /var/run/openldap
+sed -i -e 's|%LOCALSTATEDIR%/run/|/var/run/openldap/|' \
+  servers/slapd/slapd.*
+
+# Change the location of ldapi socket into /var/run/openldap
+sed -i -e 's|\(#define LDAPI_SOCK\).*|\1 "/var/run/openldap/ldapi"|' \
+  include/ldap_defaults.h
+
+# Change the default OpenLDAP database directory
+sed -i -e 's|openldap-data|lib/openldap|' \
+  servers/slapd/slapd.* include/ldap_defaults.h servers/slapd/Makefile.in
+
+
+CFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --exec-prefix=/usr \
+  --sysconfdir=/etc \
+  --mandir=/usr/man \
+  --localstatedir=/var \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  \
+  --enable-debug \
+  --enable-dynamic \
+  --enable-syslog \
+  --enable-proctitle \
+  --enable-ipv6 \
+  --enable-local \
+  \
+  --enable-slapd \
+  --enable-dynacl \
+  --enable-aci \
+  --enable-cleartext \
+  --enable-crypt \
+  --enable-lmpasswd \
+  --enable-spasswd \
+  --enable-modules \
+  --enable-rewrite \
+  --enable-rlookups \
+  --enable-slapi \
+  --disable-slp \
+  --enable-wrappers \
+  \
+  --enable-backends=mod \
+  --enable-bdb=yes \
+  --enable-hdb=yes \
+  --enable-mdb=yes \
+  --enable-monitor=yes \
+  --enable-perl=yes \
+  --disable-ndb \
+  \
+  --enable-overlays=mod \
+  \
+  --disable-static \
+  --enable-shared \
+  \
+  --with-cyrus-sasl \
+  --without-fetch \
+  --with-threads \
+  --with-pic \
+  --with-tls
+
+make depend
+
+# Build only slapd server. The libraries and header files are present in
+# Slackware n/openldap-client package
+
+( cd libraries
+  make
+)
+
+( cd servers
+  make -j1
+  make -j1 install DESTDIR=$PKG
+)
+
+( cd doc
+  make
+  make install DESTDIR=$PKG
+)
+
+rm -f $PKG/etc/openldap/*.default
+
+# Copy default slapd configuration
+mv $PKG/etc/openldap/slapd.conf $PKG/etc/openldap/slapd.conf.new
+mv $PKG/etc/openldap/slapd.ldif $PKG/etc/openldap/slapd.ldif.new
+
+# Create a symlink for slapd into /usr/sbin
+mkdir -p $PKG/usr/sbin
+( cd $PKG/usr/sbin ; ln -sf ../libexec/slapd slapd )
+
+# Create OpenLDAP run directory
+mkdir -p $PKG/var/run/openldap
+
+# Fix ldapi socket location for n/openldap-client package
+mkdir -p $PKG/var/lib/run
+( cd $PKG/var/lib/run; ln -sf ../../run/openldap/ldapi ldapi )
+
+# Create OpenLDAP certificates directory
+mkdir -p $PKG/etc/openldap/certs
+
+# Copy rc.openldap
+mkdir -p $PKG/etc/rc.d
+cat $CWD/rc.openldap > $PKG/etc/rc.d/rc.openldap.new
+
+# Copy slapd default file
+mkdir -p $PKG/etc/default
+cat $CWD/slapd > $PKG/etc/default/slapd.new
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
+
+cp -a \
+  ANNOUNCEMENT COPYRIGHT LICENSE README CHANGES \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+
+# Include monitor backend README
+cp -a \
+  servers/slapd/back-monitor/README \
+  $PKG/usr/doc/$PRGNAM-$VERSION/README.back-monitor
+
+# Include Perl backend README
+cp -a \
+  servers/slapd/back-perl/README \
+  $PKG/usr/doc/$PRGNAM-$VERSION/README.back-perl
+
+# Include Perl backend sample file
+cp -a \
+  servers/slapd/back-perl/SampleLDAP.pm \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+
+# Include OpenLDAP documentation
+cp -a \
+  doc/guide/admin/*.png \
+  doc/guide/admin/*.html \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+
+# Fix permissions
+chmod 755 $PKG/usr/lib${LIBDIRSUFFIX}/*.so.*
+chmod 700 $PKG/var/lib/openldap
+chmod 755 $PKG/usr/libexec/openldap
+
+# Fix ownership
+chown -R ldap:ldap $PKG/var/lib/openldap
+chown -R ldap:ldap $PKG/var/run/openldap
+chown -R ldap:ldap $PKG/etc/openldap
+
+# Remove OpenLDAP client man pages
+rm -rf $PKG/usr/man/man1
+rm -rf $PKG/usr/man/man3
+rm -rf $PKG/usr/man/man5/{ldap,ldif}.*
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Create an empty slapd log file
+mkdir -p $PKG/var/log
+touch $PKG/var/log/slapd
+chown ldap:ldap $PKG/var/log/slapd
+
+
+mkdir $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}

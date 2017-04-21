@@ -1,0 +1,153 @@
+From 5df600ee06458eebf037f6bff663b0a9273e3a3f Mon Sep 17 00:00:00 2001
+From: Jonathan Davies <jonathan.davies@citrix.com>
+Date: Tue, 14 Mar 2017 13:20:07 +0000
+Subject: [PATCH 07/15] oxenstored: support commit history tracking
+
+Add ability to track xenstore tree operations -- either non-transactional
+operations or committed transactions.
+
+For now, the call to actually retain commits is commented out because history
+can grow without bound.
+
+For now, we call record_commit for all non-transactional operations. A
+subsequent patch will make it retain only the ones with side-effects.
+
+Reported-by: Juergen Gross <jgross@suse.com>
+Signed-off-by: Jonathan Davies <jonathan.davies@citrix.com>
+Signed-off-by: Thomas Sanders <thomas.sanders@citrix.com>
+Reviewed-by: Christian Lindig <christian.lindig@citrix.com>
+
+---
+ tools/ocaml/xenstored/Makefile     |  1 +
+ tools/ocaml/xenstored/history.ml   | 43 ++++++++++++++++++++++++++++++++++++++
+ tools/ocaml/xenstored/process.ml   | 24 +++++++++++++++++++--
+ tools/ocaml/xenstored/xenstored.ml |  1 +
+ 4 files changed, 67 insertions(+), 2 deletions(-)
+ create mode 100644 tools/ocaml/xenstored/history.ml
+
+diff --git a/tools/ocaml/xenstored/Makefile b/tools/ocaml/xenstored/Makefile
+index 1769e55..d238836 100644
+--- a/tools/ocaml/xenstored/Makefile
++++ b/tools/ocaml/xenstored/Makefile
+@@ -53,6 +53,7 @@ OBJS = paths \
+ 	domains \
+ 	connection \
+ 	connections \
++	history \
+ 	parse_arg \
+ 	process \
+ 	xenstored
+diff --git a/tools/ocaml/xenstored/history.ml b/tools/ocaml/xenstored/history.ml
+new file mode 100644
+index 0000000..e4b4d70
+--- /dev/null
++++ b/tools/ocaml/xenstored/history.ml
+@@ -0,0 +1,43 @@
++(*
++ * Copyright (c) 2017 Citrix Systems Ltd.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License as published
++ * by the Free Software Foundation; version 2.1 only. with the special
++ * exception on linking described in file LICENSE.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License for more details.
++ *)
++
++type history_record = {
++	con: Connection.t;   (* connection that made a change *)
++	tid: int;            (* transaction id of the change (may be Transaction.none) *)
++	before: Store.t;     (* the store before the change *)
++	after: Store.t;      (* the store after the change *)
++	finish_count: int64; (* the commit-count at which the transaction finished *)
++}
++
++let history : history_record list ref = ref []
++
++(* Called from periodic_ops to ensure we don't discard symbols that are still needed. *)
++(* There is scope for optimisation here, since in consecutive commits one commit's `after`
++ * is the same thing as the next commit's `before`, but not all commits in history are
++ * consecutive. *)
++let mark_symbols () =
++	(* There are gaps where dom0's commits are missing. Otherwise we could assume that
++	 * each element's `before` is the same thing as the next element's `after`
++	 * since the next element is the previous commit *)
++	List.iter (fun hist_rec ->
++			Store.mark_symbols hist_rec.before;
++			Store.mark_symbols hist_rec.after;
++		)
++		!history
++
++let push (x: history_record) =
++	let dom = x.con.Connection.dom in
++	match dom with
++	| None -> () (* treat socket connections as always free to conflict *)
++	| Some d -> if not (Domain.is_free_to_conflict d) then history := x :: !history
+diff --git a/tools/ocaml/xenstored/process.ml b/tools/ocaml/xenstored/process.ml
+index 5f92044..964c044 100644
+--- a/tools/ocaml/xenstored/process.ml
++++ b/tools/ocaml/xenstored/process.ml
+@@ -293,6 +293,16 @@ let write_response_log ~ty ~tid ~con ~response =
+ 	| Packet.Reply x -> write_answer_log ~ty ~tid ~con ~data:x
+ 	| Packet.Error e -> write_answer_log ~ty:(Xenbus.Xb.Op.Error) ~tid ~con ~data:e
+ 
++let record_commit ~con ~tid ~before ~after =
++	let inc r = r := Int64.add 1L !r in
++	let finish_count = inc Transaction.counter; !Transaction.counter in
++	(* This call would leak memory if historic activity is retained forever
++	   so can only be uncommented if history is guaranteed not to grow
++	   unboundedly.
++	History.push {History.con=con; tid=tid; before=before; after=after; finish_count=finish_count}
++	*)
++	()
++
+ (* Replay a stored transaction against a fresh store, check the responses are
+    all equivalent: if so, commit the transaction. Otherwise send the abort to
+    the client. *)
+@@ -363,8 +373,14 @@ let do_transaction_end con t domains cons data =
+ 		Connection.end_transaction con (Transaction.get_id t) commit in
+ 	if not success then
+ 		raise Transaction_again;
+-	if commit then
+-		process_watch (List.rev (Transaction.get_paths t)) cons
++	if commit then begin
++		process_watch (List.rev (Transaction.get_paths t)) cons;
++		match t.Transaction.ty with
++		| Transaction.No ->
++			() (* no need to record anything *)
++		| Transaction.Full(id, oldstore, cstore) ->
++			record_commit ~con ~tid:id ~before:oldstore ~after:cstore
++	end
+ 
+ let do_introduce con t domains cons data =
+ 	if not (Connection.is_dom0 con)
+@@ -448,7 +464,11 @@ let process_packet ~store ~cons ~doms ~con ~req =
+ 			else
+ 				Connection.get_transaction con tid
+ 			in
++
++		let before = Store.copy store in
+ 		let response = input_handle_error ~cons ~doms ~fct ~con ~t ~req in
++		let after = Store.copy store in
++		if tid = Transaction.none then record_commit ~con ~tid ~before ~after;
+ 
+ 		let response = try
+ 			if tid <> Transaction.none then
+diff --git a/tools/ocaml/xenstored/xenstored.ml b/tools/ocaml/xenstored/xenstored.ml
+index f562f59..d5c50fd 100644
+--- a/tools/ocaml/xenstored/xenstored.ml
++++ b/tools/ocaml/xenstored/xenstored.ml
+@@ -385,6 +385,7 @@ let _ =
+ 			Symbol.mark_all_as_unused ();
+ 			Store.mark_symbols store;
+ 			Connections.iter cons Connection.mark_symbols;
++			History.mark_symbols ();
+ 			Symbol.garbage ()
+ 		end;
+ 
+-- 
+2.1.4
+
