@@ -25,7 +25,7 @@
 set -e
 
 PRGNAM=cargo
-VERSION=${VERSION:-0.17.0}
+VERSION=${VERSION:-0.18.0}
 
 rm -rf "$PRGNAM-$VERSION" "$PRGNAM-$VERSION-vendor.tar.gz"
 tar xvf "$PRGNAM-$VERSION.tar.gz"
