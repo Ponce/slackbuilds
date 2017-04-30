@@ -1,0 +1,113 @@
+#!/bin/sh
+
+# Slackware build script for the Python 3 version of matplotlib
+
+# Copyright 2011-2017 Serban Udrea <s.udrea@gsi.de>
+#                     Jeremy Hansen <jebrhansen+SBo -at- gmail.com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification,
+# is permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR
+# IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
+# INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+# STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
+# IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+# Written by Aleksandar Samardzic <asamardzic@gmail.com>
+# Updated to 0.99.1.2 by João Felipe Santos <joao.eel@gmail.com>
+# Patch for libpng borrowed from Arch Linux
+# Updated up to version 1.5.2 by Serban Udrea <S.Udrea@gsi.de>
+# Adapted for Python 3 by Jeremy Hansen
+
+PRGNAM=python3-matplotlib
+SRCNAM=matplotlib
+VERSION=${VERSION:-1.5.2}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+TARBALL_VERSION=${TARBALL_VERSION:-1.5.2} # Tarball sometimes has a wrong version number
+DISABLE_TESTS=${DISABLE_TESTS:-Y}
+DISABLE_TK_TESTS=${DISABLE_TK_TESTS:-Y}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=${PKG:-$TMP/package-$PRGNAM}
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$TARBALL_VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$TARBALL_VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Use setup.cfg to decide about the optional subpackages tests and
+# toolkits_tests
+#
+cat setup.cfg.template > setup.cfg
+
+DISABLE_TESTS=$(echo "$DISABLE_TESTS"|cut -b 1|tr a-z A-Z)
+DISABLE_TK_TESTS=$(echo "$DISABLE_TK_TESTS"|cut -b 1|tr a-z A-Z)
+
+if [ "$DISABLE_TESTS" = "Y" ]
+then
+ sed -i "s|#tests = True|tests = False|" setup.cfg
+else
+ python3 -c "import nose, mock" > /dev/null 2>&1 || \
+ { echo "ERROR: Missing requirements nose and/or mock!" && exit 1; }
+fi
+
+if [ "$DISABLE_TK_TESTS" = "Y" ]
+then
+ sed -i "s|#toolkits_tests = auto|toolkits_tests = False|" setup.cfg
+elif [ "$DISABLE_TESTS" = "Y" ]
+then
+ echo "ERROR: Cannot enable toolkits_tests if tests are disabled!" && exit 1
+fi
+
+# Use modified setupext.py to make sure that the build process gets
+# interrupted if requirements are not fulfilled
+#
+cat "${CWD}/setupext.py" > setupext.py
+
+python3 setup.py install --root $PKG  # > ${CWD}/SETUP.OUTPUT 2>&1
+
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CHANGELOG INSTALL $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
