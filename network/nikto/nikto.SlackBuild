@@ -1,11 +1,9 @@
 #!/bin/sh
 
 # Slackware build script for Nikto Web Scanner
-#
-# Copyright 2015 Brenton Earl <brent@exitstatusone.com>
-# All rights reserved.
-#
+
 # Copyright 2010-2011 Marco Bonetti <sid77@slackware.it>
+# Copyright 2015-2017 Brenton Earl <brent@exitstatusone.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -26,13 +24,13 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=nikto
-VERSION=${VERSION:-2.1.5}
+VERSION=${VERSION:-2.1.6}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+    i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
@@ -43,13 +41,14 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-DOCS="CHANGES.txt LICENSE.txt nikto_manual.html"
-
-if [ "$ARCH" = "i486" ]; then
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
@@ -65,50 +64,50 @@ rm -rf $PRGNAM
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Fix nikto.pl paths to use libwhisker2 from SBo.
-patch -p1 --verbose < $CWD/patches/nikto-2.1.5/nikto.pl.diff
+# Force SBo shipped LW2 module
+patch -p1 --verbose < $CWD/patches/nikto.pl.diff
+patch -p1 --verbose < $CWD/patches/replay.pl.diff
+patch -p1 --verbose < $CWD/patches/nikto_core.plugin.diff
 
-# Set the correct EXECDIR for nikto based on $ARCH
+# Fix path for Slackware
+patch -p1 --verbose < $CWD/patches/man_page.diff
+
+# Install executable
 if [ "$ARCH" = "x86_64" ]; then
-	patch -p1 --verbose < $CWD/patches/nikto-2.1.5/nikto64.conf.diff
+  install -Dm 755 $CWD/nikto64.sh $PKG/usr/bin/nikto
 else
-	patch -p1 --verbose < $CWD/patches/nikto-2.1.5/nikto.conf.diff
+  install -Dm 755 $CWD/nikto.sh $PKG/usr/bin/nikto
 fi
 
-# Install the program
-install -d \
-  $PKG/etc/ \
-  $PKG/usr/bin/ \
-  $PKG/usr/lib$LIBDIRSUFFIX/nikto/docs/ \
-  $PKG/usr/lib$LIBDIRSUFFIX/nikto/plugins/ \
-  $PKG/usr/lib$LIBDIRSUFFIX/nikto/templates/ \
-	$PKG/usr/lib$LIBDIRSUFFIX/nikto/databases/
-install -m 0644 nikto.conf $PKG/etc/nikto.conf.new
-install -m 0644 docs/CHANGES.txt $PKG/usr/lib$LIBDIRSUFFIX/nikto/docs/
-install -m 0644 plugins/* $PKG/usr/lib$LIBDIRSUFFIX/nikto/plugins/
-install -m 0644 templates/* $PKG/usr/lib$LIBDIRSUFFIX/nikto/templates/
-install -m 0644 databases/* $PKG/usr/lib$LIBDIRSUFFIX/nikto/databases/
-install -m 0755 nikto.pl $PKG/usr/bin/
+# Install the rest
+install -d $PKG/usr/lib${LIBDIRSUFFIX}/nikto
+cp -a program/* $PKG/usr/lib${LIBDIRSUFFIX}/nikto
+install -Dm 644 program/nikto.conf $PKG/etc/nikto.conf.new
+install -Dm 644 documentation/nikto.1 $PKG/usr/man/man1/nikto.1
+install -Dm 755 program/replay.pl $PKG/usr/bin/replay.pl
 
-## However, be compatible with any users' scripts
-# No, drop compatibility here: stick as much as possible to the sources.
-# This was a debianism I adopted with the first version, however, if you like
-# it just uncomment the lines below.
-#( cd $PKG/usr/bin
-#  ln -s nikto.pl nikto
-#)
+# Remove the upstream shipped libwhisker2
+rm -f $PKG/usr/lib${LIBDIRSUFFIX}/nikto/plugins/LW2.pm
 
-# Remove the shipped libwhisker2
-rm -f $PKG/usr/lib$LIBDIRSUFFIX/nikto/plugins/LW2.pm
+# Clean up duplicate config
+rm -f $PKG/usr/lib${LIBDIRSUFFIX}/nikto/nikto.conf
 
-# Copy over important docs and man page
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-mkdir -p $PKG/usr/man/man1/
-cd docs
-  cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION/
-  gzip -9c nikto.1 > $PKG/usr/man/man1/nikto.1.gz
-cd -
+cp -a program/docs/nikto_manual.html program/docs/*.txt README.md \
+  $PKG/usr/doc/$PRGNAM-$VERSION/
+rm -r $PKG/usr/lib${LIBDIRSUFFIX}/nikto/docs
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
@@ -117,4 +116,3 @@ cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
-
