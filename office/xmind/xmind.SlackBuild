@@ -1,11 +1,8 @@
 #!/bin/sh
-#
-# Slackware build script for XMind
 
-# Copyright 2011 Vegard Haugland, Kristiansand, Norway
+# Slackware build script for XMind
+# Copyright 2017 Panagiotis Nikolaou, Culver City, CA
 # All rights reserved.
-#
-# Based on Slackware build script for Google Chrome, by Erik Hanson.
 #
 # Redistribution and use of this script, with or without modification, is
 # permitted provided that the following conditions are met:
@@ -13,74 +10,95 @@
 # 1. Redistributions of this script must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 #
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
-# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
-# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-# updated by Andre Barboza <bmg.andre@gmail.com>
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=xmind
-VERSION=${VERSION:-3.5.1}
-PKGVERSION=3.5.1.201411201906
+VERSION=${VERSION:-8update2}
+SRCVERSION=${SRCVERSION:-8-update2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-case "$(uname -m)" in
-  i?86) DEBARCH="i386" ; LIBDIRSUFFIX="" ; ARCH=i386 ;;
-  x86_64) DEBARCH="amd64" ; LIBDIRSUFFIX="64" ; ARCH=x86_64 ;;
-  *) echo "Package for $(uname -m) architecture is not available." ; exit 1 ;;
-esac
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    *) ARCH=$( uname -m ) ;;
+  esac
+fi
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-set -eu
+set -e
 
 rm -rf $PKG
-mkdir -p $TMP $PKG $OUTPUT
-cd $PKG
-ar p $CWD/xmind-linux-${PKGVERSION}_${DEBARCH}.deb data.tar.gz | gunzip -d | tar xv
+mkdir -p $TMP $PKG/opt/$PRGNAM $OUTPUT
+cd $PKG/opt/$PRGNAM
 
-# Move from /usr/local/xmind to /opt/xmind
-mkdir -p $PKG/opt
-mv $PKG/usr/lib/xmind/ $PKG/opt/
+unzip $CWD/$PRGNAM-$SRCVERSION-linux.zip
 
-# Create launch script
-mkdir -p $PKG/usr/bin
-cat > $PKG/usr/bin/XMind << XMIND
-#!/bin/sh
-/opt/xmind/XMind
-XMIND
-chmod +x $PKG/usr/bin/XMind
-
-# Modify executable in xmind.desktop
-sed -i 's#/usr/local/#/opt/#' $PKG/usr/share/applications/xmind.desktop
+if [ "$ARCH" = "i586" ] || [ "$ARCH" = "i686" ]; then
+  rm -rf $PKG/opt/$PRGNAM/XMind_amd64
+  SRCARCH="_i386"
+elif [ "$ARCH" = "x86_64" ]; then
+  rm -rf $PKG/opt/$PRGNAM/XMind_i386
+  SRCARCH="_amd64"
+else
+  echo "$ARCH is not supported..."
+  exit 1
+fi
 
 chown -R root:root .
+find . -type d -exec chmod 755 {} \;
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
   -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-chmod 0755 $PKG # Put this back.
+# Remove unused
+rm setup.sh
+
+# Change data and configuration stuff location to user's home instead of /opt
+sed -e "s|./configuration|@user.home/.xmind/configuration|" \
+    -e "s|../workspace|@user.home/.xmind/workspace|" \
+    -i XMind$SRCARCH/XMind.ini
+
+# Add a wrapper to run xmind from /usr/bin
+# and copy configuration out of /opt to user's home
+mkdir -p $PKG/usr/bin
+cat << EOF > $PKG/usr/bin/$PRGNAM
+#!/bin/sh
+if [ ! -f ~/.xmind/configuration/config.ini ] && [ -f /opt/xmind/XMind$SRCARCH/configuration/config.ini ]; then
+  mkdir -p ~/.xmind/configuration
+  cp -r /opt/xmind/XMind$SRCARCH/configuration/* ~/.xmind/configuration/
+fi
+exec /opt/xmind/XMind$SRCARCH/XMind $@
+EOF
+chmod 0755 $PKG/usr/bin/$PRGNAM
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/share/applications
+install -D -m 0644 $CWD/$PRGNAM.desktop $PKG/usr/share/applications/$PRGNAM.desktop
+
+mkdir -p $PKG/usr/share/pixmaps
+install -D -m 0644 $CWD/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-mv $PKG/usr/lib/xmindnet/* $PKG/usr/doc/$PRGNAM-$VERSION
-rm -rf $PKG/usr/lib/xmindnet/
+mv *.html *.txt $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-
-mv $PKG/usr/share/man $PKG/usr/
-rm -rf $PKG/usr/lib/
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
