@@ -4,6 +4,7 @@
 # Based on http://slackbuilds.org/templates/autotools-template.SlackBuild
 
 # Copyright (c) 2011, Eric B. Pratt <eric.b.pratt@gmail.com>
+#               2015-17, Shrivatsan Sampathkumar <nastavs@gmail.com>
 #
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -18,7 +19,7 @@
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 PRGNAM=KeePass
-VERSION=${VERSION:-2.34}
+VERSION=${VERSION:-2.35}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -59,50 +60,72 @@ rm -rf $PRGNAM-$VERSION
 mkdir -p $PRGNAM-$VERSION
 cd $PRGNAM-$VERSION
 
-mkdir -p $PRGNAM-$VERSION-Source
-unzip $CWD/$PRGNAM-$VERSION.zip -d $PRGNAM-$VERSION
-unzip $CWD/$PRGNAM-$VERSION-Source.zip -d $PRGNAM-$VERSION-Source
+unzip $CWD/$PRGNAM-$VERSION-Source.zip
 
 chown -R root:root .
 find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+cd Build && bash PrepMonoDev.sh && cd ..
+find . -name "*.sln" -print -exec sed -i 's/Format Version 10.00/Format Version 11.00/g' {} \;
+find . -name "*.csproj" -print -exec sed -i 's#ToolsVersion="3.5"#ToolsVersion="4.0"#g; s#<TargetFrameworkVersion>.*</TargetFrameworkVersion>##g; s#<PropertyGroup>#<PropertyGroup><TargetFrameworkVersion>v4.5</TargetFrameworkVersion>#g' {} \;
+sed -i '1s/ 10.00/ 11.00/' KeePass.sln
+find . -name "*.csproj" -exec sed -i '1s/"3.5"/"4.0"/' {} +
+
+# Now finally build the package
+xbuild /t:KeePass /p:Configuration=Release
 
 # Generate icons
 ICON_SIZES="256x256 192x192 128x128 96x96 64x64 48x48 32x32 16x16"
-ICON_FILES=$(ls $TMP/$PRGNAM-$VERSION/$PRGNAM-$VERSION-Source/Ext/Icons_04_CB/Finals | grep png)
+ICON_FILES=$(ls $TMP/$PRGNAM-$VERSION/Ext/Icons_04_CB/Finals|grep png)
 for i in $ICON_SIZES ; do
   mkdir -p $PKG/usr/share/icons/hicolor/$i/apps
   for j in $ICON_FILES; do
     if [ "$i" == "256x256" ];then
-      cp $TMP/$PRGNAM-$VERSION/$PRGNAM-$VERSION-Source/Ext/Icons_04_CB/Finals/$j \
+      cp $TMP/$PRGNAM-$VERSION/Ext/Icons_04_CB/Finals/$j \
          $PKG/usr/share/icons/hicolor/$i/apps/KeePass-$j
     else
       convert -resize $i \
-        $TMP/$PRGNAM-$VERSION/$PRGNAM-$VERSION-Source/Ext/Icons_04_CB/Finals/$j \
+        $TMP/$PRGNAM-$VERSION/Ext/Icons_04_CB/Finals/$j \
         $PKG/usr/share/icons/hicolor/$i/apps/KeePass-$j
     fi
   done
 done
 
+## Custom In-app Nuvola icons bundled with Source KeePass distributions
+NUVOLA_ICON_FILES=$(ls $TMP/$PRGNAM-$VERSION/Ext/Images_App_HighRes/Nuvola|grep "48x48.*png")
+for i in $ICON_SIZES; do
+    for j in $NUVOLA_ICON_FILES; do
+	if [ "$i" == "48x48" ];then
+	    cp $TMP/$PRGNAM-$VERSION/Ext/Images_App_HighRes/Nuvola/$j \
+	       $PKG/usr/share/icons/hicolor/$i/apps/KeePass-$j
+	else
+	    ## Everything else to resize, since they are all 48x48px dimensions.
+	    convert -resize $i \
+		    $TMP/$PRGNAM-$VERSION/Ext/Images_App_HighRes/Nuvola/$j \
+		    $PKG/usr/share/icons/hicolor/$i/apps/KeePass-$j
+	fi
+    done
+done
+
 mkdir -p $PKG/usr/lib
-cp -a $PRGNAM-$VERSION $PKG/usr/lib/
-mv $PKG/usr/lib/$PRGNAM-$VERSION $PKG/usr/lib/$PRGNAM
+cp Ext/KeePass.exe.config Build/KeePass/Release/
+cp -a $TMP/$PRGNAM-$VERSION/Build/KeePass/ $PKG/usr/lib/KeePass-${VERSION}
+cp -a $TMP/$PRGNAM-$VERSION/Build/KeePassLib_Distrib/ $PKG/usr/lib/KeePass-${VERSION}
 
 mkdir -p $PKG/usr/bin
-echo -e '#!/bin/bash'"\nexec /usr/bin/mono /usr/lib/KeePass/KeePass.exe" > $PKG/usr/bin/keepass
+echo -e '#!/bin/bash'"\nexec /usr/bin/mono /usr/lib/KeePass-${VERSION}/Release/KeePass.exe" > $PKG/usr/bin/keepass
 chmod 0755 $PKG/usr/bin/keepass
 
 mkdir -p $PKG/usr/share/applications
-cp $CWD/files/KeePass.desktop $PKG/usr/share/applications/
+cp $CWD/KeePass.desktop $PKG/usr/share/applications/
 chmod 0644 $PKG/usr/share/applications/KeePass.desktop
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-mv $PKG/usr/lib/$PRGNAM/License.txt \
-  $PKG/usr/lib/$PRGNAM/$PRGNAM.chm \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+cp Docs/License.txt $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
