@@ -11,5 +11,4 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/motion-dist.conf.new
-
+config etc/motion/motion-dist.conf.new
