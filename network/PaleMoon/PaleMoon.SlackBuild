@@ -26,7 +26,7 @@
 
 PRGNAM=PaleMoon
 VERSION=${VERSION:-27.3.0}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -60,6 +60,33 @@ else
   LIBDIRSUFFIX=""
 fi
 
+# Set the compiler that will be used. The ideal compiler for
+# PaleMoon is most likely gcc-4.9.4.
+#
+# If the user has specified a compiler, use that. Other wise
+# look to see if gcc-4.9.4 and g++-4.9.4 can be found.
+if [ "$CC" = "" ] && [ "$CXX" = "" ]; then
+	GCC494=$(type -P gcc-4.9.4) && GCXX494=$(type -P g++-gcc-4.9.4)
+fi
+# If no compiler is specified by the user, default to using
+# gcc-4.9.4 and g++-gcc-4.9.4; if they are present and can be found.
+if [ "$GCC494" != "" ] && [ "$GCXX494" != "" ]; then
+	CC=gcc-4.9.4 && CXX=g++-gcc-4.9.4
+# If gcc-4.9.4 is not found look for it, and if found, use gcc-4.8.2
+elif [ "$GCC494" = "" ] && [ "$GCXX494" = "" ]; then
+	GCC482=$(type -P gcc-4.8.2) && GCXX482=$(type -P g++-gcc-4.8.2)
+	if [ "$GCC482" != "" ] && [ "$GCXX482" != "" ]; then
+		CC=gcc-4.8.2 && CXX=g++-gcc-4.8.2
+# Lastly, if there is no user defined compiler to use, and,
+# gcc-4.9.4 can not be found, use the default Slackware gcc
+# and g++.
+           else CC=gcc && CXX=g++
+        fi
+fi
+
+export CC="$CC"
+export CXX="$CXX"
+
 rm -rf $PKG $TMP/pmbuild $TMP/gold
 mkdir -p $TMP $PKG $OUTPUT $TMP/pmbuild $TMP/gold
 
@@ -74,8 +101,8 @@ if [ "${ENABLE_DEBUG:-no}" = "yes" ]; then
     cp $TMP/gold/gold $TMP/gold/ld
     chmod +x $TMP/gold/*
     PATH="$TMP/gold:$PATH"
-    export CC="gcc -B$TMP/gold"
-    export CXX="g++ -B$TMP/gold"
+    export CC="$CC -B$TMP/gold"
+    export CXX="$CXX -B$TMP/gold"
   fi
 fi
 
@@ -135,12 +162,18 @@ if [ "$LIBDIRSUFFIX" = "64" ]; then
     xpcom/io/nsAppFileLocationProvider.cpp
 fi
 
+
+# Without LANG=C, building the Python environment may fail with:
+# "UnicodeDecodeError: 'ascii' codec can't decode byte 0xe2 in position 36: ordinal not in range(128)"
+export LANG=C
+
 export MOZBUILD_STATE_PATH="$TMP/Pale-Moon-${VERSION}_Release/moz.build"
 export MOZCONFIG="$TMP/Pale-Moon-${VERSION}_Release/.mozconfig"
 export MOZILLA_OFFICIAL=1
 export MOZ_MAKE_FLAGS=$MAKEFLAGS
 export CFLAGS="$SLKCFLAGS"
 export CXXFLAGS="$SLKCFLAGS"
+export PYTHON=/usr/bin/python2
 
 # Dev tools are enabled by default in the official binaries, so we should do the same here;
 # passing DEVTOOLS=no to the script, however, will disable them.
@@ -162,6 +195,7 @@ OPTIONS="\
   --disable-mochitests \
   --enable-jemalloc \
   --with-pthreads \
+  --enable-shared-js \
   $DEVTOOLS \
   $DEBUG \
   --x-libraries=/usr/lib${LIBDIRSUFFIX} \
