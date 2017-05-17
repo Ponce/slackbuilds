@@ -47,4 +47,7 @@ for file in "${BACKUP_LOCAL[@]}"; do
 done
 
 # disable udev-postmount
-[ -e etc/runlevels/sysinit/udev-postmount ] && rm etc/runlevels/sysinit/udev-postmount
+[ -e etc/runlevels/sysinit/udev-postmount ] && rm -v etc/runlevels/sysinit/udev-postmount
+
+# disable kmod-static-nodes (openrc-0.26.1, 2017-05-14)
+[ -e etc/runlevels/sysinit/kmod-static-nodes ] && rm -v etc/runlevels/sysinit/kmod-static-nodes
