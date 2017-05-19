@@ -1,5 +1,5 @@
 #!/bin/csh
-setenv FDK_EXE /opt/afdko/linux
+setenv FDK_EXE /opt/afdko/Tools/linux
 if ( $?PATH ) then
   echo :${PATH}: | grep -q :${FDK_EXE}: || setenv PATH ${PATH}:${FDK_EXE}
 else
