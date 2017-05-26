@@ -1,18 +1,38 @@
 #!/bin/sh
 
 # Slackware build script for gpsbabel
-# Written by Kyle Guinn <elyk03@gmail.com>
+
+# Copyright 2017 Kyle Guinn <elyk03@gmail.com>, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=gpsbabel
-VERSION=${VERSION:-1.3.3}
+VERSION=${VERSION:-1.5.3}
+SRCVER=${PRGNAM}_$(echo ${VERSION} | tr . _)
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
-  case "$( uname -m )" in
+  case "$(uname -m)" in
     i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
-       *) ARCH=$( uname -m ) ;;
+       *) ARCH=$(uname -m) ;;
   esac
 fi
 
@@ -21,7 +41,12 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
+DOCS="AUTHORS COPYING README*"
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
@@ -40,34 +65,56 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+rm -rf $PRGNAM-$SRCVER
+tar xvf $CWD/$PRGNAM-$SRCVER.tar.gz
+cd $PRGNAM-$SRCVER
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+chmod -R u+w,go-w,a+rX-st .
 
-CFLAGS="$SLKCFLAGS" \
+# Protect your privacy:  Turn off usage reporting and checks for upgrades
+# by default.  These can be enabled manually via the preferences window.
+# Upgrade checking is broken (for me, at least) so this silences an error dialog.
+sed -i \
+  -e '/reportStatistics_/s/true/false/' \
+  -e '/startupVersionCheck_/s/true/false/' \
+  -e '/ignoreVersionMismatch/s/false/true/' \
+  gui/babeldata.h
+
+# Make it more FHS-compliant by moving gmapbase.html and the translations
+# to /usr/share.  Tell the GUI where to find them.  Thanks to Arch.
+sed -i 's|QApplication::applicationDirPath() +|"/usr/share/gpsbabel"|' gui/map.cc
+sed -i 's|QApplication::applicationDirPath()|"/usr/share/gpsbabel"|' gui/mainwindow.cc
+
+# Build using the system zlib and libminizip from SBo (see --with-zlib=system).
+# Thanks to Gentoo.
+sed -i '/AC_CHECK_LIB(\[z\], \[gzopen\])/aAC_CHECK_LIB([minizip], [zipOpen64])' configure.in
+sed -i 's|"zlib/contrib/minizip/zip.h"|<minizip/zip.h>|' src/core/ziparchive.cc src/core/ziparchive.h
+autoreconf -vif
+
 ./configure \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --localstatedir=/var \
+  --mandir=/usr/man \
+  --infodir=/usr/info \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
   --with-zlib=system \
-  --without-doc \
-  --build=$ARCH-slackware-linux
+  --build=$ARCH-slackware-linux \
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
 
 make
-make install DESTDIR=$PKG
+make gui
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+install -D -m0755 -s gpsbabel $PKG/usr/bin/gpsbabel
+install -D -m0755 -s gui/objects/gpsbabelfe-bin $PKG/usr/bin/gpsbabelfe
+install -D -m0644 gui/gmapbase.html $PKG/usr/share/gpsbabel/gmapbase.html
+install -d -m0755 $PKG/usr/share/gpsbabel/translations/
+install -D -m0644 gui/*.qm $PKG/usr/share/gpsbabel/translations/
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS COPYING README* $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
