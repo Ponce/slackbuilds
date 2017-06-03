@@ -3,7 +3,9 @@
 # Slackware build script for zyGrib
 
 # Copyright 2011, 2012, 2013  Chris Abela, Malta
-# Copyright 2014  Ryan P.C. McQuen, WA, ryanpcmcquen@member.fsf.org
+# Copyright 2014 Ryan P.C. McQuen, WA
+# Copyright 2017 Philip Lacroix <slackph at posteo dot de>
+#
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -24,7 +26,7 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=zyGrib
-VERSION=${VERSION:-7.0.0}
+VERSION=${VERSION:-8.0.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -41,31 +43,14 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
-fi
-
 set -e
-
-# In case the source was fetched with wget or some other downloader:
-SRCTAR=$PRGNAM-$VERSION.tgz
-[ -e "getfile.php?file=$SRCTAR" ] && SRCTAR="getfile.php?file=$SRCTAR"
 
 rm -rf $PKG
 mkdir -p $TMP $PKG/opt/$PRGNAM $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$SRCTAR
+tar xvf $CWD/$PRGNAM-$VERSION.tgz
+
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
@@ -74,21 +59,36 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-make QMAKE=/usr/bin/qmake
+if [ "$ARCH" != x86_64 ]; then
+  # fixup for i586/i686 from Arch
+  sed -i -E 's:(^CFLAGS.*)-m64(.*)-D.*$:\1\2:' src/g2clib/makefile
+fi
+
+make QMAKE=/usr/bin/qmake-qt5
 make install INSTALLDIR=$PKG/opt/$PRGNAM
 
-mkdir -p $PKG/usr/bin/
-ln -sfv /opt/$PRGNAM/$PRGNAM $PKG/usr/bin/$PRGNAM
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" \
+  | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-mkdir -p $PKG/usr/share/applications/ $PKG/usr/share/pixmaps/
-cat $CWD/zyGrib.desktop > $PKG/usr/share/applications/zyGrib.desktop
-cat $CWD/zyGrib.png > $PKG/usr/share/pixmaps/zyGrib.png
+PRGBIN=$PKG/usr/bin
+PRGSHR=$PKG/usr/share
+PRGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# Move startup script, set path.
+mkdir -p $PRGBIN
+mv $PKG/opt/$PRGNAM/$PRGNAM $PRGBIN/
+sed -i "s~^cd .*~cd /opt/$PRGNAM~" $PRGBIN/$PRGNAM
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+mkdir -p $PRGSHR/{applications,pixmaps}
+cp -a $CWD/$PRGNAM.desktop $PRGSHR/applications/
+cp -a $CWD/$PRGNAM.png $PRGSHR/pixmaps/
+
+# Install documentation (not available for zyGrib itself, hence the README).
+mkdir -p $PRGDOC/{qwt,g2clib}
+cp -a $CWD/README $PRGDOC/
+cp -a src/g2clib/README $PRGDOC/g2clib/
+cp -a src/qwt*/{README,COPYING} $PRGDOC/qwt/
+cat $CWD/$PRGNAM.SlackBuild > $PRGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
