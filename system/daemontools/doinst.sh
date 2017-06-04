@@ -1,2 +1,1 @@
-chroot . /bin/sh /install/doinst_sh
-rm install/doinst_sh
+chroot . sh -c "cd /package/admin/daemontools;./package/run"
