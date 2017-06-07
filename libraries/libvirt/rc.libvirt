@@ -12,7 +12,7 @@
 # on your setup
 
 MODULES="tun vhost_net"
-TIMEOUT=${TIMEOUT:-40}
+TIMEOUT=${TIMEOUT:-300}
 LIBVIRTD_PIDFILE="/var/run/libvirt/libvirtd.pid"
 LIBVIRTD_OPTS=${LIBVIRT_OPTS:-" -v -f /etc/libvirt/libvirtd.conf -p $LIBVIRTD_PIDFILE "}
 VIRTLOGD_PIDFILE="/var/run/libvirt/virtlogd.pid"
@@ -20,15 +20,21 @@ VIRTLOGD_OPTS=${VIRTLOGD_OPTS:-" -v -f /etc/libvirt/virtlogd.conf -p $VIRTLOGD_P
 VIRTLOCKD_PIDFILE="/var/run/libvirt/virtlockd.pid"
 VIRTLOCKD_OPTS=${VIRTLOCKD_OPTS:-" -v -f /etc/libvirt/virtlockd.conf -p $VIRTLOCKD_PIDFILE "}
 
-check_running_machines() {
-
-  count=0
+guests_reboot() {
 
   for machine in $(/usr/sbin/virsh list --name --state-running | grep -v ^$) ; do
-    /usr/sbin/virsh shutdown $machine
+    /usr/sbin/virsh reboot $machine
   done
 
-  echo -n "Waiting machines"
+}
+
+guests_shutdown() {
+
+  for machine in $(/usr/sbin/virsh list --name --state-running | grep -v ^$) ; do
+    /usr/sbin/virsh shutdown $machine &
+  done
+
+  echo -n "Waiting for guests to finish shutting down"
 
   while [ $(/usr/sbin/virsh list --name --state-running | grep -v ^$ | wc -l) -gt "0" ]; do
     if [ "$count" -ge "$TIMEOUT" ];then
@@ -43,16 +49,51 @@ check_running_machines() {
 
   if [ $(/usr/sbin/virsh list --name --state-running | grep -v ^$ | wc -l) -gt "0" ];then
 
-    echo -n "The following machines are still running, forcing shutdown: "
+    echo -n "The following guests are still running, destroying them: "
     for machine in $(/usr/sbin/virsh list --name --state-running | grep -v ^$) ; do
       /usr/sbin/virsh destroy $machine
       echo -n "$machine "
     done
 
-    echo ""
     sleep 2
   fi
 
+}
+
+
+guests_managedsave() {
+  # apply managedsave on running  and paused machines (as we can't distinguish between
+  # the two states while managedsave is being applied, so won't know when to finish waiting)
+
+  count=0
+
+  for machine in $(/usr/sbin/virsh list --name | grep -v ^$) ; do
+    /usr/sbin/virsh managedsave $machine &
+  done
+
+  echo -n "Waiting for managedsave to finish on all guests"
+
+  while [ $(/usr/sbin/virsh list --name | grep -v ^$ | wc -l) -gt "0" ]; do
+    if [ "$count" -ge "$TIMEOUT" ];then
+      break
+    fi
+    echo -n "."
+    count=$(expr $count + 1)
+    sleep 1
+  done
+
+  echo ""
+
+  if [ $(/usr/sbin/virsh list --name | grep -v ^$ | wc -l) -gt "0" ];then
+
+    echo -n "The following guests are still running, destroying them: "
+    for machine in $(/usr/sbin/virsh list --name | grep -v ^$) ; do
+      /usr/sbin/virsh destroy $machine
+      echo -n "$machine "
+    done
+
+    sleep 2
+  fi
 }
 
 check_processor() {
@@ -96,7 +137,7 @@ stop_libvirtd() {
     echo "libvirt is not running..."
     exit 2
   fi
-  check_running_machines
+  guests_managedsave
   check_processor
   echo "Stopping libvirtd..."
   for network in $(/usr/sbin/virsh net-list | tail -n +3 | awk '{print $1}'); do
@@ -167,8 +208,14 @@ restart)
   start_virtlogd
   start_libvirtd
   ;;
+guests_shutdown)
+  guests_shutdown
+  ;;
+guests_reboot)
+  guests_reboot
+  ;;
 *)
-  echo "Usage: $0 (start|stop|restart)"
+  echo "Usage: $0 (start|stop|restart|guests_shutdown|guests_reboot)"
   ;;
 esac
 
