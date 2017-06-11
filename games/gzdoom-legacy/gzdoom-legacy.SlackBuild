@@ -1,0 +1,147 @@
+#!/bin/sh
+
+# Slackware build script for gzdoom
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20170610 bkw:
+# - Renamed to gzdoom-legacy. Too much effort to keep testing old
+#   gzdoom versions every time there's a new release, so the regular
+#   gzdoom build will only support the newest version. If you're
+#   wondering why I keep supporting old versions, it's because I have
+#   old hardware. Doom is from the 1990s, it shouldn't need a $5000
+#   gaming rig to play properly in 2017.
+
+# 20170324 bkw:
+# - Updated for 2.4.0.
+
+# 20170207 bkw:
+# - BUILD=2
+# - Get rid of private fmodapi, now that the SBo fmodapi has been updated
+#   to a new enough version. Re-add fmodapi to REQUIRES.
+# - Fix download link so we always get the correct filename.
+
+# 20170113 bkw:
+# - Updated for 2.3.2. 1.9.1 and 1.8.09 still work, too.
+# - Use newer version of fmodapi. Due to licensing confusion, the
+#   fmodapi version on SBo hasn't been upgraded in forever. So this
+#   build now uses its own dedicated fmodapi, which installs to
+#   a private directory (won't conflict with system fmodapi, if present).
+
+PRGNAM=gzdoom-legacy
+SRCNAM=gzdoom
+VERSION=${VERSION:-2.4.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-g$VERSION $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-g$VERSION.tar.gz || \
+  tar xvf $CWD/g$VERSION.tar.gz || \
+  tar xvf $CWD/$SRCNAM-$VERSION.tar.gz || \
+  tar xvf $CWD/$VERSION.tar.gz
+cd $SRCNAM-g$VERSION || cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \+ -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \+
+
+# fmodapi support tries to find its lib in the current dir, fix it:
+sed -i \
+  "s,setPluginPath(progdir),setPluginPath(\"/usr/lib$LIBDIRSUFFIX/$SRCNAM\")," \
+  src/sound/fmodsound.cpp
+
+# gzdoom in windowed mode wants to display its git tag and hash as part
+# of the window title. For releases this shows up as "<unknown version> 0",
+# which doesn't hurt anything but is ugly.
+# This makes the window title appear as e.g. "GZDOOM 2.1.1 (Aug 3 2016)". The
+# date is the build date.
+patch -p1 < $CWD/window_title_version.diff
+
+# Sometimes upstream forgets to bump the version number, so the window
+# title will read 1.8.08 for version 1.8.09, eg.
+sed -i "/#define *VERSIONSTR/s,\"[^\"]*\",\"$VERSION\"," src/version.h
+
+# This isn't currently used, but was in the past, and will be again I'm sure.
+[ -e $CWD/compilefix.$VERSION.diff ] && \
+  patch -p1 < $CWD/compilefix.$VERSION.diff
+
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS_RELEASE:STRING="$SLKCFLAGS -DSHARE_DIR=\\\"/usr/share/games/doom\\\"" \
+    -DCMAKE_CXX_FLAGS_RELEASE:STRING="$SLKCFLAGS -DSHARE_DIR=\\\"/usr/share/games/doom\\\"" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+    -DMAN_INSTALL_DIR=/usr/man \
+	 -DFMOD_LIBRARY=/usr/lib${LIBDIRSUFFIX}/libfmodex${LIBDIRSUFFIX}.so \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make VERBOSE=1
+  mkdir -p $PKG/usr/games $PKG/usr/share/games/doom
+  install -m0755 -s $SRCNAM $PKG/usr/games/$SRCNAM
+  install -m0644 *.pk3 $PKG/usr/share/games/doom/
+
+  # If fmodapi support was compiled in:
+  if [ -e liboutput_sdl.so ]; then
+    mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/$SRCNAM
+    install -m0755 -s liboutput_sdl.so $PKG/usr/lib$LIBDIRSUFFIX/$SRCNAM/liboutput_sdl.so
+  fi
+cd ..
+
+# .desktop written for this SlackBuild
+mkdir -p $PKG/usr/share/applications
+cat $CWD/$SRCNAM.desktop > $PKG/usr/share/applications/$SRCNAM.desktop
+
+# PNG converted from Windows icon
+mkdir -p $PKG/usr/share/pixmaps
+cat $CWD/$SRCNAM.png > $PKG/usr/share/pixmaps/$SRCNAM.png
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a docs/* $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README_SBo.txt > $PKG/usr/doc/$PRGNAM-$VERSION/README_SBo.txt
+
+# Fix DOS CRLF line endings. The stuff in licenses/ is already OK, for 2.3.2.
+sed -i 's/\r//' $PKG/usr/doc/$PRGNAM-$VERSION/*.*
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
