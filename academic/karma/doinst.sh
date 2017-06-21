@@ -24,3 +24,5 @@ preserve_perms() {
 
 preserve_perms etc/profile.d/karma.sh.new
 preserve_perms etc/profile.d/karma.csh.new
+
+( cd /usr/local ; ln -sf /opt/karma karma )
