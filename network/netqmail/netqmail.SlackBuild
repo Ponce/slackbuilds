@@ -1,0 +1,271 @@
+#!/bin/sh
+
+# Slackware build script for netqmail
+
+# Copyright 2017 Duncan Roe, Melbourne, Australia
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=netqmail
+VERSION=${VERSION:-1.06}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION
+CHROOT=$TMP/$PRGNAM
+DO_CONFIG=${DO_CONFIG:-yes}
+MAILDIR=${MAILDIR:-no}
+SYMLINK_SERVICE=${SYMLINK_SERVICE:-no}
+ADMIN_USER=${ADMIN_USER:-nobody}
+INSTALL_USERS=${INSTALL_USERS:-yes}
+VERBOSE_ADDCHROOT=${VERBOSE_ADDCHROOT:-yes}
+export VERBOSE_ADDCHROOT
+
+# Put here rather than /var/log/setup to keep different build variants
+INSTDIR=$DOCDIR/install_scripts
+
+[ "$ARCH" = "x86_64" ] && LIBDIRSUFFIX="64" || LIBDIRSUFFIX=""
+
+# These are the user and group ids allocated by SBo
+NOFILES_GROUP=${NOFILES_GROUP:-340}
+QMAIL_GROUP=${QMAIL_GROUP:-339}
+ALIAS_USER=${ALIAS_USER:-339}
+QMAILD_USER=${QMAILD_USER:-340}
+QMAILL_USER=${QMAILL_USER:-341}
+QMAILP_USER=${QMAILP_USER:-342}
+QMAILQ_USER=${QMAILQ_USER:-343}
+QMAILR_USER=${QMAILR_USER:-344}
+QMAILS_USER=${QMAILS_USER:-345}
+
+# It's an error to request to start qmail w/out specifying an admin user
+[ $SYMLINK_SERVICE = no -o $ADMIN_USER != nobody ] ||
+  { echo "You must provide an admin user to start qmail"; exit 1; }
+
+# If any users or groups are already configured, use their id instead
+for i in nofiles qmail
+do
+  grep -q ^$i: /etc/group &&
+    eval $(echo $i|tr a-z A-Z)_GROUP=$(grep ^$i: /etc/group|cut -f3 -d:)
+done
+for i in alias qmail{d,l,p,q,r,s}
+do
+  grep -q ^$i: /etc/passwd &&
+    eval $(echo $i|tr a-z A-Z)_USER=$(grep ^$i: /etc/passwd|cut -f3 -d:)
+done
+
+set -e
+
+rm -rf $PKG $CHROOT
+mkdir -p $INSTDIR $OUTPUT $CHROOT
+
+# Create doinst.sh fragment to add users & groups
+# (-r option stops creation of mailboxes)
+if [ "$INSTALL_USERS" = yes ]; then
+  cat >$INSTDIR/doinst_users <<////
+grep -q ^nofiles: /etc/group ||
+  groupadd -g $NOFILES_GROUP nofiles
+grep -q ^alias: /etc/passwd ||
+  useradd -r -g nofiles -d /var/qmail/alias -u $ALIAS_USER -s "" alias
+grep -q ^qmaild: /etc/passwd ||
+  useradd -r -g nofiles -d /var/qmail -u $QMAILD_USER -s "" qmaild
+grep -q ^qmaill: /etc/passwd ||
+  useradd -r -g nofiles -d /var/qmail -u $QMAILL_USER -s "" qmaill
+grep -q ^qmailp: /etc/passwd ||
+  useradd -r -g nofiles -d /var/qmail -u $QMAILP_USER -s "" qmailp
+grep -q ^qmail: /etc/group ||
+  groupadd -g $QMAIL_GROUP qmail
+grep -q ^qmailq: /etc/passwd ||
+  useradd -r -g qmail -d /var/qmail -u $QMAILQ_USER -s "" qmailq
+grep -q ^qmailr: /etc/passwd ||
+  useradd -r -g qmail -d /var/qmail -u $QMAILR_USER -s "" qmailr
+grep -q ^qmails: /etc/passwd ||
+  useradd -r -g qmail -d /var/qmail -u $QMAILS_USER -s "" qmails
+////
+else
+  cat /dev/null >$INSTDIR/doinst_users
+fi
+
+cd $CHROOT
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+for i in $CWD/*.patch
+do
+  cat $i|patch -p0
+done
+
+############################################################################
+# The build process requires all the qmail users to be registered,         #
+# so do it in a chroot to avoid messing with the build system's etc/passwd #
+############################################################################
+
+cd $CHROOT
+export MKCHROOT_FOR_GCC=yes
+mkchroot .
+
+# need make + groff + sed
+addchroot . make guile gc libffi libunistring groff sed
+
+# need gcc, kernel headers, flex
+addchroot . binutils gcc libmpc kernel-headers flex
+
+mkdir -p var/qmail
+
+# install the qmail users and groups for chroot
+cat >>etc/group <<////
+nofiles:x:$NOFILES_GROUP:
+qmail:x:$QMAIL_GROUP:
+////
+cat >>etc/passwd <<////
+root:x:0:0::/root:/bin/bash
+alias:x:$ALIAS_USER:$NOFILES_GROUP::/var/qmail/alias:/bin/true
+qmaild:x:$QMAILD_USER:$NOFILES_GROUP::/var/qmail:/bin/true
+qmaill:x:$QMAILL_USER:$NOFILES_GROUP::/var/qmail:/bin/true
+qmailp:x:$QMAILP_USER:$NOFILES_GROUP::/var/qmail:/bin/true
+qmailq:x:$QMAILQ_USER:$QMAIL_GROUP::/var/qmail:/bin/true
+qmailr:x:$QMAILR_USER:$QMAIL_GROUP::/var/qmail:/bin/true
+qmails:x:$QMAILS_USER:$QMAIL_GROUP::/var/qmail:/bin/true
+////
+
+# Set up the commands to run in the chroot jail
+cat >commands <<////
+cd /$PRGNAM-$VERSION
+make
+make setup check
+////
+
+# Run the chroot commands
+chroot . /bin/sh /commands
+
+rm -r var/qmail/man/cat*
+mv var/qmail/doc/* $DOCDIR
+rmdir var/qmail/doc
+mv var/qmail/man $PKG/usr
+mv var $PKG
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+cat $CWD/$PRGNAM.SlackBuild > $DOCDIR/$PRGNAM.SlackBuild
+cp -a $CHROOT/$PRGNAM-$VERSION/{BLURB*,CHANGES,COPYRIGHT,INTERNALS,README} $DOCDIR
+
+chown -R root: $PKG/usr
+
+mkdir -p $PKG/install
+cat $INSTDIR/doinst_users $CWD/doinst_new > $INSTDIR/doinst_sh
+
+###########################################################################
+# doinst.sh implements the configure advice in "Life with qmail" (LWQ).   #
+# You can skip this step by secifying DO_CONFIG=no on the SlackBuild line #
+###########################################################################
+
+if [ $DO_CONFIG = yes ]
+then
+  # LWQ 2.5.5
+  cd $CHROOT/$PRGNAM-$VERSION
+  cp config hostname dnsfq dnsip ipmeprint dnsptr $INSTDIR
+  cat $CWD/doinst_config >> $INSTDIR/doinst_sh
+
+  # LWQ 2.8.1
+  cd $PKG
+  cat $CWD/LWQ_scripts/rc > var/qmail/rc
+  chmod 755 var/qmail/rc
+  mkdir -p var/log/qmail
+  [ "$MAILDIR" = no ] && i=./Mailbox || i=./Maildir/
+  echo $i > var/qmail/control/defaultdelivery
+
+  # LWQ 2.8.2.1
+  cat $CWD/LWQ_scripts/qmailctl-script-dt70 > var/qmail/bin/qmailctl
+  chmod 755 var/qmail/bin/qmailctl
+  cat $CWD/LWQ_scripts/inst_check > var/qmail/bin/inst_check
+  chmod 755 var/qmail/bin/inst_check # LWQ 2.9
+  mkdir usr/bin
+  ln -s ../../var/qmail/bin/{qmailctl,inst_check} usr/bin
+
+  # LWQ 2.8.2.2
+  mkdir -p var/qmail/supervise/qmail-send/log
+  mkdir -p var/qmail/supervise/qmail-smtpd/log
+  cat $CWD/LWQ_scripts/qmail-send-run > var/qmail/supervise/qmail-send/run
+  cat $CWD/LWQ_scripts/qmail-send-log-run \
+    > var/qmail/supervise/qmail-send/log/run
+  cat $CWD/LWQ_scripts/qmail-smtpd-run > var/qmail/supervise/qmail-smtpd/run
+  echo 20 > var/qmail/control/concurrencyincoming
+  chmod 644 var/qmail/control/concurrencyincoming
+  cat $CWD/LWQ_scripts/qmail-smtpd-log-run \
+    > var/qmail/supervise/qmail-smtpd/log/run
+  chmod 755 var/qmail/supervise/qmail-send/run
+  chmod 755 var/qmail/supervise/qmail-send/log/run
+  chmod 755 var/qmail/supervise/qmail-smtpd/run
+  chmod 755 var/qmail/supervise/qmail-smtpd/log/run
+  mkdir -p var/log/qmail/smtpd
+  chown $QMAILL_USER:$NOFILES_GROUP var/log/qmail var/log/qmail/smtpd
+  [ $SYMLINK_SERVICE = no ] || cat $CWD/doinst_service >> $INSTDIR/doinst_sh
+
+  # 2.8.3 is done in doinst_config
+
+  # LWQ 2.8.4
+  if [ $ADMIN_USER != nobody ]
+  then
+    echo $ADMIN_USER > var/qmail/alias/.qmail-root
+    echo $ADMIN_USER > var/qmail/alias/.qmail-postmaster
+    ln -s .qmail-postmaster var/qmail/alias/.qmail-mailer-daemon
+    ln -s .qmail-postmaster var/qmail/alias/.qmail-abuse
+    chmod 644 var/qmail/alias/.qmail-root var/qmail/alias/.qmail-postmaster
+  fi
+fi
+
+# qmail installer likes to put a sendmail symlink in /usr/lib
+mkdir -p $PKG/usr/lib
+
+# symlink useful programs to usr/bin
+mkdir -p $PKG/usr/bin
+ln -s ../../var/qmail/bin/maildirmake $PKG/usr/bin
+
+# Distribute the installer test suite
+mkdir $INSTDIR/tests
+cp -a $CWD/tests/{README,makechroot} $INSTDIR/tests/
+chown -R root: $INSTDIR/tests
+
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l n -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}

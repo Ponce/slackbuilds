@@ -1,0 +1,305 @@
+#!/bin/sh
+
+# Dave Sill, 2003-11-10
+# http://lifewithqmail.org/inst_check
+
+# set to n if you're not running a pop3 server, y if you are
+CHECKPOP=n
+
+QMHOME=/var/qmail
+LBIN=/usr/bin
+
+OK=1
+
+if [ $# -eq 1 ]; then
+  if [ "$1" = "-v" ]; then
+    VERB=y
+  else
+    VERB=n
+  fi
+fi
+
+if [ ! -d $QMHOME ]; then
+  echo "! Couldn't find qmail's home directory, $QMHOME!"
+else
+  if [ "$VERB" = y ]; then
+    echo "$QMHOME exists"
+  fi
+  for i in alias bin boot control queue supervise users; do
+    if [ ! -d $QMHOME/$i ]; then
+      echo "! Couldn't find $QMHOME/$i!"
+      OK=0
+    elif [ "$VERB" = y ]; then
+      echo "$QMHOME/$i exists"
+    fi
+  done
+
+  if [ ! -f $QMHOME/rc ]; then
+    echo "! $QMHOME/rc is missing"
+    OK=0
+  elif [ ! -x $QMHOME/rc ]; then
+    echo "! $QMHOME/rc is not executable"
+    echo "...try: chmod 755 $QMHOME/rc"
+    OK=0
+  elif [ `head -1 $QMHOME/rc|cat -vet` != '#!/bin/sh$' ]; then
+    echo "! $QMHOME/rc has bad magic cookie"
+    echo "...try: dos2unix $QMHOME/rc"
+    OK=0
+  elif [ "$VERB" = y ]; then
+    echo "$QMHOME/rc is executable and has a valid magic cookie"
+  fi
+fi
+
+for i in alias qmaild qmaill qmailp qmailq qmailr qmails; do
+  grep "^$i:" /etc/passwd >/dev/null
+  if [ $? -ne 0 ]; then
+    echo "! Couldn't find $i user in /etc/passwd"
+    OK=0
+  elif [ "$VERB" = y ]; then
+    echo "$i user exists"
+  fi
+done
+
+for i in qmail nofiles; do
+  grep "^$i:" /etc/group >/dev/null
+  if [ $? -ne 0 ]; then
+    echo "! Couldn't find $i group in /etc/group"
+    OK=0
+  elif [ "$VERB" = y ]; then
+    echo "$i group exists"
+  fi
+done
+
+for i in tcprules tcpserver; do
+  if [ ! -x $LBIN/$i ]; then
+    echo "! Couldn't find $LBIN/$i from ucspi-tcp"
+    OK=0
+  elif [ "$VERB" = y ]; then
+    echo "$i from ucspi-tcp is installed"
+  fi
+done
+
+for i in multilog softlimit setuidgid supervise svok svscan tai64nlocal; do
+  if [ ! -x $LBIN/$i ]; then
+    echo "! Couldn't find $LBIN/$i from daemontools"
+    OK=0
+  elif [ "$VERB" = y ]; then
+    echo "$i from daemontools is installed"
+fi
+done
+
+if [ ! -d /service ]; then
+  echo "! /service directory is missing"
+  OK=0
+elif [ "$VERB" = y ]; then
+  echo "/service directory exists"
+fi
+
+if [ -f /etc/inittab ]; then
+  grep "^SV" /etc/inittab >/dev/null
+  if [ $? -ne 0 ]; then
+    echo "! Couldn't find SV entry in inittab"
+    OK=0
+  elif [ "$VERB" = y ]; then
+    echo "svscan /service is configured to run via /etc/inittab"
+  fi
+  PS="ps -ef"
+else
+  grep "svscanboot" /etc/rc.local >/dev/null
+  if [ $? -ne 0 ]; then
+    echo "! Couldn't find 'csh -cf '/command/svscanboot &' in /etc/rc.local"
+    OK=0
+  elif [ "$VERB" = y ]; then
+    echo "/command/svscanboot is configured to run via /etc/rc.local"
+  fi
+  PS="ps -waux"
+fi
+
+SVRUN=`$PS | grep "svscan /service" | grep -v grep`
+if [ -z "$SVRUN" ]; then
+  echo "'! svscan /service' doesn't seem to be running"
+  OK=0
+elif [ "$VERB" = y ]; then
+  echo "svscan /service is running"
+fi
+
+if [ ! -f $QMHOME/control/defaultdelivery ]; then
+  echo "! Couldn't find $QMHOME/control/defaultdelivery"
+  OK=0
+elif [ ! -s $QMHOME/control/defaultdelivery ]; then
+  echo "! $QMHOME/control/defaultdelivery is empty"
+  OK=0
+elif [ "$VERB" = y ]; then
+  echo "$QMHOME/control/defaultdelivery looks OK"
+fi
+
+if [ ! -f $QMHOME/bin/qmailctl ]; then
+  echo "! $QMHOME/bin/qmailctl is missing"
+  OK=0
+elif [ ! -s $QMHOME/bin/qmailctl ]; then
+  echo "! $QMHOME/bin/qmailctl is empty"
+  OK=0
+elif [ `head -1 $QMHOME/bin/qmailctl|cat -vet` != '#!/bin/sh$' ]; then
+    echo "! $QMHOME/bin/qmailctl has bad magic cookie"
+    echo "...try: dos2unix $QMHOME/bin/qmailctl"
+    OK=0
+elif [ ! -x $QMHOME/bin/qmailctl ]; then
+  echo "! $QMHOME/bin/qmailctl is not executable"
+  echo "...try: chmod 755 $QMHOME/bin/qmailctl"
+  OK=0
+elif [ "$VERB" = y ]; then
+  echo "$QMHOME/bin/qmailctl looks OK"
+fi
+if [ ! -L /usr/bin/qmailctl ]; then
+  echo "! /usr/bin/qmailctl is missing"
+  echo "...try: ln -s $QMHOME/bin/qmailctl /usr/bin"
+  OK=0
+elif [ "$VERB" = y ]; then
+  echo "/usr/bin/qmailctl exists"
+fi
+
+SVCDIRS="qmail-send qmail-send/log qmail-smtpd qmail-smtpd/log"
+if [ "$CHECKPOP" = "y" ]; then
+  SVCDIRS="$SVCDIRS qmail-pop3d qmail-pop3d/log"
+fi
+for i in $SVCDIRS; do
+  if [ ! -f $QMHOME/supervise/$i/run ]; then
+    echo "! $QMHOME/supervise/$i/run file is missing"
+    OK=0
+  elif [ `head -1 $QMHOME/supervise/$i/run|cat -vet` != '#!/bin/sh$' ]; then
+    echo "! $QMHOME/supervise/$i/run has bad magic cookie"
+    echo "...try: dos2unix $QMHOME/supervise/$i/run"
+    OK=0
+  elif [ ! -x $QMHOME/supervise/$i/run ]; then
+    echo "! $QMHOME/supervise/$i/run file is not executable"
+    OK=0
+  elif [ "$VERB" = y ]; then
+    echo "$QMHOME/supervise/$i/run looks OK"
+  fi
+done
+
+if [ ! -f $QMHOME/control/concurrencyincoming ]; then
+  echo "! $QMHOME/control/concurrencyincoming is missing"
+  echo "...try: echo 20 >$QMHOME/control/concurrencyincoming"
+  OK=0
+elif [ "$VERB" = y ]; then
+  echo "$QMHOME/control/concurrencyincoming looks OK"
+fi
+
+LOGDIRS="/var/log/qmail /var/log/qmail/smtpd"
+if [ "$CHECKPOP" = "y" ]; then
+  LOGDIRS="$LOGDIRS /var/log/qmail/pop3d"
+fi
+for i in $LOGDIRS; do
+  if [ ! -d $i ]; then
+    echo "! $i is missing"
+    echo "...try: mkdir -p $i"
+    OK=0
+  elif [ "`ls -ld $i|awk '{print $3}'`" != "qmaill" ]; then
+    echo "! $i has wrong owner, should be qmaill"
+    echo "...try: chown qmaill $i"
+    OK=0
+  elif [ "`ls -ld $i|awk '{print $1}'`" != "drwxr-xr-x" ]; then
+    echo "! $i has wrong mode, should be 755"
+    echo "...try: chmod 755 $i"
+    OK=0
+  elif [ "$VERB" = y ]; then
+    echo "$i looks OK"
+  fi
+done
+
+SVCLINKS="/service/qmail-send /service/qmail-smtpd"
+if [ "$CHECKPOP" = "y" ]; then
+  SVCLINKS="$SVCLINKS /service/qmail-pop3d"
+fi
+for i in $SVCLINKS; do
+  if [ ! -L $i ]; then
+    echo "! $i is missing"
+    echo "...try: ln -s $QMHOME$i $i"
+    OK=0
+  elif [ "$VERB" = y ]; then
+    echo "$i exists"
+  fi
+done
+
+if [ ! -f /etc/tcp.smtp ]; then
+  echo "! /etc/tcp.smtp is missing"
+  echo "...try: echo '127.:allow,RELAYCLIENT=\"\"' >>/etc/tcp.smtp"
+  OK=0
+elif [ "$VERB" = y ]; then
+  echo "/etc/tcp.smtp exists"
+fi
+
+if [ ! -f /etc/tcp.smtp.cdb ]; then
+  echo "! /etc/tcp.smtp.cdb is missing"
+  echo "...try: $QMHOME/bin/qmailctl cdb"
+  OK=0
+elif [ "$VERB" = y ]; then
+  echo "/etc/tcp.smtp.cdb exists"
+fi
+
+AHOME=`grep "^alias:" /etc/passwd | awk -F: '{print $6}'`
+if [ -z "$AHOME" ]; then
+  echo "! Couldn't find user alias's home directory"
+  OK=0
+else
+  for i in root postmaster mailer-daemon; do
+    if [ ! -f $AHOME/.qmail-$i ]; then
+      echo "! Alias for $i is missing"
+      echo "...try: echo me >$AHOME/.qmail-$i"
+      OK=0
+    elif [ "$VERB" = y ]; then
+      echo "$i alias exists"
+    fi
+  done
+fi
+
+if netstat -a | grep smtp | grep -i listen >/dev/null; then
+  if $PS | grep sendmail | grep -v grep >/dev/null; then
+    echo "! Sendmail is still running"
+    echo "...try: $RCDIR/init.d/sendmail stop"
+    OK=0
+  elif $LBIN/svok /service/qmail-smtpd; then
+    if [ "$VERB" = y ]; then
+      echo "/service/qmail-smtpd is running"
+    fi
+  else
+    echo "! Something is listening on port 25 (not tcpserver/qmail-smtpd)"
+    echo "...try: disabling current MTA"
+    OK=0
+  fi
+fi
+
+if [ "$CHECKPOP" = "y" ]; then
+  if netstat -a | grep pop | grep -i listen >/dev/null; then
+    if $LBIN/svok /service/qmail-pop3d; then
+      if [ "$VERB" = y ]; then
+        echo "/service/qmail-pop3d is running"
+      fi
+    else
+      echo "! Something is listening on port 110 (not tcpserver/qmail-pop3d)"
+      echo "...try: disabling other POP server"
+      OK=0
+    fi
+  fi
+fi
+
+for i in /usr/lib/sendmail /usr/sbin/sendmail; do
+  if [ -f $i -a ! -L $i ]; then
+    echo "! $i is a file, should be a link"
+    echo "...try: uninstalling current MTA or: mv $i $i.old; ln -s $QMHOME/bin/sendmail $i"
+    OK=0
+  elif [ ! -f $i ];then
+    echo "! $i is missing"
+    echo "...try: ln -s $QMHOME/bin/sendmail $i"
+    OK=0
+  elif [ "$VERB" = y ]; then
+    echo "$i exists"
+  fi
+done
+
+if [ $OK -eq 1 ]; then
+  echo "Congratulations, your LWQ installation looks good!"
+elif [ "$VERB" = y ]; then
+  echo "! Potential problems were found with your LWQ installation"
+fi
