@@ -1,0 +1,74 @@
+#!/bin/sh
+#set -x
+
+# A function to make a file local (not hard-linked to the real file)
+# One should run this on any file that the test might modify
+make_local()
+{
+  while [ $# -gt 0 ]
+  do
+    cp -a $CHROOT/$1 $CHROOT/$1.new
+    mv $CHROOT/$1.new $CHROOT/$1
+    shift
+  done
+}
+
+CHROOT=${CHROOT:-/tmp/t5}
+VERBOSE_ADDCHROOT=${VERBOSE_ADDCHROOT:-true}
+export VERBOSE_ADDCHROOT
+PKGDIR=${PKGDIR:-/usr/packages}
+[ -n "$MKCHROOT_IGNORE_LN_ERRORS" ] && LNE='2>/dev/null' || LNE=
+
+# These are options
+INSTALL_DAEMONTOOLS=${INSTALL_DAEMONTOOLS:-no}
+STRIP_INITTAB_SV=${STRIP_INITTAB_SV:-yes}
+STRIP_QMAIL_USERS_GROUPS=${STRIP_QMAIL_USERS_GROUPS:-yes}
+
+[ ! -d $CHROOT/proc/1 ] || umount $CHROOT/proc
+rm -rf $CHROOT
+mkchroot $CHROOT
+addchroot $CHROOT tar pkgtools
+mkdir -p $CHROOT$PKGDIR
+eval ln $PKGDIR/netqmail* $PKGDIR/daemontools* $CHROOT$PKGDIR $LNE \|\| \
+  cp -a $PKGDIR/netqmail* $PKGDIR/daemontools* $CHROOT$PKGDIR
+addchroot $CHROOT ucspi-tcp mkchroot
+
+# Set up Slackware install DB for mkchroot
+for i in packages scripts
+do
+  mkdir $CHROOT/var/log/$i
+  (cd /var/log/$i; ls -1 | while read j; do [ -d $j ] ||
+    eval ln $j $CHROOT/var/log/$i $LNE \|\| cp -a $j $CHROOT/var/log/$i; done)
+done
+
+addchroot $CHROOT etc
+make_local etc/{group,gshadow,passwd,shadow}
+addchroot $CHROOT sysvinit
+addchroot $CHROOT sysvinit-scripts
+make_local etc/inittab
+[ $STRIP_INITTAB_SV != yes ] ||
+{
+  cat $CHROOT/etc/inittab | grep -E -v '^SV:' >$CHROOT/etc/inittab.new
+  mv $CHROOT/etc/inittab.new $CHROOT/etc/inittab
+}
+addchroot $CHROOT sed util-linux gzip network-scripts shadow ncurses
+mkdir $CHROOT/root $CHROOT/proc
+[ $INSTALL_DAEMONTOOLS = no ] || addchroot $CHROOT daemontools
+
+[ $STRIP_QMAIL_USERS_GROUPS != yes ] ||
+{
+  mount -tproc proc $CHROOT/proc
+  
+  for i in alias qmail{d,l,p,q,r,s}
+  do
+    grep -q ^$i: $CHROOT/etc/passwd && chroot $CHROOT userdel $i
+  done
+  for i in nofiles qmail
+  do
+    grep -q ^$i: $CHROOT/etc/group && chroot $CHROOT groupdel $i
+  done
+  umount $CHROOT/proc
+}
+
+# inst_check needs these
+addchroot $CHROOT procps-ng gawk net-tools
