@@ -1,0 +1,54 @@
+From: Julien Grall <julien.grall@arm.com>
+Subject: arm: vgic: Don't update the LR when the IRQ is not enabled
+
+gic_raise_inflight_irq will be called if the IRQ is already inflight
+(i.e the IRQ is injected to the guest). If the IRQ is already already in
+the LRs, then the associated LR will be updated.
+
+To know if the interrupt is already in the LR, the function check if the
+interrupt is queued. However, if the interrupt is not enabled then the
+interrupt may not be queued nor in the LR. So gic_update_one_lr may be
+called (if we inject on the current vCPU) and read the LR.
+
+Because the interrupt is not in the LR, Xen will either read:
+    * LR 0 if the interrupt was never injected before
+    * LR 255 (GIC_INVALID_LR) if the interrupt was injected once. This
+    is because gic_update_one_lr will reset p->lr.
+
+Reading LR 0 will result to potentially update the wrong interrupt and
+not keep the LRs in sync with Xen.
+
+Reading LR 255 will result to:
+    * Crash Xen on GICv3 as the LR index is bigger than supported (see
+    gicv3_ich_read_lr).
+    * Read/write always GICH_LR + 255 * 4 that is not part of the memory
+    mapped.
+
+The problem can be prevented by checking whether the interrupt is
+enabled in gic_raise_inflight_irq before calling gic_update_one_lr.
+
+A follow-up of this patch is expected to mitigate the issue in the
+future.
+
+This is XSA-223.
+
+Reported-by: Julien Grall <julien.grall@arm.com>
+Signed-off-by: Julien Grall <julien.grall@arm.com>
+Reviewed-by: Stefano Stabellini <sstabellini@kernel.org>
+---
+ xen/arch/arm/gic.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+--- a/xen/arch/arm/gic.c
++++ b/xen/arch/arm/gic.c
+@@ -417,6 +417,10 @@ void gic_raise_inflight_irq(struct vcpu *v, unsigned int virtual_irq)
+ 
+     ASSERT(spin_is_locked(&v->arch.vgic.lock));
+ 
++    /* Don't try to update the LR if the interrupt is disabled */
++    if ( !test_bit(GIC_IRQ_GUEST_ENABLED, &n->status) )
++        return;
++
+     if ( list_empty(&n->lr_queue) )
+     {
+         if ( v == current )
