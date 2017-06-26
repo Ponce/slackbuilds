@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# texmf_get.sh (c) 2016 Johannes Schoepfer, slackbuilds[at]schoepfer[dot]info
+# texmf_get.sh (c) 2016-2017 Johannes Schoepfer, slackbuilds[at]schoepfer[dot]info
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -20,7 +20,7 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-#  V 0.6
+#  V 0.7
 #
 #  Prepare xz-compressed tarballs of texlive-texmf-trees based on texlive.tlpdb
 #  This script takes care of dependencies(as far as these are present in texlive.tlpdb) of collections and packages,
@@ -31,7 +31,7 @@
 # packages source: http://mirror.ctan.org/systems/texlive/tlnet/archive/
 
 #set -e
-MAJORVERSION=2016
+MAJORVERSION=2017
 # release mirror
 mirror="http://mirror.ctan.org/systems/texlive/tlnet/"
 # pre-test mirror 2016
@@ -54,7 +54,6 @@ packages () {
     cbfonts
     sanskrit-t1
     cmcyr
-    cs
     uhc
     fonts-tlwg
     ethiop-t1
@@ -65,24 +64,23 @@ packages () {
     nanumtype1" \
   texmfget fonts
 
-# The base
+# The base. some notes:
+#  cs needed by fmtutil-sys --all, 2017-06-24
+#  hyphen-belarusian needed by fmtutil-sys --all, 2017-06-24
+#  hyphen-ethiopic
   PACKAGES="
     collection-basic
     collection-latex
-    collection-genericrecommended
     collection-latexrecommended
     collection-xetex
     collection-metapost
-    collection-plainextra
     collection-fontutils
-    collection-genericextra
-    collection-formatsextra
-    collection-htmlxml
     collection-luatex
     collection-fontsrecommended
-    collection-mathextra
     collection-humanities
     collection-context
+    collection-mathscience
+    collection-plaingeneric
     lh
     yfonts
     doublestroke
@@ -113,9 +111,7 @@ packages () {
     idxlayout
     bidi
     filecontents
-    biblatex
-    biber.x86_64-linux
-    biber.i386-linux
+    cs
     collection-langeuropean
     collection-langenglish
     collection-langfrench
@@ -125,7 +121,8 @@ packages () {
     collection-langportuguese
     collection-langspanish
     collection-langgreek
-    collection-langafrican
+    hyphen-belarusian
+    hyphen-ethiopic
     hyphen-czech
     hyphen-slovak
     hyphen-indic
@@ -157,20 +154,20 @@ PACKAGES="collection-fontsextra" texmfget fonts
 
 # Put all remaining stuff in the "extra" tarball
   PACKAGES="
+    biber.x86_64-linux
+    biber.i386-linux
+    collection-formatsextra
     collection-latexextra
     collection-pictures
     collection-games
     collection-publishers
     collection-bibtexextra
     collection-binextra
-    collection-science
-    collection-omega
     collection-music
     collection-langother
     collection-pstricks
     collection-langcyrillic
     collection-langczechslovak
-    collection-langindic
     collection-langjapanese
     collection-langkorean
     collection-langarabic
@@ -191,8 +188,7 @@ PACKAGES="collection-fontsextra" texmfget fonts
 	done < $TMP/allcollections
   fi
 
-# Following aren't supported
-#NAME=context PACKAGES="collection-context" ./texmf_get.sh
+# Following collections are windows only related
 #NAME=texworks PACKAGES="collection-texworks" ./texmf_get.sh
 #NAME=wintools PACKAGES="collection-wintools" ./texmf_get.sh
 
