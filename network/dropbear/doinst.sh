@@ -22,12 +22,7 @@ preserve_perms() {
   config $NEW
 }
 
-if [ -e usr/bin/scp ]; then
-  mv usr/bin/scp usr/bin/scp.openssh
-fi
-
 preserve_perms etc/rc.d/rc.dropbear.new
-config etc/rc.d/rc.dropbear.new
 
 # Create a logfile if one doesn't already exist
 if [ ! -e var/log/dropbear.log ]; then
