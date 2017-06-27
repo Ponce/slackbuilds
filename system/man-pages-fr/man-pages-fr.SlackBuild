@@ -22,9 +22,18 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# Now maintained by B. Watson <yalhcru@gmail.com>
+
+# 20170626 bkw:
+# - Take over maintenance, BUILD=2.
+# - Combine old man-pages-extras-fr build with this one. I can't
+#   think of a reason why anyone would ever want to install one but
+#   not the other.
+# - Add UTF8 option.
+
 PRGNAM=man-pages-fr
 VERSION=${VERSION:-3.03.0}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 # Hardcode ARCH
@@ -35,30 +44,71 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
+XTRANAM=man-pages-extras-fr
+XTRAVER=${XTRAVER:-0.8.1}
+
+UTF8=${UTF8:-no}
+
 set -e
+
+fix_perms() {
+  chown -R root:root .
+  find -L . \
+   \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+   -exec chmod 755 {} \+ -o \
+   \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+   -exec chmod 644 {} \+
+}
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
+
+# First, the "extras".
+# Cribbed from man-pages-extras-fr.SlackBuild
+cd $TMP
+rm -rf $XTRANAM-$XTRAVER
+tar xvf $CWD/$XTRANAM-$XTRAVER.tar.bz2
+cd $XTRANAM-$XTRAVER
+fix_perms
+make DESTDIR=$PKG MANDIR=/usr/man/fr install
+
+if [ "$UTF8" != "yes" ]; then
+  echo "Converting to latin-1..."
+  cd $PKG/usr/man/fr
+  for MANPAGE in man*/* ; do
+    iconv -c -t LATIN1 -f UTF8 < $MANPAGE > tmp
+    mv tmp $MANPAGE
+  done
+  cd -
+fi
+
+echo "Compressing..."
+find $PKG/usr/man/fr -type f -print0 | xargs -0 gzip -9
+
+# This one is included in Slackware.
+rm $PKG/usr/man/fr/man1/chsh.1.gz
+
+mkdir -p $PKG/usr/doc/$XTRANAM-$XTRAVER
+cp -a AFAIRE Lisez_moi $PKG/usr/doc/$XTRANAM-$XTRAVER
+
+# Now, the main package.
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvjf $CWD/$PRGNAM-$VERSION.tar.bz2 || exit 1
-cd $PRGNAM-$VERSION || exit 1
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
+cd $PRGNAM-$VERSION
+fix_perms
+
+[ "$UTF8" != "yes" ] && ENC="--encoding=latin1"
 
 ./configure \
   --prefix=$PKG/usr \
-  --encoding=latin1 \
-  --gzip \
-  || exit 1
+  $ENC \
+  --gzip
 
-make || exit 1
+make
 
-mv $PKG/usr/doc/$PRGNAM $PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+mv $PKG/usr/doc/$PRGNAM/* $PKG/usr/doc/$XTRANAM-$XTRAVER $PKG/usr/doc/$PRGNAM-$VERSION
 
 # These two are included in Slackware.
 rm $PKG/usr/man/fr/man5/passwd.5.gz
@@ -71,4 +121,3 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
-
