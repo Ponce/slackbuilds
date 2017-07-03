@@ -20,20 +20,18 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# nvidia-switch utility 3.0
+# nvidia-switch utility 4.0
 #
 # A tool to install and cleanly remove the nvidia driver without stomping on the xorg files.
 # Note: this tool "should" allow switching on the fly, but why? Pick a driver! You will still
 # need to edit a bunch of other config files.
 
-# TO-DO: needs more cleanup; still way too brittle.
-# might be better to move mesa and xorg conflicts to /var/lib/nvidia 
-
+# TO-DO: needs more cleanup, simplify linking using system tools
 
 ROOT="${ROOT:-/}"
 CWD=$(pwd)
-LIBSUFFIX="LIBDIRSUFFIX" # This will be replaced in the build script
 COMPAT32="LIB32FLAG" # This will be replaced in the build script (yes | no)
+LIBSUFFIX="LIBDIRSUFFIX" # This will be replaced in the build script
 INC="${ROOT}usr/include/GL"
 LIB="${ROOT}usr/lib${LIBSUFFIX}"
 LIB32="${ROOT}usr/lib"
@@ -43,56 +41,67 @@ NV_VERSION="PKGVERSION" # This will be replaced in the build script
 GL_VERSION="1.2.0"
 GLVND="GLVNDFLAG" # This will be replaced in the build script (yes | no)
 NV_CONF="/usr/share/X11/xorg.conf.d/10-nvidia.conf"
+SAVELIBS="/var/log/nvidia"
 
 save_GL(){
+# backup original mesa and xorg conflicts to /var/lib/nvidia
   cd $2
+  if [ "$2" = "$LIB32" ]; then
+     SAVELIBS="/var/log/nvidia/32"
+  fi
+  if [ "$2" = "$LIB" ]; then
+     SAVELIBS="/var/log/nvidia/64"
+  fi
   case "$1" in
     "nvidia")
-      mv libGL.so.$GL_VERSION xorg-libGL.so.$GL_VERSION
-      mv libGL.la xorg-libGL.la
+
+      mv libGL.so.$GL_VERSION $SAVELIBS/libGL.so.$GL_VERSION
+      mv libGL.la $SAVELIBS/libGL.la
+      mv libEGL.so.1.0.0 $SAVELIBS/libEGL.so.1.0.0
+      mv libGLESv1_CM.so.1.1.0 $SAVELIBS/libGLESv1_CM.so.1.1.0
+      mv libGLESv2.so.2.0.0 $SAVELIBS/libGLESv2.so.2.0.0
       mv libGL.la-nvidia libGL.la
-      mv libEGL.so.1.0.0 xorg-libEGL.so.1.0.0
 
       if [ "$GLVND" = "yes" ]; then
         ln -sf libGL.so.1.0.0 libGL.so.1
-        ln -sf libGL.so.1 libGL.so
+	ln -sf libGL.so.1.0.0 libGL.so
         ln -sf libEGL.so.1-nvidia libEGL.so.1
-        ln -sf libEGL.so.1 libEGL.so
+	ln -sf libEGL.so.1-nvidia libEGL.so
       else
         ln -sf libGL.so.$NV_VERSION libGL.so.1
-        ln -sf libGL.so.1 libGL.so
+        ln -sf libGL.so.$NV_VERSION libGL.so
         ln -sf libEGL.so.$NV_VERSION libEGL.so.1
-        ln -sf libEGL.so.1 libEGL.so
+        ln -sf libEGL.so.$NV_VERSION libEGL.so
       fi
 
-      mv libGLESv1_CM.so.1.1.0 xorg-libGLESv1_CM.so.1.1.0
       ln -sf libGLESv1_CM.so.1-nvidia libGLESv1_CM.so.1
-      ln -sf libGLESv1_CM.so.1 libGLESv1_CM.so
-      mv libGLESv2.so.2.0.0 xorg-libGLESv2.so.2.0.0
+      ln -sf libGLESv1_CM.so.1-nvidia libGLESv1_CM.so
+
       ln -sf libGLESv2.so.2-nvidia libGLESv2.so.2
-      ln -sf libGLESv2.so.2 libGLESv2.so
+      ln -sf libGLESv2.so.2-nvidia libGLESv2.so
     ;;
 
     "xorg")
        mv libGL.la libGL.la-nvidia
-       mv xorg-libGL.la libGL.la
-       mv xorg-libEGL.so.1.0.0 libEGL.so.1.0.0
-       mv xorg-libGL.so.$GL_VERSION libGL.so.$GL_VERSION
+       mv $SAVELIBS/libGL.so.$GL_VERSION libGL.so.$GL_VERSION
+       mv $SAVELIBS/libGL.la libGL.la
+       mv $SAVELIBS/libEGL.so.1.0.0 libEGL.so.1.0.0
+       mv $SAVELIBS/libGLESv1_CM.so.1.1.0 libGLESv1_CM.so.1.1.0
+       mv $SAVELIBS/libGLESv2.so.2.0.0 libGLESv2.so.2.0.0
 
        ln -sf libGL.so.$GL_VERSION libGL.so.1
        ln -sf libGL.so.$GL_VERSION libGL.so
        ln -sf libEGL.so.1.0.0 libEGL.so.1
        ln -sf libEGL.so.1.0.0 libEGL.so
 
-       mv xorg-libGLESv1_CM.so.1.1.0 libGLESv1_CM.so.1.1.0
        ln -sf libGLESv1_CM.so.1.1.0 libGLESv1_CM.so.1
        ln -sf libGLESv1_CM.so.1.1.0 libGLESv1_CM.so
-       mv xorg-libGLESv2.so.2.0.0 libGLESv2.so.2.0.0
        ln -sf libGLESv2.so.2.0.0 libGLESv2.so.2
        ln -sf libGLESv2.so.2.0.0 libGLESv2.so
   ;;
+
   *)
-        echo "nothind to do for save_gl?"
+        echo "nothing to do for save_gl?"
         exit 1
   ;;
   esac
@@ -117,7 +126,7 @@ save_glx(){
         fi
       ;;
         *)
-          echo "nothind to do for save_glx?"
+          echo "nothing to do for save_glx?"
           exit 1
       ;;
   esac
@@ -152,11 +161,7 @@ nvidia_install(){
   save_wfb "nvidia"
 # Check for multilib configuration
   if [ "$COMPAT32" = "yes" ]; then
-    if [ -e $LIB32/libGL.so.$GL_VERSION ]; then
-      save_GL "nvidia" $LIB32
-    else
-      echo "mesa-compat32 is not installed, skipping..."
-    fi
+    save_GL "nvidia" $LIB32
   fi
 }
 
@@ -169,32 +174,10 @@ nvidia_remove(){
   save_glx "xorg"
   save_GL "xorg" $LIB
   save_wfb "xorg"
-# remove dangling sylinks
-  rm -f $LIB/libnvcuvid.so.1
-  rm -f $LIB/libnvidia-cfg.so.1
-  rm -f $LIB/libnvidia-encode.so.1
-  rm -f $LIB/libnvidia-fbc.so.1
-  rm -f $LIB/libnvidia-ifr.so.1
-  rm -f $LIB/libnvidia-ml.so.1
-  rm -f $LIB/libnvidia-opencl.so.1
-  rm -f $LIB/libcuda.so.1
-  rm -f $LIB/libOpenCL.so.1
+
 # Check for multilib configuration
   if [ "$COMPAT32" = "yes" ]; then
-    if [ -e $LIB32/xorg-libGL.so.$GL_VERSION ]; then
-      save_GL "xorg" $LIB32
-    else
-      echo "mesa-compat32 is not installed, skipping..."
-    fi
-# remove dangling sylinks
-    rm -f $LIB32/libnvcuvid.so.1
-    rm -f $LIB32/libnvidia-encode.so.1
-    rm -f $LIB32/libnvidia-fbc.so.1
-    rm -f $LIB32/libnvidia-ifr.so.1
-    rm -f $LIB32/libnvidia-ml.so.1
-    rm -f $LIB32/libnvidia-opencl.so.1
-    rm -f $LIB32/libcuda.so.1
-    rm -f $LIB32/libOpenCL.so.1
+    save_GL "xorg" $LIB32
   fi
 
   if [ -e $NV_CONF ]; then
@@ -211,9 +194,9 @@ restore(){
 # User must:
 # 1. remove any dangling symlinks and xorg-*, *-nvidia files in /usr/lib*/,
 #    and any other housekeeping tasks.
-# 2. copy stock Slackware packages to /root/Slackware
-# 3. be running STOCK Slackware-14.2
-# 4. realize that COMPAT32 is not supported ;-)
+# 2. copy stock Slackware packages to /root/Slackware or provide an alternate location
+# 3. be running Slackware-14.2, not current
+# 4. realize that COMPAT32 is not stable ;-)
 
 if [ "$LIBSUFFIX" = "64" ]; then
   ARCH="x86_64"
@@ -221,7 +204,7 @@ else
   ARCH="x86"
 fi
 
-PKGPATH="/root/Slackware"
+PKGPATH=${PKGPATH:-/root/Slackware}
 MESA="mesa-11.2.2-$ARCH-1.txz"
 MESA32="mesa-compat32-11.2.2-$ARCH-1compat32.txz"
 XORG="xorg-server-1.18.3-$ARCH-2.txz"
@@ -231,9 +214,9 @@ if [ -d $PKGPATH ]; then
   if [ `find $PKGPATH -prune -empty -type d` ]; then
     echo "Your $PKGPATH is empty!"
   else
-    upgradepkg --reinstall $MESA $XORG
+    upgradepkg --reinstall --install-new $MESA $XORG
     if [ "COMPAT32" = "yes" ]; then
-      upgradepkg --reinstall $MESA32
+      upgradepkg --reinstall --install-new $MESA32
     fi
   fi
 else
@@ -243,10 +226,14 @@ fi
 
 usage(){
   echo "Usage:"
-  echo " --install		Set up nvidia driver files (only during pkg install)"
-  echo " --remove		Return to stock xorg files and remove all symlinks"
-  echo " --restore		Reinstall stock Mesa and xorg-server [EXPERIMENTAL]"
-  echo " --help			Show this help message"
+  echo " --install    Set up nvidia driver files"
+  echo " --remove     Return to stock xorg files and restore all symlinks"
+  echo " --restore    Reinstall stock Mesa and xorg-server [EXPERIMENTAL]"
+  echo "              mesa-11.2.2, org-server-1.18.3, and optionally"
+  echo "              mesa-compat32-11.2.2 are expected in /root/Slackware"
+  echo "              Use 'PKGPATH="<location>" nvidia-switch --restore'"
+  echo "              to override."
+  echo " --help	      Show this help message"
 }
 
 case "$1" in
