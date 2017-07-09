@@ -23,7 +23,7 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=RetroArch
-VERSION=${VERSION:-1.4.1}
+VERSION=${VERSION:-1.6.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -55,11 +55,11 @@ else
 fi
 
 DEBUG=${DEBUG:-0}
-if [ "${DEBUG}" = "1" ]; then
-  SLKCFLAGS=$(echo $SLKCFLAGS | sed 's/-O2/-O0 -g/')
+if [ "$DEBUG" = 1 ]; then
+  SLKCFLAGS="$(printf %s "$SLKCFLAGS" | sed 's/-O2/-O0 -g/')"
 fi
 
-set -e
+set -eu
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -74,39 +74,45 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-if [ "$PYTHON" = "1" ]; then
-  python="--enable-python"
+if [ "${PYTHON:-0}" = 1 ]; then
+  python='--enable-python'
   # Needed for python3 in the 14.1 SBo branch.
   if ! pkg-config --exists python3 && pkg-config --exists python-3.5; then
     sed -i 's/python3/python-3.5/' qb/config.libs.sh
   fi
+else
+  python=
 fi
 
-if [ "$GLES" = "1" ]; then
-  gles="--enable-opengles"
-elif [ "$GLES3" = "1" ]; then
-  gles="--enable-opengles --enable-opengles3"
+if [ "${GLES:-0}" = 1 ]; then
+  gles='--enable-opengles'
+elif [ "${GLES3:-0}" = 1 ]; then
+  gles='--enable-opengles --enable-opengles3'
+else
+  gles=
 fi
 
-if [ "$BUILDBOT" != "1" ]; then
-  update_cores="--disable-update_cores"
+# Disable downloading cores with the online updater
+# https://github.com/libretro/RetroArch/issues/3237
+if [ "${BUILDBOT:-0}" != 1 ]; then
   SED_CORE="s|# libretro_directory =|libretro_directory = /usr/lib${LIBDIRSUFFIX}/libretro|"
   SED_INFO="s|# libretro_info_path =|libretro_info_path = /usr/lib${LIBDIRSUFFIX}/libretro/info|"
-
-  # Disable downloading cores with the online updater
-  # https://github.com/libretro/RetroArch/issues/3237
-  zcat $CWD/disable_core_update.patch.gz | patch -p1
+  SED_MENU='s|# menu_show_core_updater = true|menu_show_core_updater = false|'
+else
+  SED_CORE=
+  SED_INFO=
+  SED_MENU=
 fi
 
 # Set the config file default directories to be consistent with the installation.
 sed -e "s|# audio_filter_dir =|audio_filter_dir = /usr/lib${LIBDIRSUFFIX}/retroarch/filters/audio|" \
     -e "s|# video_filter_dir =|video_filter_dir = /usr/lib${LIBDIRSUFFIX}/retroarch/filters/video|" \
-    -e "$SED_CORE;$SED_INFO" \
+    -e "$SED_CORE;$SED_INFO;$SED_MENU" \
     -i retroarch.cfg
 
-# Fix ./configure --enable-python
-# https://github.com/libretro/RetroArch/commit/a06380e9cab1e5a59c70826fb2735566221e4149
-zcat $CWD/python3.diff.gz | patch -p1
+# Revert "udev input: support controlling the menu with a TV remote control"
+# https://github.com/libretro/RetroArch/commit/5c5c5ecbdfb05f78215ca6d4666b9ca20bd07805
+zcat $CWD/udev.patch.gz | patch -p1
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -116,9 +122,9 @@ CXXFLAGS="$SLKCFLAGS" \
   --with-assets_dir=/usr/share/games \
   --disable-dbus \
   --disable-update_assets \
-  $gles $python $update_cores
+  $gles $python
 
-make GL_DEBUG=$DEBUG VULKAN_DEBUG=$DEBUG
+make GL_DEBUG="$DEBUG" VULKAN_DEBUG="$DEBUG"
 make install DESTDIR=$PKG
 
 for filter in audio video; do
@@ -141,7 +147,7 @@ done
 
 mv $PKG/etc/retroarch.cfg $PKG/etc/retroarch.cfg.new
 
-if [ "${DEBUG}" = "0" ]; then
+if [ "$DEBUG" = 0 ]; then
   find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
     | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 fi
@@ -150,7 +156,7 @@ find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a CONTRIBUTING.md COPYING README* $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CHANGES.md CONTRIBUTING.md COPYING README* $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a media/assets/COPYING $PKG/usr/doc/$PRGNAM-$VERSION/COPYING.assets
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
