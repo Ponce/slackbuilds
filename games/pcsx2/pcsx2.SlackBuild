@@ -2,7 +2,7 @@
 
 # Slackware build script for pcsx2
 
-# Copyright 2016 Hunter Sezen California, USA
+# Copyright 2016-2017 Hunter Sezen California, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,7 +23,7 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=pcsx2
-VERSION=${VERSION:-2017.02.01_23d081ab2}
+VERSION=${VERSION:-2017.05.21_7d75a7310}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -60,7 +60,7 @@ else
   BINDIR=""
 fi
 
-set -e
+set -eu
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -75,20 +75,31 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Build a GSdx legacy plugin compatible with GL3.3
-GL3=${GL3:-no}
-case "$GL3" in
-  'yes' ) GSDX='-DGSDX_LEGACY=ON' ;;
-  * ) GSDX= ;;
-esac
+DEBUG="${DEBUG:-no}"
+DEVEL="${DEVEL:-no}"
+if [ "$DEVEL" = yes ] || [ "$DEBUG" = yes ]; then
+  case "${ASAN:-FALSE}" in
+    yes) ASAN=TRUE ;;
+    *) ASAN=FALSE ;;
+  esac
+  case "$DEVEL" in
+    yes) RELEASE=Devel ;;
+    *) RELEASE=Debug ;;
+  esac
+  SLKCFLAGS="$(printf %s "$SLKCFLAGS" | sed 's/-O2/-O0/')"
+else
+  ASAN=FALSE
+  RELEASE=Release
+fi
 
-# (CRC) Add project metafalica retranslation
-# https://github.com/PCSX2/pcsx2/issues/1762
-zcat $CWD/project_metafalica.diff.gz | patch -p1
+case "${EGL_API:-OFF}" in
+  yes|[oO][nN]) EGL=ON ;;
+  *) EGL=OFF ;;
+esac
 
 # Use a font included with Slackware
 # osd error: 'Failed to init the freetype face'
-zcat $CWD/osd_font.diff.gz | patch  -p1
+zcat $CWD/osd_font.diff.gz | patch -p1
 
 mkdir -p build
 cd build
@@ -100,18 +111,24 @@ cd build
     -DMAN_DIR=/usr/man \
     -DwxWidgets_CONFIG_EXECUTABLE=/usr/bin${BINDIR}/wx-config \
     -DwxWidgets_wxrc_EXECUTABLE=/usr/bin${BINDIR}/wxrc-3.0 \
-    -DGLSL_API=ON \
+    -DBUILD_REPLAY_LOADERS=TRUE \
+    -DDISABLE_ADVANCE_SIMD=ON \
+    -DDISABLE_BUILD_DATE=ON \
+    -DGSDX_LEGACY=ON \
     -DPACKAGE_MODE=ON \
-    -DREBUILD_SHADER=ON \
     -DXDG_STD=ON \
-    $GSDX $MULTILIB \
-    -DCMAKE_BUILD_TYPE=Release ..
+    -DEGL_API="$EGL" \
+    -DUSE_ASAN="$ASAN" \
+    $MULTILIB \
+    -DCMAKE_BUILD_TYPE=$RELEASE ..
   make
   make install DESTDIR=$PKG
 cd ..
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+if [ "$DEBUG" = no ] && [ "$DEVEL" = no ]; then
+  find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+    | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+fi
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
@@ -133,4 +150,4 @@ if [ "$ARCH" = 'x86_64' ]; then
 fi
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-${VERSION}-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
