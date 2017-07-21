@@ -25,7 +25,7 @@ preserve_perms() {
 config etc/dbus-1/system.d/FirewallD.conf.new
 config etc/firewall/applet.conf.new
 config etc/firewalld/firewalld.conf.new
-config etc/sysconfig/firewalld.new
+config etc/default/firewalld.new
 preserve_perms etc/rc.d/rc.FireWallD.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
