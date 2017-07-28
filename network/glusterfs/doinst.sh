@@ -22,8 +22,11 @@ preserve_perms() {
   config $NEW
 }
 
-config etc/ganesha/ganesha-ha.conf.sample.new
+config etc/glusterfs/eventsconfig.json.new
 config etc/glusterfs/glusterd.vol.new
+config etc/glusterfs/group-gluster-block.new
+config etc/glusterfs/group-metadata-cache.new
+config etc/glusterfs/group-nl-cache.new
 config etc/glusterfs/group-virt.example.new
 config etc/glusterfs/logger.conf.example.new
 config etc/logrotate.d/glusterfs-georep.new
