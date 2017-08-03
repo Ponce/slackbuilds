@@ -23,6 +23,5 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.hdapsd.new
-config etc/rc.d/rc.hdapsd.new
 config etc/hdapsd.conf.new
 
