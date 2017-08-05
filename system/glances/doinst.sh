@@ -8,4 +8,4 @@ config() {
   fi
 }
 
-config /etc/glances.conf.new
+config etc/glances.conf.new
