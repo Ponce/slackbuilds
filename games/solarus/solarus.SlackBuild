@@ -23,7 +23,7 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=solarus
-VERSION=${VERSION:-1.5.1}
+VERSION=${VERSION:-1.5.3}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -54,13 +54,13 @@ else
   LIBDIRSUFFIX=""
 fi
 
-set -e
+set -eu
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION-src.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
@@ -69,9 +69,19 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-if ! pkg-config --exists Qt5Core; then
-  GUI="-DSOLARUS_GUI=OFF"
+if pkg-config --exists Qt5Core; then
+  GUI=ON
+else
+  GUI=OFF
 fi
+
+# Add SOLARUS_MANUAL_INSTALL_DESTINATION
+# Remove SOLARUS_BUNDLE in cmake/AddInstallTargets.cmake
+# Install solarus-run.6 when the gui is not compiled
+# https://github.com/solarus-games/solarus/commit/a7822b3a523a7985defbe1c9daca1401c98dc7a7
+# https://github.com/solarus-games/solarus/commit/1d5cb589cc532e477d784907e776d5ce3d6fed3a
+# https://github.com/solarus-games/solarus/commit/2b3a54137fbb124f87eec40ad406291acb63cf3b
+zcat $CWD/cmake.patch.gz | patch -p1
 
 mkdir -p build
 cd build
@@ -80,9 +90,10 @@ cd build
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DSOLARUS_EXECUTABLE_INSTALL_DESTINATION:PATH=games \
+    -DSOLARUS_MANUAL_INSTALL_DESTINATION:PATH=man \
     -DSOLARUS_LIBRARY_INSTALL_DESTINATION:PATH=lib${LIBDIRSUFFIX} \
     -DSOLARUS_DEFAULT_QUEST=/usr/share/games/$PRGNAM/zsdx \
-    $GUI \
+    -DSOLARUS_GUI=$GUI \
     -DCMAKE_BUILD_TYPE=Release ..
   make
   make install DESTDIR=$PKG
@@ -91,17 +102,17 @@ cd ..
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-install -Dm0644 $PRGNAM.6 $PKG/usr/man/man6/$PRGNAM.6
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-DOCS="changelog.txt compilation.txt README.md license.txt"
+DOCS='changelog.txt compilation.txt README.md license.txt license_gpl.txt'
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
