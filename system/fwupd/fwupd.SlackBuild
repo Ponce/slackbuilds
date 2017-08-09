@@ -1,0 +1,129 @@
+#!/bin/sh
+
+# Slackware build script for fwupd
+
+# Copyright 2017 Andrew Clemons, Wellington New Zealand
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=fwupd
+VERSION=${VERSION:-0.9.6}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+ENABLE_COLORHUG=${ENABLE_COLORHUG:-false}
+ENABLE_DELL=${ENABLE_DELL:-false}
+ENABLE_UEFI=${ENABLE_UEFI:-false}
+ENABLE_UEFI_LABELS=${ENABLE_UEFI_LABELS:-false}
+
+# libelf is disable because meson seems unable to find it on slack
+# tbtfwu is not packaged on slackbuilds.org
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+meson --prefix=/usr \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --libexecdir=/usr/libexec \
+  --buildtype=release \
+  --mandir=/usr/man \
+  -Denable-systemd=false \
+  -Denable-libelf=false \
+  -Denable-tbtfwu=false \
+  -Denable-colorhug=$ENABLE_COLORHUG \
+  -Denable-uefi=$ENABLE_UEFI \
+  -Denable-dell=$ENABLE_DELL \
+  -Denable-uefi-labels=$ENABLE_UEFI_LABELS \
+  build
+
+ninja -C build
+DESTDIR=$PKG ninja -C build install
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mv $PKG/etc/fwupd.conf $PKG/etc/fwupd.conf.new
+mv $PKG/etc/fwupd/remotes.d/fwupd.conf $PKG/etc/fwupd/remotes.d/fwupd.conf.new
+mv $PKG/etc/fwupd/remotes.d/lvfs-testing.conf $PKG/etc/fwupd/remotes.d/lvfs-testing.conf.new
+mv $PKG/etc/fwupd/remotes.d/lvfs.conf $PKG/etc/fwupd/remotes.d/lvfs.conf.new
+mv $PKG/etc/fwupd/remotes.d/vendor.conf $PKG/etc/fwupd/remotes.d/vendor.conf.new
+
+mv $PKG/etc/pki/fwupd-metadata/GPG-KEY-Linux-Vendor-Firmware-Service $PKG/etc/pki/fwupd-metadata/GPG-KEY-Linux-Vendor-Firmware-Service.new
+mv $PKG/etc/pki/fwupd/GPG-KEY-Hughski-Limited $PKG/etc/pki/fwupd/GPG-KEY-Hughski-Limited.new
+mv $PKG/etc/pki/fwupd/GPG-KEY-Linux-Vendor-Firmware-Service $PKG/etc/pki/fwupd/GPG-KEY-Linux-Vendor-Firmware-Service.new
+
+rm -rf $PKG/usr/share/installed-tests
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  AUTHORS COPYING MAINTAINERS NEWS README.md RELEASE \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
