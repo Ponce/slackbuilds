@@ -22,7 +22,7 @@ preserve_perms() {
   config $NEW
 }
 
-preserve_perms /etc/rc.d/rc.sms3.new
+preserve_perms etc/rc.d/rc.sms3.new
 #chgrp -R dialout /var/spool/sms
 #chmod -R g+rw /var/spool/sms
 
