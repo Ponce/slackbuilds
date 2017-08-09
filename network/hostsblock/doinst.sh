@@ -14,6 +14,6 @@ config() {
 config etc/hostsblock/rc.conf.new
 
 # backup existing /etc/hosts to /etc/hostsblock/hosts.head if it doesn't already exist
-if [ ! -r /etc/hostsblock/hosts.head ] ; then
-  cp /etc/hosts /etc/hostsblock/hosts.head
+if [ ! -r etc/hostsblock/hosts.head ] ; then
+  cp etc/hosts etc/hostsblock/hosts.head
 fi
