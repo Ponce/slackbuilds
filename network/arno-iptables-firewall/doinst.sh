@@ -8,7 +8,7 @@ config() {
   fi
 }
 
-CONFIG=${CONFIG:-/etc/arno-iptables-firewall}
+CONFIG=${CONFIG:-etc/arno-iptables-firewall}
 for conf in $( find $CONFIG -name *.new ) ; do
   config ${conf}
 done
