@@ -23,7 +23,6 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.mythbackend.new
-config etc/rc.d/rc.mythbackend.new
 config etc/logrotate.d/mythbackend.new
 config etc/mythtv/config.xml.new
 config etc/mythtv/mysql.txt.new
