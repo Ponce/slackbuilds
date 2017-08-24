@@ -25,11 +25,14 @@
 PRGNAM=rust
 SRCNAM="${PRGNAM}c"
 VERSION=${VERSION:-1.19.0}
+
+# src/stage0.txt
 RSTAGE0_VERSION=${RSTAGE0_VERSION:-1.18.0}
 RSTAGE0_DIR=${RSTAGE0_DIR:-2017-06-08}
 CSTAGE0_VERSION=${CSTAGE0_VERSION:-0.19.0}
 CSTAGE0_DIR=${CSTAGE0_DIR:-$RSTAGE0_DIR}
-BUILD=${BUILD:-1}
+
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -84,18 +87,20 @@ if [ "$LOCAL_BOOTSTRAP" != "yes" ] ; then
 fi
 
 # src/bootstrap/config.toml.example
-cat <<EOF > config.toml
+cat << EOF > config.toml
 [build]
 vendor = true
-extended = false
-submodules = false
+extended = true
 
 [install]
-prefix = "$PKG/usr"
+prefix = "/usr"
+docdir = "doc/rust"
 libdir = "lib$LIBDIRSUFFIX"
 mandir = "man"
 
 [rust]
+codegen-units = 0
+debuginfo = true
 channel = "stable"
 rpath = false
 codegen-tests = false
@@ -107,7 +112,7 @@ llvm-config = "/usr/bin/llvm-config"
 EOF
 
 if [ "$LOCAL_BOOTSTRAP" = "yes" ] ; then
-  sed -i "s|^\(vendor = true\)$|\1\nrustc = \"/usr/bin/rustc\"\ncargo = \"/usr/bin/cargo\"|" config.toml
+  sed -i "s|^\(extended = true\)$|\1\nrustc = \"/usr/bin/rustc\"\ncargo = \"/usr/bin/cargo\"|" config.toml
 fi
 
 chown -R root:root .
@@ -118,33 +123,22 @@ find -L . \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 export RUSTFLAGS="$RUSTFLAGS -C link-args=-lffi"
-export CC=clang
-export CXX=clang++
 
+# README.md says gcc 4.7 / clang 3.x or later needed
+# but building fails for me with GCC 5.3 from slackware 14.2
+CC=clang \
+CXX=clang++ \
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
-python x.py build --verbose
+python x.py build
 
-python x.py dist --verbose
+DESTDIR=$PKG python x.py install
 
-for dist in rustc rust-std rust-docs ; do
-  mkdir unpack
-  (
-    cd unpack
-
-    tar xvf ../build/dist/$dist-$VERSION-$ARCH-unknown-linux-gnu.tar.gz
-
-    cd $dist-$VERSION-$ARCH-unknown-linux-gnu
-    ./install.sh --prefix="$PKG/usr" --mandir="$PKG/usr/man"
-  )
-  rm -rf unpack
-done
-
-if [ "$ARCH" = "x86_64" ]; then
-  mv $PKG/usr/lib $PKG/usr/lib$LIBDIRSUFFIX
-fi
-
-mv $PKG/usr/share/doc $PKG/usr/
+rm -rf $PKG/usr/lib$LIBDIRSUFFIX/rustlib/components
+rm -rf $PKG/usr/lib$LIBDIRSUFFIX/rustlib/install.log
+rm -rf $PKG/usr/lib$LIBDIRSUFFIX/rustlib/manifest-*
+rm -rf $PKG/usr/lib$LIBDIRSUFFIX/rustlib/rust-installer-version
+rm -rf $PKG/usr/lib$LIBDIRSUFFIX/rustlib/uninstall.sh
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
