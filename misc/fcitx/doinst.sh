@@ -2,12 +2,8 @@ if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
 fi
 
-if [ -x /usr/bin/gtk-query-immodules-2.0 ]; then
-  /usr/bin/gtk-query-immodules-2.0 --update-cache
-fi
-
-if [ -x /usr/bin/gtk-query-immodules-3.0 ]; then
-  /usr/bin/gtk-query-immodules-3.0 --update-cache
+if [ -x usr/bin/update-gtk-immodules ]; then
+  chroot . /usr/bin/update-gtk-immodules --verbose 1>/dev/null
 fi
 
 if [ -x /usr/bin/update-mime-database ]; then
