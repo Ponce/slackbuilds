@@ -2,7 +2,8 @@
 
 # Slackware build script for rust
 
-# Copyright 2017 Andrew Clemons, Wellington New Zealand
+# Copyright 2017  Andrew Clemons, Wellington, New Zealand
+# Copyright 2017  Patrick J. Volkerding, Sebeka, Minnesota, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -24,23 +25,42 @@
 
 PRGNAM=rust
 SRCNAM="${PRGNAM}c"
-VERSION=${VERSION:-1.19.0}
+VERSION=${VERSION:-1.20.0}
 
 # src/stage0.txt
-RSTAGE0_VERSION=${RSTAGE0_VERSION:-1.18.0}
-RSTAGE0_DIR=${RSTAGE0_DIR:-2017-06-08}
-CSTAGE0_VERSION=${CSTAGE0_VERSION:-0.19.0}
+RSTAGE0_VERSION=${RSTAGE0_VERSION:-1.19.0}
+RSTAGE0_DIR=${RSTAGE0_DIR:-2017-07-20}
+CSTAGE0_VERSION=${CSTAGE0_VERSION:-0.20.0}
 CSTAGE0_DIR=${CSTAGE0_DIR:-$RSTAGE0_DIR}
 
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i686) ARCH=i686 ;;
+    i?86) ARCH=i686 ;;
+    armv7*) ARCH=$( uname -m ) ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
+fi
+
+# Bootstrapping ARCH:
+if [ "$ARCH" = "i586" ]; then
+  BARCH="i686"
+elif case $ARCH in armv7*) true;; *) false;; esac; then
+  BARCH="armv7"
+else
+  BARCH="$ARCH"
+fi
+
+# Bootstrapping ABI:
+if case $ARCH in armv7*) true;; *) false;; esac; then
+  BABI="gnueabihf"
+elif [ "$ARCH" = "arm" ]; then
+  BABI="gnueabi"
+else
+  BABI="gnu"
 fi
 
 CWD=$(pwd)
@@ -48,15 +68,21 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i686" ]; then
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
+elif case $ARCH in armv7*) true;; *) false;; esac; then
+  SLKCFLAGS="-O2 -march=armv7-a -mfpu=vfpv3-d16"
+  LIBDIRSUFFIX=""
 else
-  echo "$ARCH is unsupported"
-  exit 1
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
 fi
 
 set -e
@@ -78,12 +104,12 @@ if [ "$LOCAL_BOOTSTRAP" != "yes" ] ; then
   # rust requires bootstrapping with the previous rust version.
   # versions are defined in src/stage0.txt
   mkdir -p build/cache/$RSTAGE0_DIR
-  cp $CWD/$PRGNAM-std-$RSTAGE0_VERSION-$ARCH-unknown-linux-gnu.tar.gz \
-     $CWD/$SRCNAM-$RSTAGE0_VERSION-$ARCH-unknown-linux-gnu.tar.gz \
+  cp $CWD/$PRGNAM-std-$RSTAGE0_VERSION-$BARCH-unknown-linux-$BABI.tar.gz \
+     $CWD/$SRCNAM-$RSTAGE0_VERSION-$BARCH-unknown-linux-$BABI.tar.gz \
      build/cache/$RSTAGE0_DIR
 
   mkdir -p build/cache/$CSTAGE0_DIR
-  cp $CWD/cargo-$CSTAGE0_VERSION-$ARCH-unknown-linux-gnu.tar.gz build/cache/$CSTAGE0_DIR
+  cp $CWD/cargo-$CSTAGE0_VERSION-$BARCH-unknown-linux-$BABI.tar.gz build/cache/$CSTAGE0_DIR
 fi
 
 # src/bootstrap/config.toml.example
@@ -94,7 +120,7 @@ extended = true
 
 [install]
 prefix = "/usr"
-docdir = "doc/rust"
+docdir = "doc/rust-$VERSION"
 libdir = "lib$LIBDIRSUFFIX"
 mandir = "man"
 
@@ -105,10 +131,8 @@ channel = "stable"
 rpath = false
 codegen-tests = false
 
-[target.$ARCH-unknown-linux-gnu]
+[target.$BARCH-unknown-linux-$BABI]
 llvm-config = "/usr/bin/llvm-config"
-# build fails using the system jemalloc
-# jemalloc = "/usr/lib$LIBDIRSUFFIX/libjemalloc_pic.a"
 EOF
 
 if [ "$LOCAL_BOOTSTRAP" = "yes" ] ; then
@@ -131,14 +155,19 @@ CXX=clang++ \
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 python x.py build
-
 DESTDIR=$PKG python x.py install
 
-rm -rf $PKG/usr/lib$LIBDIRSUFFIX/rustlib/components
-rm -rf $PKG/usr/lib$LIBDIRSUFFIX/rustlib/install.log
-rm -rf $PKG/usr/lib$LIBDIRSUFFIX/rustlib/manifest-*
-rm -rf $PKG/usr/lib$LIBDIRSUFFIX/rustlib/rust-installer-version
-rm -rf $PKG/usr/lib$LIBDIRSUFFIX/rustlib/uninstall.sh
+# Eh, none of this is all that big. Might as well leave it around as a
+# reference.
+#rm -f $PKG/usr/lib$LIBDIRSUFFIX/rustlib/components
+#rm -f $PKG/usr/lib$LIBDIRSUFFIX/rustlib/install.log
+#rm -f $PKG/usr/lib$LIBDIRSUFFIX/rustlib/manifest-*
+#rm -f $PKG/usr/lib$LIBDIRSUFFIX/rustlib/rust-installer-version
+#rm -f $PKG/usr/lib$LIBDIRSUFFIX/rustlib/uninstall.sh
+# Make sure the paths are correct, though:
+sed -i "s,/tmp/package-rust/,/,g" $PKG/usr/lib$LIBDIRSUFFIX/rustlib/install.log $PKG/usr/lib$LIBDIRSUFFIX/rustlib/manifest-*
+# And a little compression doesn't hurt either:
+gzip -9 $PKG/usr/lib$LIBDIRSUFFIX/rustlib/manifest-*
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -147,7 +176,12 @@ find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a *.md COPYRIGHT LICENSE-APACHE LICENSE-MIT $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a *.md COPYRIGHT* LICENSE* $PKG/usr/doc/$PRGNAM-$VERSION
+# Include licenses from third party vendors:
+mkdir $PKG/usr/doc/$PRGNAM-$VERSION/vendor
+( cd src/vendor
+  tar cf - $(find . -maxdepth 2 | grep -e README -e LICENSE -e COPYING -e CHANGELOG -e PERFORMANCE -e UPGRADE ) | ( cd $PKG/usr/doc/$PRGNAM-$VERSION/vendor ; tar xf - )
+)
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
