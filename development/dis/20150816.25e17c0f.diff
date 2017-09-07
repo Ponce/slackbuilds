@@ -1,0 +1,177 @@
+diff --git a/README.md b/README.md
+index b9e708c..01aa299 100644
+--- a/README.md
++++ b/README.md
+@@ -29,10 +29,13 @@ Usage
+       -comment   Emit comments
+       -call      Emit callers
+       -access    Emit accessors
++      -extern    Emit labels for out-of-range addresses
++      -rangelabels Emit labels for ranges instead of base+offset
+       -verbose   Print info to STDERR
+       -dump      Print options in format for -a
+       -a FILE    Read options from FILE. Lines are: OPTION VALUE
+     
++      Addresses may include a range, e.g. table=$300+F
+       Addresses may include xex segment number, e.g. 3:1FAE
+ 
+ Examples
+diff --git a/dis b/dis
+index 13090f4..83a3be2 100755
+--- a/dis
++++ b/dis
+@@ -41,7 +41,7 @@ use constant {
+ 
+ sub state {
+     return {
+-        #mem => [map [0], 0 .. 0x10000],
++        mem => [map [0], 0 .. 0x10000],
+         segnum => 0,
+     };
+ }
+@@ -79,10 +79,10 @@ sub labels {
+                 (?:\+([0-9a-fA-F]+))? # optional range in hex
+                 /x;
+             $match or die "ERROR: Unrecognized $opt address: $value\n";
+-            my $label = $1;
+             my $segnum = $2 || 0;
+             my $base = hex($3);
+             my $range = hex($4||0);
++            my $label = $1 || sprintf "u%2X", $base;
+             for my $off (0 .. $range) {
+                 my $addr = $base + $off;
+                 if (($addr & 0xFFFF) != $addr) {
+@@ -92,6 +92,7 @@ sub labels {
+                 if (defined $state->{$opt}{$segnum}{$addr}) {
+                     warn sprintf "WARNING: Duplicate $opt: $value: %X\n",
+                         $addr;
++                    next;
+                 }
+                 $state->{$opt}{$segnum}{$addr} =
+                     $off ? $rangelabels ? sprintf "${label}_%X", $off :
+@@ -194,14 +195,18 @@ sub trace {
+             my $targ = rel($i, $i1);
+             trace($state, $targ, $byte->[LABEL], $i);
+         } elsif ($mode =~ /Ind|Z-Page/) {
+-            my $tlabel = $mem->[$i1][LABEL];
++            my $data = $mem->[$i1];
++            my $pre = $data->[SEGNUM] ? sprintf "s$data->[SEGNUM]" : "";
++            my $tlabel = $data->[LABEL] ||= $pre . sprintf "l%02X", $i1;
+             push @{$byte->[TARGETS]}, $tlabel if $tlabel;
+-            push @{$mem->[$i1][ACCESSORS]}, seglabel($state, $i);
++            push @{$data->[ACCESSORS]}, seglabel($state, $i);
+         } elsif ($mode =~ /Absolute/) {
+             my $addr = addr($i1, $i2);
+-            my $tlabel = $mem->[$addr][LABEL];
++            my $data = $mem->[$addr];
++            my $pre = $data->[SEGNUM] ? sprintf "s$data->[SEGNUM]" : "";
++            my $tlabel = $data->[LABEL] ||= $pre . sprintf "l%04X", $addr;
+             push @{$byte->[TARGETS]}, $tlabel if $tlabel;
+-            push @{$mem->[$addr][ACCESSORS]}, seglabel($state, $i);
++            push @{$data->[ACCESSORS]}, seglabel($state, $i);
+         }
+         $i += $len[$code];
+     }
+@@ -214,23 +219,24 @@ sub extern {
+     return if not $opts->{extern};
+     return if not $opts->{labels};
+     my @labels;
+-    for my $opt (qw(code data vector)) {
+-        for my $labels (values %{$state->{$opt}||{}}) {
+-            for my $addr (sort {$a <=> $b} keys %$labels) {
+-                my $label = $labels->{$addr} or next;
+-                next if $opts->{labelled}{$label};
+-                next if not $opts->{referenced}{$label};
+-                next if $label =~ /\+/;
+-                my $accessors = $state->{mem}[$addr][ACCESSORS];
+-                my $access = "";
+-                if ($accessors and $opts->{access}) {
+-                    $access = "\t\t; " . join " ", "Access:", uniq @$accessors;
+-                }
+-                push @labels, [$addr,
+-                    sprintf "$labels->{$addr} equ \$%X$access\n", $addr];
+-            }
++    for (my $addr = 0; $addr < 0x10000; ++$addr) {
++        my $label = $state->{mem}[$addr][LABEL] or next;
++        next if $opts->{labelled}{$label};
++        next if not $opts->{referenced}{$label};
++        next if $label =~ /\+/;
++        my $comment = "";
++        my $accessors = $state->{mem}[$addr][ACCESSORS];
++        if ($accessors and $opts->{access}) {
++            $comment .= "\t\t; " . join " ", "Access:", uniq @$accessors;
+         }
++        my $callers = $state->{mem}[$addr][CALLERS];
++        if ($callers and $opts->{call}) {
++            $comment .= "\t\t; " . join " ", "Callers:", uniq @$callers;
++        }
++        push @labels, [$addr,
++            sprintf "$label equ \$%X$comment\n", $addr];
+     }
++    print "##EXTERN##\n";
+     print map $_->[1], sort { $a->[0] <=> $b->[0] } @labels;
+ }
+ 
+@@ -286,8 +292,6 @@ sub dis {
+                 my $targ = $imm8 = $imm16 = $rel = $targets->[-1];
+                 $targ =~ s/\+.*//;
+                 $opts->{referenced}{$targ}++;
+-                # Use z: if label is not predeclared in zero-page
+-                $imm8 = "z:$imm8" if not defined $mem->[$i1][VALUE];
+             } elsif ($mode eq "Immediate" and $state->{constant}{$segnum}{$i1}) {
+                 $imm8 = $state->{constant}{$segnum}{$i1};
+                 $opts->{referenced}{$imm8}++;
+@@ -522,7 +526,7 @@ sub raw {
+     my ($stream, $opts) = @_;
+     my $start = hex($opts->{org}||0);
+     my $end = $start + (length $stream) - 1;
+-    printf "    opt h-\n";
++    printf "    opt h-\n" unless $opts->{headers};
+     printf "    org \$%04X\n", $start;
+     my $state = state();
+     layer($state, $start, $end, $stream);
+@@ -616,6 +620,7 @@ sub main {
+         call!
+         access!
+         extern!
++        headers!
+         verbose!
+         dump!
+         arg|a=s@
+@@ -650,6 +655,13 @@ sub main {
+         warn "WARNING: Truncating file at 1M\n";
+     }
+ 
++    if ($opts{extern} and open my $pipe, "-|") {
++        $_ = do { local $/; <$pipe> };
++        s/(.*)##EXTERN##\n(.*)/$2$1/s;
++        print;
++        exit 0;
++    }
++
+     if ($opts{type} eq "xex") {
+         xex($stream, \%opts);
+     } elsif ($opts{type} eq "prg") {
+diff --git a/sid.dop b/sid.dop
+index 0a85ddf..ea19fab 100644
+--- a/sid.dop
++++ b/sid.dop
+@@ -28,4 +28,4 @@ data SIDPADX=$D419
+ data SIDPADY=$D41A
+ data SIDOSCIL=$D41B
+ data SIDENVEL=$D41C
+-data SID=$D41D+D2
++data SID=$D41D+E2
+diff --git a/sys.dop b/sys.dop
+index 96c7266..a875e15 100644
+--- a/sys.dop
++++ b/sys.dop
+@@ -339,7 +339,7 @@ data COLOR2=$2C6
+ data COLOR3=$2C7
+ data COLOR4=$2C8                   ;BACKGROUND
+                                 ;($2C9 - $2DF SPARE)
+-data GLBABS=$2E0                   ;GLOBAL VARIABLES
++data GLBABS=$2E0+2                   ;GLOBAL VARIABLES
+                                 ;($2E0 - $2E3 SPARE)
+ data RAMSIZ=$2E4                   ;RAM SIZE (HI BYTE ONLY)
+ data MEMTOP=$2E5+1                   ;TOP OF AVAILABLE MEMORY
