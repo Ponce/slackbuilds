@@ -24,12 +24,12 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=docker
-VERSION=${VERSION:-17.03.2}
-GITHASH=${GITHASH:-f5ec1e2}
+VERSION=${VERSION:-17.06.2}
+GITHASH=${GITHASH:-cec0b72}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-SRCNAM=moby
+SRCNAM=$PRGNAM-ce
 SRCVER=$VERSION-ce
 
 if [ -z "$ARCH" ]; then
@@ -60,14 +60,32 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-AUTO_GOPATH=1 \
-DOCKER_GITCOMMIT="$GITHASH" \
+mkdir -p build/src/github.com/docker
+( cd build/src/github.com/docker
+  ln -s $TMP/$SRCNAM-$SRCVER/components/engine docker
+  ln -s $TMP/$SRCNAM-$SRCVER/components/cli cli
+)
+
+# Build daemon.
+cd components/engine
+DOCKER_GITCOMMIT=$GITHASH \
 DOCKER_BUILDTAGS="seccomp" \
+GOPATH=$TMP/$SRCNAM-$SRCVER/build \
 ./hack/make.sh dynbinary
 
-# Install executables.
-install -D -m 0755 bundles/$SRCVER/dynbinary-client/docker-$SRCVER $PKG/usr/bin/docker
-install -D -m 0755 bundles/$SRCVER/dynbinary-daemon/dockerd-$SRCVER $PKG/usr/bin/dockerd
+install -D -m 0755 bundles/$SRCVER/dynbinary-daemon/dockerd-$SRCVER \
+  $PKG/usr/bin/dockerd
+cd ../..
+
+# Build CLI.
+cd components/cli
+GITCOMMIT=$GITHASH \
+VERSION=$(cat VERSION) \
+GOPATH=$TMP/$SRCNAM-$SRCVER/build \
+make dynbinary
+
+install -D -m 0755 build/docker-linux-amd64 $PKG/usr/bin/docker
+cd ../..
 
 # Integrate required components.
 ln -s runc $PKG/usr/bin/docker-runc
@@ -77,19 +95,24 @@ ln -s ctr $PKG/usr/bin/docker-containerd-ctr
 ln -s tini-static $PKG/usr/bin/docker-init
 
 # Completion.
-install -D -m 0644 contrib/completion/bash/docker $PKG/usr/share/bash-completion/completions/docker
-install -D -m 0644 contrib/completion/zsh/_docker $PKG/usr/share/zsh/site-functions/_docker
-install -D -m 0644 contrib/completion/fish/docker.fish $PKG/usr/share/fish/vendor_completions.d/docker.fish
+( cd components/cli/contrib/completion
+  install -D -m 0644 bash/docker $PKG/usr/share/bash-completion/completions/docker
+  install -D -m 0644 zsh/_docker $PKG/usr/share/zsh/site-functions/_docker
+  install -D -m 0644 fish/docker.fish $PKG/usr/share/fish/vendor_completions.d/docker.fish
+)
 
 install -D -m 0644 $CWD/config/docker.default $PKG/etc/default/docker.new
 install -D -m 0644 $CWD/config/docker.logrotate $PKG/etc/logrotate.d/docker.new
 install -D -m 0644 $CWD/config/rc.docker $PKG/etc/rc.d/rc.docker.new
 
 # Install udev rules.
-install -D -m 0644 contrib/udev/80-docker.rules $PKG/lib/udev/rules.d/80-docker.rules
+install -D -m 0644 components/engine/contrib/udev/80-docker.rules \
+  $PKG/lib/udev/rules.d/80-docker.rules
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS CHANGELOG.md LICENSE NOTICE README.md $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  CHANGELOG.md components/engine/LICENSE components/engine/NOTICE README.md \
+  $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
