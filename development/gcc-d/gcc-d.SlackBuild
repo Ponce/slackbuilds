@@ -1,0 +1,180 @@
+#!/bin/sh
+
+# Slackware build script for gcc-d
+
+# Copyright 2017 Eugene Wissner, Dachau, Germany
+#
+# Based on the GCC build script by Patrick J. Volkerding, Sebeka, MN, USA
+#
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=gcc-d
+SRCNAM=gdc
+VERSION=${VERSION:-2.076.0_b1}
+GCC_VERSION=5.3.0
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$(uname -m)" in
+    i?86) ARCH=i586 ;;
+    arm*) readelf /usr/bin/file -A | egrep -q "Tag_CPU.*[4,5]" && ARCH=arm || ARCH=armv7hl ;;
+    *) ARCH=$(uname -m) ;;
+  esac
+  export ARCH
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+  LIB_ARCH=i386
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+  LIB_ARCH=i386
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+  LIB_ARCH=amd64
+elif [ "$ARCH" = "armv7hl" ]; then
+  SLKCFLAGS="-O3 -march=armv7-a -mfpu=vfpv3-d16"
+  LIBDIRSUFFIX=""
+  LIB_ARCH=armv7hl
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+  LIB_ARCH=$ARCH
+fi
+
+case "$ARCH" in
+  arm*) TARGET=$ARCH-slackware-linux-gnueabi ;;
+  *)    TARGET=$ARCH-slackware-linux ;;
+esac
+
+# Create directories.
+set -e
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION gcc-$GCC_VERSION
+tar xvf $CWD/gcc-$GCC_VERSION.tar.?z*
+tar xvf $CWD/$SRCNAM-$VERSION.tar.?z*
+
+# Apply patches.
+cd $TMP/gcc-$GCC_VERSION/gcc
+cat $CWD/gcc.66782.diff | patch -p0 --verbose
+cat $CWD/gcc.69140.diff | patch -p2 --verbose
+
+cd $TMP/$SRCNAM-$VERSION
+sh setup-gcc.sh ../gcc-$GCC_VERSION
+
+cd $TMP/gcc-$GCC_VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+if [ "$ARCH" != "x86_64" ]; then
+  GCC_ARCHOPTS="--with-arch=$ARCH"
+else
+  GCC_ARCHOPTS="--disable-multilib"
+fi
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+../gcc-$GCC_VERSION/configure \
+  --prefix=/usr \
+  --libdir=/usr/lib$LIBDIRSUFFIX \
+  --mandir=/usr/man \
+  --infodir=/usr/info \
+  --enable-shared \
+  --disable-bootstrap \
+  --enable-languages=c,c++,d \
+  --enable-threads=posix \
+  --enable-checking=release \
+  --with-system-zlib \
+  --with-python-dir=/lib$LIBDIRSUFFIX/python2.7/site-packages \
+  --enable-libstdcxx-dual-abi \
+  --disable-libunwind-exceptions \
+  --enable-__cxa_atexit \
+  --enable-libssp \
+  --enable-lto \
+  --disable-install-libiberty \
+  --with-gnu-ld \
+  --verbose \
+  --with-arch-directory=$LIB_ARCH \
+  $GCC_ARCHOPTS \
+  --target=${TARGET} \
+  --build=${TARGET} \
+  --host=${TARGET}
+
+make
+make install DESTDIR=$PKG
+
+# Remove not D related stuff, already available in GCC
+find $PKG/usr/bin -type f -not -name "*gdc*" -delete
+find $PKG/usr/info -type f -not -name "*gdc*" -delete
+find $PKG/usr/man/man1 -type f -not -name "*gdc*" -delete
+rm -r $PKG/usr/man/man7
+rm -r $PKG/usr/share
+rm -r $PKG/usr/include
+rm -r $PKG/usr/lib$LIBDIRSUFFIX/python2.7
+
+find $PKG/usr/libexec/gcc \
+  \( -type f -or -type l \) -not -name "cc1d" \
+  -delete
+
+find $PKG/usr/lib$LIBDIRSUFFIX/gcc -mindepth 3 \
+  \( -type f -or -type l \) -not -regex ".*/d/.*" \
+  -delete
+
+find $PKG/usr/lib$LIBDIRSUFFIX -maxdepth 1 \
+  \( -type f -or -type l \)  \
+  -not \( -name "*phobos*" -or -name "*gdruntime*" \) \
+  -delete
+
+find $PKG/usr -type d -empty -delete
+
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+gzip -9 $PKG/usr/info/*.info
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp $TMP/$SRCNAM-$VERSION/README.md $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
