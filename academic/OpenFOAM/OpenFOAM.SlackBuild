@@ -1,0 +1,99 @@
+#!/bin/sh
+
+# Slackware build script for OpenFOAM
+
+# Copyright 2017 Lorenzo Trevisan, Caorle, Venice, Italy
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=OpenFOAM
+VERSION=${VERSION:-5.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+XVER=${VERSION%%.*}.x
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $PKG
+mkdir -p opt/$PRGNAM
+cd $PKG/opt/$PRGNAM
+tar xvf $CWD/$PRGNAM-$XVER-version-$VERSION.tar.gz
+mv $PRGNAM-$XVER-version-$VERSION $PRGNAM-$VERSION
+tar xvf $CWD/ThirdParty-$XVER-version-$VERSION.tar.gz
+mv ThirdParty-$XVER-version-$VERSION ThirdParty-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+cd $PRGNAM-$VERSION
+
+sed -i -e '16s=-lreadline=-lreadline -lncurses=' ./applications/utilities/mesh/manipulation/setSet/Allwmake
+sed -i -e '47s=$HOME=/opt=' ./etc/bashrc
+
+# "Allwmake" below doesn't accept MAKEFLAGS. If MAKEFLAGS contains a -j option,
+# extract it and pass it to "Allwmake". (Thanks to Chris Willing)
+jval="$(echo $MAKEFLAGS |grep -o "\-j *[0-9]*" | grep -o "[0-9]*")" || true
+jobs=''
+[ -n "$jval" ] && jobs="-j${jval}"
+
+(
+  . ./etc/bashrc || true
+  cd $WM_PROJECT_DIR
+  ./Allwmake $jobs
+  # check for graphviz
+  if [ -x /usr/bin/dot ]; then
+    wmake all doc
+  fi
+)
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+install -D -m755 $CWD/OpenFOAM.sh $PKG/etc/profile.d/OpenFOAM.sh
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  $PKG/opt/$PRGNAM/$PRGNAM-$VERSION/doc/Guides/OpenFOAMUserGuide-A4.pdf \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
