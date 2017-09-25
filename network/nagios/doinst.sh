@@ -11,14 +11,19 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-# Keep same perms on rc.nagios.new:
-if [ -e etc/rc.d/rc.nagios ]; then
-  cp -a etc/rc.d/rc.nagios etc/rc.d/rc.nagios.new.incoming
-  cat etc/rc.d/rc.nagios.new > etc/rc.d/rc.nagios.new.incoming
-  mv etc/rc.d/rc.nagios.new.incoming etc/rc.d/rc.nagios.new
-fi
+preserve_perms() {
+  NEW="$1"
+  OLD="$(dirname $NEW)/$(basename $NEW .new)"
+  if [ -e $OLD ]; then
+    cp -a $OLD ${NEW}.incoming
+    cat $NEW > ${NEW}.incoming
+    mv ${NEW}.incoming $NEW
+  fi
+  config $NEW
+}
+
+preserve_perms etc/rc.d/rc.nagios.new
 
 find etc/nagios/ -name *.cfg.new | while read cfg ; do config $cfg ; done
 config etc/httpd/extra/nagios.conf.new
-config etc/rc.d/rc.nagios.new
 
