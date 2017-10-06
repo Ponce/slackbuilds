@@ -59,12 +59,23 @@ else
   LIBDIRSUFFIX=""
 fi
 
+# NOTE: Using the system version of poppler will require texlive to be
+# recompiled with pretty much every poppler update, as they almost always
+# bump the shared library version. But sometimes you do what you have
+# to do...
+SYSTEMPOPPLER=${SYSTEMPOPPLER:-YES}
+if [ "$SYSTEMPOPPLER" = "NO" ]; then
+  POPPLER="--without-system-poppler --without-system-xpdf"
+else
+  POPPLER="--with-system-poppler --with-system-xpdf"
+fi
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf texlive-$SOURCEVERSION-source
-tar xvf $CWD/texlive-${SOURCEVERSION}-source.tar.xz
-cd texlive-$SOURCEVERSION-source
+tar xvf $CWD/texlive-${SOURCEVERSION}-source.tar.xz || exit 1
+cd texlive-$SOURCEVERSION-source || exit 1
 chown -R root:root .
 chmod -R u+w,go-w,a+rX-st .
 
@@ -79,12 +90,18 @@ sed -i \
   texk/kpathsea/texmf.cnf
 
 # Thanks to the lfs-folks ...
-patch -Np1 -i $CWD/patches/texlive-20170524-source-gcc7-1.patch
-patch -Np1 -i $CWD/patches/texlive-20170524-source-upstream_fixes-2.patch
+patch -Np1 -i $CWD/patches/texlive-20170524-source-gcc7-1.patch || exit 1
+patch -Np1 -i $CWD/patches/texlive-20170524-source-upstream_fixes-2.patch || exit 1
+
+## Needed on -current, 2017-10-06
+## Thanks to archlinux for the poppler-0.59 API fixup patch:
+#if [ ! "$SYSTEMPOPPLER" = "NO" ]; then
+#	patch -Np1 -i $CWD/patches/texlive-poppler-0.59.patch || exit 1
+#fi
 
 # --with-system-harfbuzz requires graphite2 (and harfbuzz linked to it)
 mkdir build
-pushd build
+cd build
   CFLAGS="$SLKCFLAGS" \
   CXXFLAGS="$SLKCFLAGS" \
   ../configure \
@@ -106,8 +123,6 @@ pushd build
     --disable-xindy-rules \
     --with-clisp-runtime=system \
     --enable-gc=system \
-    --with-system-poppler \
-    --with-system-xpdf \
     --with-system-zlib \
     --with-system-libpng \
     --with-system-t1lib \
@@ -121,18 +136,24 @@ pushd build
     --with-system-mpfr \
     --with-system-fontconfig \
     --with-system-ncurses \
-    --build=$ARCH-slackware-linux
-  make
-  # make check
-  make install-strip DESTDIR=$PKG
+    --without-system-harfbuzz \
+    $POPPLER \
+    --build=$ARCH-slackware-linux || exit 1
+
+  make || exit 1
+  # make check || exit 1
+  make install-strip DESTDIR=$PKG || exit 1
   # Create symlinks
-  make texlinks DESTDIR=$PKG
-popd
+  make texlinks DESTDIR=$PKG || exit 1
+cd ..
+
+# Don't ship .la files:
+rm -f $PKG/usr/lib${LIBDIRSUFFIX}/*.la
 
 # install the texmf stuff, overwrite partly stuff coming from the source build;
 # don't remove/separate koma-script docs as this is the wish of the author
 mkdir -p $PKG/usr/share
-tar vxf $CWD/texlive-base-$VERSION.tar.xz -C $PKG/usr/share
+tar xvf $CWD/texlive-base-$VERSION.tar.xz -C $PKG/usr/share || exit 1
 chown -R root:root $PKG
 chmod -R u+w,go-w,a+rX-st $PKG
 
