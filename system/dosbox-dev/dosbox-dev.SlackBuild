@@ -1,0 +1,125 @@
+#!/bin/sh
+
+# Slackware build script for dosbox-dev
+
+# Ryan P.C. McQuen | Everett, WA | ryanpcmcquen@member.fsf.org
+
+# Copyright 2006  Martin Lefebvre <dadexter@gmail.com>
+# Copyright 2008-2009, Michiel van Wessem, Manchester, United Kingdom.
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=dosbox-dev
+REVISION=${REVISION:-4055}
+VERSION=${VERSION:-0.74.r$REVISION}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+DOSBOXDEV=${DOSBOXDEV:-no}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+    SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+    LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+    SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+    LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+    SLKCFLAGS="-O2 -fPIC"
+    LIBDIRSUFFIX="64"
+else
+    SLKCFLAGS="-O2"
+    LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+SRCNAM=$PRGNAM-$VERSION
+rm -rf $SRCNAM
+tar xfv $CWD/$SRCNAM.tar.xz
+cd $PRGNAM
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Fix building with gcc>= 4.6.x, thanks to gentoo people
+patch -p0 < $CWD/dosbox-0.74-gcc46.patch
+
+./autogen.sh
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --build=$ARCH-slackware-linux
+
+make DESTDIR=$PKG
+make install-strip DESTDIR=$PKG
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $(find $PKG/usr/man -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+
+# Add a desktop file to create a menu entry
+install -D -m 0644 $CWD/dosbox.desktop \
+  $PKG/usr/share/applications/dosbox.desktop
+
+# Add the dosbox.ico file to /usr/share/pixmaps
+install -D -m 0644 src/dosbox.ico $PKG/usr/share/pixmaps/dosbox.ico
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS COPYING ChangeLog INSTALL NEWS README THANKS \
+  docs/PORTING docs/README.video  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+# Change dosbox filenames to $PRGNAM for using it alongside stable dosbox
+if [ "$DOSBOXDEV" = "yes" ]; then
+	mv $PKG/usr/share/applications/dosbox.desktop $PKG/usr/share/applications/$PRGNAM.desktop
+	mv $PKG/usr/share/pixmaps/dosbox.ico $PKG/usr/share/pixmaps/$PRGNAM.ico
+	mv $PKG/usr/man/man1/dosbox.1.gz $PKG/usr/man/man1/$PRGNAM.1.gz
+	mv $PKG/usr/bin/dosbox $PKG/usr/bin/$PRGNAM
+	sed -i "s/dosbox/dosbox-dev/g" $PKG/usr/share/applications/$PRGNAM.desktop
+fi
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-${VERSION}-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
