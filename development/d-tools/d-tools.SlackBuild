@@ -1,0 +1,120 @@
+#!/bin/sh
+
+# Slackware build script for D tools
+
+# Copyright 2017 Eugene Wissner, Dachau, Germany
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY
+# EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=d-tools
+VERSION=${VERSION:-2.076.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+DUB_VERSION=${DUB_VERSION:-1.5.0}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+else
+  SLKCFLAGS="-O2"
+fi
+
+set -e
+
+if [ -z "$DC" ]; then
+  DC=$(which dmd)
+else
+  DC=$(which $DC)
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+mkdir -p $PKG/usr/bin
+
+# Build dub.
+cd $TMP
+rm -rf dub-$DUB_VERSION
+tar xvf $CWD/dub-$DUB_VERSION.tar.gz
+cd dub-$DUB_VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+case "$DC" in
+  *gdc) sh build-gdc.sh
+        ;;
+     *) sh build.sh
+        ;;
+esac
+
+mv bin/dub $PKG/usr/bin
+
+# Build D tools.
+cd $TMP
+rm -rf tools-$VERSION
+tar xvf $CWD/tools-$VERSION.tar.gz
+cd tools-$VERSION
+
+for binary in rdmd ddemangle; do
+  echo "Build $binary..."
+  case "$DC" in
+    *gdc) $DC $SLKCFLAGS -o $PKG/usr/bin/$binary $binary.d
+          ;;
+       *) $DC -release -od. -of$PKG/usr/bin/$binary $binary.d
+          ;;
+  esac
+done
+
+echo "Build DustMite..."
+case "$DC" in
+  *gdc) $DC $SLKCFLAGS -o $PKG/usr/bin/dustmite DustMite/*.d
+        ;;
+     *) $DC -release -od. -of$PKG/usr/bin/dustmite DustMite/*.d
+        ;;
+esac
+
+# Copy documentation.
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
