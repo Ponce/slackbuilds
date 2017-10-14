@@ -4,6 +4,7 @@
 
 # Copyright 2017  Andrew Clemons, Wellington, New Zealand
 # Copyright 2017  Patrick J. Volkerding, Sebeka, Minnesota, USA
+# Copyright 2017  Stuart Winter
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,12 +26,12 @@
 
 PRGNAM=rust
 SRCNAM="${PRGNAM}c"
-VERSION=${VERSION:-1.20.0}
+VERSION=${VERSION:-1.21.0}
 
 # src/stage0.txt
-RSTAGE0_VERSION=${RSTAGE0_VERSION:-1.19.0}
-RSTAGE0_DIR=${RSTAGE0_DIR:-2017-07-20}
-CSTAGE0_VERSION=${CSTAGE0_VERSION:-0.20.0}
+RSTAGE0_VERSION=${RSTAGE0_VERSION:-1.20.0}
+RSTAGE0_DIR=${RSTAGE0_DIR:-2017-08-31}
+CSTAGE0_VERSION=${CSTAGE0_VERSION:-0.21.0}
 CSTAGE0_DIR=${CSTAGE0_DIR:-$RSTAGE0_DIR}
 
 BUILD=${BUILD:-1}
@@ -57,8 +58,12 @@ if [ "$ARCH" = "i586" ]; then
     if rustc -Vv | grep host | grep i586 > /dev/null ; then
       BARCH="$ARCH"
     else
-      echo "Your exising rust cannot bootstrap an i586 toolchain. Either set LOCAL_BOOTSTRAP=no or remove your existing rust package and do a full bootstrap."
-      exit 1
+      BARCH="i686"
+
+      if case "$( uname -m )" in i586) true ;; *) false ;; esac ; then
+        echo "rust must be bootstrapped from an i686 machine"
+        exit 1
+      fi
     fi
   else
     # i586 must be built on a i686 machine, since the bootstrap compiler is i686
@@ -69,28 +74,28 @@ if [ "$ARCH" = "i586" ]; then
       exit 1
     fi
   fi
+
+  TARCH="$ARCH"
+elif [ "$ARCH" = "arm" ]; then
+  # bootstrap compiler is armv6
+  BARCH="$ARCH"
+
+  if case "$( uname -m )" in armv5*) true ;; *) false ;; esac ; then
+    echo "rust must be bootstrapped from an armv6 machine or later"
+    exit 1
+  fi
+
+  # there is tier3 support for armv5te, but it ftbfs for me
+  # https://github.com/rust-lang-nursery/compiler-builtins/pull/115
+  TARCH="$BARCH"
 else
   BARCH="$ARCH"
+  TARCH="$ARCH"
 fi
-
-TARCH="$ARCH"
 
 # Bootstrapping ABI:
 if [ "$ARCH" = "arm" ]; then
-  if readelf -h /bin/bash | grep Flags | grep hard > /dev/null 2>&1 ; then
-    # hardfloat
-    BABI="gnueabihf"
-    BARCH="armv7"
-    TARCH="$BARCH"
-  else
-    # softfloat
-    BABI="gnueabi"
-
-    if case "$( uname -m )" in armv5*) true ;; *) false ;; esac ; then
-      echo "rust must be bootstrapped from an armv6 machine or later"
-      exit 1
-    fi
-  fi
+  BABI="gnueabi"
 else
   BABI="gnu"
 fi
@@ -110,12 +115,8 @@ elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 elif [ "$ARCH" = "arm" ] ; then
-  SLKCFLAGS="-O2"
+  SLKCFLAGS=""
   LIBDIRSUFFIX=""
-
-  if [ "$BABI" = "gnueabihf" ] ; then
-    SLKCFLAGS="$SLKCFLAGS -march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard"
-  fi
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
@@ -129,6 +130,7 @@ cd $TMP
 rm -rf $SRCNAM-$VERSION-src
 tar xvf $CWD/$SRCNAM-$VERSION-src.tar.gz
 cd $SRCNAM-$VERSION-src
+patch -p1 < $CWD/link_libffi.diff
 
 if [ "$LOCAL_BOOTSTRAP" != "yes" ] ; then
   # rust requires bootstrapping with the previous rust version.
@@ -138,21 +140,18 @@ if [ "$LOCAL_BOOTSTRAP" != "yes" ] ; then
      $CWD/$SRCNAM-$RSTAGE0_VERSION-$BARCH-unknown-linux-$BABI.tar.gz \
      build/cache/$RSTAGE0_DIR
 
-  if [ "$TARCH" = "i586" ] ; then
-    cp $CWD/$PRGNAM-std-$RSTAGE0_VERSION-$TARCH-unknown-linux-$BABI.tar.gz \
-       build/cache/$RSTAGE0_DIR
-  fi
-
   mkdir -p build/cache/$CSTAGE0_DIR
-  cp $CWD/cargo-$CSTAGE0_VERSION-$BARCH-unknown-linux-$BABI.tar.gz build/cache/$CSTAGE0_DIR
+  cp $CWD/cargo-$CSTAGE0_VERSION-$BARCH-unknown-linux-$BABI.tar.gz \
+     build/cache/$CSTAGE0_DIR
 fi
 
-# src/bootstrap/config.toml.example
+# config.toml.example
 cat << EOF > config.toml
 [build]
 build = "$BARCH-unknown-linux-$BABI"
 host = ["$TARCH-unknown-linux-$BABI"]
 target = ["$TARCH-unknown-linux-$BABI"]
+submodules = false
 vendor = true
 extended = true
 
@@ -164,10 +163,10 @@ mandir = "man"
 
 [rust]
 codegen-units = 0
-debuginfo = false
 channel = "stable"
 rpath = false
 codegen-tests = false
+ignore-git = true
 
 [target.i586-unknown-linux-gnu]
 llvm-config = "/usr/bin/llvm-config"
@@ -178,10 +177,7 @@ llvm-config = "/usr/bin/llvm-config"
 [target.x86_64-unknown-linux-gnu]
 llvm-config = "/usr/bin/llvm-config"
 
-[target.arm-unknown-linux-gnuabi]
-llvm-config = "/usr/bin/llvm-config"
-
-[target.armv7-unknown-linux-gnuabihf]
+[target.arm-unknown-linux-gnueabi]
 llvm-config = "/usr/bin/llvm-config"
 EOF
 
@@ -196,45 +192,44 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-if [ "$BARCH" = "i686" ] && [ "$TARCH" = "i586" ] ; then
-  # this will cause some messages like:
-  # warning: redundant linker flag specified for library `m`
-  # but will keep the build from falling over when doing the stage1 compiler
-  # linking for the i586 compiler. seems the correct flags don't get passed
-  # through and we end up failures like:
-  # error: linking with `clang` failed: exit code: 1
-  # /tmp/SBo/rustc-1.20.0-src/build/i686-unknown-linux-gnu/stage1-rustc/i586-unknown-linux-gnu/release/deps/librustc_llvm-4ab259c9aed547db.so: undefined reference to `xxx`
-  export RUSTFLAGS="$RUSTFLAGS -C link-args=-lffi -lrt -ldl -lcurses -lpthread -lz -lm"
-else
-  # https://github.com/rust-lang/rust/issues/39880
-  # $ llvm-config --system-libs
-  # -lrt -ldl -lcurses -lpthread -lz -lm
-  export RUSTFLAGS="$RUSTFLAGS -C link-args=-lffi"
-fi
-
 export PKG_CONFIG_ALLOW_CROSS=1
 
 if [ "$BARCH" = "i586" ] ; then
   # when bootstrapping from i586 (rust already installed), also build a i686
   # rustlib
 
-  # from config.toml.example:
-
-  # In addition to all host triples, other triples to produce the standard library
-  # for. Each host triple will be used to produce a copy of the standard library
-  # for each target triple.
-  #target = ["x86_64-unknown-linux-gnu"] # defaults to just the build triple
-
   sed -i 's/^target =.*$/target = ["i686-unknown-linux-gnu"]/' config.toml
+elif [ "$BARCH" = "i686" ] ; then
+  # sigh, full bootstrapping fails on i686 with
+  # /tmp/SBo/rustc-1.21.0-src/build/i686-unknown-linux-gnu/stage2/bin/rustdoc: error while loading shared libraries: librustc_driver-f8bd7e4f77e9a650.so: cannot open shared object file: No such file or directory
+  # maybe this issue:
+  # https://github.com/rust-lang/rust/issues/43289
+  sed -i 's/rpath = false/rpath = true/' config.toml
+
+  if [ "$TARCH" = "i586" ] ; then
+    # this will cause some messages like:
+    # warning: redundant linker flag specified for library `m`
+    # but will keep the build from falling over when doing the stage1 compiler
+    # linking for the i586 compiler. seems the correct flags don't get passed
+    # through and we end up failures like:
+    # error: linking with `clang` failed: exit code: 1
+    # /tmp/SBo/rustc-1.20.0-src/build/i686-unknown-linux-gnu/stage1-rustc/i586-unknown-linux-gnu/release/deps/librustc_llvm-4ab259c9aed547db.so: undefined reference to `xxx`
+    export RUSTFLAGS="$RUSTFLAGS -C link-args=-lrt -ldl -lcurses -lpthread -lz -lm"
+  fi
 fi
 
-# README.md says gcc 4.7 / clang 3.x or later needed
-# but building fails for me with GCC 5.3 from slackware 14.2
-CC=clang \
-CXX=clang++ \
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-python x.py build
+if [ "$ARCH" = "arm" ] ; then
+  python x.py dist
+else
+  # README.md says gcc 4.7 / clang 3.x or later needed
+  # but building fails for me with GCC 5.3 from slackware 14.2
+  CC=clang \
+  CXX=clang++ \
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  python x.py dist
+fi
+
 DESTDIR=$PKG python x.py install
 
 # Eh, none of this is all that big. Might as well leave it around as a
