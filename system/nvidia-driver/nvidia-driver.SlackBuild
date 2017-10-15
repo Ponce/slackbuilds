@@ -2,7 +2,6 @@
 
 # Slackware build script for nvidia-driver
 
-# Copyright 2007-2011 Heinz Wiesinger, Amsterdam, The Netherlands
 # Copyright 2012-2017 Edward W. Koenig, Vancouver, WA, USA
 # All rights reserved.
 #
@@ -26,12 +25,12 @@
 # see changelog.txt
 
 PRGNAM=nvidia-driver
-VERSION=${VERSION:-375.66}
+VERSION=${VERSION:-384.90}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 GLVND=${GLVND:-yes}
-# libglnvd may land in mesa and is Nvidia recomended
+# libglnvd may land in mesa and is Nvidia recommended
 
 set -e
 
@@ -83,7 +82,7 @@ mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/{drivers,extensions} \
   $PKG/etc/X11/glvnd/egl_vendor.d $PKG/var/log/nvidia/{32,64}
 
 if [ "$COMPAT32" = "yes" ]; then
-  mkdir -p $PKG/usr/lib
+  mkdir -p $PKG/usr/lib/tls
 fi
 
 # Extract all the sources
@@ -240,6 +239,7 @@ cd $TMP/$SRCNAM
   --x-sysconfig-path=$PKG/etc/X11/xorg.conf.d \
   --opengl-prefix=$PKG/usr \
   --utility-prefix=$PKG/usr \
+  --utility-libdir=lib${LIBDIRSUFFIX} \
   --documentation-prefix=$PKG/usr \
   --application-profile-path=$PKG/usr/share/nvidia \
   --glvnd-egl-config-path=$PKG/etc/X11/glvnd/egl_vendor.d \
@@ -249,6 +249,13 @@ cd $TMP/$SRCNAM
 
 # Clean-up: we really do not need this:
 rm -rf /var/lib/nvidia
+# which 32-bit tls? why? why?
+if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
+      install -m 755 32/tls/libnvidia-tls.so.$VERSION $PKG/usr/lib/tls/libnvidia-tls.so.$VERSION
+      cd $PKG/usr/lib
+          ln -sf tls/libnvidia-tls.so.$VERSION libnvidia-tls.so.$VERSION
+      cd -
+fi
 
 # Bash script to cleanly install (in doinst.sh) and uninstall the nvidia files
 # so we don't stomp on the overlapping xorg files.
@@ -278,9 +285,10 @@ sed -i "s|$PKG/usr/share/doc/NVIDIA_GLX-1.0|/usr/share/pixmaps|" \
 if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
   sed -i "s|$TMP/package-$PRGNAM/usr|/usr|" $PKG/usr/lib/libGL.la
   sed -i "s|/usr/X11R6/lib|/usr/lib|" $PKG/usr/lib/libGL.la
+  sed -i "s|'/usr/'|'/usr/lib'|" $PKG/usr/lib/libGL.la
 fi
 
-# rename conficting files as needed; remove conflicting symlinks created by installer
+# rename wrong/conficting files as needed; remove conflicting symlinks created by installer
 cd $PKG/usr/lib$LIBDIRSUFFIX
    if [ "$GLVND" = "yes" ]; then
       mv libEGL.so.1 libEGL.so.1-nvidia
@@ -311,14 +319,24 @@ if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
       rm -f libGLESv1_CM.so
       rm -f libGLESv2.so
    cd -
+# FIXME With COMPAT32=yes on pure x86_64, a weird /usr/lib/libGL.so.1 symlink to $PKG/usr/lib64/libGL.so.1
+# appears? this gets fixed in nvidia-switch so ignoring for now.
 fi
 
-#ICDs
-install -m 644 nvidia.icd $PKG/etc/OpenCL/vendors/
-install -m 644 nvidia_icd.json $PKG/etc/vulkan/icd.d/
+# Move ICDs to $PKG and cleanup (no switch option in installer?)
+mv /etc/OpenCL/vendors/nvidia.icd $PKG/etc/OpenCL/vendors/nvidia.icd
+mv /etc/vulkan/icd.d/nvidia_icd.json $PKG/etc/vulkan/icd.d/nvidia_icd.json
+rm -rf /etc/OpenCL
+rm -rf /etc/vulkan
 
 # Remove xorg conf file since we take care of that in nvidia-driver
 rm -rf $PKG/etc/X11/xorg.conf.d
+
+# Fix weird bug in nvidia-installer that I can't find
+cd $TMP/nvidia-modprobe-$VERSION
+  install -m 755 _out/Linux_$TARGET/nvidia-modprobe $PKG/usr/bin/
+  rm -f /usr/bin/nvidia-modprobe
+cd -
 
 cat <<EOF > $PKG/var/log/nvidia/README.txt
 Do NOT delete this directory!
