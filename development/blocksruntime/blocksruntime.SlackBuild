@@ -1,0 +1,138 @@
+#!/bin/sh
+
+# Slackware build script for Blocks Runtime Library
+
+# Copyright 2017 Felipe Bugno <capent@yahoo.com>
+#
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=blocksruntime
+MSTPRGNAM=compiler-rt
+VERSION=${VERSION:-3.8.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ "$ARCH" = "x86_64" ]; then
+  LIBDIRSUFFIX="64"
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $MSTPRGNAM-$VERSION.src
+tar -xvf $CWD/$MSTPRGNAM-$VERSION.src.tar.xz
+cd $MSTPRGNAM-$VERSION.src
+
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+#We require a config.h to set some variables. Calling cmake just for that below is a overkill
+
+cat > ./lib/BlocksRuntime/config.h << End-of-config
+#if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 1) /* GCC >= 4.1 */
+
+/* runtime.c ignores these if __WIN32__ or _WIN32 is defined */
+#define HAVE_SYNC_BOOL_COMPARE_AND_SWAP_INT 1
+#define HAVE_SYNC_BOOL_COMPARE_AND_SWAP_LONG 1
+
+#else /* GCC earlier than version 4.1 */
+
+#error GCC version 4.1 (or compatible) or later is required on non-apple, non-w32 targets
+
+#endif /* GCC earlier than version 4.1 */
+End-of-config
+
+#Now, the compiling infrastructure
+
+if [ -z "$CC" ]; then
+  if command -v gcc > /dev/null; then
+    CC=gcc
+  elif command -v clang > /dev/null; then
+    CC=clang
+  elif command -v cc > /dev/null; then
+    CC=cc
+  else
+    echo "Could not guess name of compiler, please set CC" >&2
+    exit 2
+  fi
+fi
+
+echo "CC=$CC"
+: ${AR:=ar}
+echo "AR=$AR"
+: ${RANLIB:=ranlib}
+echo "RANLIB=$RANLIB"
+
+if [ "${CFLAGS+set}" != "set" ]; then
+  case "$CC" in
+    *gcc*|*clang*)
+      CFLAGS="-O2 -fPIC"
+      ;;
+    *)
+      CFLAGS="-O -fPIC"
+      ;;
+  esac
+fi
+
+echo "CFLAGS=$CFLAGS"
+set -v
+
+LIB=libBlocksRuntime.a
+SRC=./lib/BlocksRuntime
+if test -f $LIB; then rm $LIB; fi
+"$CC" -c $CFLAGS -o $SRC/data.o $SRC/data.c \
+&& "$CC" -c $CFLAGS -o $SRC/runtime.o -I . $SRC/runtime.c \
+&& "$AR" cr $LIB $SRC/data.o $SRC/runtime.o \
+&& "$RANLIB" $LIB
+
+#Now the install block to prime the package for makepkg
+
+install -d $PKG/usr/include $PKG/usr/lib$LIBDIRSUFFIX
+install -m 644 ./lib/BlocksRuntime/Block.h $PKG/usr/include
+install -m 755 ./libBlocksRuntime.a $PKG/usr/lib$LIBDIRSUFFIX
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CREDITS.TXT LICENSE.TXT README.txt CODE_OWNERS.TXT $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
