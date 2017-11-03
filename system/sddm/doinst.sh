@@ -12,3 +12,14 @@ config() {
 }
 
 config etc/sddm.conf.new
+
+if [ -n "$(grep sddm etc/passwd | grep var/empty)" ]; then
+  echo "*NOTICE*"
+  echo
+  echo 'SDDM $HOME is set to /var/empty in /etc/passwd'
+  echo "This needs to be changed to /var/lib/sddm"
+  echo
+  echo "Please run:"
+  echo "usermod -d /var/lib/sddm sddm"
+  echo
+fi
