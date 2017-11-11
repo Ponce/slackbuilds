@@ -12,15 +12,15 @@ config() {
   fi
 }
 
-config /usr/share/games/mangband/lib/data/scores.raw.new
-config /usr/share/games/mangband/lib/edit/artifact.txt.new
-config /usr/share/games/mangband/lib/edit/ego_item.txt.new
-config /usr/share/games/mangband/lib/edit/flavor.txt.new
-config /usr/share/games/mangband/lib/edit/limits.txt.new
-config /usr/share/games/mangband/lib/edit/monster.txt.new
-config /usr/share/games/mangband/lib/edit/object.txt.new
-config /usr/share/games/mangband/lib/edit/p_class.txt.new
-config /usr/share/games/mangband/lib/edit/p_hist.txt.new
-config /usr/share/games/mangband/lib/edit/p_race.txt.new
-config /usr/share/games/mangband/lib/edit/terrain.txt.new
-config /usr/share/games/mangband/lib/edit/vault.txt.new
+config usr/share/games/mangband/lib/data/scores.raw.new
+config usr/share/games/mangband/lib/edit/artifact.txt.new
+config usr/share/games/mangband/lib/edit/ego_item.txt.new
+config usr/share/games/mangband/lib/edit/flavor.txt.new
+config usr/share/games/mangband/lib/edit/limits.txt.new
+config usr/share/games/mangband/lib/edit/monster.txt.new
+config usr/share/games/mangband/lib/edit/object.txt.new
+config usr/share/games/mangband/lib/edit/p_class.txt.new
+config usr/share/games/mangband/lib/edit/p_hist.txt.new
+config usr/share/games/mangband/lib/edit/p_race.txt.new
+config usr/share/games/mangband/lib/edit/terrain.txt.new
+config usr/share/games/mangband/lib/edit/vault.txt.new

@@ -26,7 +26,7 @@ case $(basename $0) in
   mangband)
     exec ${GAMES_MANGBAND}/mangclient "$@"
     ;;
-  mangband.server)
+  mangbandd)
     exec ${GAMES_MANGBAND}/runserv "$@"
     ;;
   esac
