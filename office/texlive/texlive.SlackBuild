@@ -2,7 +2,7 @@
 
 # TeXLive build script for Slackware
 
-# Copyright 2009  Patrick J. Volkerding, Sebeka, MN, USA
+# Copyright 2009, 2017  Patrick J. Volkerding, Sebeka, MN, USA
 # Copyright 2009-2014  Robby Workman, Northport, AL, USA
 # Copyright 2016-2017  Johannes Schoepfer, Germany
 # All rights reserved.
@@ -29,7 +29,7 @@
 
 PRGNAM=texlive
 SOURCEVERSION=20170520
-VERSION=${VERSION:-2017.170622}
+VERSION=${VERSION:-2017.171108}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -89,6 +89,9 @@ sed -i \
   -e 's|^TEXMFLOCAL.*|TEXMFLOCAL = $TEXMFROOT/texmf-local|' \
   texk/kpathsea/texmf.cnf
 
+# prevent compiling Xdvi with libXp
+sed -i 's|-lXp ||' texk/xdvik/configure
+
 # Thanks to the lfs-folks ...
 patch -Np1 -i $CWD/patches/texlive-20170524-source-gcc7-1.patch || exit 1
 patch -Np1 -i $CWD/patches/texlive-20170524-source-upstream_fixes-2.patch || exit 1
@@ -137,30 +140,31 @@ cd build
     --with-system-fontconfig \
     --with-system-ncurses \
     --without-system-harfbuzz \
+    --disable-aleph \
+    --disable-dump-share \
     $POPPLER \
     --build=$ARCH-slackware-linux || exit 1
 
   make || exit 1
   # make check || exit 1
   make install-strip DESTDIR=$PKG || exit 1
+
+  # Don't ship .la files:
+  rm -f $PKG/usr/lib${LIBDIRSUFFIX}/*.la
+
+  # Remove all files which are covered by tlnet
+  rm -rf $PKG/usr/share $PKG/usr/man $PKG/usr/info
+
+  # install the tlnet stuff
+  mkdir -p $PKG/usr/share
+  tar xvf $CWD/texlive-base-$VERSION.tar.xz -C $PKG/usr/share || exit 1
+  chown -R root:root $PKG
+  chmod -R u+w,go-w,a+rX-st $PKG
+
   # Create symlinks
   make texlinks DESTDIR=$PKG || exit 1
+
 cd ..
-
-# Don't ship .la files:
-rm -f $PKG/usr/lib${LIBDIRSUFFIX}/*.la
-
-# install the texmf stuff, overwrite partly stuff coming from the source build;
-# don't remove/separate koma-script docs as this is the wish of the author
-mkdir -p $PKG/usr/share
-tar xvf $CWD/texlive-base-$VERSION.tar.xz -C $PKG/usr/share || exit 1
-chown -R root:root $PKG
-chmod -R u+w,go-w,a+rX-st $PKG
-
-# Remove mpost from shell_escape_commands, http://tug.org/pipermail/tldistro/2016q4/000277.html
-sed -i \
-  -e '/^mpost/d' \
-  $PKG/usr/share/texmf-dist/web2c/texmf.cnf
 
 # set some paths
 sed -i \
@@ -169,6 +173,14 @@ sed -i \
   -e 's|^OSFONTDIR.*|OSFONTDIR = ~/.fonts:/usr/share/fonts|' \
   -e 's|texlive20[0-9][0-9]|texlive|g' \
   $PKG/usr/share/texmf-dist/web2c/texmf.cnf
+
+# disable obsolete aleph/lamed/cslatex/pdfcslatex
+sed -i \
+  -e 's|^aleph|#! aleph|' \
+  -e 's|^lamed|#! lamed|' \
+  -e 's|^cslatex|#! cslatex|' \
+  -e 's|^pdfcslatex|#! pdfcslatex|' \
+  $PKG/usr/share/texmf-dist/web2c/fmtutil.cnf
 
 # make ConTeXt work, and remove unused settings
 sed -i \
@@ -179,9 +191,22 @@ sed -i \
   -e '/texmflocal/d' \
   $PKG/usr/share/texmf-dist/web2c/texmfcnf.lua
 
+# provide texlive fonts optionally for other system apps
+mkdir -p $PKG/etc/fonts/conf.avail
+cat > $PKG/etc/fonts/conf.avail/09-texlive.conf << EOF
+<?xml version='1.0'?>
+<!DOCTYPE fontconfig SYSTEM 'fonts.dtd'>
+<fontconfig>
+   <dir>/usr/share/texmf-dist/fonts/opentype</dir>
+   <dir>/usr/share/texmf-dist/fonts/truetype</dir>
+</fontconfig>
+EOF
+
 # Install the docs while we're still here
 mkdir -p $PKG/usr/doc/texlive-$VERSION
 cp -a ChangeLog README* $PKG/usr/doc/texlive-$VERSION
+# Install index of provided tex packages to the docs
+mv $PKG/usr/share/texmf-dist/packages.base.gz $PKG/usr/doc/texlive-$VERSION
 
 # Put a symlink to /usr/share/texmf-dist/doc in our Slackware docdir
 ln -s ../../share/texmf-dist/doc $PKG/usr/doc/texlive-$VERSION/doc
@@ -197,6 +222,13 @@ mkdir -p $PKG/usr/share/{texmf-config,texmf-var,texmf-local}
 # Add some perl modules, at least one of which is required by updmap
 mkdir -p $PKG/usr/share/perl5
 mv texk/tests/TeXLive $PKG/usr/share/perl5/
+
+# Move manual pages to the correct place
+mkdir $PKG/usr/man
+mv $PKG/usr/share/texmf-dist/doc/man/man1 $PKG/usr/man
+mv $PKG/usr/share/texmf-dist/doc/man/man5 $PKG/usr/man
+rmdir $PKG/usr/share/texmf-dist/doc/man
+mv $PKG/usr/share/texmf-dist/doc/info $PKG/usr
 
 # Handle the man pages
 find $PKG/usr/man -type f -exec gzip -9 {} \;
