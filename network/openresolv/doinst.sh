@@ -12,3 +12,7 @@ config() {
 }
 
 config etc/resolvconf.conf.new
+# This file is optional (added with OPENVPN=yes); let's make sure it exists
+if [ -e etc/openvpn/update-resolv-conf.new ]; then
+  config etc/openvpn/update-resolv-conf.new
+fi
