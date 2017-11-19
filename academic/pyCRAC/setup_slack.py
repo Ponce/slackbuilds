@@ -2,7 +2,7 @@
 # not compatible with python 3
 __author__      = "Sander Granneman"
 __copyright__   = "Copyright 2017"
-__version__     = "1.2.3.0"
+__version__     = "1.2.4.0"
 __credits__     = ["Sander Granneman","Hywell Dunn Davies"]
 __maintainer__  = ["Rob van Nues, via SlackBuilds.org"]
 __email__       = "sgrannem@staffmail.ed.ac.uk"
