@@ -23,8 +23,8 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=RetroArch
-VERSION=${VERSION:-1.6.7}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.6.9}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -69,43 +69,37 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-if [ "${DEBUG:-0}" = 1 ]; then
+if [ "${DEBUG:=0}" != 0 ]; then
   DEBUG=1
   RELEASE=debug
   SLKCFLAGS="$(printf %s "$SLKCFLAGS" | sed 's/-O2/-O0 -g/')"
 else
-  DEBUG=0
   RELEASE=release
 fi
 
+gles=''
+if [ "${GLES:-0}" = 1 ]; then
+  gles='--enable-opengles'
+elif [ "${GLES3:-0}" = 1 ]; then
+  gles='--enable-opengles --enable-opengles3'
+fi
+
+python=''
 if [ "${PYTHON:-0}" = 1 ]; then
   python='--enable-python'
   # Needed for python3 in the 14.1 SBo branch.
   if ! pkg-config --exists python3 && pkg-config --exists python-3.5; then
     sed -i 's/python3/python-3.5/' qb/config.libs.sh
   fi
-else
-  python=
-fi
-
-if [ "${GLES:-0}" = 1 ]; then
-  gles='--enable-opengles'
-elif [ "${GLES3:-0}" = 1 ]; then
-  gles='--enable-opengles --enable-opengles3'
-else
-  gles=
 fi
 
 # Disable downloading cores with the online updater
 # https://github.com/libretro/RetroArch/issues/3237
+SED_CORE=''; SED_INFO=''; SED_MENU=''
 if [ "${BUILDBOT:-0}" != 1 ]; then
   SED_CORE="s|# libretro_directory =|libretro_directory = /usr/lib${LIBDIRSUFFIX}/libretro|"
   SED_INFO="s|# libretro_info_path =|libretro_info_path = /usr/lib${LIBDIRSUFFIX}/libretro/info|"
   SED_MENU='s|# menu_show_core_updater = true|menu_show_core_updater = false|'
-else
-  SED_CORE=
-  SED_INFO=
-  SED_MENU=
 fi
 
 # Set the config file default directories to be consistent with the installation.
@@ -113,10 +107,6 @@ sed -e "s|# audio_filter_dir =|audio_filter_dir = /usr/lib${LIBDIRSUFFIX}/retroa
     -e "s|# video_filter_dir =|video_filter_dir = /usr/lib${LIBDIRSUFFIX}/retroarch/filters/video|" \
     -e "$SED_CORE;$SED_INFO;$SED_MENU" \
     -i retroarch.cfg
-
-# Disable keyboard input if window is not active
-# https://github.com/libretro/RetroArch/commit/84d33fb847d62e833edbf75017d6861bb66aac31
-zcat $CWD/udev.patch.gz | patch -p1
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -129,7 +119,7 @@ CXXFLAGS="$SLKCFLAGS" \
   --disable-update_assets \
   $gles $python
 
-make GL_DEBUG="$DEBUG" VULKAN_DEBUG="$DEBUG"
+make GL_DEBUG=$DEBUG VULKAN_DEBUG=$DEBUG
 make install DESTDIR=$PKG
 
 for filter in audio video; do
@@ -152,9 +142,10 @@ done
 
 mv $PKG/etc/retroarch.cfg $PKG/etc/retroarch.cfg.new
 
-[ "$DEBUG" = 0 ] && \
+if [ $DEBUG = 0 ]; then
   find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
     | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+fi
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
