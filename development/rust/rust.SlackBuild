@@ -26,12 +26,12 @@
 
 PRGNAM=rust
 SRCNAM="${PRGNAM}c"
-VERSION=${VERSION:-1.21.0}
+VERSION=${VERSION:-1.22.1}
 
 # src/stage0.txt
-RSTAGE0_VERSION=${RSTAGE0_VERSION:-1.20.0}
-RSTAGE0_DIR=${RSTAGE0_DIR:-2017-08-31}
-CSTAGE0_VERSION=${CSTAGE0_VERSION:-0.21.0}
+RSTAGE0_VERSION=${RSTAGE0_VERSION:-1.21.0}
+RSTAGE0_DIR=${RSTAGE0_DIR:-2017-10-12}
+CSTAGE0_VERSION=${CSTAGE0_VERSION:-0.22.0}
 CSTAGE0_DIR=${CSTAGE0_DIR:-$RSTAGE0_DIR}
 
 BUILD=${BUILD:-1}
@@ -128,24 +128,27 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $SRCNAM-$VERSION-src
-tar xvf $CWD/$SRCNAM-$VERSION-src.tar.gz
+tar xvf $CWD/$SRCNAM-$VERSION-src.tar.xz
 cd $SRCNAM-$VERSION-src
-patch -p1 < $CWD/link_libffi.diff
+
+# Link with -lffi in case of using system LLVM:
+zcat $CWD/link_libffi.diff.gz | patch -p1 --verbose
 
 if [ "$LOCAL_BOOTSTRAP" != "yes" ] ; then
   # rust requires bootstrapping with the previous rust version.
-  # versions are defined in src/stage0.txt
+  # versions are defined in src/stage0.txt.
   mkdir -p build/cache/$RSTAGE0_DIR
   cp $CWD/$PRGNAM-std-$RSTAGE0_VERSION-$BARCH-unknown-linux-$BABI.tar.gz \
      $CWD/$SRCNAM-$RSTAGE0_VERSION-$BARCH-unknown-linux-$BABI.tar.gz \
      build/cache/$RSTAGE0_DIR
 
   mkdir -p build/cache/$CSTAGE0_DIR
-  cp $CWD/cargo-$CSTAGE0_VERSION-$BARCH-unknown-linux-$BABI.tar.gz \
-     build/cache/$CSTAGE0_DIR
+  cp $CWD/cargo-$CSTAGE0_VERSION-$BARCH-unknown-linux-$BABI.tar.gz build/cache/$CSTAGE0_DIR
 fi
 
-# config.toml.example
+# Build configuration. We'll go ahead and build with rpath because it may be
+# needed during the build, and then we'll strip the rpaths out of the
+# binaries later.
 cat << EOF > config.toml
 [build]
 build = "$BARCH-unknown-linux-$BABI"
@@ -164,7 +167,7 @@ mandir = "man"
 [rust]
 codegen-units = 0
 channel = "stable"
-rpath = false
+rpath = true
 codegen-tests = false
 ignore-git = true
 
@@ -196,16 +199,9 @@ export PKG_CONFIG_ALLOW_CROSS=1
 
 if [ "$BARCH" = "i586" ] ; then
   # when bootstrapping from i586 (rust already installed), also build a i686
-  # rustlib
-
+  # rustlib:
   sed -i 's/^target =.*$/target = ["i686-unknown-linux-gnu"]/' config.toml
 elif [ "$BARCH" = "i686" ] ; then
-  # sigh, full bootstrapping fails on i686 with
-  # /tmp/SBo/rustc-1.21.0-src/build/i686-unknown-linux-gnu/stage2/bin/rustdoc: error while loading shared libraries: librustc_driver-f8bd7e4f77e9a650.so: cannot open shared object file: No such file or directory
-  # maybe this issue:
-  # https://github.com/rust-lang/rust/issues/43289
-  sed -i 's/rpath = false/rpath = true/' config.toml
-
   if [ "$TARCH" = "i586" ] ; then
     # this will cause some messages like:
     # warning: redundant linker flag specified for library `m`
@@ -244,12 +240,22 @@ sed -i "s,$PKG/,/,g" $PKG/usr/lib$LIBDIRSUFFIX/rustlib/install.log $PKG/usr/lib$
 # And a little compression doesn't hurt either:
 gzip -9 $PKG/usr/lib$LIBDIRSUFFIX/rustlib/manifest-*
 
+# Correct permissions on shared libraries:
+find $PKG/usr/lib$LIBDIRSUFFIX -name "*.so" -exec chmod 755 "{}" \;
+
+# Strip ELF objects:
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
+# Remove any compiled-in RPATHs:
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs patchelf --remove-rpath 2> /dev/null || true
+
+# Compress man pages:
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
+# Add some documentation:
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a *.md COPYRIGHT* LICENSE* $PKG/usr/doc/$PRGNAM-$VERSION
 # Include licenses from third party vendors:
