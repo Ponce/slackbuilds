@@ -1,0 +1,119 @@
+#######################################################################
+# elinks by default generates its own search query form when it sees
+# a type 7 index entity. The problem is that it didn't read the
+# served results page and instead generated another search page after
+# you had entered the first. This patch fixes that and in my tests it
+# seems to work so far.
+#######################################################################
+diff -Naur a/src/protocol/gopher/gopher.c b/src/protocol/gopher/gopher.c
+--- a/src/protocol/gopher/gopher.c	2017-11-24 19:12:52.495714437 +0000
++++ b/src/protocol/gopher/gopher.c	2017-11-30 12:56:38.872336516 +0000
+@@ -43,6 +43,34 @@
+ #include "util/memory.h"
+ #include "util/string.h"
+ 
++#ifdef HAVE_FCNTL_H
++#include <fcntl.h> /* OS/2 needs this after sys/types.h */
++#endif
++
++/* To enable logging for debugging purposes. */
++#if 1
++
++#define LOGFILE "/tmp/log"
++
++static void
++debug_log(unsigned char *data,  int NL)
++{
++	int fd = open(LOGFILE, O_WRONLY | O_APPEND | O_CREAT, 0622);
++
++	if (fd == -1) return;
++
++	set_bin(fd);
++	write(fd, data, strlen(data));
++    if (NL)
++        write(fd, "\n", 1);
++	close(fd);
++}
++#undef LOGFILE
++
++#else
++#define debug_log(data, len)
++#endif
++
+ struct module gopher_protocol_module = struct_module(
+ 	/* name: */		N_("Gopher"),
+ 	/* options: */		NULL,
+@@ -219,23 +247,31 @@
+ 		if (query) selectorlen -= 1;
+ 		query = NULL;
+ 		querylen = 0;
+-	} else {
+-		query += 1;
++	} else if (entity == GOPHER_INDEX) {
++        /* fix query size to not include the seach= part */
++		query += 8;
+ 		querylen = selector + selectorlen - query;
+ 		/* Exclude '?' */
+-		selectorlen -= querylen + 1;
++        /* fix selector length to fit with query */
++		selectorlen -= querylen + 8;
+ 		if (querylen >= 7 && !c_strncasecmp(query, "search=", 7)) {
+ 			query	 += 7;
+ 			querylen -= 7;
+ 		}
++		debug_log("selector:", 1);
++		debug_log(selector, 1);
++		debug_log("query:", 1);
++		debug_log(query, 1);
+ 	}
+ 
+ 	switch (entity) {
+ 	case GOPHER_INDEX:
+ 		/* No search required? */
++        /* Don't display the form page */
+ 		if (!query) {
+ 			done_string(command);
+-			return init_gopher_index_cache_entry(conn);
++			add_uri_decoded(command, selector, selectorlen, 0);
++			break;
+ 		}
+ 
+ 		add_uri_decoded(command, selector, selectorlen, 0);
+@@ -343,6 +379,10 @@
+ 	gopher->entity = entity_info;
+ 	gopher->commandlen = command.length;
+ 
++debug_log("439 gopher->entity:", 1);
++debug_log(gopher->entity, 1);
++debug_log("437 command.source:", 1);
++debug_log(command.source, 1);
+ 	memcpy(gopher->command, command.source, command.length);
+ 	done_string(&command);
+ 
+@@ -377,7 +417,7 @@
+ 		"<td>            </td>"
+ 		"<td>%s:</td>"
+ 		"<td><input maxlength=\"256\" name=\"search\" value=\"\"></td>"
+-		"<td><input type=submit value=\"Search\"></td>"
++		"<td><input type=submit value=\"Submit\"></td>"
+ 		"</table>"
+ 		"</form>",
+ 		addr, text);
+@@ -726,7 +766,8 @@
+ 	/* Now read the data from the socket */
+ 	switch (gopher->entity->type) {
+ 	case GOPHER_DIRECTORY:
+-	case GOPHER_INDEX:
++/* Don't do directory list for cgi output (7)
++	case GOPHER_INDEX: */
+ 		state = read_gopher_directory_data(conn, rb);
+ 		break;
+ 
+@@ -738,6 +779,7 @@
+ 		state = connection_state(S_GOPHER_CSO_ERROR);
+ 		break;
+ 
++	case GOPHER_INDEX:
+ 	case GOPHER_SOUND:
+ 	case GOPHER_PLUS_SOUND:
+ 	case GOPHER_PLUS_MOVIE:
