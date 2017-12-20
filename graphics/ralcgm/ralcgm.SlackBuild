@@ -1,0 +1,101 @@
+#!/bin/sh
+
+# Slackware build script for ralcgm
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+PRGNAM=ralcgm
+VERSION=${VERSION:-3.50}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+mkdir -p $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.Z
+chown -R root:root .
+
+# Departure from template here due to annoying perms in the tarball.
+find . -type d -exec chmod 755 {} \+
+find . -type f -exec chmod 644 {} \+
+
+# This SlackBuild owes a great debt to PLD Linux:
+# git://git.pld-linux.org/packages/ralcgm.git
+
+# Add "linux" as a supported OS.
+patch -p1 < $CWD/ralcgm-linux.patch
+
+# Patch was created by running the interactive config, then diffing against
+# the un-configured source. Also file locations were edited in mach.h.
+patch -p1 < $CWD/no_interactive_config.diff
+
+# Compiler warnings scare me.
+patch -p1 < $CWD/fix_warnings.diff
+
+# These 3 stanzas come from PLD's ralcgm.spec:
+# The genbez and genher tools need to be built with DATADIR set to ../data/
+make -j1 -C src COMPILE="gcc $SLKCFLAGS" cgmfile.o cgmerr.o genbez genher
+
+# ..everything else needs it as /usr/share/ralcgm/.
+sed -i '/^#define *DATADIR/s,"\..*,"/usr/share/ralcgm/",' include/mach.h
+
+# Clean up, then build for real.
+rm -f src/cgmfile.o src/cgmerr.o
+make -C src $PRGNAM cgmlib COMPILE="gcc $SLKCFLAGS"
+
+# Manual install, since the "install" script doesn't actually install.
+# Not sure that all the includes are necessary, but they shouldn't do
+# any harm.
+mkdir -p $PKG/usr/bin $PKG/usr/lib$LIBDIRSUFFIX $PKG/usr/man/man1 \
+         $PKG/usr/share/$PRGNAM $PKG/usr/include/$PRGNAM
+install -s -oroot -groot -m0755 bin/$PRGNAM $PKG/usr/bin
+install -oroot -groot -m0644 bin/libcgm.a $PKG/usr/lib$LIBDIRSUFFIX
+install -oroot -groot -m0644 data/* $PKG/usr/share/$PRGNAM
+install -oroot -groot -m0644 include/* $PKG/usr/include/$PRGNAM
+
+gzip -9c < docs/$PRGNAM.man > $PKG/usr/man/man1/$PRGNAM.1.gz
+
+# The INSTALL actually has somewhat useful info.
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README docs/INSTALL examples $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
