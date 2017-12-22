@@ -18,6 +18,7 @@ if [ -n "$(grep sddm etc/passwd | grep var/empty)" ]; then
   echo
   echo 'SDDM $HOME is set to /var/empty in /etc/passwd'
   echo "This needs to be changed to /var/lib/sddm"
+  echo "(see README)."
   echo
   echo "Please run:"
   echo "usermod -d /var/lib/sddm sddm"
