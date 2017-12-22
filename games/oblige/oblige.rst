@@ -2,7 +2,7 @@
 ..   rst2man.py oblige.rst > oblige.6
 .. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 6.20
+.. |version| replace:: 7.70
 .. |date| date::
 
 ======
@@ -21,7 +21,7 @@ random level generator for Doom and Doom II
 SYNOPSIS
 ========
 
-oblige [*-options*]
+oblige [*-options*] [*key=value* *...*]
 
 DESCRIPTION
 ===========
@@ -37,7 +37,7 @@ OPTIONS
 =======
 
 --home <dir>
-  Home directory, where B<oblige> looks for its config file, and creates
+  Home directory, where **oblige** looks for its config file, and creates
   temporary files. Default is *~/.oblige*.
 
 --install <dir>
@@ -45,8 +45,7 @@ OPTIONS
   data. Default is */usr/share/oblige*.
 
 --config <file>
-
-  Config file to use. Default is *~/.oblige/CONFIG.txt*. Not used in
+  Config file to use. Default is *~/.oblige/CONFIG.txt* in GUI mode, none in
   **--batch** mode.
 
 --batch, **-b** *<output>*
@@ -69,11 +68,14 @@ OPTIONS
   Enable verbose debugging messages in log.
 
 --terminal, -t
-  Print log messages to stdout (rather than *~/.oblige/LIGS.txt*). Disabled
+  Print log messages to stdout (rather than *~/.oblige/LOGS.txt*). Disabled
   by default, unless in **--batch** mode.
 
 --help, -h
   Show built-in help message.
+
+**key=value**
+  Override setting from CONFIG.txt. May be given multiple times.
 
 .. other sections we might want, uncomment as needed.
 
@@ -100,7 +102,7 @@ See the file /usr/doc/oblige-|version|/GPL.txt for license information.
 AUTHORS
 =======
 
-**oblige** is (c) 2006-2015 by Andrew Apted.
+**oblige** is (c) 2006-2017 by Andrew Apted.
 
 This man page written for the SlackBuilds.org project
 by B. Watson, and is licensed under the WTFPL.
