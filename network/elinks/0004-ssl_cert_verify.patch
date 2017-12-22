@@ -1,0 +1,161 @@
+##############################################################################
+# elinks does not verify ssl host names with openssl
+# This is a modifed version of the patch here that fixes that issue:
+# http://lists.linuxfromscratch.org/pipermail/elinks-dev/2015-June/002099.html
+# This patch turns on verification by default, and differentiates
+# between host verification fail and noral SSL errors.
+# dave@dawoodfall.net
+##############################################################################
+--- a/configure.in	2017-12-21 15:58:12.470247050 +0000
++++ b/configure.in	2017-12-21 16:10:27.406938487 +0000
+@@ -1132,6 +1132,9 @@
+ fi
+ 
+ AC_MSG_RESULT($cf_result)
++if test "$cf_result" = yes; then
++	AC_CHECK_FUNCS(X509_VERIFY_PARAM_set1_host)
++fi
+ 
+ # ---- GNU TLS
+ 
+diff -Naur a/src/network/ssl/socket.c b/src/network/ssl/socket.c
+--- a/src/network/ssl/socket.c	2017-12-21 15:58:12.553249389 +0000
++++ b/src/network/ssl/socket.c	2017-12-21 16:11:47.532190591 +0000
+@@ -7,6 +7,9 @@
+ #ifdef CONFIG_OPENSSL
+ #include <openssl/ssl.h>
+ #include <openssl/x509v3.h>
++#ifdef HAVE_X509_VERIFY_PARAM_SET1_HOST
++#include <openssl/x509_vfy.h>
++#endif
+ #define USE_OPENSSL
+ #elif defined(CONFIG_NSS_COMPAT_OSSL)
+ #include <nss_compat_ossl/nss_compat_ossl.h>
+@@ -168,6 +171,30 @@
+ 
+ #ifdef USE_OPENSSL
+ 
++#ifdef HAVE_X509_VERIFY_PARAM_SET1_HOST
++/* activate the OpenSSL-provided host name check */
++static int
++ossl_set_hostname(void *ssl, unsigned char *server_name)
++{
++	int ret = -1;
++
++	X509_VERIFY_PARAM *vpm = X509_VERIFY_PARAM_new();
++	if (vpm) {
++		if (X509_VERIFY_PARAM_set1_host(vpm, (char *) server_name, 0)
++				&& SSL_set1_param(ssl, vpm))
++		{
++			/* successfully activated the OpenSSL host name check */
++			ret = 0;
++		}
++
++		X509_VERIFY_PARAM_free(vpm);
++	}
++
++	return ret;
++}
++
++#else /* HAVE_X509_VERIFY_PARAM_SET1_HOST */
++
+ /** Checks whether the host component of a URI matches a host name in
+  * the server certificate.
+  *
+@@ -360,6 +387,7 @@
+ 	mem_free(host_in_uri);
+ 	return matched;
+ }
++#endif	/* HAVE_X509_VERIFY_PARAM_SET1_HOST */
+ 
+ #endif	/* USE_OPENSSL */
+ 
+@@ -389,7 +417,10 @@
+ 
+ 		default:
+ 			socket->no_tls = !socket->no_tls;
+-			socket->ops->retry(socket, connection_state(S_SSL_ERROR));
++			if (SSL_VERIFY_FAIL_IF_NO_PEER_CERT != NULL)
++				socket->ops->retry(socket, connection_state(S_SSL_CERTFAIL));
++			else
++				socket->ops->retry(socket, connection_state(S_SSL_ERROR));
+ 	}
+ }
+ 
+@@ -400,6 +431,9 @@
+ 	int ret;
+ 	unsigned char *server_name;
+ 	struct connection *conn = socket->conn;
++#ifdef USE_OPENSSL
++	int (*verify_callback_ptr)(int, X509_STORE_CTX *);
++#endif	/* USE_OPENSSL */
+ 
+ 	/* TODO: Recode server_name to UTF-8.  */
+ 	server_name = get_uri_string(conn->proxied_uri, URI_HOST);
+@@ -418,6 +452,23 @@
+ 		return -1;
+ 	}
+ 
++#ifdef USE_OPENSSL
++#ifdef HAVE_X509_VERIFY_PARAM_SET1_HOST
++	/* activate the OpenSSL-provided host name check */
++	if (ossl_set_hostname(socket->ssl, server_name)) {
++		mem_free_if(server_name);
++		socket->ops->done(socket, connection_state(S_SSL_ERROR));
++		return -1;
++	}
++
++	/* verify_callback() is not needed with X509_VERIFY_PARAM_set1_host() */
++	verify_callback_ptr = NULL;
++#else
++	/* use our own callback implementing the host name check */
++	verify_callback_ptr = verify_callback;
++#endif
++#endif	/* USE_OPENSSL */
++
+ 	mem_free_if(server_name);
+ 
+ 	if (socket->no_tls)
+@@ -429,7 +480,7 @@
+ 	if (get_opt_bool("connection.ssl.cert_verify", NULL))
+ 		SSL_set_verify(socket->ssl, SSL_VERIFY_PEER
+ 					  | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+-			       verify_callback);
++			       verify_callback_ptr);
+ 
+ 	if (get_opt_bool("connection.ssl.client_cert.enable", NULL)) {
+ 		unsigned char *client_cert;
+diff -Naur a/src/network/ssl/ssl.c b/src/network/ssl/ssl.c
+--- a/src/network/ssl/ssl.c	2017-12-21 15:58:12.553249389 +0000
++++ b/src/network/ssl/ssl.c	2017-12-21 16:11:03.378949490 +0000
+@@ -109,7 +109,7 @@
+ 
+ static union option_info openssl_options[] = {
+ 	INIT_OPT_BOOL("connection.ssl", N_("Verify certificates"),
+-		"cert_verify", 0, 0,
++		"cert_verify", 0, 1,
+ 		N_("Verify the peer's SSL certificate. Note that this "
+ 		"needs extensive configuration of OpenSSL by the user.")),
+ 
+diff -Naur a/src/network/state.c b/src/network/state.c
+--- a/src/network/state.c	2017-12-21 15:58:12.553249389 +0000
++++ b/src/network/state.c	2017-12-21 16:10:20.579746621 +0000
+@@ -88,6 +88,7 @@
+ 
+ #ifdef CONFIG_SSL
+ 	{S_SSL_ERROR,		N_("SSL error")},
++	{S_SSL_CERTFAIL,		N_("SSL Host Verification Failed.")},
+ #else
+ 	{S_SSL_ERROR,		N_("This version of ELinks does not contain SSL/TLS support")},
+ #endif
+diff -Naur a/src/network/state.h b/src/network/state.h
+--- a/src/network/state.h	2017-12-21 15:58:12.553249389 +0000
++++ b/src/network/state.h	2017-12-21 16:10:03.057254202 +0000
+@@ -67,6 +67,7 @@
+ 	S_ENCODE_ERROR		= -100017,
+ 	S_SSL_ERROR		= -100018,
+ 	S_NO_FORCED_DNS		= -100019,
++	S_SSL_CERTFAIL		= -100020,
+ 
+ 	S_HTTP_ERROR		= -100100,
+ 	S_HTTP_204		= -100101,
