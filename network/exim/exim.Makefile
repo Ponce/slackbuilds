@@ -192,6 +192,11 @@ SPOOL_DIRECTORY=/var/spool/exim
 # least one type of lookup. You should consider whether you want to build
 # the Exim monitor or not.
 
+# If you need to override how pkg-config finds configuration files for
+# installed software, then you can set that here; wildcards will be expanded.
+
+# PKG_CONFIG_PATH=/usr/local/opt/openssl/lib/pkgconfig : /opt/*/lib/pkgconfig
+
 
 #------------------------------------------------------------------------------
 # These settings determine which individual router drivers are included in the
@@ -488,6 +493,7 @@ WITH_CONTENT_SCAN=yes
 # Uncomment the following line to add DMARC checking capability, implemented
 # using libopendmarc libraries.  You must have SPF support enabled also.
 # EXPERIMENTAL_DMARC=yes
+# DMARC_TLD_FILE= /etc/exim/opendmarc.tlds
 # CFLAGS += -I/usr/local/include
 # LDFLAGS += -lopendmarc
 
@@ -1115,6 +1121,13 @@ USE_READLINE=yes
 # You may need to add -ldl to EXTRALIBS when you set USE_READLINE=yes.
 # Note that this option adds to the size of the Exim binary, because the
 # dynamic loading library is not otherwise included.
+
+# If libreadline is not in the normal library paths, then because Exim is
+# setuid you'll need to ensure that the correct directory is stamped into
+# the binary so that dlopen will find it.
+# Eg, on macOS/Darwin with a third-party install of libreadline, perhaps:
+
+# EXTRALIBS_EXIM+=-Wl,-rpath,/usr/local/opt/readline/lib
 
 
 #------------------------------------------------------------------------------
