@@ -23,7 +23,7 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=RetroArch
-VERSION=${VERSION:-1.6.9}
+VERSION=${VERSION:-1.7.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -70,23 +70,27 @@ find -L . \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 if [ "${DEBUG:=0}" != 0 ]; then
+  [ "${ASAN:=}" != '' ] && ASAN=address
   DEBUG=1
   RELEASE=debug
   SLKCFLAGS="$(printf %s "$SLKCFLAGS" | sed 's/-O2/-O0 -g/')"
 else
+  ASAN=
   RELEASE=release
 fi
 
-gles=; python=
+lib=
 
-if [ "${GLES:-0}" = 1 ]; then
-  gles='--enable-opengles'
-elif [ "${GLES3:-0}" = 1 ]; then
-  gles='--enable-opengles --enable-opengles3'
+if [ "${GLES:-0}" != 0 ]; then
+  lib="${lib} --enable-opengles"
+elif [ "${GLES3:-0}" != 0 ]; then
+  lib="${lib} --enable-opengles --enable-opengles3"
 fi
 
-if [ "${PYTHON:-0}" = 1 ]; then
-  python='--enable-python'
+[ -d /usr/include/miniupnpc ] && lib="${lib} --disable-builtinminiupnpc"
+
+if [ "${PYTHON:-0}" != 0 ]; then
+  lib="${lib} --enable-python"
   # Needed for python3 in the 14.1 SBo branch.
   if ! pkg-config --exists python3 && pkg-config --exists python-3.5; then
     sed -i 's/python3/python-3.5/' qb/config.libs.sh
@@ -96,7 +100,7 @@ fi
 # Disable downloading cores with the online updater
 # https://github.com/libretro/RetroArch/issues/3237
 SED_CORE=; SED_INFO=; SED_MENU=
-if [ "${BUILDBOT:-0}" != 1 ]; then
+if [ "${BUILDBOT:-0}" = 0 ]; then
   SED_CORE="s|# libretro_directory =|libretro_directory = /usr/lib${LIBDIRSUFFIX}/libretro|"
   SED_INFO="s|# libretro_info_path =|libretro_info_path = /usr/lib${LIBDIRSUFFIX}/libretro/info|"
   SED_MENU='s|# menu_show_core_updater = true|menu_show_core_updater = false|'
@@ -108,6 +112,9 @@ sed -e "s|# audio_filter_dir =|audio_filter_dir = /usr/lib${LIBDIRSUFFIX}/retroa
     -e "$SED_CORE;$SED_INFO;$SED_MENU" \
     -i retroarch.cfg
 
+# Set $lib to a portable array
+eval "set -- $lib"
+
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -115,11 +122,11 @@ CXXFLAGS="$SLKCFLAGS" \
   --with-bin_dir=/usr/games \
   --with-man_dir=/usr/man \
   --with-assets_dir=/usr/share/games \
-  --disable-dbus \
   --disable-update_assets \
-  $gles $python
+  --build=$ARCH-slackware-linux \
+  "$@"
 
-make GL_DEBUG=$DEBUG VULKAN_DEBUG=$DEBUG
+make GL_DEBUG=$DEBUG VULKAN_DEBUG=$DEBUG SANITIZER=$ASAN
 make install DESTDIR=$PKG
 
 for filter in audio video; do
