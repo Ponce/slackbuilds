@@ -1,5 +1,5 @@
 #!/bin/sh
-# vim: et ts=2 sw=2 
+# vim: et ts=2 sw=2
 
 config() {
   NEW="$1"
