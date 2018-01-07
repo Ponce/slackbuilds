@@ -25,23 +25,16 @@
 +FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 +DEALINGS IN THE SOFTWARE.
 +++ Makefile
-@@ -17,13 +17,12 @@
- CPPFLAGS += -D_GNU_SOURCE
- CFLAGS += $(shell $(PKG_CONFIG) --cflags cairo xcb-xinerama xcb-atom xcb-image xcb-xkb xkbcommon xkbcommon-x11)
- LIBS += $(shell $(PKG_CONFIG) --libs cairo xcb-xinerama xcb-atom xcb-image xcb-xkb xkbcommon xkbcommon-x11)
--LIBS += -lpam
- LIBS += -lev
- LIBS += -lm
+@@ -22,7 +22,7 @@
  
--# OpenBSD lacks PAM, use bsd_auth(3) instead.
-+# On OpenBSD we use bsd_auth(3) instead.
+ # OpenBSD lacks PAM, use bsd_auth(3) instead.
  ifneq ($(UNAME),OpenBSD)
 -  LIBS += -lpam
 +  LIBS += -lcrypt
  endif
  
  FILES:=$(wildcard *.c)
-@@ -51,9 +50,7 @@
+@@ -50,9 +50,7 @@
  
  install: all
  	$(INSTALL) -d $(DESTDIR)$(PREFIX)/bin
@@ -51,7 +44,7 @@
  
  uninstall:
  	rm -f $(DESTDIR)$(PREFIX)/bin/i3lock
-@@ -62,7 +59,7 @@
+@@ -61,7 +59,7 @@
  	[ ! -d i3lock-${VERSION} ] || rm -rf i3lock-${VERSION}
  	[ ! -e i3lock-${VERSION}.tar.bz2 ] || rm i3lock-${VERSION}.tar.bz2
  	mkdir i3lock-${VERSION}
@@ -101,7 +94,7 @@
  #endif
  #include <getopt.h>
  #include <string.h>
-@@ -57,7 +59,7 @@
+@@ -59,7 +61,7 @@
  xcb_window_t win;
  static xcb_cursor_t cursor;
  #ifndef __OpenBSD__
@@ -110,7 +103,7 @@
  #endif
  int input_position = 0;
  /* Holds the password you enter (in UTF-8). */
-@@ -90,6 +92,37 @@
+@@ -93,6 +95,37 @@
  bool ignore_empty_password = false;
  bool skip_repeated_empty_password = false;
  
@@ -126,30 +119,30 @@
 +static void
 +dontkillme(void)
 +{
-+	FILE *f;
-+	const char oomfile[] = "/proc/self/oom_score_adj";
++    FILE *f;
++    const char oomfile[] = "/proc/self/oom_score_adj";
 +
-+	if (!(f = fopen(oomfile, "w"))) {
-+		if (errno == ENOENT)
-+			return;
-+		errx(EXIT_FAILURE, "fopen %s: %s", oomfile, strerror(errno));
-+	}
-+	fprintf(f, "%d", OOM_SCORE_ADJ_MIN);
-+	if (fclose(f)) {
-+		if (errno == EACCES)
-+			errx(EXIT_FAILURE, "unable to disable OOM killer. "
-+			                   "Make sure to suid or sgid i3lock.");
-+		else
-+			errx(EXIT_FAILURE, "fclose %s: %s", oomfile, strerror(errno));
-+	}
++    if (!(f = fopen(oomfile, "w"))) {
++        if (errno == ENOENT)
++            return;
++        errx(EXIT_FAILURE, "fopen %s: %s", oomfile, strerror(errno));
++    }
++    fprintf(f, "%d", OOM_SCORE_ADJ_MIN);
++    if (fclose(f)) {
++        if (errno == EACCES)
++            errx(EXIT_FAILURE, "unable to disable OOM killer. "
++                               "Make sure to suid or sgid i3lock.");
++        else
++            errx(EXIT_FAILURE, "fclose %s: %s", oomfile, strerror(errno));
++    }
 +}
 +#endif
 +
  /* isutf, u8_dec © 2005 Jeff Bezanson, public domain */
  #define isutf(c) (((c)&0xC0) != 0x80)
  
-@@ -281,16 +314,16 @@
-         exit(0);
+@@ -285,16 +318,16 @@
+         return;
      }
  #else
 -    if (pam_authenticate(pam_handle, 0) == PAM_SUCCESS) {
@@ -172,8 +165,8 @@
 +        DEBUG("successfully authenticated");
 +        clear_password_memory();
  
-         exit(0);
-     }
+         ev_break(EV_DEFAULT, EVBREAK_ALL);
+         return;
 @@ -626,39 +659,6 @@
      redraw_screen();
  }
@@ -214,18 +207,40 @@
  /*
   * This callback is only a dummy, see xcb_prepare_cb and xcb_check_cb.
   * See also man libev(3): "ev_prepare" and "ev_check" - customise your event loop
-@@ -813,10 +813,6 @@
-     struct passwd *pw;
+@@ -766,13 +766,15 @@
+  *
+  */
+ static void raise_loop(xcb_window_t window) {
+-    xcb_connection_t *conn;
+     xcb_generic_event_t *event;
+-    int screens;
+ 
+-    if ((conn = xcb_connect(NULL, &screens)) == NULL ||
++#ifdef __OpenBSD__
++    xcb_connection_t *conn;
++
++    if ((conn = xcb_connect(NULL, NULL)) == NULL ||
+         xcb_connection_has_error(conn))
+         errx(EXIT_FAILURE, "Cannot open display\n");
++#endif
+ 
+     /* We need to know about the window being obscured or getting destroyed. */
+     xcb_change_window_attributes(conn, window, XCB_CW_EVENT_MASK,
+@@ -820,8 +822,11 @@
      char *username;
      char *image_path = NULL;
--#ifndef __OpenBSD__
+ #ifndef __OpenBSD__
 -    int ret;
 -    struct pam_conv conv = {conv_callback, NULL};
--#endif
++    struct passwd *pwd;
++    struct group *grp;
++    uid_t duid;
++    gid_t dgid;
++    xcb_connection_t *raise_conn;
+ #endif
      int curs_choice = CURS_NONE;
      int o;
-     int optind = 0;
-@@ -842,6 +838,48 @@
+@@ -848,6 +853,65 @@
      if ((username = pw->pw_name) == NULL)
          errx(EXIT_FAILURE, "pw->pw_name is NULL.\n");
  
@@ -235,14 +250,23 @@
 +     *
 +     * Slock has code to make it run as nobody:nogroup, which has the added
 +     *  security that the locker can only be killed by root.
-+     * It causes problems with the xcb_connect in raise_loop, however,
-+     *  and I'm not aware of any other methods to keep the calling user from
-+     *  killing the locker.
-+     * This means that a malicious program running as your user
-+     *  could easily bypass your locker by killing it.
-+     * However, if such a program even manages to be running, you're pretty
-+     *  screwed regardless.
++     * It causes problems with the xcb_connect in raise_loop, and the main
++     *  xcb_connect, however.
++     * Because of that, both xcb_connect are ran as root, before dropping the
++     *  privileges to the user, much like is being done with XOpenDisplay
++     *  in slock.
++     * I'm unsure of any security implications that may have, as it seems to
++     *  run fine, otherwise.
++     * Please contact me if it's something I _really_ shouldn't do.
 +     */
++
++    /* If the nobody:nogroup don't exist, just use the password's user */
++    duid = pw->pw_uid;
++    if ((pwd = getpwnam("nobody")))
++        duid = pwd->pw_uid;
++    dgid = pw->pw_gid;
++    if ((grp = getgrnam("nogroup")))
++        dgid = grp->gr_gid;
 +
 +#ifdef __linux__
 +    dontkillme();
@@ -262,19 +286,27 @@
 +    if (!crypt("", hash))
 +        errx(EXIT_FAILURE, "crypt: %s", strerror(errno));
 +
++    /* Create the necessary connections before dropping privileges */
++    if ((conn = xcb_connect(NULL, NULL)) == NULL ||
++        xcb_connection_has_error(conn))
++        errx(EXIT_FAILURE, "Could not connect to X11, maybe you need to set DISPLAY?");
++    if ((raise_conn = xcb_connect(NULL, NULL)) == NULL ||
++        xcb_connection_has_error(raise_conn))
++        errx(EXIT_FAILURE, "Cannot open display\n");
++
 +    /* drop privileges */
 +    if (setgroups(0, NULL) < 0)
 +        errx(EXIT_FAILURE, "setgroups: %s", strerror(errno));
-+    if (setgid(pw->pw_gid) < 0)
++    if (setgid(dgid) < 0)
 +        errx(EXIT_FAILURE, "setgid: %s", strerror(errno));
-+    if (setuid(pw->pw_uid) < 0)
++    if (setuid(duid) < 0)
 +        errx(EXIT_FAILURE, "setuid: %s", strerror(errno));
 +#endif
 +
      char *optstring = "hvnbdc:p:ui:teI:f";
-     while ((o = getopt_long(argc, argv, optstring, longopts, &optind)) != -1) {
+     while ((o = getopt_long(argc, argv, optstring, longopts, &longoptind)) != -1) {
          switch (o) {
-@@ -910,15 +948,6 @@
+@@ -916,15 +980,6 @@
       * the unlock indicator upon keypresses. */
      srand(time(NULL));
  
@@ -290,6 +322,38 @@
  /* Using mlock() as non-super-user seems only possible in Linux.
   * Users of other operating systems should use encrypted swap/no swap
   * (or remove the ifdef and run i3lock as super-user).
+@@ -938,11 +993,12 @@
+         err(EXIT_FAILURE, "Could not lock page in memory, check RLIMIT_MEMLOCK");
+ #endif
+ 
++#ifdef __OpenBSD__
+     /* Double checking that connection is good and operatable with xcb */
+-    int screennr;
+-    if ((conn = xcb_connect(NULL, &screennr)) == NULL ||
++    if ((conn = xcb_connect(NULL, NULL)) == NULL ||
+         xcb_connection_has_error(conn))
+         errx(EXIT_FAILURE, "Could not connect to X11, maybe you need to set DISPLAY?");
++#endif
+ 
+     if (xkb_x11_setup_xkb_extension(conn,
+                                     XKB_X11_MIN_MAJOR_XKB_VERSION,
+@@ -1056,10 +1112,16 @@
+     if (pid == 0) {
+         /* Child */
+         close(xcb_get_file_descriptor(conn));
++#ifndef __OpenBSD__
++        conn = raise_conn;
++#endif
+         maybe_close_sleep_lock_fd();
+         raise_loop(win);
+         exit(EXIT_SUCCESS);
+     }
++#ifndef __OpenBSD__
++    close(xcb_get_file_descriptor(raise_conn));
++#endif
+ 
+     /* Load the keymap again to sync the current modifier state. Since we first
+      * loaded the keymap, there might have been changes, but starting from now,
 +++ i3lock.pam
 @@ -1,6 +0,0 @@
 -#
