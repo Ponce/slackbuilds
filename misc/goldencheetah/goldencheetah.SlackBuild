@@ -1,0 +1,113 @@
+#!/bin/sh
+
+# Slackware build script for GoldenCheetah
+
+# Copyright 2018 Kyle Guinn <elyk03@gmail.com>, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=goldencheetah
+SRCNAM=GoldenCheetah
+VERSION=${VERSION:-3.4}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$(uname -m)" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$(uname -m) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM-$VERSION
+OUTPUT=${OUTPUT:-/tmp}
+
+DOCS="COPYING doc/user/GC3-Manual.pdf doc/user/GC3-FAQ.pdf"
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+chown -R root:root .
+chmod -R u+w,go-w,a+rX-st .
+
+# GoldenCheetah statically links its own version of qwt, which doesn't seem to
+# correspond to any released version.  The build system uses -L/-l flags to
+# refer to the static lib, but due to other -L flags and symlinked directories,
+# it might find the system qwt instead.  Replace the flags with a filename.
+sed -i 's|-L\(\$\${PWD}/../qwt/lib\) -l\(qwtd\?\)|\1/lib\2.a|' src/src.pro
+
+# We don't have a '-qt4' suffix on lrelease.
+sed -i 's|\(lrelease\)-qt4|\1|' src/src.pro
+
+# Copy the default config files, then modify them below.
+cp qwt/qwtconfig.pri.in qwt/qwtconfig.pri
+cp src/gcconfig.pri.in  src/gcconfig.pri
+
+# Set up the build configuration.
+sed -i 's|^#\(CONFIG += release\)|\1|'    src/gcconfig.pri
+sed -i 's|^#\(QMAKE_LEX  = flex\)|\1|'    src/gcconfig.pri
+sed -i 's|^#\(QMAKE_YACC = bison\)|\1|'   src/gcconfig.pri
+sed -i 's|^#\(LIBZ_INCLUDE =\)|\1|'       src/gcconfig.pri
+sed -i 's|^#\(LIBZ_LIBS    = -lz\).*|\1|' src/gcconfig.pri
+
+# Enable optional dependencies found in stock Slackware.
+# TODO:  Enable other optional dependencies (VLC, qwtplot3d, others?)
+sed -i 's|^#\(ICAL_INSTALL =\).*|\1 /usr|'   src/gcconfig.pri
+sed -i 's|^#\(LIBUSB_INSTALL =\).*|\1 /usr|' src/gcconfig.pri
+
+qmake \
+  -recursive \
+  QMAKE_CFLAGS_RELEASE="$SLKCFLAGS" \
+  QMAKE_CXXFLAGS_RELEASE="$SLKCFLAGS" \
+
+make
+install -D -m0755 -s src/GoldenCheetah $PKG/usr/bin/GoldenCheetah
+install -D -m0644 src/Resources/linux/51-garmin-usb.rules $PKG/lib/udev/rules.d/51-garmin-usb.rules
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
