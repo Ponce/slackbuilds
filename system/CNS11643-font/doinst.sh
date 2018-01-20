@@ -5,7 +5,6 @@ if [ -x /usr/bin/mkfontdir ]; then
     mkfontdir .
   )
 fi
-
 if [ -x /usr/bin/fc-cache ]; then
   /usr/bin/fc-cache -f
 fi
