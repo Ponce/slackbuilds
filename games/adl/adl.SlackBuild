@@ -7,7 +7,7 @@
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/
 # for details.
 
-# VERSION is the timestamp of the tarball. Most of the files
+# 93 (1993) is the timestamp of the tarball. Most of the files
 # inside are stamped May 10 1991, and the copyright notice
 # says 1987.
 
@@ -15,11 +15,19 @@
 # independent. 32-bit adlcomp produces files that won't run on a 64-bit
 # adlrun, and vice versa.
 
+# 20180122 bkw: It turns out that adl development continued up
+# through 2011, with a Windows and Linux binary release in 2003.
+# The ADL language and bytecode formats were changed for the 2003
+# binary release, and changed again afterwards. For maximum
+# compatibility, I'm now including 3 versions of adl in the package.
+# If the code in this script hurts your head, don't feel too bad,
+# mine's aching right now.
+
 # 20170621 bkw: add -j1 to the make commands. I got a mysterious
 # build failure that I couldn't duplicate, hopefully this fixes it.
 
 PRGNAM=adl
-VERSION=${VERSION:-19930322}
+VERSION=${VERSION:-20110628}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -36,18 +44,16 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
+BITS=32
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
+  BITS="64"
 else
   SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
 fi
 
 set -e
@@ -56,6 +62,11 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM
+mkdir -p $PRGNAM
+cd $PRGNAM
+
+### First, the old 19930322 version, installed as adl93.
+YEAR=93
 tar xvf $CWD/$PRGNAM.tar.Z
 cd $PRGNAM
 chown -R root:root .
@@ -69,10 +80,10 @@ find -L . \
 # - fix various compile errors (mostly relating to lack of ANSI prototypes).
 # - remove 'extern char *malloc()' and such, include system headers instead.
 # - add support for OPTFLAGS (instead of hard-coded -O in CFLAGS).
-# - -DADL_NAME="/usr/games/adlrun" (for adlcomp's emitted shebang lines).
+# - -DADL_NAME="/usr/games/adlrun93" (for adlcomp's emitted shebang lines).
 # - stop adlrun from opening game files read/write: it never writes to them,
 #   and the open fails for e.g. non-root user trying to run /usr/games/aard.
-patch -p1 < $CWD/compilefixes.diff
+patch -p1 < $CWD/compilefixes$YEAR.diff
 
 # 'make install' doesn't create directories.
 mkdir -p $PKG/usr/games $PKG/usr/man/man6
@@ -92,17 +103,111 @@ make -j1 -C samples clean
 
 # use reconstituted man pages instead of the preformatted ones in the
 # source. See fixman.sh.
+# Even though we're shipping 3 versions of adl, there's only one set
+# of man pages because nobody ever updated them.
 for page in $CWD/man/*.6; do
   gzip -9c < $page > $PKG/usr/man/man6/$( basename $page ).gz
 done
 
-DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION
+DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM$YEAR
 mkdir -p $DOCDIR
 # rename this so no GUIs think it's a MS Word doc:
 cp -a man/adl.doc $DOCDIR/adl.doc.txt
 cp -a copyrigh readme samples $DOCDIR
-cat $CWD/$PRGNAM.SlackBuild > $DOCDIR/$PRGNAM.SlackBuild
 
+# rename everything
+for bin in adlcomp adlrun adldebug; do
+  mv $PKG/usr/games/$bin $PKG/usr/games/$bin$YEAR
+  ln -s $bin.6.gz $PKG/usr/man/man6/$bin$YEAR.6.gz
+done
+
+### Next, the 2003 binary-only release. No man pages, almost no docs,
+#   and don't install compiled sample games. The "64-bit" binaries are
+#   actually statified (static) 32-bit, which MUST NOT be stripped!
+#   AFAICT, this is the most commonly used version in the ADL community,
+#   so these get symlinked to the bare names (adlrun03 => adlrun).
+YEAR=03
+cd $TMP/$PRGNAM
+tar xvf $CWD/${PRGNAM}_linux${BITS}_1_0.tar.gz
+cd ADL_linux${BITS}_1_0
+chown -R root:root .
+
+# Bonus tutorial for hardcore SlackBuilders:
+# The shebang line is hard-coded in adlcomp, but sed works on binaries,
+# and we can use it to change the compiled-in string.
+# The rules for doing this:
+# 1. All occurrences of the text to replace will be changed, so make
+#    sure either (a) it occurs only once, or else (b) you really do want
+#    them all changed.
+# 2. Replacement must be shorter than the original text.
+# 3. Replacement must end with \x00. This is the famous NUL terminator
+#    that C uses to terminate strings.
+# 4. Only replace as many original characters as the replacement length,
+#    including the NUL terminator.
+# 5. The modified binary *must be* **exactly** the same size in bytes as
+#    the original was. If not, you didn't follow rules 1-4 correctly!
+# 6. If you're dealing with non-ASCII character encoding (e.g. UTF-8 or
+#    UCS-2), make *damn sure* you know what you're doing! It's possible
+#    but not necessarily straightforward. ASCII is easier (one byte is
+#    one character).
+# In the line below, the full original text was plain ASCII,
+# "/users/cunniff/bin/adlrun". We only replace "/users/cunniff/bin/a". The
+# \x00 terminates the string, replacing the "a", and the rest of the
+# original text ("dlrun\x00") is left as-is in the binary (C code will
+# ignore anything after the first \x00, so it just acts as padding).
+
+sed -i 's,/users/cunniff/bin/a,/usr/games/adlrun03\x00,' adlcomp
+
+# DO NOT strip these. The pseudo-64-bit binaries break if you do,
+# because they're actually 32-bit pseudo-static, created by statifier.
+# "file" shows them as "dynamically linked" but "ldd" says they're not,
+# and strip gets powerfully confused by this state of affairs.
+for bin in adlcomp adlrun adldebug; do
+  install -m0755 -oroot -groot $bin $PKG/usr/games/$bin$YEAR
+  ln -s $bin$YEAR $PKG/usr/games/$bin
+  ln -s $bin.6.gz $PKG/usr/man/man6/$bin$YEAR.6.gz
+done
+
+DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM$YEAR
+mkdir -p $DOCDIR
+cp -a readme *.txt $DOCDIR
+
+# The samples come from CVS, circa 2003
+tar xvf $CWD/$PRGNAM$YEAR-samples.tar.gz
+chown -R root:root $PRGNAM$YEAR-samples
+cp -a $PRGNAM$YEAR-samples $DOCDIR/samples
+
+### Last, the 2011 development version, from CVS. We install the docs
+#   but not the man pages or compiled sample games.
+YEAR=11
+cd $TMP/$PRGNAM
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+
+# Patch is similar to the one for adl93.
+patch -p1 < $CWD/compilefixes$YEAR.diff
+
+# Install the docs first, so we don't get the compiled samples/demos.
+DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM$YEAR
+mkdir -p $DOCDIR
+chmod 644 doc/*.*
+cp -a C* porting readme doc samples $DOCDIR
+
+make -j1 all BIN=$PKG/usr/games OPTFLAGS="$SLKCFLAGS"
+
+install -s -m0755 adlcomp/adlcomp $PKG/usr/games/adlcomp$YEAR
+install -s -m0755 adlrun/adlrun $PKG/usr/games/adlrun$YEAR
+install -s -m0755 misc/adldebug $PKG/usr/games/adldebug$YEAR
+
+for bin in adlcomp adlrun adldebug; do
+  ln -s $bin.6.gz $PKG/usr/man/man6/$bin$YEAR.6.gz
+done
+
+### OK, now regular SBo stuff from here on out.
+
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README_versions.txt > $PKG/usr/doc/$PRGNAM-$VERSION/README_versions.txt
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
