@@ -11,4 +11,5 @@ config() {
 }
 
 config etc/sboui/sboui.conf.new
+config etc/sboui/sboui-backend.conf.new
 config etc/sboui/package_blacklist.new
