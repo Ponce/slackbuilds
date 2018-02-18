@@ -24,7 +24,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=wine
-VERSION=${VERSION:-3.0}
+VERSION=${VERSION:-3.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 CWD=$(pwd)
@@ -48,6 +48,11 @@ if [ -z "$ARCH" ]; then
 	esac
 fi
 
+if [ -n "$NOWIN32" ] && [ -z "$WIN64" ]; then
+	echo "Both 64 and 32 bit builds disabled. Nothing to do."
+	exit 1
+fi
+
 # These should work for anything not specified below
 BUILD_ARCH=$ARCH"-slackware-linux"
 SLKCFLAGS="-O2"
@@ -62,13 +67,11 @@ case "$ARCH" in
 		# https://gcc.gnu.org/bugzilla/show_bug.cgi?id=78911
 		# https://bugs.gentoo.org/613128
 		SLKCFLAGS="-Os -march=$ARCH -mtune=i686"
-		SLKLDFLAGS="-L/usr/lib -ldl"
 		;;
 	x86_64)
 		[ -n "$WIN64" ] && WIN64="--enable-win64"
 		SLKCFLAGS="-O2 -fPIC"
 		LIBDIRSUFFIX="64"
-		SLKLDFLAGS="-L/usr/lib64"
 		;;
 esac
 
@@ -95,26 +98,65 @@ if [ "$ARCH" == "i?86" ]; then
 	patch -p1 --verbose < $CWD/x86_remove_fpic.patch
 fi
 
-LDFLAGS="$SLKLDFLAGS" \
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-	$WIN64 \
-	--prefix=/usr \
-	--localstatedir=/var \
-	--libdir=/usr/lib$LIBDIRSUFFIX \
-	--sysconfdir=/etc \
-	--mandir=/usr/man \
-	--with-x \
-	--with-gnutls \
-	--${do_opengl}-opengl \
-	--program-prefix= \
-	--program-suffix= \
-	--disable-tests \
-	--build=$BUILD_ARCH
+if [ -n "$WIN64" ]; then
+	wine64="--with-wine64=../wine64"
+	mkdir wine64
+	cd wine64
 
-make
-make install DESTDIR=$PKG
+	LDFLAGS="-L/usr/lib64 -ldl" \
+	CFLAGS="$SLKCFLAGS" \
+	CXXFLAGS="$SLKCFLAGS" \
+	../configure \
+	  --enable-win64 \
+		--prefix=/usr \
+		--libdir=/usr/lib64 \
+		--localstatedir=/var \
+		--sysconfdir=/etc \
+		--mandir=/usr/man \
+		--with-x \
+		--with-gnutls \
+		--${do_opengl}-opengl \
+		--program-prefix= \
+		--program-suffix= \
+		--disable-tests \
+		--build=$BUILD_ARCH
+
+	make depend
+	make
+	make install DESTDIR=$PKG
+	cd ..
+fi
+
+
+if [ -z "$NOWIN32" ]; then
+	mkdir wine32
+	cd wine32
+
+	export PKG_CONFIG_PATH="/usr/lib/pkgconfig:$PKG_CONFIG_PATH"
+
+	LDFLAGS="-L/usr/lib -ldl" \
+	CFLAGS="$SLKCFLAGS" \
+	CXXFLAGS="$SLKCFLAGS" \
+	../configure \
+		$wine64 \
+		--prefix=/usr \
+		--libdir=/usr/lib \
+		--localstatedir=/var \
+		--sysconfdir=/etc \
+		--mandir=/usr/man \
+		--with-x \
+		--with-gnutls \
+		--${do_opengl}-opengl \
+		--program-prefix= \
+		--program-suffix= \
+		--disable-tests \
+		--build=$BUILD_ARCH
+
+	make depend
+	make
+	make install DESTDIR=$PKG
+	cd ..
+fi
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
 	| cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
