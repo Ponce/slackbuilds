@@ -25,7 +25,7 @@
 # see changelog.txt
 
 PRGNAM=nvidia-driver
-VERSION=${VERSION:-384.90}
+VERSION=${VERSION:-390.25}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -77,9 +77,9 @@ rm -rf $TMP/$SRCNAM
 mkdir -p $TMP $PKG $OUTPUT $PKG/install
 mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/{drivers,extensions} \
   $PKG/etc/OpenCL/vendors/ $PKG/usr/{bin,doc,man/man1,sbin} \
-  $PKG/usr/share/{applications,nvidia,pixmaps} \
+  $PKG/usr/share/{applications,nvidia,pixmaps,egl/egl_external_platform.d} \
   $PKG/usr/include/GL $PKG/etc/vulkan/icd.d $PKG/etc/X11/xorg.conf.d \
-  $PKG/etc/X11/glvnd/egl_vendor.d $PKG/var/log/nvidia/{32,64}
+  $PKG/etc/X11/glvnd/egl_vendor.d $PKG/var/log/nvidia/{32,64} \
 
 if [ "$COMPAT32" = "yes" ]; then
   mkdir -p $PKG/usr/lib/tls
@@ -111,7 +111,7 @@ find -L . \
 cd $TMP/nvidia-installer-$VERSION
 
 # Let's try to remove the conflicting files and GPU detection
-  patch -p1 < $CWD/skip_conflict-GPU_detect.patch
+  patch -p0 < $CWD/skip_conflict-GPU_detect.patch
 
   chown -R root:root .
   find -L . \
@@ -127,7 +127,63 @@ cd $TMP/nvidia-installer-$VERSION
 
 cd -
 
-# Compiling nvidia-settings from source
+# Now we need to copy the newly patched and compiled nvidia-installer
+# to the driver source tree for use
+mv -f $PKG/usr/bin/nvidia-installer $TMP/$SRCNAM
+mv -f $PKG/usr/man/man1/nvidia-installer.1.gz $TMP/$SRCNAM
+
+# Configure options
+if [ "$GLVND" = "yes" ]; then
+  GLVNDOPT="--install-libglvnd --glvnd-glx-client --glvnd-egl-client"
+else
+  GLVNDOPT="--no-install-libglvnd --no-glvnd-glx-client --no-glvnd-egl-client"
+fi
+if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
+    COMP32="--install-compat32-libs --compat32-prefix=$PKG/usr"
+    MULTI="_multi"
+else
+    if [ ! "$ARCH" = "x86_64" ]; then
+        COMP32=""
+    else
+        COMP32="--no-install-compat32-libs"
+	MULTI=""
+    fi
+fi
+
+# Install the binary libs using nvidia-installer compiled above
+cd $TMP/$SRCNAM
+./nvidia-installer -s --no-kernel-module -z -n -b \
+  --no-rpms --no-distro-scripts --no-kernel-module-source \
+  --no-x-check --force-libglx-indirect \
+  --x-prefix=$PKG/usr \
+  --x-module-path=$PKG/usr/lib${LIBDIRSUFFIX}/xorg/modules \
+  --x-library-path=$PKG/usr/lib${LIBDIRSUFFIX} \
+  --x-sysconfig-path=$PKG/etc/X11/xorg.conf.d \
+  --opengl-prefix=$PKG/usr \
+  --utility-prefix=$PKG/usr \
+  --utility-libdir=lib${LIBDIRSUFFIX} \
+  --documentation-prefix=$PKG/usr \
+  --application-profile-path=$PKG/usr/share/nvidia \
+  --glvnd-egl-config-path=$PKG/etc/X11/glvnd/egl_vendor.d \
+  --log-file-name=$PKG/var/log/nvidia-installer.log \
+  --egl-external-platform-config-path=$PKG/usr/share/egl/egl_external_platform.d \
+  --no-nvidia-modprobe \
+  $GLVNDOPT \
+  $COMP32
+
+# Clean-up: we really do not need this:
+rm -rf /var/lib/nvidia
+# which 32-bit tls? why? why?
+if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
+      install -m 755 32/tls/libnvidia-tls.so.$VERSION $PKG/usr/lib/tls/libnvidia-tls.so.$VERSION
+      cd $PKG/usr/lib
+          ln -sf tls/libnvidia-tls.so.$VERSION libnvidia-tls.so.$VERSION
+      cd -
+fi
+
+# Compile utilites from source, replacing the precompiled versions
+#
+# Compiling nvidia-settings
 cd $TMP/nvidia-settings-$VERSION
   chown -R root:root .
   find -L . \
@@ -154,7 +210,7 @@ cd $TMP/nvidia-settings-$VERSION
   install -m 755 src/_out/Linux_$TARGET/libnvidia-gtk3.so $PKG/usr/lib$LIBDIRSUFFIX/libnvidia-gtk3.so.$VERSION
 cd -
 
-# Compiling nvidia-xconfig from source
+# Compiling nvidia-xconfig
 cd $TMP/nvidia-xconfig-$VERSION
   chown -R root:root .
   find -L . \
@@ -174,7 +230,7 @@ cd -
 # nvidia-modprobe needed to create device nodes, see README!
 # FIXME: Needs cleanup at a later date.
 
-# Compiling nvidia-modprobe from source
+# Compiling nvidia-modprobe
   cd $TMP/nvidia-modprobe-$VERSION
     chown -R root:root .
     find -L . \
@@ -188,7 +244,8 @@ cd -
     install -m 755 _out/Linux_$TARGET/nvidia-modprobe $PKG/usr/bin/
     install -m 644 _out/Linux_$TARGET/nvidia-modprobe.1.gz $PKG/usr/man/man1/
   cd -
-# Compiling nvidia-persistenced from source
+
+# Compiling nvidia-persistenced
   cd $TMP/nvidia-persistenced-$VERSION
     chown -R root:root .
     find -L . \
@@ -202,60 +259,6 @@ cd -
     install -m 755 _out/Linux_$TARGET/nvidia-persistenced $PKG/usr/bin/
     install -m 644 _out/Linux_$TARGET/nvidia-persistenced.1.gz $PKG/usr/man/man1/
   cd -
-
-# Now we need to copy these newly compiled binaries to the driver source tree
-# since we can't stop the installer from installing the precompiled ones. The installer
-# will then "reinstall" the proper set to the package tree!
-mv -f $PKG/usr/bin/nvidia-* $TMP/$SRCNAM
-mv -f $PKG/usr/lib$LIBDIRSUFFIX/libnvidia-gtk2.so.$VERSION $TMP/$SRCNAM
-mv -f $PKG/usr/lib$LIBDIRSUFFIX/libnvidia-gtk3.so.$VERSION $TMP/$SRCNAM
-
-# Configure options
-if [ "$GLVND" = "yes" ]; then
-  GLVNDOPT="--install-libglvnd --glvnd-glx-client --glvnd-egl-client"
-else
-  GLVNDOPT="--no-install-libglvnd --no-glvnd-glx-client --no-glvnd-egl-client"
-fi
-if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
-    COMP32="--install-compat32-libs --compat32-prefix=$PKG/usr"
-    MULTI="_multi"
-else
-    if [ ! "$ARCH" = "x86_64" ]; then
-        COMP32=""
-    else
-        COMP32="--no-install-compat32-libs"
-	MULTI=""
-    fi
-fi
-
-# Install the binary libs using nvidia-installer compiled above
-cd $TMP/$SRCNAM
-./nvidia-installer -s -N --no-kernel-module -z -n -b \
-  --no-rpms --no-distro-scripts --no-kernel-module-source \
-  --no-x-check --force-libglx-indirect \
-  --x-prefix=$PKG/usr \
-  --x-module-path=$PKG/usr/lib${LIBDIRSUFFIX}/xorg/modules \
-  --x-library-path=$PKG/usr/lib${LIBDIRSUFFIX} \
-  --x-sysconfig-path=$PKG/etc/X11/xorg.conf.d \
-  --opengl-prefix=$PKG/usr \
-  --utility-prefix=$PKG/usr \
-  --utility-libdir=lib${LIBDIRSUFFIX} \
-  --documentation-prefix=$PKG/usr \
-  --application-profile-path=$PKG/usr/share/nvidia \
-  --glvnd-egl-config-path=$PKG/etc/X11/glvnd/egl_vendor.d \
-  --log-file-name=$PKG/var/log/nvidia-installer.log \
-  $GLVNDOPT \
-  $COMP32
-
-# Clean-up: we really do not need this:
-rm -rf /var/lib/nvidia
-# which 32-bit tls? why? why?
-if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
-      install -m 755 32/tls/libnvidia-tls.so.$VERSION $PKG/usr/lib/tls/libnvidia-tls.so.$VERSION
-      cd $PKG/usr/lib
-          ln -sf tls/libnvidia-tls.so.$VERSION libnvidia-tls.so.$VERSION
-      cd -
-fi
 
 # Bash script to cleanly install (in doinst.sh) and uninstall the nvidia files
 # so we don't stomp on the overlapping xorg files.
@@ -274,13 +277,12 @@ else
   sed -i s/LIB32FLAG/no/g $PKG/usr/sbin/nvidia-switch
 fi
 
-# These correct wrong paths
+# These add or correct wrong paths
 sed -i "s|$TMP/package-$PRGNAM/usr|/usr|" $PKG/usr/lib$LIBDIRSUFFIX/libGL.la
 sed -i "s|/usr/X11R6/lib|/usr/lib$LIBDIRSUFFIX|" $PKG/usr/lib$LIBDIRSUFFIX/libGL.la
-sed -i "s|$PKG/usr/bin|/usr/bin|" \
-  $PKG/usr/share/applications/nvidia-settings.desktop
-sed -i "s|$PKG/usr/share/doc/NVIDIA_GLX-1.0|/usr/share/pixmaps|" \
-  $PKG/usr/share/applications/nvidia-settings.desktop
+sed -i "s|__UTILS_PATH__|/usr/bin|" $PKG/usr/share/applications/nvidia-settings.desktop
+sed -i "s|__PIXMAP_PATH__|/usr/share/pixmaps|" $PKG/usr/share/applications/nvidia-settings.desktop
+sed -i "s|__NVIDIA_SETTINGS_DESKTOP_CATEGORIES__|Application;Settings;|" $PKG/usr/share/applications/nvidia-settings.desktop
 
 if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
   sed -i "s|$TMP/package-$PRGNAM/usr|/usr|" $PKG/usr/lib/libGL.la
@@ -331,12 +333,6 @@ rm -rf /etc/vulkan
 
 # Remove xorg conf file since we take care of that in nvidia-driver
 rm -rf $PKG/etc/X11/xorg.conf.d
-
-# Fix weird bug in nvidia-installer that I can't find
-cd $TMP/nvidia-modprobe-$VERSION
-  install -m 755 _out/Linux_$TARGET/nvidia-modprobe $PKG/usr/bin/
-  rm -f /usr/bin/nvidia-modprobe
-cd -
 
 cat <<EOF > $PKG/var/log/nvidia/README.txt
 Do NOT delete this directory!
