@@ -2,8 +2,8 @@
 
 # Slackware build script for rust
 
-# Copyright 2017-2018  Andrew Clemons, Wellington, New Zealand
-# Copyright 2017  Patrick J. Volkerding, Sebeka, Minnesota, USA
+# Copyright 2017, 2018  Andrew Clemons, Wellington, New Zealand
+# Copyright 2017, 2018  Patrick J. Volkerding, Sebeka, Minnesota, USA
 # Copyright 2017  Stuart Winter
 # All rights reserved.
 #
@@ -26,7 +26,7 @@
 
 PRGNAM=rust
 SRCNAM="${PRGNAM}c"
-VERSION=${VERSION:-1.24.0}
+VERSION=${VERSION:-1.24.1}
 
 # src/stage0.txt
 RSTAGE0_VERSION=${RSTAGE0_VERSION:-1.23.0}
@@ -104,6 +104,10 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
+# Not needed, as the build will automatically use as many jobs as there are
+# cores.
+#NUMJOBS=${NUMJOBS:-" -j7 "}
+
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
@@ -146,13 +150,17 @@ fi
 # needed during the build, and then we'll strip the rpaths out of the
 # binaries later.
 
-# LLVM in Slackware14.2 is now too old to build rust 1.24.0, so the rust build
-# falls back to building its own
+# LLVM in Slackware14.2 is now too old to build rust 1.24.1, so the rust build
+# falls back to building its own. You can force using the system LLVM with this
+# flag.
+SYSTEM_LLVM=${SYSTEM_LLVM:-no}
+
 cat << EOF > config.toml
 [build]
 build = "$BARCH-unknown-linux-$BABI"
 host = ["$TARCH-unknown-linux-$BABI"]
 target = ["$TARCH-unknown-linux-$BABI"]
+full-bootstrap = false
 submodules = false
 vendor = true
 extended = true
@@ -170,6 +178,48 @@ rpath = true
 codegen-tests = false
 ignore-git = true
 EOF
+
+if [ "$SYSTEM_LLVM" = "yes" ] ; then
+  cat << EOF >> config.toml
+
+[target.i586-unknown-linux-gnu]
+llvm-config = "/usr/bin/llvm-config"
+
+[target.i686-unknown-linux-gnu]
+llvm-config = "/usr/bin/llvm-config"
+
+[target.x86_64-unknown-linux-gnu]
+llvm-config = "/usr/bin/llvm-config"
+
+[target.armv7-unknown-linux-gnueabihf]
+llvm-config = "/usr/bin/llvm-config"
+EOF
+
+  if [ "$(llvm-config --version)" = "5.0.1" ] ; then
+    # llvm-config --cflags returns a set of flags including -Wcovered-switch-default
+    # and -Wstring-conversion which gcc does not support, breaking the build.
+    cat << EOF > local-llvm-config
+#!/bin/bash
+
+set -e
+set -o pipefail
+
+/usr/bin/llvm-config "\$@" | sed 's/-Wcovered-switch-default//g;s/-Wstring-conversion//g'
+EOF
+
+    chmod 0755 local-llvm-config
+    sed -i "s|/usr/bin/llvm-config|$(pwd)/local-llvm-config|" config.toml
+  fi
+
+  # Link with -lffi in case of using system LLVM:
+  zcat $CWD/link_libffi.diff.gz | patch -p1 --verbose
+fi
+
+FULL_BOOTSTRAP="${FULL_BOOTSTRAP:-no}"
+
+if [ "$FULL_BOOTSTRAP" = "yes" ] ; then
+  sed -i 's/^full-bootstrap.*$/full-bootstrap = true/' config.toml
+fi
 
 if [ "$LOCAL_BOOTSTRAP" = "yes" ] ; then
   sed -i "s|^\(extended = true\)$|\1\nrustc = \"/usr/bin/rustc\"\ncargo = \"/usr/bin/cargo\"|" config.toml
@@ -232,7 +282,7 @@ find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | gr
 
 # Remove any compiled-in RPATHs:
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs patchelf --remove-rpath 2> /dev/null || true
+  | cut -f 1 -d : | xargs -I xx patchelf --remove-rpath xx 2> /dev/null || true
 
 # Compress man pages:
 find $PKG/usr/man -type f -exec gzip -9 {} \;
