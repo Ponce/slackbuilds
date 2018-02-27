@@ -1,0 +1,149 @@
+#!/bin/sh
+
+# Slackware build script for LizardFS
+
+# Copyright 2018 Marcin Szychowski <szycha@gmail.com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=lizardfs
+VERSION=${VERSION:-3.12.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+LIZARDFS_UID=${LIZARDFS_UID:-353}
+LIZARDFS_GID=${LIZARDFS_GID:-353}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# Bail out if user or group isn't valid on your system
+# For slackbuilds.org, assigned mfs uid/gid are 353/353
+# See http://slackbuilds.org/uid_gid.txt
+if ! getent group mfs 2>&1 > /dev/null; then
+  echo "  You must have a mfs group to run this script."
+  echo "    # groupadd -g $LIZARDFS_GID mfs"
+  exit 1
+elif ! getent passwd mfs 2>&1 > /dev/null; then
+  echo "  You must have a mfs user to run this script."
+  echo "    # useradd -u $LIZARDFS_UID -g $LIZARDFS_GID -d /var/lib/pgsql mfs"
+  exit 1
+fi
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+for z in $CWD/*.zip; do
+  unzip $z -d external/
+done
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/ \
+    -DENABLE_DEBIAN_PATHS=YES \
+    -DENABLE_TESTS=NO \
+    -DENABLE_DOCS=YES \
+    -DENABLE_OFFICIAL_BUILD=NO \
+    -DSET_RC_BUILD_NUMBER=NO \
+    -DENABLE_CLIENT_LIB=YES \
+    -DENABLE_NFS_GANESHA=YES \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install DESTDIR=$PKG
+cd ..
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mv $PKG/usr/share/man $PKG/usr/
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+for d in chunkserver exports goals hdd master metalogger mount topology; do
+  mv $PKG/etc/mfs/mfs$d.cfg.dist $PKG/etc/mfs/mfs$d.cfg.new
+done
+for l in '' global; do
+  mv $PKG/etc/mfs/${l}iolimits.cfg.dist $PKG/etc/mfs/${l}iolimits.cfg.new
+done
+
+mkdir -p $PKG/var/run/mfs $PKG/var/lib/mfs
+chown mfs:mfs $PKG/var/run/mfs $PKG/var/lib/mfs
+
+mkdir -p $PKG/etc/rc.d
+cp -a $CWD/rc.lizardfs-cgiserv.new $CWD/rc.lizardfs-chunkserver.new \
+  $CWD/rc.lizardfs-master.new $CWD/rc.lizardfs-metalogger.new \
+  $CWD/rc.lizardfs.new $PKG/etc/rc.d/
+
+mkdir -p $PKG/var/log/setup
+cp -a $CWD/setup.lizardfs-services.new $PKG/var/log/setup/
+
+chmod +x $PKG/var/log/setup/setup.lizardfs-services.new \
+  $PKG/etc/rc.d/rc.lizardfs-chunkserver.new
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  COPYING INSTALL NEWS README.md UPGRADE ReleaseNotes \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.SBo
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
