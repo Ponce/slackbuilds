@@ -18,5 +18,9 @@ if [ -e etc/rc.d/rc.polipo ]; then
   mv etc/rc.d/rc.polipo.new.incoming etc/rc.d/rc.polipo.new
 fi
 
+if [ -x /usr/bin/install-info ]; then
+  chroot . /usr/bin/install-info --info-dir=/usr/info /usr/info/polipo.info.gz 2> /dev/null
+fi
+
 config etc/rc.d/rc.polipo.new
 config etc/polipo/config.new
