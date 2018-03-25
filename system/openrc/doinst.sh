@@ -22,3 +22,6 @@ done
 for file in "${BACKUP_CONF[@]}"; do
   config "etc/conf.d/${file}.new"
 done
+
+# enable cgroups service as required by openrc 0.35+
+[ ! -e etc/runlevels/sysinit/cgroups ] && /sbin/rc-update add cgroups sysinit
