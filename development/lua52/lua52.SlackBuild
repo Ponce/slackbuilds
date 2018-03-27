@@ -1,0 +1,150 @@
+#!/bin/sh
+
+# Slackware build script for lua52
+
+# Copyright 2018 Azure Zanculmarktum <zanculmarktum@gmail.com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Some of the codes were taken from development/lua/lua.SlackBuild
+
+PRGNAM=lua52
+SRCNAM=${PRGNAM%??}
+VERSION=${VERSION:-5.2.4}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L . \
+  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+    -o -perm 511 \) -exec chmod 755 {} \; -o \
+  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+    -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+eval $(sed -ne '/^\(V\|R\)= /s, ,,p' Makefile)
+
+sed -i \
+  -e '/^INSTALL_TOP= /s,\(/usr\).*,\$(DESTDIR)\1,' \
+  -e '/^INSTALL_INC= /s,include,&/lua\$V,' \
+  -e '/^INSTALL_LIB= /s,lib,&'"${LIBDIRSUFFIX}"',' \
+  -e '/^INSTALL_CMOD= /s,lib,&'"${LIBDIRSUFFIX}"',' \
+  -e '/^TO_BIN= /s,luac\?,&\$V,g' \
+  -e '/^TO_LIB= /s,liblua,&\$V,' \
+  Makefile
+
+sed -i \
+  -e '/^CFLAGS= /s,-O2,'"$SLKCFLAGS"',' \
+  -e '/-DLUA_USE_LINUX.*-Wl,-E -ldl -lreadline/s|-lreadline|& -lncurses|' \
+  -e '/^LUA_A=/s,liblua,&'"$V"',' \
+  -e '/^LUA_T=/s,lua,&'"$V"',' \
+  -e '/^LUAC_T=/s,luac,&'"$V"',' \
+  src/Makefile
+
+sed -i \
+  -e '/^#define LUA_ROOT/s,".*,"/usr",' \
+  -e '/^#define LUA_CDIR/s,"lib,&'"${LIBDIRSUFFIX}"',' \
+  src/luaconf.h
+
+make linux
+make install DESTDIR=$PKG
+
+# Now let's build the shared library
+mkdir -p shared
+cd shared
+  ar -x $PKG/usr/lib${LIBDIRSUFFIX}/liblua$V.a
+  gcc -ldl -lreadline -lncurses -lm -shared *.o -o liblua$V.so.$R
+  cp -a liblua$V.so.$R $PKG/usr/lib${LIBDIRSUFFIX}
+  ( cd $PKG/usr/lib${LIBDIRSUFFIX}
+    ln -s liblua$V.so.$R liblua$V.so.$V
+    ln -s liblua$V.so.$R liblua$V.so.${V%??}
+    ln -s liblua$V.so.$R liblua$V.so
+  )
+cd - >/dev/null
+
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig
+cd $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig
+  sed \
+    -e '/^V= /s, .*, '"$V"',' \
+    -e '/^R= /s, .*, '"$R"',' \
+    -e '/^prefix= /s,\(/usr\).*,\1,' \
+    -e '/^INSTALL_INC= /s,include,&/lua\${V},' \
+    -e '/^INSTALL_LIB= /s,lib,&'"${LIBDIRSUFFIX}"',' \
+    -e '/^INSTALL_CMOD= /s,lib,&'"${LIBDIRSUFFIX}"',' \
+    -e '/^libdir=/s,/lib,&'"${LIBDIRSUFFIX}"',' \
+    -e '/^includedir=/s,/include,&/lua\${V},' \
+    $CWD/lua.pc.in > lua$V.pc
+  ln -s lua$V.pc lua-$V.pc
+  ln -s lua$V.pc lua${V%.?}${V#?.}.pc
+cd - >/dev/null
+
+cd $PKG/usr/man/man1
+  mv lua.1 lua$V.1
+  mv luac.1 luac$V.1
+cd - >/dev/null
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
