@@ -1,7 +1,8 @@
 #!/bin/sh
 
 # Copyright 2006, Alan Hicks, Lizella, GA
-# Copyright 2010, 2013, 2015  Mario Preksavec, Zagreb, HR
+# Copyright 2010, 2013, 2015  Mario Preksavec, Zagreb, Croatia
+# Copyright 2018 Chris Walker, Kempner, TX
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,15 +23,13 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=asterisk
-VERSION=${VERSION:-1.8.24.0}
+VERSION=${VERSION:-13.20.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-ADDONS=${ADDONS:-yes}
-
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+    i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
@@ -41,8 +40,15 @@ TMP=${TMP:-/tmp/SBo}
 PKG="$TMP/package-$PRGNAM"
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+ASTERISKUSR=${ASTERISKUSR:-asterisk}
+ASTERISKGRP=${ASTERISKGRP:-asterisk}
+ASTERISKUID=${ASTERISKUID:-267}
+ASTERISKGID=${ASTERISKGID:-267}
+
+IMAPDIR=imap-2007f
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
@@ -55,11 +61,45 @@ else
   LIBDIRSUFFIX=""
 fi
 
+do_exit() {
+  echo ; echo "You must have the ${ASTERISKUSR} user and ${ASTERISKGRP} group in"
+  echo "order to build asterisk.  Sample lines to do so are below:"
+  echo "# groupadd -g ${ASTERISKGID} ${ASTERISKGRP}"
+  echo "# useradd -u ${ASTERISKUID} -d /var/lib/asterisk -s /bin/false -g ${ASTERISKGRP} ${ASTERISKUSR}"
+  echo "Exiting..." ; echo ; exit 1
+}
+
+getent group ${ASTERISKGRP} >/dev/null || do_exit
+getent passwd ${ASTERISKUSR} >/dev/null || do_exit
+
 set -e
 
-rm -fr $PKG $TMP/$PRGNAM-$VERSION
+rm -fr $PKG $TMP/$PRGNAM-$VERSION $TMP/$IMAPDIR
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
+
+VM_IMAP=${VM_IMAP:-"no"}
+CONFIGURE_OPTS=
+
+if [ "$VM_IMAP" != "no" ] && [ "${VM_ODBC:-no}" = "no" ]; then
+  tar xvf $CWD/imap.tar.Z
+  ( cd imap-2007f
+    chown -R root:root .
+    find -L . \
+     \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+      -o -perm 511 \) -exec chmod 755 {} \; -o \
+     \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+      -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+    if [ "$ARCH" = "x86_64" ]; then
+      make slx EXTRACFLAGS="-fPIC -I/usr/include/openssl"
+    else
+      make slx EXTRACFLAGS="-I/usr/include/openssl"
+    fi
+  )
+  CONFIGURE_OPTS="--with-imap=$TMP/$IMAPDIR"
+fi
+
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
@@ -67,9 +107,9 @@ find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
   -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-CFLAGS="$SLKCFLAGS -fgnu89-inline" \
+CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
@@ -77,40 +117,93 @@ CXXFLAGS="$SLKCFLAGS" \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --mandir=/usr/man \
+  $CONFIGURE_OPTS \
   --build=$ARCH-slackware-linux
 
-make menuselect.makeopts
-make
+( cd menuselect
+  make menuselect
+)
+make menuselect-tree
 
-if [ "$ADDONS" = "yes" ]; then
-  # Select some addons (the list is actualy inverted, and deselected addons are shown here)
-  sed -i -e 's/^MENUSELECT_ADDONS=.*$/MENUSELECT_ADDONS=app_saycountpl chan_mobile chan_ooh323 format_mp3/' \
-    menuselect.makeopts
-  make addons DESTDIR=$PKG
+menuselect/menuselect \
+  --enable res_config_mysql \
+  menuselect.makeopts
+
+#
+# Did asterisk menuselect discover the pjsip library?
+if [ "$(menuselect/menuselect --list-options menuselect.makeopts | grep -c '+ res_pjsip')" -gt 0 ]; then
+  #
+  # Asterisk menuselect discovered the pjsip library and is trying to use it.
+  # Need to modify header file so asterisk will build properly.
+  sed -i -r \
+    -e "s/\/\*\s+#undef\s+(HAVE_PJ_TRANSACTION_GRP_LOCK)\s+\*\//#define \1 1/" \
+    include/asterisk/autoconfig.h
 fi
 
+if [ "${MOH:-no}" != "no" ]; then
+  menuselect/menuselect \
+    --enable MOH-OPSOUND-ULAW \
+    --enable MOH-OPSOUND-ALAW \
+    --enable MOH-OPSOUND-GSM \
+    --enable MOH-OPSOUND-G729 \
+    menuselect.makeopts
+fi
+
+if [ "${SOUNDS_EXTRA:-no}" != "no" ]; then
+  menuselect/menuselect \
+    --enable EXTRA-SOUNDS-EN-WAV \
+    --enable EXTRA-SOUNDS-EN-ULAW \
+    --enable EXTRA-SOUNDS-EN-ALAW \
+    --enable EXTRA-SOUNDS-EN-GSM \
+    --enable EXTRA-SOUNDS-EN-G729 \
+    menuselect.makeopts
+fi
+
+if [ "${VM_ODBC:-no}" != "no" ]; then
+  menuselect/menuselect \
+    --enable ODBC_STORAGE \
+    menuselect.makeopts
+elif [ "$VM_IMAP" != "no" ]; then
+  menuselect/menuselect \
+    --enable IMAP_STORAGE \
+    menuselect.makeopts
+fi
+
+if [ "${MEETME:-no}" != "no" ]; then
+  menuselect/menuselect \
+    --enable app_meetme \
+    menuselect.makeopts
+fi
+
+if [ "${G711_NEW:-no}" != "no" ]; then
+  menuselect/menuselect \
+    --enable G711_NEW_ALGORITHM \
+    menuselect.makeopts
+fi
+
+make
 make installdirs DESTDIR=$PKG
 make samples DESTDIR=$PKG
 make install DESTDIR=$PKG
+make install-logrotate DESTDIR=$PKG
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-gzip -9 $PKG/usr/man/man?/*.?
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-# Logrotate script
-mkdir -p $PKG/etc/logrotate.d
-install -m 0644 $CWD/logrotate.asterisk $PKG/etc/logrotate.d/asterisk.new
+mv $PKG/etc/logrotate.d/asterisk $PKG/etc/logrotate.d/asterisk.new
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/sample_confs
 mv $PKG/etc/asterisk/* $PKG/usr/doc/$PRGNAM-$VERSION/sample_confs/
-cp -a CHANGES COPYING CREDITS ChangeLog LICENSE README UPGRADE.txt doc/ \
+cp -a CHANGES COPYING CREDITS ChangeLog LICENSE README* UPGRADE* doc/ contrib/ast-db-manage \
   $PKG/usr/doc/$PRGNAM-$VERSION/
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 # Install a few typical config files for common asterisk servers
 for i in \
-  asterisk codecs extensions iax indications musiconhold sip modules ;
+  asterisk codecs extensions iax indications musiconhold sip modules voicemail ;
   do
   cat $PKG/usr/doc/$PRGNAM-$VERSION/sample_confs/${i}.conf > \
     $PKG/etc/asterisk/${i}.conf.new ;
@@ -122,10 +215,23 @@ install -m 0755 contrib/init.d/rc.slackware.asterisk $PKG/etc/rc.d/rc.asterisk.n
 # Fix pid file location in rc script
 sed -i 's/asterisk.pid/asterisk\/asterisk.pid/' $PKG/etc/rc.d/rc.asterisk.new
 
+# Set file ownership
+chown -R $ASTERISKUSR:$ASTERISKGRP $PKG/usr/lib${LIBDIRSUFFIX}
+chown -R $ASTERISKUSR:$ASTERISKGRP $PKG/var/lib/asterisk
+chown -R $ASTERISKUSR:$ASTERISKGRP $PKG/var/spool/asterisk
+chown -R $ASTERISKUSR:$ASTERISKGRP $PKG/var/log/asterisk
+chown -R $ASTERISKUSR:$ASTERISKGRP $PKG/var/run/asterisk
+chown $ASTERISKUSR:$ASTERISKGRP $PKG/usr/sbin/asterisk
+
+# The following permissions are a bit weird; if you have the voicemail config
+# file needs to writeable by the asterisk user otherwise password changes aren't
+# preserved
+chown -R root:$ASTERISKGRP $PKG/etc/asterisk
+chmod 664 $PKG/etc/asterisk/voicemail.conf.new
+
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-chown -R root:root .	# Some files have improper ownership
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
