@@ -22,6 +22,6 @@ preserve_perms() {
   config $NEW
 }
 
-config etc/powerdns/recursor.conf.new
+config etc/recursor.conf.new
 preserve_perms etc/rc.d/rc.pdns-recursor.new
 
