@@ -317,7 +317,9 @@ LOOKUP_DSEARCH=yes
 # LOOKUP_ORACLE=yes
 LOOKUP_PASSWD=yes
 # LOOKUP_PGSQL=yes
+LOOKUP_PGSQL_PC=libpq
 # LOOKUP_REDIS=yes
+LOOKUP_REDIS_PC=hiredis
 # LOOKUP_SQLITE=yes
 LOOKUP_SQLITE_PC=sqlite3
 # LOOKUP_WHOSON=yes
@@ -364,6 +366,12 @@ PCRE_CONFIG=yes
 
 
 #------------------------------------------------------------------------------
+# Uncomment the following line to add DANE support
+# Note: Enabling this unconditionally overrides DISABLE_DNSSEC
+# For DANE under GnuTLS we need an additional library.  See TLS_LIBS below.
+SUPPORT_DANE=yes
+
+#------------------------------------------------------------------------------
 # Additional libraries and include directories may be required for some
 # lookup styles (e.g. LDAP, MYSQL or PGSQL). LOOKUP_LIBS is included only on
 # the command for linking Exim itself, not on any auxiliary programs. You
@@ -385,17 +393,8 @@ endif
 
 ifeq ($(LOOKUP_MYSQL),yes)
 LOOKUP_INCLUDE+=-I/usr/include/mysql
-LOOKUP_LIBS+=-L/usr/lib$(LIBDIRSUFFIX)/mysql -lmysqlclient_r
+LOOKUP_LIBS+=-L/usr/lib$(LIBDIRSUFFIX)/mysql -lmysqlclient
 endif
-
-ifeq ($(LOOKUP_REDIS),yes)
-LOOKUP_LIBS+=-lhiredis
-endif
-
-ifeq ($(LOOKUP_PGSQL),yes)
-LOOKUP_LIBS+=-lpq
-endif
-
 
 #------------------------------------------------------------------------------
 # Compiling the Exim monitor: If you want to compile the Exim monitor, a
@@ -417,15 +416,24 @@ endif
 
 WITH_CONTENT_SCAN=yes
 
-#------------------------------------------------------------------------------
-# If you're using ClamAV and are backporting fixes to an old version, instead
-# of staying current (which is the more usual approach) then you may need to
-# use an older API which uses a STREAM command, now deprecated, instead of
-# zINSTREAM.  If you need to set this, please let the Exim developers know, as
-# if nobody reports a need for it, we'll remove this option and clean up the
-# code.  zINSTREAM was introduced with ClamAV 0.95.
-#
-# WITH_OLD_CLAMAV_STREAM=yes
+# If you have content scanning you may wish to only include some of the scanner
+# interfaces.  Uncomment any of these lines to remove that code.
+
+# DISABLE_MAL_FFROTD=yes
+# DISABLE_MAL_FFROT6D=yes
+# DISABLE_MAL_DRWEB=yes
+# DISABLE_MAL_FSECURE=yes
+# DISABLE_MAL_SOPHIE=yes
+# DISABLE_MAL_CLAM=yes
+# DISABLE_MAL_AVAST=yes
+# DISABLE_MAL_SOCK=yes
+# DISABLE_MAL_CMDLINE=yes
+
+# These scanners are claimed to be no longer existent.
+
+DISABLE_MAL_AVE=yes
+DISABLE_MAL_KAV=yes
+DISABLE_MAL_MKS=yes
 
 
 #------------------------------------------------------------------------------
@@ -453,7 +461,7 @@ WITH_CONTENT_SCAN=yes
 # By default, Exim has support for checking the AD bit in a DNS response, to
 # determine if DNSSEC validation was successful.  If your system libraries
 # do not support that bit, then set DISABLE_DNSSEC to "yes"
-# Note: Enabling EXPERIMENTAL_DANE unconditionally overrides this setting.
+# Note: Enabling SUPPORT_DANE unconditionally overrides this setting.
 
 # DISABLE_DNSSEC=yes
 
@@ -473,14 +481,6 @@ WITH_CONTENT_SCAN=yes
 
 # EXPERIMENTAL_DCC=yes
 
-# Uncomment the following lines to add SPF support. You need to have libspf2
-# installed on your system (www.libspf2.org). Depending on where it is installed
-# you may have to edit the CFLAGS and LDFLAGS lines.
-
-# EXPERIMENTAL_SPF=yes
-# CFLAGS  += -I/usr/local/include
-# LDFLAGS += -lspf2
-
 # Uncomment the following lines to add SRS (Sender rewriting scheme) support.
 # You need to have libsrs_alt installed on your system (srs.mirtol.com).
 # Depending on where it is installed you may have to edit the CFLAGS and
@@ -491,11 +491,15 @@ WITH_CONTENT_SCAN=yes
 # LDFLAGS += -lsrs_alt
 
 # Uncomment the following line to add DMARC checking capability, implemented
-# using libopendmarc libraries.  You must have SPF support enabled also.
+# using libopendmarc libraries. You must have SPF and DKIM support enabled also.
 # EXPERIMENTAL_DMARC=yes
 # DMARC_TLD_FILE= /etc/exim/opendmarc.tlds
 # CFLAGS += -I/usr/local/include
 # LDFLAGS += -lopendmarc
+
+# Uncomment the following line to add ARC (Authenticated Received Chain)
+# support.  You must have SPF and DKIM support enabled also.
+# EXPERIMENTAL_ARC=yes
 
 # Uncomment the following lines to add Brightmail AntiSpam support. You need
 # to have the Brightmail client SDK installed. Please check the experimental
@@ -505,11 +509,6 @@ WITH_CONTENT_SCAN=yes
 # EXPERIMENTAL_BRIGHTMAIL=yes
 # CFLAGS  += -I/opt/brightmail/bsdk-6.0/include
 # LDFLAGS += -lxml2_single -lbmiclient_single -L/opt/brightmail/bsdk-6.0/lib
-
-# Uncomment the following line to add DANE support
-# Note: Enabling this unconditionally overrides DISABLE_DNSSEC
-# Note: DANE is only supported when using OpenSSL
-# EXPERIMENTAL_DANE=yes
 
 # Uncomment the following to include extra information in fail DSN message (bounces)
 # EXPERIMENTAL_DSN_INFO=yes
@@ -817,6 +816,9 @@ USE_OPENSSL_PC=openssl
 # or
 # TLS_LIBS=-L/opt/gnu/lib -lgnutls -ltasn1 -lgcrypt
 
+# For DANE under GnuTLS we need an additional library.
+# TLS_LIBS += -lgnutls-dane
+
 # TLS_LIBS is included only on the command for linking Exim itself, not on any
 # auxiliary programs. If the include files are not in a standard place, you can
 # set TLS_INCLUDE to specify where they are, for example:
@@ -985,6 +987,16 @@ SUPPORT_I18N=yes
 LDFLAGS += -lidn
 # SUPPORT_I18N_2008=yes
 # LDFLAGS += -lidn -lidn2
+
+
+#------------------------------------------------------------------------------
+# Uncomment the following lines to add SPF support. You need to have libspf2
+# installed on your system (www.libspf2.org). Depending on where it is installed
+# you may have to edit the CFLAGS and LDFLAGS lines.
+
+# SUPPORT_SPF=yes
+# CFLAGS  += -I/usr/local/include
+# LDFLAGS += -lspf2
 
 
 #------------------------------------------------------------------------------
