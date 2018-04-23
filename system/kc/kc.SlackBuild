@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Copyright (c) 2011-2013 LEVAI Daniel
+# Copyright (c) 2011-2018 LEVAI Daniel
 # All rights reserved.
 #
 # * Redistribution and use in source and binary forms, with or without
@@ -24,7 +24,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=kc
-VERSION=${VERSION:-2.3.2}
+VERSION=${VERSION:-2.4.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -57,12 +57,46 @@ fi
 
 set -e
 
+
+# XXX Upgrade incompatibility notice
+if [ -f /var/log/packages/kc-*_SBo ];then
+	typeset -i KC_MINOR=$( ls -1 /var/log/packages/kc-*_SBo |cut -d- -f2 |cut -d. -f2 )
+	if [ ${KC_MINOR} -lt 4 ];then
+		echo ""
+		echo "!!! Incompatibility notice !!!"
+		echo ""
+		echo "This SlackBuild has detected a version of kc older than 2.4 on your system."
+		echo "Starting with version 2.4, kc uses a newer database format."
+		echo "What this means is that starting from kc-2.4, it will not be"
+		echo "able to open older databases, and an older kc will not be able"
+		echo "to open newer databases."
+		echo "The recommended upgrade path is detailed in the kc-2.4 package's"
+		echo "Changelog file:"
+		echo "https://github.com/levaidaniel/kc/blob/2.4/Changelog"
+		echo "... but here is a shallow outline of the procedure:"
+		echo "1) Dump your database as an XML file with your old kc."
+		echo "   See the dump command's description."
+		echo "2) Upgrade kc to version 2.4 or later."
+		echo "3) Create a new empty database."
+		echo "4) Import your XML dump into your empty database."
+		echo "5) Shred your XML export."
+		echo ""
+		echo "But really, you should check the Changelog file for detailed instructions."
+		echo ""
+		echo -n "Type in UPGRADE, if you are ready to upgrade: "; read
+
+		if [ "${REPLY}" != 'UPGRADE' ];then
+			echo "Not ready to upgrade!"
+			exit 1;
+		fi
+	fi
+fi
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-[ -e $CWD/$VERSION.tar.gz ] && tar xvf $CWD/$VERSION.tar.gz
-[ -e $CWD/$PRGNAM-$VERSION.tar.gz ] && tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
@@ -71,8 +105,17 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-CFLAGS="$SLKCFLAGS" make -f GNUMakefile HAVE_PCRE=y
-make -f GNUMakefile install DESTDIR=$PKG PREFIX=/usr
+
+if [ -n "${LIBSCRYPT}" ];then
+	LIBSCRYPT="HAVE_LIBSCRYPT=y"
+fi
+
+if [ -n "${EDITLINE}" ];then
+	EDITLINE="EDITLINE=y"
+fi
+
+CFLAGS="$SLKCFLAGS" make -f Makefile.linux HAVE_PCRE=y ${LIBSCRYPT} ${EDITLINE}
+make -f Makefile.linux install DESTDIR=$PKG PREFIX=/usr
 
 strip --strip-unneeded $PKG/usr/bin/kc
 gzip -9 $PKG/usr/man/man1/kc.1
