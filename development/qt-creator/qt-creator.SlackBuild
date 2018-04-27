@@ -1,8 +1,9 @@
 #!/bin/sh
 
-# Slackware build script for qt-creator
+# Slackware build script for Qt Creator
 
 # Copyright 2016 Andre Barboza, Belo Horizonte - Brazil
+# Copyright 2018 Andrzej Telszewski, Szczecin
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -11,32 +12,25 @@
 # 1. Redistributions of this script must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 #
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
-# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
-# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-# Updated by Andre Barboza <bmg.andre@gmail.com>
-# Code Model updates by Andrzej Telszewski <atelszewski@gmail.com>
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 # For building -rc or -beta releases, set VERSION to something like:
 # VERSION=4.2.0_rc1 or VERSION=4.2.0_beta1 (note the underscore).
 
 PRGNAM=qt-creator
-VERSION=${VERSION:-4.3.1}
+VERSION=${VERSION:-4.6.0}
 SRCVER=$(echo $VERSION | tr _ -)
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
-
-CODE_MODEL=${CODE_MODEL:-no}
-LLVM_VERSION=${LLVM_VERSION:-3.9.1}
-CLANG_VERSION=${CLANG_VERSION:-3.9.1}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -71,17 +65,9 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$SRCVER
-tar xvf $CWD/$PRGNAM-$SRCVER.tar.gz
+tar xvf $CWD/$PRGNAM-opensource-src-$SRCVER.tar.gz
+mv $PRGNAM-opensource-src-$SRCVER $PRGNAM-$SRCVER
 cd $PRGNAM-$SRCVER
-
-# Unpack LLVM if code model is required
-if [ "${CODE_MODEL}" == "yes" ]; then
-  tar xvf $CWD/llvm-$LLVM_VERSION.src.tar.xz
-  mv llvm-$LLVM_VERSION.src llvm-src
-  tar xvf $CWD/cfe-$CLANG_VERSION.src.tar.xz -C llvm-src/tools
-  mv llvm-src/tools/cfe-$CLANG_VERSION.src llvm-src/tools/clang
-fi
-
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -89,58 +75,34 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# LLVM/Clang is used by QTC's Clang Code Model and Clang Static Analyzer.
-if [ "${CODE_MODEL}" == "yes" ]; then
-  # LLVM/Clang temporary (QTC build-time) install directory.
-  LLVM_INSTALL_ROOT=$(pwd)/llvm-install-root
-
-  # Build and temporarily install LLVM/Clang.
-  mkdir llvm-src/build
-  cd llvm-src/build
-    cmake \
-      -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
-      -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
-      -DCMAKE_INSTALL_PREFIX=$LLVM_INSTALL_ROOT \
-      -DCMAKE_BUILD_TYPE=Release \
-      -G "Unix Makefiles" \
-      -DLLVM_ENABLE_RTTI=ON \
-      -DLLVM_TARGETS_TO_BUILD="X86" \
-      ..
-    make
-    make install
-  cd -
-fi
-
-# Adjust QTC docs location.
+# Adjust docs location.
 sed -i "s|share/doc/qtcreator|doc/$PRGNAM-$VERSION|g" qtcreator.pri
 sed -i "s|share/doc/qtcreator|doc/$PRGNAM-$VERSION|g" doc/api/qtcreator-documentation.qdoc
 sed -i "s|share/doc/qtcreator|doc/$PRGNAM-$VERSION|g" src/plugins/coreplugin/icore.cpp
 
+# LLVM/Clang can be used to extend Qt Creator functionality.
+if [ "${USE_LLVM:-no}" = yes -o "${CODE_MODEL:-no}" = "yes" ]; then
+  LLVM_INSTALL_ROOT=/usr/libexec/qtcreator/clang
+
+  if [ ! -x $LLVM_INSTALL_ROOT/bin/clang ]; then
+    echo "error: You must install \"qt-creator-llvm\" package in order to"
+    echo "error: use LLVM/Clang tools integration."
+    exit 1
+  fi
+fi
+
 qmake-qt5 qtcreator.pro \
   QMAKE_CXXFLAGS="$SLKCFLAGS" \
-  DEFINES+=QBS_ENABLE_PROJECT_FILE_UPDATES \
   QTC_PREFIX=/usr \
   IDE_LIBRARY_BASENAME=lib$LIBDIRSUFFIX \
   LLVM_INSTALL_DIR=$LLVM_INSTALL_ROOT \
-  QBS_INSTALL_DIR=/usr
+  QBS_INSTALL_DIR=/usr \
+  DEFINES+=QBS_ENABLE_PROJECT_FILE_UPDATES
 
 make
 make install INSTALL_ROOT=$PKG
 make docs
 make install_docs INSTALL_ROOT=$PKG
-
-if [ "${CODE_MODEL}" == "yes" ]; then
-  # Install (bundle) LLVM/Clang components needed for running QTC.
-  cd $LLVM_INSTALL_ROOT
-    mkdir -p $PKG/usr/libexec/qtcreator/clang/bin
-    cp -a bin/clang $PKG/usr/libexec/qtcreator/clang/bin
-    cp -a bin/$(readlink bin/clang) $PKG/usr/libexec/qtcreator/clang/bin
-    mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/qtcreator
-    cp -a lib/libclang.so* $PKG/usr/lib$LIBDIRSUFFIX/qtcreator
-    mkdir -p $PKG/usr/libexec/qtcreator/clang/lib/clang
-    cp -a lib/clang/* $PKG/usr/libexec/qtcreator/clang/lib/clang
-  cd -
-fi
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
