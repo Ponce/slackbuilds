@@ -26,7 +26,7 @@
 
 PRGNAM=OTB
 VERSION=${VERSION:-6.4.0}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -78,6 +78,10 @@ sed -i "s/lib\b/lib${LIBDIRSUFFIX}/" \
   CMake/OTBApplicationMacros.cmake \
   CMake/CPackFunctions.cmake
 
+MONTEVERDI=${MONTEVERDI:-OFF}
+BUILD_MONTEVERDI="-DOTB_USE_QWT=$MONTEVERDI -DOTB_USE_GLEW=$MONTEVERDI -DOTB_USE_OPENGL=$MONTEVERDI"
+BUILD_QT="-DOTB_USE_QT4=${QTGUI:-ON}"
+
 mkdir -p build
 cd build
   cmake \
@@ -85,17 +89,12 @@ cd build
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DBUILD_APPLICATIONS=ON \
     -DBUILD_EXAMPLES=OFF \
     -DBUILD_TESTING=OFF \
     -DOTB_USE_CURL=ON \
-    -DOTB_USE_QT4=ON \
-    -DOTB_USE_QWT=ON \
-    -DOTB_USE_GLEW=ON \
     -DOTB_USE_LIBKML=OFF \
     -DOTB_USE_MUPARSER=ON \
     -DOTB_USE_OPENCV=${OPENCV:-OFF} \
-    -DOTB_USE_OPENGL=ON \
     -DOTB_USE_OPENMP=ON \
     -DOTB_USE_SHARK=ON \
     -DOTB_WRAP_PYTHON=ON \
@@ -103,13 +102,35 @@ cd build
     -DOTB_WRAP_PYTHON3=ON \
     -DOTB_INSTALL_PYTHON3_DIR=$(python3 -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())") \
     -DOTB_INSTALL_DOC_DIR=doc/$PRGNAM-$VERSION \
+    $BUILD_MONTEVERDI \
+    $BUILD_QT \
     ..
 
   make install DESTDIR=$PKG
 cd ..
 
+if [ "$QTGUI" = "OFF" ] ; then
+  # otbgui scripts are added but are unusable
+  rm $PKG/usr/bin/otbgui_*
+fi
+
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/etc/profile.d
+cat > $PKG/etc/profile.d/otb.csh << EOF
+#!/bin/csh
+# Orfeo ToolBox applications path
+setenv OTB_APPLICATION_PATH /usr/lib${LIBDIRSUFFIX}/otb/applications
+EOF
+cat > $PKG/etc/profile.d/otb.sh << EOF
+#!/bin/sh
+# Orfeo ToolBox applications path
+export OTB_APPLICATION_PATH=/usr/lib${LIBDIRSUFFIX}/otb/applications
+EOF
+
+chmod 0755 $PKG/etc/profile.d/otb.csh
+chmod 0755 $PKG/etc/profile.d/otb.sh
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
@@ -119,7 +140,9 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-cat $CWD/doinst.sh > $PKG/install/doinst.sh
+if [ "$MONTEVERDI" = "ON" ] ; then
+  cat $CWD/doinst.sh > $PKG/install/doinst.sh
+fi
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
