@@ -11,8 +11,8 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/zm.conf.new
 config etc/httpd/extra/zm.conf.new
+config etc/zm.conf.new
 config etc/logrotate.d/zm.new
 config etc/rc.d/rc.zm.new
 
