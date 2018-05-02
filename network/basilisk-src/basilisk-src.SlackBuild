@@ -25,9 +25,9 @@
 # Modified by SlackBuilds.org
 
 PRGNAM=basilisk-src
-VERSION=${VERSION:-2018.02.11}
+VERSION=${VERSION:-2018.04.23}
 BUILD=${BUILD:-1}
-TAG=${TAG:-SBo}
+TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -41,6 +41,10 @@ CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
+
+OBJ=${OBJ:-obj-$PRGNAM}
+GTK=${GTK:-gtk3}
+EME=${EME:---enable-eme=widevine}
 
 # You can try changing the optimization level to simply "-O2" if your processor
 # doesn't support sse2 instructions.
@@ -63,14 +67,14 @@ fi
 # The default is to build with official branding. This SlackBuild is used to
 # produce officially approved third party "contributed builds" of Basilisk.
 # This SlackBuild can also be used to produce unapproved packages -- which
-# requires the use of the "unofficial"
+# requires the use of the "unofficial" branding.
 BRANDING=${BRANDING:---enable-official-branding}
 if [ "$BRANDING" = "unofficial" ]; then
 	BRANDING="--disable-official-branding --with-branding=browser/branding/unofficial"
 fi
 
-rm -rf $PKG $TMP/gold $TMP/obj
-mkdir -p $TMP $PKG $OUTPUT $TMP/gold $TMP/obj
+rm -rf $PKG $TMP/gold $TMP/$OBJ
+mkdir -p $TMP $PKG $OUTPUT $TMP/gold $TMP/$OBJ
 
 DEBUG=" --enable-strip --disable-debug --disable-debug-symbols --enable-release"
 if [ "${ENABLE_DEBUG:-no}" = "yes" ]; then
@@ -127,9 +131,9 @@ PATH=$TMP/autoconf-tmp/usr/bin:$PATH
 
 # Build basilisk
 cd $TMP
-rm -rf moebius-$VERSION
-tar -xvf $CWD/moebius-$VERSION.tar.gz
-cd moebius-$VERSION
+rm -rf UXP-$VERSION
+tar -xvf $CWD/UXP-$VERSION.tar.gz
+cd UXP-$VERSION
 
 chown -R root:root .
 find -L . \
@@ -142,7 +146,7 @@ find -L . \
 # "UnicodeDecodeError: 'ascii' codec can't decode byte 0xe2 in position 36: ordinal not in range(128)"
 export LANG=C
 
-export MOZCONFIG="$TMP/moebius-$VERSION/.mozconfig"
+export MOZCONFIG="$TMP/UXP-$VERSION/.mozconfig"
 export MOZILLA_OFFICIAL=1
 export MOZ_MAKE_FLAGS=$MAKEFLAGS
 export CFLAGS="$SLKCFLAGS"
@@ -161,18 +165,18 @@ OPTIONS="\
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --with-default-mozilla-five-home=/usr/lib${LIBDIRSUFFIX}/$PRGNAM-$VERSION \
   --x-libraries=/usr/lib${LIBDIRSUFFIX} \
-  --enable-default-toolkit=cairo-gtk3 \
+  --enable-default-toolkit=cairo-$GTK \
   $DEBUG \
   $DEVTOOLS \
+  $EME \
   --enable-application=browser \
   --disable-crashreporter \
   --disable-updater \
   --disable-tests \
-  --enable-eme=widevine \
   --enable-jemalloc \
   --with-pthreads"
 
-echo "mk_add_options MOZ_OBJDIR=$TMP/obj" > .mozconfig
+echo "mk_add_options MOZ_OBJDIR=$TMP/$OBJ" > .mozconfig
 
 # Write in the .mozconfig the options above
 for option in $OPTIONS; do echo "ac_add_options $option" >> .mozconfig; done
@@ -181,11 +185,14 @@ echo "ac_add_options --enable-optimize=\"$OPTIMIZE\"" >> .mozconfig
 if ! pkg-config --exists libpulse; then
 echo "ac_add_options --disable-pulseaudio" >> .mozconfig; fi
 
-python2 mach build
+if pkg-config --exists jack && [ "${BLACKLIST_JACK:-no}" != "yes" ]; then
+echo "ac_add_options --enable-jack" >> .mozconfig; fi
+
+make -f client.mk build
 
 ## Clean up; and package basilisk.
 mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/mozilla/plugins
-cd $TMP/obj
+cd $TMP/$OBJ
 make install DESTDIR=$PKG
 
 cd $PKG
@@ -221,11 +228,11 @@ sed "s|@VERSION@|$VERSION|" $CWD/$PRGNAM.desktop \
   > $PKG/usr/share/applications/$PRGNAM.desktop
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a $TMP/UXP-$VERSION/LEGAL $TMP/UXP-$VERSION/LICENSE $TMP/UXP-$VERSION/README.md $PKG/usr/doc/$PRGNAM-$VERSION/
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
-cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
