@@ -23,5 +23,4 @@ preserve_perms() {
 }
 
 preserve_perms etc/dehydrated/config.new
-preserve_perms etc/logrotate.d/dehydrated.new
 preserve_perms etc/cron.d/dehydrated.new
