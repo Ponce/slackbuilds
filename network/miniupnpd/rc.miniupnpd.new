@@ -1,0 +1,92 @@
+#!/bin/bash
+
+PRG="MiniUPnPd"
+ARGS="-f /etc/miniupnpd/miniupnpd.conf"
+IPV6=@IPV6@
+
+cleanup() {
+  /etc/miniupnpd/iptables_removeall.sh &> /dev/null
+  [ "$IPV6" = "yes" ] && /etc/miniupnpd/ip6tables_removeall.sh &> /dev/null
+}
+
+start() {
+  echo -n "Starting $PRG..."
+  /etc/miniupnpd/iptables_init.sh &> /dev/null
+  [ "$IPV6" = "yes" ] && /etc/miniupnpd/ip6tables_init.sh &> /dev/null
+  if /usr/sbin/miniupnpd $ARGS; then
+    echo "Done."
+  else
+    EXIT=$?
+    cleanup
+    exit $EXIT
+  fi
+}
+
+stop() {
+  echo -n "Stopping $PRG..."
+  killall miniupnpd &> /dev/null
+  cleanup
+  echo "Done."
+}
+
+ensure_running() {
+  if pidof miniupnpd &> /dev/null; then
+    RUN=1
+  else
+    echo "$PRG is not running."
+    exit 1
+  fi
+}
+
+case "$1" in
+  "start")
+    if pidof miniupnpd &> /dev/null; then
+      echo "$PRG already running."
+      exit 0
+    fi
+    start
+    ;;
+  "stop")
+    ensure_running
+    stop
+    ;;
+  "restart")
+    if pidof miniupnpd &> /dev/null; then
+      stop
+    else
+      echo -n "$PRG is not running. Cleaning..."
+      cleanup
+      echo "Done."
+    fi
+    start
+    ;;
+  "flush")
+    ensure_running
+    echo -n "Flushing $PRG iptables rules..."
+    /etc/miniupnpd/iptables_flush.sh
+    [ "$IPV6" = "yes" ] && /etc/miniupnpd/ip6tables_flush.sh
+    echo "Done."
+    ;;
+  "display")
+    ensure_running
+    /etc/miniupnpd/iptables_display.sh
+    [ "$IPV6" = "yes" ] && /etc/miniupnpd/ip6tables_display.sh
+    ;;
+  "status")
+    ensure_running
+    echo "$PRG is running."
+    ;;
+  "cleanup")
+    if pidof miniupnpd &> /dev/null; then
+      echo "$PRG is running. Refusing to cleanup."
+      exit 1
+    fi
+    echo -n "Cleaning..."
+    cleanup
+    echo "Done."
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart|flush|display|cleanup|status}"
+    exit 1
+    ;;
+esac
