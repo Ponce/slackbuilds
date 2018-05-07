@@ -1,0 +1,136 @@
+#!/bin/sh
+
+# Slackware build script for powerpanel
+
+# Copyright 2017  Jason Graham Baltimore, MD, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=powerpanel
+VERSION=${VERSION:-1.3.2}
+PKGVER=${VERSION//./}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ "$ARCH" = "i586" ] || [ "$ARCH" = "i686" ]; then
+  PKGARCH=i386
+elif [ "$ARCH" = "x86_64" ]; then
+  PKGARCH=x86_64
+else
+  printf "$ARCH is not supported.\n"; exit 1
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$PKGVER-$PKGARCH.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Install binary files
+mkdir -p $PKG/usr/sbin
+install -D -m 0755 bin/pwrstat $PKG/usr/sbin/pwrstat
+install -D -m 0755 bin/pwrstatd $PKG/usr/sbin/pwrstatd
+
+# Install scripts
+mkdir -p $PKG/etc/powerpanel
+for f in script/*.sh
+do
+  install -D -m 0755 $f $PKG/etc/powerpanel/${f##*/}
+done
+# Making links since these are required to be in /etc (they are
+# actually hardcoded in pwrstatd...no seriously, they are).
+ln -s /etc/powerpanel/shutdown.sh $PKG/etc/shutdown.sh
+ln -s /etc/powerpanel/hibernate.sh $PKG/etc/hibernate.sh
+
+# Update scripts configuration with updated email script location
+sed -i 's/\/etc\/pwrstatd-email.sh/\/etc\/powerpanel\/pwrstatd-email.sh/g' $PKG/etc/powerpanel/pwrstatd-lowbatt.sh
+sed -i 's/\/etc\/pwrstatd-email.sh/\/etc\/powerpanel\/pwrstatd-email.sh/g' $PKG/etc/powerpanel/pwrstatd-powerfail.sh
+
+# Install config file and update locations for scripts
+cat conf/pwrstatd.conf > $PKG/etc/pwrstatd.conf
+sed -i  's/\/etc\/init.d\/pwrstatd/\/etc\/rc.d\/rc.pwrstatd/g' $PKG/etc/pwrstatd.conf
+sed -i  's/\/etc\/pwrstatd-lowbatt.sh/\/etc\/powerpanel\/pwrstatd-lowbatt.sh/g' $PKG/etc/pwrstatd.conf
+sed -i  's/\/etc\/pwrstatd-powerfail.sh/\/etc\/powerpanel\/pwrstatd-powerfail.sh/g' $PKG/etc/pwrstatd.conf
+
+# Install rc script
+mkdir -p $PKG/etc/rc.d
+install -D -m 0644 script/default_pwrstatd $PKG/etc/rc.d/rc.pwrstatd
+sed -i 's/default_pwrstatd/rc.pwrstatd/g' $PKG/etc/rc.d/rc.pwrstatd
+
+# Install man pages
+mkdir -p $PKG/usr/man/man8
+cat doc/pwrstat.8 > $PKG/usr/man/man8/pwrstat.8
+cat doc/pwrstatd.8 > $PKG/usr/man/man8/pwrstatd.8
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  doc/LICENSE doc/README doc/deploy-guide doc/user-manual $CWD/README.SLACKWARE \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+# Don't clobber existing config files
+find $PKG/etc -type f -exec mv {} {}.new \;
+
+# Make sure we preserve permissions on rc-script(s)
+( cd $PKG
+  for i in $(find etc/rc.d -type f -name "*.new") ; do
+    echo "preserve_perms $i" >> $PKG/install/doinst.sh
+  done
+)
+
+( cd $PKG
+  for i in $(find etc -type f -name "*.new" -not -path "etc/rc.d/*") ; do
+    echo "config $i" >> $PKG/install/doinst.sh ;
+  done
+)
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
