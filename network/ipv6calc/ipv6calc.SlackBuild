@@ -4,6 +4,7 @@
 
 # Copyright 2012, 2013  Chris Abela, Malta
 # Copyright 2014  Ryan P.C. McQuen, WA, ryanpcmcquen@member.fsf.org
+# Copyright 2018  Jason Graham, MD <jgraha8@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -24,7 +25,7 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=ipv6calc
-VERSION=${VERSION:-0.98.0}
+VERSION=${VERSION:-1.0.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -70,20 +71,38 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-if [ "$IP2LOCATION" = yes ]; then
-  ENABLE_IP2LOCATION="${ENABLE_IP2LOCATION:-"--enable-ip2location"}"
-else
-  # The default is to disable ip2location
-  unset ENABLE_IP2LOCATION
+unset ENABLE_IP2LOCATION
+unset ENABLE_GEOIP
+unset ENABLE_EXTERNAL
+unset ENABLE_MOD_IPV6CALC
+
+if [ "$IP2LOCATION" = "yes" ]; then
+    ENABLE_IP2LOCATION="--enable-ip2location  --with-ip2location-db=/usr/share/IP2Loc"
+fi
+
+if [ "$GEOIP" = "yes" ]; then
+    ENABLE_GEOIP="--enable-geoip --with-geoip-db=/usr/share/GeoIP"
+fi
+
+if [ "$EXTERNAL" = "yes" ]; then
+    ENABLE_EXTERNAL="--enable-external"
+fi
+
+if [ "$MOD_IPV6CALC" = "yes" ]; then
+    ENABLE_MOD_IPV6CALC="--enable-mod_ipv6calc"
 fi
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
-  --bindir=/usr/bin \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
   --mandir=/usr/man \
-  $ENABLE_IP2LOCATION
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --build=$ARCH-slackware-linux \
+  $ENABLE_IP2LOCATION $ENABLE_GEOIP $ENABLE_EXTERNAL $ENABLE_MOD_IPV6CALC
 
 make
 make install DESTDIR=$PKG
@@ -94,16 +113,27 @@ find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | gr
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-# If you need more docs/scripts, have a look at the source,
-# I take a minimalist approach here.
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  COPYING CREDITS ChangeLog INSTALLING LICENSE README* TODO USAGE doc \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+   CHANGES COPYING CREDITS ChangeLog LICENSE README TODO USAGE VERSION \
+   doc/ipv6calc.html \
+   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+if [ "$MOD_IPV6CALC" = "yes" ]; then
+    # Move the ipv6calc.conf to the proper location
+    mkdir -p $PKG/etc/httpd
+    mv $PKG/etc/{httpd.d,httpd/extra}
+    mv $PKG/etc/httpd/extra/ipv6calc.conf $PKG/etc/httpd/extra/httpd-ipv6calc.conf.new
+    echo "config etc/httpd/extra/httpd-ipv6calc.conf.new" >> $PKG/install/doinst.sh
+
+    # Update IP2Loc db directory
+    sed -i 's/\/usr\/share\/IP2Location/\/usr\/share\/IP2Loc/g' $PKG/etc/httpd/extra/httpd-ipv6calc.conf.new
+fi
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
