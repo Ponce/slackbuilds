@@ -26,16 +26,21 @@
 
 PRGNAM=rust
 SRCNAM="${PRGNAM}c"
-VERSION=${VERSION:-1.25.0}
-
-# src/stage0.txt
-RSTAGE0_VERSION=${RSTAGE0_VERSION:-1.24.0}
-RSTAGE0_DIR=${RSTAGE0_DIR:-2018-02-15}
-CSTAGE0_VERSION=${CSTAGE0_VERSION:-0.25.0}
-CSTAGE0_DIR=${CSTAGE0_DIR:-$RSTAGE0_DIR}
-
+VERSION=${VERSION:-1.26.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+
+# Set this to YES to build with the system LLVM, or NO to use the bundled LLVM.
+# YES is probably better (when it works...)
+# LLVM in Slackware14.2 is now too old to build rust 1.26.0
+SYSTEM_LLVM=${SYSTEM_LLVM:-NO}
+SYSTEM_LLVM=$(echo "$SYSTEM_LLVM" | tr '[:lower:]' '[:upper:]')
+
+# Bootstrap variables (might not be kept updated for latest Rust):
+RSTAGE0_VERSION=${RSTAGE0_VERSION:-1.25.0}
+RSTAGE0_DIR=${RSTAGE0_DIR:-2018-03-29}
+CSTAGE0_VERSION=${CSTAGE0_VERSION:-0.26.0}
+CSTAGE0_DIR=${CSTAGE0_DIR:-$RSTAGE0_DIR}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -134,6 +139,11 @@ rm -rf $SRCNAM-$VERSION-src
 tar xvf $CWD/$SRCNAM-$VERSION-src.tar.xz
 cd $SRCNAM-$VERSION-src
 
+# Link with -lffi in case of using system LLVM:
+if [ "${SYSTEM_LLVM}" = "YES" ]; then
+  zcat $CWD/link_libffi.diff.gz | patch -p1 --verbose || exit 1
+fi
+
 if [ "$LOCAL_BOOTSTRAP" != "yes" ] ; then
   # rust requires bootstrapping with the previous rust version.
   # versions are defined in src/stage0.txt.
@@ -149,14 +159,9 @@ fi
 # Build configuration. We'll go ahead and build with rpath because it may be
 # needed during the build, and then we'll strip the rpaths out of the
 # binaries later.
-
-# LLVM in Slackware14.2 is now too old to build rust 1.24.1, so the rust build
-# falls back to building its own. You can force using the system LLVM with this
-# flag.
-SYSTEM_LLVM=${SYSTEM_LLVM:-no}
-
 cat << EOF > config.toml
 [llvm]
+ccache = "/usr/bin/ccache"
 targets = "X86"
 
 [build]
@@ -176,20 +181,20 @@ mandir = "man"
 
 [rust]
 codegen-units = 0
-thinlto = false
 channel = "stable"
 rpath = true
 codegen-tests = false
 ignore-git = true
+
 EOF
 
 if [ "$ARCH" = "arm" ] ; then
   sed -i 's/"X86"/"X86;ARM"//' config.toml
 fi
 
-if [ "$SYSTEM_LLVM" = "yes" ] ; then
+if [ "${SYSTEM_LLVM}" = "YES" ]; then
   cat << EOF >> config.toml
-
+# Add this stuff to build with the system LLVM:
 [target.i586-unknown-linux-gnu]
 llvm-config = "/usr/bin/llvm-config"
 
@@ -218,9 +223,6 @@ EOF
     chmod 0755 local-llvm-config
     sed -i "s|/usr/bin/llvm-config|$(pwd)/local-llvm-config|" config.toml
   fi
-
-  # Link with -lffi in case of using system LLVM:
-  zcat $CWD/link_libffi.diff.gz | patch -p1 --verbose
 fi
 
 FULL_BOOTSTRAP="${FULL_BOOTSTRAP:-no}"
@@ -231,6 +233,11 @@ fi
 
 if [ "$LOCAL_BOOTSTRAP" = "yes" ] ; then
   sed -i "s|^\(extended = true\)$|\1\nrustc = \"/usr/bin/rustc\"\ncargo = \"/usr/bin/cargo\"|" config.toml
+fi
+
+
+if [ "$ARCH" = "x86_64" ] && [ "$LOCAL_BOOTSTRAP" = "yes" ] && [ "$(echo "$VERSION" | cut -d. -f 1)" -eq 1 ] && [ "$(echo "$VERSION" | cut -d. -f 2)" -gt 24 ] ; then
+  zcat $CWD/slackware64_local_bootstrap.diff.gz | patch -p1 --verbose || exit 1
 fi
 
 chown -R root:root .
@@ -283,6 +290,14 @@ gzip -9 $PKG/usr/lib$LIBDIRSUFFIX/rustlib/manifest-*
 
 # Correct permissions on shared libraries:
 find $PKG/usr/lib$LIBDIRSUFFIX -name "*.so" -exec chmod 755 "{}" \;
+
+# Evidently there are a lot of duplicated libraries in this tree, so let's
+# try to save some space:
+(
+  find "$PKG/usr/lib${LIBDIRSUFFIX}/rustlib" -type d -path '*/*-linux-gnu/*' -name 'lib' | while read -r dir ; do
+    cd "$dir" && for file in *.so ; do if cmp -s "$file" ../../../"$file" ; then ln -sf ../../../"$file" ; fi ; done
+  done
+)
 
 # Strip ELF objects:
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
