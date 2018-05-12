@@ -6,7 +6,7 @@
 # Modified by Mario Preksavec <mario@slackware.hr>
 
 KERNEL=${KERNEL:-4.4.118}
-XEN=${XEN:-4.10.0}
+XEN=${XEN:-4.10.1}
 BOOTLOADER=${BOOTLOADER:-lilo}
 
 ROOTMOD=${ROOTMOD:-ext4}
