@@ -1,0 +1,198 @@
+#!/bin/sh
+
+# Play audio script for ClockChimes
+
+# Copyright 2018 - Stu Miller - Colorado, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Function - input: UC - output: LC
+lowercase () {
+  LC=$(echo $UC | tr [:upper:] [:lower:])
+} # END lowercase
+
+# function - input: ARRAY, KEY - output: VALUE
+read_array(){
+  # indirect reference method
+  TMP=${ARRAY}[KEY]
+  VALUE=${!TMP}
+} # END read_array
+
+# Function - input: CHIME, STRIKE - output: sox audio
+play_chimestrike(){
+#echo "play_chimestrike - #1:"$chime$strike":"
+  # check chimestrike null
+  if [ "$CHIME$STRIKE" != "" ]; then
+    # determine user based on 1st local display
+    # last - reads /var/log/wtmp file
+    # grep - looks for ":0" followed by "still logged in"
+    # awk - uses 1st line and 1st field, ignores remaining lines
+    USER=$(last | grep -E :0.*"still logged in" | awk 'NR==1{print $1}')
+
+    # play as default root user or user currently logged in
+    # for play commands, see: man sox
+    # functionaly equivalent to: sox -q $CHIME$STRIKE -d
+    if [[ "$USER" == "" || "$USER" == "root" ]]; then
+      # play as root
+      /usr/bin/play -q $CHIME$STRIKE
+    else
+      # play as user currently logged in
+      su -l $USER -c "/usr/bin/play -q $CHIME$STRIKE"
+    fi # END play as root or user
+  fi # END chimestrike null
+#echo "play_chimestrike - :end:"
+} # END play_chimestrike
+
+# Function - requires: read_array - input: CONTROL[], MINUTE, LOOP - output: STRIKE
+set_strike(){
+#echo "START set_strike - #1:play_strike:"${CONTROL[2]}":minute:"$MINUTE":loop:"$LOOP":"
+  # check play strike
+  if [ ${CONTROL[2]} == "yes" ]; then
+    # check min 00
+    if [[ "$MINUTE" == "00" || "$MINUTE" == "0" ]]; then
+      # set strike to play, minus last
+      while [ "$LOOP" -gt "1" ]; do
+        # concatenate pre & strike
+        ARRAY=${CONTROL[0]}; KEY="4"; read_array
+        STRIKE=$STRIKE" "$PRE$VALUE
+        # decrement loop counter
+        LOOP=$(($LOOP-1))
+      done # END strike loop
+      # concatenate last pre & strike
+      ARRAY=${CONTROL[0]}; KEY="5"; read_array
+      STRIKE=$STRIKE" "$PRE$VALUE
+    fi # END min 00
+  fi # END play strike
+#echo "END set_strike - strike:"$STRIKE":"
+} # END set_strikes
+
+# Function - requires: read_array - input: CONTROL[], MINUTE - output: CHIME
+set_chime(){
+#echo "START set_chime - #1:play_chime:"${CONTROL[1]}":minute:"$MINUTE":"
+  # check play chimes
+  if [ "${CONTROL[1]}" == "yes" ]; then
+    # check minute on the quarter hour
+    if [ "$MINUTE" == "00" ]; then
+      ARRAY=${CONTROL[0]}; KEY="0"; read_array
+      CHIME=$PRE$VALUE
+    elif [ "$MINUTE" == "15" ]; then
+      ARRAY=${CONTROL[0]}; KEY="1"; read_array
+      CHIME=$PRE$VALUE
+    elif [ "$MINUTE" == "30" ]; then
+      ARRAY=${CONTROL[0]}; KEY="2"; read_array
+      CHIME=$PRE$VALUE
+    elif [ "$MINUTE" == "45" ]; then
+      ARRAY=${CONTROL[0]}; KEY="3"; read_array
+      CHIME=$PRE$VALUE
+    fi # END minute on the quarter hour
+  fi # END play chimes
+#echo "END set_chime - chime:"$CHIME":"
+} # END set_chime
+
+# Function - input: $1, $2, $3 - output: LOOP, MINUTE
+test(){
+#echo "START test_script - #1:"$1":"$2":"$3":"
+  USAGE="TEST FAILED: requires 2nd & 3rd integer arguments"
+  # check for arguments
+  if [[ "$2" != "" && "$3" != "" ]]; then
+    USAGE="TEST FAILED: 2nd argument represents hours. It must be an integer <= 24"
+    # check hour argument is integer
+    if [ "$2" -eq "$2" ] 2>/dev/null; then
+      # check hour argument is -le 24
+      if [ $2 -le 12 ]; then
+        LOOP=$2
+      elif [ $2 -le 24 ]; then
+        LOOP=$(($2-12))
+      else
+        echo $USAGE; exit
+      fi # END hour argument is -le 24
+    else
+      echo $USAGE; exit
+    fi # END hour argument is integer
+    USAGE="TEST FAILED: 3rd argument represents minutes. It must be an integer <= 45"
+    # check minute argument is integer
+    if [ "$3" -eq "$3" ] 2>/dev/null; then
+      # check minute argument -le 45
+      if [ $3 -le 45 ]; then
+        MINUTE=$3
+      else
+        echo $USAGE; exit
+      fi # END minute argument -le 45
+    else
+      echo $USAGE; exit
+    fi # END minute argument is integer
+  else
+    echo $USAGE; exit
+  fi # END check for arguments
+#echo "END test_script - loop:"$LOOP":minute:"$MINUTE":"
+  echo "NOTE: requires logged in user password if NOT running as root"
+} # END test
+
+# source config file
+. /etc/clockchimes.conf
+
+# sound directory
+SND_DIR="/usr/share/sounds/clockchimes/"
+
+# prefix volume factor, sound directory & chime name
+UC=${CONTROL[0]}; lowercase
+PRE="-v "${CONTROL[3]}" "$SND_DIR$LC"/"
+
+# system minute
+MINUTE=$(date +"%M")
+
+# system hour, 12 hour clock
+HOUR=$(date +"%I")
+
+# loop counter, strip leading "0" from system hour
+LOOP=$((10#$HOUR))
+
+# version language
+VERSION="clockchimes v0.2
+Copyright 2018 - Stu Miller - Colorado, USA
+All rights reserved."
+
+# usage language
+USAGE="Usage: $0 [OPTION]
+Play clock chimes and hour strikes.
+
+  --help        display this help and exit
+  --test        test sample time, add hour & minute
+  --version     display version information and exit
+
+Report bugs to <slackbuilds@go4it2day.com>."
+
+# Main routine
+# check for options
+case $1 in
+  '--help')
+    printf '%s\n' "$USAGE" || exit
+  ;;
+  '--test')
+    # must pass script arguments to funtions
+    test $1 $2 $3
+  ;;
+  '--version')
+    printf '%s\n' "$VERSION" || exit
+  ;;
+esac
+
+set_chime
+set_strike
+play_chimestrike
