@@ -2,7 +2,7 @@
 
 # Slackware build script for pcsx2
 
-# Copyright 2016-2017 Hunter Sezen California, USA
+# Copyright 2016-2018 Hunter Sezen California, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,7 +23,7 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=pcsx2
-VERSION=${VERSION:-2017.08.09_8c37418e4}
+VERSION=${VERSION:-2018.05.16_290397d}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -40,24 +40,18 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-# pcsx2 does not support x86_64 yet and does
-# not plan to for the foreseeable future.
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  MULTILIB=""
-  BINDIR=""
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=core2"
-  MULTILIB=""
-  BINDIR=""
+  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2"
-  MULTILIB="-DCMAKE_TOOLCHAIN_FILE=cmake/linux-compiler-i386-multilib.cmake"
-  BINDIR="/32"
+  LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
-  MULTILIB=""
-  BINDIR=""
+  LIBDIRSUFFIX=""
 fi
 
 set -eu
@@ -75,27 +69,28 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-DEBUG="${DEBUG:-no}"
-DEVEL="${DEVEL:-no}"
-if [ "$DEVEL" = yes ] || [ "$DEBUG" = yes ]; then
-  case "${ASAN:-FALSE}" in
-    yes) ASAN=TRUE ;;
-    *) ASAN=FALSE ;;
-  esac
-  case "$DEVEL" in
-    yes) RELEASE=Devel ;;
-    *) RELEASE=Debug ;;
-  esac
+# pcsx2 does not support x86_64 yet and does
+# not plan to for the foreseeable future.
+BINDIR=; MULTILIB=
+[ "$ARCH" = 'x86_64' ] && BINDIR='/32' \
+  MULTILIB='-DCMAKE_TOOLCHAIN_FILE=cmake/linux-compiler-i386-multilib.cmake'
+
+RELEASE=Debug
+
+if [ "${DEVEL:-0}" != 0 ]; then
+  DEBUG=1
+  RELEASE=Devel
+fi
+
+if [ "${DEBUG:=0}" != 0 ]; then
+  [ "${ASAN:=FALSE}" != FALSE ] && ASAN=TRUE
   SLKCFLAGS="$(printf %s "$SLKCFLAGS" | sed 's/-O2/-O0/')"
 else
   ASAN=FALSE
   RELEASE=Release
 fi
 
-case "${EGL_API:-OFF}" in
-  yes|[oO][nN]) EGL=ON ;;
-  *) EGL=OFF ;;
-esac
+[ "${EGL_API:=OFF}" != OFF ] && EGL_API=ON
 
 # Use a font included with Slackware
 # osd error: 'Failed to init the freetype face'
@@ -117,15 +112,15 @@ cd build
     -DGSDX_LEGACY=ON \
     -DPACKAGE_MODE=ON \
     -DXDG_STD=ON \
-    -DEGL_API="$EGL" \
-    -DUSE_ASAN="$ASAN" \
+    -DEGL_API=$EGL_API \
+    -DUSE_ASAN=$ASAN \
     $MULTILIB \
     -DCMAKE_BUILD_TYPE=$RELEASE ..
   make
   make install DESTDIR=$PKG
 cd ..
 
-if [ "$DEBUG" = no ] && [ "$DEVEL" = no ]; then
+if [ "$DEBUG" = 0 ]; then
   find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
     | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 fi
@@ -133,9 +128,9 @@ fi
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-DOCS="pcsx2/Docs/* bin/docs/*.html bin/docs/*.txt CONTRIBUTING.md COPYING* README.md"
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a pcsx2/Docs/* bin/docs/*.html bin/docs/*.txt CONTRIBUTING.md COPYING* \
+  README.md $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
@@ -143,11 +138,8 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 # Fix doinst.sh for x86_64
-if [ "$ARCH" = 'x86_64' ]; then
-  if ! grep -q 32 $PKG/install/doinst.sh; then
-    sed -i 's|-loaders >|-loaders-32 >|' $PKG/install/doinst.sh
-  fi
-fi
+[ "$ARCH" = 'x86_64' ] && \
+  sed -i 's|-loaders >|-loaders-32 >|' $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
