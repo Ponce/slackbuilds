@@ -25,7 +25,9 @@
 # Modified by SlackBuilds.org
 
 PRGNAM=basilisk-src
-VERSION=${VERSION:-2018.04.23}
+SRCNAM=${SRCNAM:-UXP}
+VERSION=${VERSION:-2018.05.15}
+RELEASEVER=${RELEASEVER:-52.9.$VERSION}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -51,13 +53,13 @@ EME=${EME:---enable-eme=widevine}
 # "-Os" might help if you experience segfaults.
 OPTIMIZE=${OPTIMIZE:-"-O2 -msse2 -mfpmath=sse"}
 if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686 -fopenmp"
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686 -fopenmp"
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC -fopenmp"
+  SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
@@ -70,7 +72,7 @@ fi
 # requires the use of the "unofficial" branding.
 BRANDING=${BRANDING:---enable-official-branding}
 if [ "$BRANDING" = "unofficial" ]; then
-	BRANDING="--disable-official-branding --with-branding=browser/branding/unofficial"
+  BRANDING="--disable-official-branding --with-branding=browser/branding/unofficial"
 fi
 
 rm -rf $PKG $TMP/gold $TMP/$OBJ
@@ -131,9 +133,18 @@ PATH=$TMP/autoconf-tmp/usr/bin:$PATH
 
 # Build basilisk
 cd $TMP
-rm -rf UXP-$VERSION
-tar -xvf $CWD/UXP-$VERSION.tar.gz
-cd UXP-$VERSION
+rm -rf $SRCNAM-$VERSION
+tar -xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+
+# This patch fixes a regression in python that causes build failures when building with mach.
+# This patch was integrated upstream, but is not in the current release.
+patch -p1 < $CWD/rb168986.patch
+
+# Set the proper version number, but do not rely on "$BASILISK_VERSION" since doing so will
+# set the version number to whenever a build takes place, rather then when a release was made.
+echo "$RELEASEVER" > browser/config/version.txt
+echo "$VERSION" > browser/config/version_display.txt
 
 chown -R root:root .
 find -L . \
@@ -146,24 +157,23 @@ find -L . \
 # "UnicodeDecodeError: 'ascii' codec can't decode byte 0xe2 in position 36: ordinal not in range(128)"
 export LANG=C
 
-export MOZCONFIG="$TMP/UXP-$VERSION/.mozconfig"
+export MOZCONFIG="$TMP/$SRCNAM-$VERSION/.mozconfig"
 export MOZILLA_OFFICIAL=1
 export MOZ_MAKE_FLAGS=$MAKEFLAGS
 export CFLAGS="$SLKCFLAGS"
 export CXXFLAGS="$SLKCFLAGS"
 export BUILDING_RELEASE=1
-export BASILISK_VERSION=1
 export MOZ_ADDON_SIGNING=
 export MOZ_REQUIRE_SIGNING=
 export MOZ_TELEMETRY_REPORTING=
 export PYTHON=/usr/bin/python2
-#
+
 # Our building options, in a configure-like display ;)
 OPTIONS="\
   ${BRANDING} \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --with-default-mozilla-five-home=/usr/lib${LIBDIRSUFFIX}/$PRGNAM-$VERSION \
+  --with-default-mozilla-five-home=/usr/lib${LIBDIRSUFFIX}/basilisk-$RELEASEVER \
   --x-libraries=/usr/lib${LIBDIRSUFFIX} \
   --enable-default-toolkit=cairo-$GTK \
   $DEBUG \
@@ -188,7 +198,7 @@ echo "ac_add_options --disable-pulseaudio" >> .mozconfig; fi
 if pkg-config --exists jack && [ "${BLACKLIST_JACK:-no}" != "yes" ]; then
 echo "ac_add_options --enable-jack" >> .mozconfig; fi
 
-make -f client.mk build
+python2 mach build
 
 ## Clean up; and package basilisk.
 mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/mozilla/plugins
@@ -198,29 +208,29 @@ make install DESTDIR=$PKG
 cd $PKG
 
 # We don't need these (just symlinks anyway):
-rm -rf usr/lib${LIBDIRSUFFIX}/$PRGNAM-devel-$VERSION
+rm -rf usr/lib${LIBDIRSUFFIX}/basilisk-devel-$RELEASEVER
 
 # Avoid duplicate binaries; details: https://bugzilla.mozilla.org/show_bug.cgi?id=658850
 # Basilisk package scripts appear to attempt this, on other 'distros'; those scripts,
 # however, appear to fail on Slackware.
-rm -f usr/lib${LIBDIRSUFFIX}/$PRGNAM-$VERSION/$PRGNAM-bin
+rm -f usr/lib${LIBDIRSUFFIX}/basilisk-$RELEASEVER/basilisk-bin
 
 # Use system provided Hunspell, if desired.
 if [ "${USE_SYSTEM_HUNSPELL}" = "yes" ]; then
-  rm -rfv usr/lib${LIBDIRSUFFIX}/$PRGNAM-$VERSION/dictionaries
-  cp -vsr /usr/share/hunspell usr/lib${LIBDIRSUFFIX}/$PRGNAM-$VERSION/dictionaries
+  rm -rfv usr/lib${LIBDIRSUFFIX}/basilisk-$RELEASEVER/dictionaries
+  cp -vsr /usr/share/hunspell usr/lib${LIBDIRSUFFIX}/basilisk-$RELEASEVER/dictionaries
 fi
 
 # Install icons:
 for PX in 16 32 48 ; do
-	mkdir -p $PKG/usr/share/icons/hicolor/${PX}x${PX}/apps
-	ln -s /usr/lib${LIBDIRSUFFIX}/$PRGNAM-$VERSION/browser/chrome/icons/default/default${PX}.png \
-	       $PKG/usr/share/icons/hicolor/${PX}x${PX}/apps/${PRGNAM}-$VERSION.png
+  mkdir -p $PKG/usr/share/icons/hicolor/${PX}x${PX}/apps
+  ln -s /usr/lib${LIBDIRSUFFIX}/basilisk-$RELEASEVER/browser/chrome/icons/default/default${PX}.png \
+        $PKG/usr/share/icons/hicolor/${PX}x${PX}/apps/$PRGNAM-$VERSION.png
 done
 # ... and the 128px icon file too:
 mkdir -p $PKG/usr/share/icons/hicolor/128x128/apps
-ln -s /usr/lib${LIBDIRSUFFIX}/$PRGNAM-$VERSION/browser/icons/mozicon128.png \
-	$PKG/usr/share/icons/hicolor/128x128/apps/${PRGNAM}-$VERSION.png
+ln -s /usr/lib${LIBDIRSUFFIX}/basilisk-$RELEASEVER/browser/icons/mozicon128.png \
+      $PKG/usr/share/icons/hicolor/128x128/apps/$PRGNAM-$VERSION.png
 
 # Install .desktop file
 mkdir -p $PKG/usr/share/applications
@@ -228,7 +238,9 @@ sed "s|@VERSION@|$VERSION|" $CWD/$PRGNAM.desktop \
   > $PKG/usr/share/applications/$PRGNAM.desktop
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a $TMP/UXP-$VERSION/LEGAL $TMP/UXP-$VERSION/LICENSE $TMP/UXP-$VERSION/README.md $PKG/usr/doc/$PRGNAM-$VERSION/
+cp -a \
+  $TMP/$SRCNAM-$VERSION/LEGAL $TMP/$SRCNAM-$VERSION/LICENSE $TMP/$SRCNAM-$VERSION/README.md \
+  $PKG/usr/doc/$PRGNAM-$VERSION/
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
