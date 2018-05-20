@@ -43,3 +43,7 @@ for L in `ls etc/netdata/health.d/*.new`
 do
 config $L
 done
+
+if [ -x /usr/libexec/netdata/plugins.d/apps.plugin ] ; then
+  setcap cap_dac_read_search,cap_sys_ptrace+ep /usr/libexec/netdata/plugins.d/apps.plugin
+fi
