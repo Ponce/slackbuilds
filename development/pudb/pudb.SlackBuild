@@ -1,20 +1,39 @@
 #!/bin/sh
 #
 # Slackware build script for pudb
+
+# Copyright 2018 David Woodfall <dave@dawoodfall.net>
+# All rights reserved.
 #
-# Written by Rudson R. Alves rudsonalves@yahoo.com.br
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=pudb
-VERSION=${VERSION:-2015.2}
+VERSION=${VERSION:-2017.1.4}
+URWIDVER=2.0.1
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
-  case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
-    arm*) ARCH=arm ;;
-       *) ARCH=$( uname -m ) ;;
-  esac
+	case "$( uname -m )" in
+		i?86) ARCH=i586 ;;
+		arm*) ARCH=arm ;;
+			*) ARCH=$( uname -m ) ;;
+	esac
 fi
 
 CWD=$(pwd)
@@ -22,43 +41,113 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
-  LIBDIRSUFFIX=""
+if [ "$ARCH" = "i586" ]; then
+	SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+	LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
+	SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+	LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
+	SLKCFLAGS="-O2 -fPIC"
+	LIBDIRSUFFIX="64"
 else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
+	SLKCFLAGS="-O2"
+	LIBDIRSUFFIX=""
 fi
+
+if [ -n "$NO_PYTHON2" ] && [ -n "$NO_PYTHON3" ]; then
+	printf "%s\n" "You appear to not want to install anything."
+	exit 1
+fi
+
+# see if we have python3 installed
+which python3 >/dev/null 2>&1 && PY3=1
 
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
+
+# install custom urwid package
+if [ -z "$NO_PYTHON2" ]; then
+	rm -rf urwid-$URWIDVER
+	tar xfv $CWD/urwid-$URWIDVER.tar.gz
+	cd urwid-$URWIDVER
+
+	chown -R root:root .
+	find -L . \
+		\( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+		-o -perm 511 \) -exec chmod 755 {} \; -o \
+		\( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+		-o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+	# change the module name so our urwid doesn't call the stock version
+	sed -i "s%'name':\"urwid\"%'name':\"py2_urwid\"%" setup.py
+	sed -i "23 a import py2_urwid\n\
+import sys\n\
+sys.modules['urwid'] = py2_urwid" urwid/__init__.py
+
+	python setup.py install --root=$PKG
+
+	# rename it so it doesn't collide with the stock version
+	mv $PKG/usr/lib$LIBDIRSUFFIX/python2.7/site-packages/urwid \
+		$PKG/usr/lib$LIBDIRSUFFIX/python2.7/site-packages/py2_urwid
+	cd ..
+fi
+
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+	\( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+	-o -perm 511 \) -exec chmod 755 {} \; -o \
+	\( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+	-o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-python setup.py install --root=$PKG
+# install the python3 version before we wreck the python2 build
+if [ -n "$PY3" ] && [ -z "$NO_PYTHON3" ]; then
+	python3 setup.py install --root=$PKG
+fi
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# install the edited python2 version
+if [ -z "$NO_PYTHON2" ]; then
+	# change all references to urwid to our custom py2_urwid
+	for py in \
+		settings.py \
+		source_view.py \
+		debugger.py \
+		theme.py \
+		__init__.py \
+		ui_tools.py \
+		var_view.py
+	do
+		sed -i "s%import urwid%import py2_urwid as urwid%g" pudb/$py
+	done
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a MANIFEST.in PKG-INFO README.rst $PKG/usr/doc/$PRGNAM-$VERSION
+	sed -i "s%urwid>=1.1.1%py2_urwid>=1.1.1%" setup.py
+
+	# done so now install
+	python setup.py install --root=$PKG
+fi
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" \
+	| grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null \
+	|| true
+
+# added more docs, some examples and a test debug script
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/examples
+cp -a README.rst LICENSE \
+	doc/starting.rst doc/usage.rst doc/misc.rst doc/shells.rst \
+	$PKG/usr/doc/$PRGNAM-$VERSION
+
+cp -a example-* debug_me.py $PKG/usr/doc/$PRGNAM-$VERSION/examples
+
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# this might come in handy later for someone
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.slackware
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
