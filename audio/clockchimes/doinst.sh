@@ -14,30 +14,24 @@ config() {
 }
 
 config etc/clockchimes.conf.new
+config etc/cron.d/clockchimes.new
 
-# root crontab missing?
-if [ ! -e /var/spool/cron/crontabs/root ]; then
-  # true: crontab missing, create crontab and set permissions
-  touch /var/spool/cron/crontabs/root
-  chmod 0600 /var/spool/cron/crontabs/root
-fi # END crontab missing
+# clean root crontab from versions before v0.3
+grep 'clockchimes' /var/spool/cron/crontabs/root 1>/dev/null
+if [ $? -eq 0 ]; then
+  grep -v 'clockchimes' > /var/spool/cron/crontabs/root
+fi # END clean root crontab
 
-# root crontab not updated?
-grep "# clockchimes" /var/spool/cron/crontabs/root 1> /dev/null
+# kill crond if running
+ps -C crond 1>/dev/null
+if [ $? -eq 0 ]; then
+  # true: kill crond
+  killall crond 1>/dev/null
+fi # END crond running
+
+# start crond if not running
+ps -C crond 1>/dev/null
 if [ $? -ne 0 ]; then
-  # true: crontab not updated, update with clockchimes
-  cat << EOF >> /var/spool/cron/crontabs/root
-# clockchimes
-0,15,30,45 * * * * /usr/bin/clockchimes 1> /dev/null
-EOF
-
-  # crond running?
-  ps -C crond 1>/dev/null
-  if [ $? -eq 0 ]; then
-    # true: crond running, reload crond
-    crontab /var/spool/cron/crontabs/root 1> /dev/null
-  else
-    # false: crond not running, start crond
-    /usr/sbin/crond -l notice
-  fi # END crond running
-fi # END crontab not updated
+  # true: start crond
+  /usr/sbin/crond -l notice
+fi # END crond running
