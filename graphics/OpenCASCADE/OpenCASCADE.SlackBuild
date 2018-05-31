@@ -25,11 +25,12 @@
 # Maintained by David Spencer <baildon.research@googlemail.com>
 
 PRGNAM=OpenCASCADE
-VERSION=${VERSION:-6.9.1}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-7.3.0}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-SRCNAM=$(echo $PRGNAM | tr '[:upper:]' '[:lower:]')
+SRCNAM=occt
+SRCVER=V$(echo $VERSION | tr . _)
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -63,9 +64,9 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $SRCNAM-$VERSION
-tar xvf $CWD/$SRCNAM-$VERSION.tgz
-cd $SRCNAM-$VERSION
+rm -rf $SRCNAM-$SRCVER
+tar xvf $CWD/$SRCNAM-$SRCVER.tar.gz
+cd $SRCNAM-$SRCVER
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -73,51 +74,36 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Update automake config, and de-version the VTK sonames
-# (* Note, VTK 7.1.0 is now required *)
-sed -i \
-  -e 's/INCLUDES =/AM_CPPFLAGS =/' \
-  adm/lin/amk/*/Makefile.am
-sed -i \
-  -e 's/vtkRenderingOpenGL/vtkRenderingOpenGL2/g' \
-  -e 's/AM_INIT_AUTOMAKE(\[foreign])/AM_INIT_AUTOMAKE([foreign subdir-objects])/' \
-  -e 's/AM_CONFIG_HEADER/AC_CONFIG_HEADERS/g' \
-  -e '/CSF_VTK_LIB/s/-6\.1//g' \
-  configure.ac
-
 # Thanks to Chris Willing for the fix for VTK-8.1.0 compatibility.
-patch -p0 < $CWD/020_vtk_InsertNextTupleValue.diff
+# This new version of the patch is still needed for occt 7.3.0 :(
+patch -p0 < $CWD/occt-7.3.0_vtk_InsertNextTupleValue.diff
 
-./build_configure
+# Fix bogus install path
+sed -i -e 's|\${INSTALL_DIR}/\${INSTALL_DIR_CMAKE}/OpenCASCADECompile|${INSTALL_DIR_CMAKE}/OpenCASCADECompile|' \
+  CMakeLists.txt
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS -DvtkFloatingPointType=double -Dnullptr=NULL" \
-./configure \
-  --prefix=/opt/${PRGNAM} \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --with-tcl=/usr/lib${LIBDIRSUFFIX} \
-  --with-tk=/usr/lib${LIBDIRSUFFIX} \
-  --with-vtk-library=/usr/lib${LIBDIRSUFFIX} \
-  --with-vtk-include=/usr/include/VTK \
-  --disable-debug \
-  --enable-production \
-  --build=$ARCH-slackware-linux
+# Strictly speaking VTK is optional, but the only user of OCC in SBo is FreeCAD,
+# and FreeCAD wants OCC's VTK support. :)
 
-# Change the resulting Makefile so that we can use DESTDIR
-sed -e "s|\$(prefix)|\$(DESTDIR)\$(prefix)|g" -i Makefile
-
-make
-make install DESTDIR=$PKG
-
-# Correct path of source files
-mv $PKG/opt/$PRGNAM/config.h $PKG/opt/$PRGNAM/src/
-# Remove unnecessary (and confusing) files
-rm -r $PKG/opt/$PRGNAM/Linux $PKG/opt/$PRGNAM/*.sh
-# Add some missed files
-cp -a data samples $PKG/opt/$PRGNAM
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DINSTALL_DIR_LIB=lib${LIBDIRSUFFIX} \
+    -DINSTALL_DIR_CMAKE=lib${LIBDIRSUFFIX}/cmake/opencascade \
+    -DINSTALL_DIR_DOC=doc/$PRGNAM-$VERSION \
+    -DUSE_GLES2=OFF \
+    -DUSE_FFMPEG=${WITH_FFMPEG:-OFF} \
+    -DUSE_FREEIMAGE=${WITH_FREEIMAGE:-OFF} \
+    -DUSE_GL2PS=${WITH_GL2PS:-OFF} \
+    -DUSE_TBB=${WITH_TBB:-OFF} \
+    -DUSE_VTK=ON \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install DESTDIR=$PKG
+cd ..
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -127,14 +113,6 @@ cp -a \
   LICENSE_LGPL_21.txt OCCT_LGPL_EXCEPTION.txt README.txt \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-
-# If you want *all* documentation in the package, use INSTALL_FULL_DOCS=yes
-#   but be warned: we're talking about ~ 520MB of documentation...
-if [ "${INSTALL_FULL_DOCS:-no}" = "yes" ]; then
-  cp -a \
-    doc/* \
-    $PKG/usr/doc/$PRGNAM-$VERSION
-fi
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
