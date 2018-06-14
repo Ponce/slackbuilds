@@ -28,6 +28,7 @@ config etc/glusterfs/group-gluster-block.new
 config etc/glusterfs/group-metadata-cache.new
 config etc/glusterfs/group-nl-cache.new
 config etc/glusterfs/group-virt.example.new
+config etc/glusterfs/gsyncd.conf.new
 config etc/glusterfs/logger.conf.example.new
 config etc/logrotate.d/glusterfs-georep.new
 config etc/logrotate.d/glusterfs.new
