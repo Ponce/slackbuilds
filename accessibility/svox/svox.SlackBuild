@@ -1,0 +1,132 @@
+#!/bin/sh
+
+# Slackware build script for svox
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# This is heavily based on Debian's packaging, see:
+# https://packages.debian.org/source/sid/svox
+
+# It's in the Debian non-free repo on a technicality: svox is free
+# software released under the Apache-2.0 license, but the sources
+# for the compiled voices (/usr/share/pico/lang/*.bin) are missing,
+# so it doesn't quite comply with the its own license.
+
+# Notes to self:
+
+# - The _8 in the version number is the Debian build number, keep it
+#   in sync with future Debian updates.
+# - "Upstream" here is Debian, not Android. Debian has svox's homepage
+#   listed as "www.android.com", it seems more useful to set HOMEPAGE
+#   to the Debian page for svox.
+
+PRGNAM=svox
+VERSION=${VERSION:-1.0+git20130326_8}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+# Split up and recombine Debian's version number, we can't have a - in
+# a Slackware version number. And using the -8 for BUILD is a bad idea
+# (thanks for pointing that out, idlemoor).
+DEBVER="$( echo $VERSION | cut -d_ -f1 )"
+DEBBLD="$( echo $VERSION | cut -d_ -f2 )"
+PRGVER=${PRGNAM}_$DEBVER
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$DEBVER
+tar xvf $CWD/$PRGVER.orig.tar.gz
+cd $PRGNAM-$DEBVER
+tar xvf $CWD/$PRGVER-$DEBBLD.debian.tar.xz
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
+
+# Apply all of Debian's patches. Many thanks to the Debian maintainers
+# for all the work that went into these patches.
+for i in $( cat debian/patches/series ); do
+  # use -e here to skip commented-out patches in 'series'.
+  [ -e debian/patches/$i ] && patch --verbose -p1 < debian/patches/$i
+done
+
+# Stop pico2wave from segfaulting on exit, when given words on the
+# command line. The code presumably works on Debian, maybe because
+# of differences in the popt library, or in glibc itself?
+patch --verbose -p1 < $CWD/dont_try_to_free_argv.diff
+
+cd pico
+autoreconf -if
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --enable-shared \
+  --disable-static \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --build=$ARCH-slackware-linux
+
+make
+make install-strip DESTDIR=$PKG
+
+# We don't need this:
+rm $PKG/usr/lib$LIBDIRSUFFIX/*.la
+
+# It drives me nuts that pico2wave can't play to my speakers, so
+# I wrote a script:
+install -m0755 -oroot -groot $CWD/pico2audio $PKG/usr/bin
+
+# The original Debian man page was generated from the --help output. I've
+# expanded it to include a proper description, examples, a list of
+# allowed languages for the -l option, and a few other goodies.
+mkdir -p $PKG/usr/man/man1
+gzip -9c < $CWD/pico2wave.1 > $PKG/usr/man/man1/pico2wave.1.gz
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cat ../debian/copyright > $PKG/usr/doc/$PRGNAM-$VERSION/copyright
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
