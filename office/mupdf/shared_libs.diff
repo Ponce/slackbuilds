@@ -1,0 +1,76 @@
+diff -Naur mupdf-1.13.0-source/Makefile mupdf-1.13.0-source.patched/Makefile
+--- mupdf-1.13.0-source/Makefile	2018-04-12 09:14:06.000000000 -0400
++++ mupdf-1.13.0-source.patched/Makefile	2018-06-23 15:24:50.242018433 -0400
+@@ -14,7 +14,7 @@
+ # Do not specify CFLAGS or LIBS on the make invocation line - specify
+ # XCFLAGS or XLIBS instead. Make ignores any lines in the makefile that
+ # set a variable that was set on the command line.
+-CFLAGS += $(XCFLAGS) -Iinclude
++CFLAGS += $(XCFLAGS) -Iinclude -fPIC
+ LIBS += $(XLIBS) -lm
+ 
+ LIBS += $(FREETYPE_LIBS)
+@@ -325,10 +325,10 @@
+ 
+ # --- Library ---
+ 
+-MUPDF_LIB = $(OUT)/libmupdf.a
+-THIRD_LIB = $(OUT)/libmupdfthird.a
+-THREAD_LIB = $(OUT)/libmuthreads.a
+-PKCS7_LIB = $(OUT)/libmupkcs7.a
++MUPDF_LIB = $(OUT)/libmupdf.so
++THIRD_LIB = $(OUT)/libmupdfthird.so
++THREAD_LIB = $(OUT)/libmuthreads.so
++PKCS7_LIB = $(OUT)/libmupkcs7.so
+ 
+ MUPDF_OBJ := \
+ 	$(FITZ_OBJ) \
+@@ -355,12 +355,16 @@
+ 	$(ZLIB_OBJ) \
+ 	$(LCMS2_OBJ)
+ 
+-$(MUPDF_LIB) : $(MUPDF_OBJ)
++$(MUPDF_LIB) : $(MUPDF_OBJ) $(THIRD_LIB) $(THREAD_LIB)
++	$(LINK_CMD) -shared -Wl,-soname -Wl,libmupdf.so.$(SOMAJOR) -Wl,--no-undefined
+ $(THIRD_LIB) : $(THIRD_OBJ)
++	$(LINK_CMD) -shared -Wl,-soname -Wl,libmupdfthird.so.$(SOMAJOR) -Wl,--no-undefined
+ $(THREAD_LIB) : $(THREAD_OBJ)
++	$(LINK_CMD) -shared -Wl,-soname -Wl,libmuthreads.so.$(SOMAJOR) -Wl,--no-undefined -lpthread
+ $(PKCS7_LIB) : $(PKCS7_OBJ)
++	$(LINK_CMD) -shared -Wl,-soname -Wl,libmupkcs7.so.$(SOMAJOR)
+ 
+-INSTALL_LIBS := $(MUPDF_LIB) $(THIRD_LIB)
++INSTALL_LIBS := $(MUPDF_LIB) $(THIRD_LIB) $(THREAD_LIB) $(PKCS7_LIB)
+ 
+ # --- Tools and Apps ---
+ 
+@@ -444,6 +448,14 @@
+ 
+ VERSION = $(shell git describe --tags)
+ 
++# 20180623 bkw: major/minor/micro versions for shared library.
++# SOMAJOR is the mupdf major/minor version jammed together (e.g. 113
++# for 1.13.0).
++# SOMINOR is the mupdf micro version (e.g. 0 for 1.13.0).
++SOMAJOR = $(shell echo $(VERSION) | cut -d. -f1-2 | sed 's,\.,,g' )
++SOMINOR = $(shell echo $(VERSION) | cut -d. -f3-  | sed 's,\.,,g' )
++SOVER = $(SOMAJOR).$(SOMINOR)
++
+ version:
+ 	sed -i~ -e '/FZ_VERSION /s/".*"/"'$(VERSION)'"/' include/mupdf/fitz/version.h
+ 
+@@ -482,7 +494,13 @@
+ 	install include/mupdf/pdf/*.h $(DESTDIR)$(incdir)/mupdf/pdf
+ 
+ 	install -d $(DESTDIR)$(libdir)
+-	install $(INSTALL_LIBS) $(DESTDIR)$(libdir)
++	install -s -m0755 $(INSTALL_LIBS) $(DESTDIR)$(libdir)
++	( cd $(DESTDIR)$(libdir) ; \
++		for i in $(INSTALL_LIBS); do \
++			j=$$( basename $$i) ; \
++			mv $$j $$j.$(SOVER) ; \
++			ln -s $$j.$(SOVER) $$j ; \
++		done )
+ 
+ 	install -d $(DESTDIR)$(bindir)
+ 	install $(INSTALL_APPS) $(DESTDIR)$(bindir)
