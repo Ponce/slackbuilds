@@ -1,0 +1,148 @@
+From 70913a1bded444b1d264c3723fca2f6a7966d667 Mon Sep 17 00:00:00 2001
+From: Konrad Rzeszutek Wilk <konrad.wilk@oracle.com>
+Date: Mon, 21 May 2018 22:54:24 +0100
+Subject: [PATCH 2/3] i386: Define the Virt SSBD MSR and handling of it
+ (CVE-2018-3639)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+"Some AMD processors only support a non-architectural means of enabling
+speculative store bypass disable (SSBD).  To allow a simplified view of
+this to a guest, an architectural definition has been created through a new
+CPUID bit, 0x80000008_EBX[25], and a new MSR, 0xc001011f.  With this, a
+hypervisor can virtualize the existence of this definition and provide an
+architectural method for using SSBD to a guest.
+
+Add the new CPUID feature, the new MSR and update the existing SSBD
+support to use this MSR when present." (from x86/speculation: Add virtualized
+speculative store bypass disable support in Linux).
+
+Signed-off-by: Konrad Rzeszutek Wilk <konrad.wilk@oracle.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
+Message-Id: <20180521215424.13520-4-berrange@redhat.com>
+Signed-off-by: Eduardo Habkost <ehabkost@redhat.com>
+(cherry picked from commit cfeea0c021db6234c154dbc723730e81553924ff)
+---
+ target/i386/cpu.h     |  2 ++
+ target/i386/kvm.c     | 16 ++++++++++++++--
+ target/i386/machine.c | 20 ++++++++++++++++++++
+ 3 files changed, 36 insertions(+), 2 deletions(-)
+
+diff --git a/target/i386/cpu.h b/target/i386/cpu.h
+index 970ab96e54..75e821cefe 100644
+--- a/target/i386/cpu.h
++++ b/target/i386/cpu.h
+@@ -351,6 +351,7 @@ typedef enum X86Seg {
+ #define MSR_IA32_FEATURE_CONTROL        0x0000003a
+ #define MSR_TSC_ADJUST                  0x0000003b
+ #define MSR_IA32_SPEC_CTRL              0x48
++#define MSR_VIRT_SSBD                   0xc001011f
+ #define MSR_IA32_TSCDEADLINE            0x6e0
+ 
+ #define FEATURE_CONTROL_LOCKED                    (1<<0)
+@@ -1150,6 +1151,7 @@ typedef struct CPUX86State {
+     uint32_t pkru;
+ 
+     uint64_t spec_ctrl;
++    uint64_t virt_ssbd;
+ 
+     /* End of state preserved by INIT (dummy marker).  */
+     struct {} end_init_save;
+diff --git a/target/i386/kvm.c b/target/i386/kvm.c
+index 6c49954e68..19e6aa320d 100644
+--- a/target/i386/kvm.c
++++ b/target/i386/kvm.c
+@@ -92,6 +92,7 @@ static bool has_msr_hv_stimer;
+ static bool has_msr_hv_frequencies;
+ static bool has_msr_xss;
+ static bool has_msr_spec_ctrl;
++static bool has_msr_virt_ssbd;
+ static bool has_msr_smi_count;
+ 
+ static uint32_t has_architectural_pmu_version;
+@@ -1218,6 +1219,9 @@ static int kvm_get_supported_msrs(KVMState *s)
+                 case MSR_IA32_SPEC_CTRL:
+                     has_msr_spec_ctrl = true;
+                     break;
++                case MSR_VIRT_SSBD:
++                    has_msr_virt_ssbd = true;
++                    break;
+                 }
+             }
+         }
+@@ -1706,6 +1710,10 @@ static int kvm_put_msrs(X86CPU *cpu, int level)
+     if (has_msr_spec_ctrl) {
+         kvm_msr_entry_add(cpu, MSR_IA32_SPEC_CTRL, env->spec_ctrl);
+     }
++    if (has_msr_virt_ssbd) {
++        kvm_msr_entry_add(cpu, MSR_VIRT_SSBD, env->virt_ssbd);
++    }
++
+ #ifdef TARGET_X86_64
+     if (lm_capable_kernel) {
+         kvm_msr_entry_add(cpu, MSR_CSTAR, env->cstar);
+@@ -2077,8 +2085,9 @@ static int kvm_get_msrs(X86CPU *cpu)
+     if (has_msr_spec_ctrl) {
+         kvm_msr_entry_add(cpu, MSR_IA32_SPEC_CTRL, 0);
+     }
+-
+-
++    if (has_msr_virt_ssbd) {
++        kvm_msr_entry_add(cpu, MSR_VIRT_SSBD, 0);
++    }
+     if (!env->tsc_valid) {
+         kvm_msr_entry_add(cpu, MSR_IA32_TSC, 0);
+         env->tsc_valid = !runstate_is_running();
+@@ -2444,6 +2453,9 @@ static int kvm_get_msrs(X86CPU *cpu)
+         case MSR_IA32_SPEC_CTRL:
+             env->spec_ctrl = msrs[i].data;
+             break;
++        case MSR_VIRT_SSBD:
++            env->virt_ssbd = msrs[i].data;
++            break;
+         case MSR_IA32_RTIT_CTL:
+             env->msr_rtit_ctrl = msrs[i].data;
+             break;
+diff --git a/target/i386/machine.c b/target/i386/machine.c
+index bd2d82e91b..f0a835c292 100644
+--- a/target/i386/machine.c
++++ b/target/i386/machine.c
+@@ -893,6 +893,25 @@ static const VMStateDescription vmstate_msr_intel_pt = {
+     }
+ };
+ 
++static bool virt_ssbd_needed(void *opaque)
++{
++    X86CPU *cpu = opaque;
++    CPUX86State *env = &cpu->env;
++
++    return env->virt_ssbd != 0;
++}
++
++static const VMStateDescription vmstate_msr_virt_ssbd = {
++    .name = "cpu/virt_ssbd",
++    .version_id = 1,
++    .minimum_version_id = 1,
++    .needed = virt_ssbd_needed,
++    .fields = (VMStateField[]){
++        VMSTATE_UINT64(env.virt_ssbd, X86CPU),
++        VMSTATE_END_OF_LIST()
++    }
++};
++
+ VMStateDescription vmstate_x86_cpu = {
+     .name = "cpu",
+     .version_id = 12,
+@@ -1015,6 +1034,7 @@ VMStateDescription vmstate_x86_cpu = {
+         &vmstate_spec_ctrl,
+         &vmstate_mcg_ext_ctl,
+         &vmstate_msr_intel_pt,
++        &vmstate_msr_virt_ssbd,
+         NULL
+     }
+ };
+-- 
+2.17.0
+
