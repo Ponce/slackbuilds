@@ -2,7 +2,7 @@
 
 # Slackware build script for bozohttpd
 
-# Copyright 2015-2017 Leonard Schmidt <lems@gmx.net>
+# Copyright 2015-2017 Leonard Schmidt <email removed>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,9 +22,23 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# Now maintained by B. Watson <yalhcru@gmail.com>.
+
+# 20180629 bkw:
+# - Take over maintenance.
+# - Move binary to /usr/sbin (to match the section 8 man page). But
+#   leave compatibility symlink in /usr/bin to avoid breaking everyone's
+#   rc.local or other scripts. BUILD=2.
+# - Fix a couple of compiler warnings.
+# - Add .htpasswd support. It's enabled by default in upstream's BSD-only
+#   Makefile.
+# - Optional Lua support.
+# - Tweak man page, de-NetBSDify the pathnames.
+# - Simplify script a bit.
+
 PRGNAM=bozohttpd
 VERSION=${VERSION:-20170201}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -65,31 +79,73 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
- -o -perm 511 \) -exec chmod 755 {} \; -o \
+ -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+ -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
-cp Makefile.boot Makefile
+# 20180629 bkw: Note to self: Ignore Makefile. It's BSD-specific.
+# In theory maybe it could be massaged into working with bmake or
+# (*shudder*) pmake. Makefile.boot is a stripped-down generic Makefile
+# that does work with GNU make... but it's a bit too stripped down,
+# have to add a couple of features that were removed.
+
+sed -i '/^CRYPTOLIBS/s,$, -lcrypt,' Makefile.boot
+
+# 20180629 bkw: support lua (-L option) if lua is installed and user
+# doesn't disable it. I've tested this with the printenv.lua script
+# and it seems to work fine.
+if [ "${LUA:-yes}" = "yes" ] && lua -v &>/dev/null; then
+  LUAOPT=""
+  WITHLUA="with"
+  EXTRADOC="printenv.lua"
+  sed -i '/^CRYPTOLIBS/s,$, -llua,' Makefile.boot
+  sed -i 's,/usr/libexec/httpd,bozohttpd,' printenv.lua
+else
+  LUAOPT="-DNO_LUA_SUPPORT"
+  WITHLUA="without"
+  EXTRADOC=""
+fi
+
+# 20180629 bkw: The man page was written for NetBSD, where I guess
+# bozohttpd is installed as "httpd". On Slackware this is Apache. The
+# man page shows example commands referring to "httpd", which will
+# confuse everyone who tries to run them... also the paths are weird.
+
+# Note to the SBo admin who reviews this: if you really hate the mega-sed
+# command below, I wouldn't mind making this a patch instead. Six of one,
+# half a dozen of the other.
+
+sed -i \
+    -e 's,\<httpd ,bozohttpd ,g' \
+    -e 's,libexec,sbin,g' \
+    -e 's,_httpd,nobody,g' \
+    -e 's,/var/www,/var/www/htdocs,g' \
+    -e 's, *-v */var/vroot,,g' \
+    -e 's,/usr/pkg,/usr,g' \
+    $PRGNAM.8
+
+# 20180629 bkw: warning: implicit declaration of function vasprintf().
+# Probably doesn't hurt anything, but might cause problems later.
+# More worrisome is missing crypt() prototype (causes implicit pointer
+# to int casts, baaaaad, especially on 64-bit).
+patch -p1 < $CWD/fix_warnings.diff
+
 # Fix build (from Arch Linux' AUR).
 sed -i 's/d_namlen/d_reclen/g' bozohttpd.c
-make OPT="$SLKCFLAGS"
 
-mkdir -p $PKG/usr/{bin,man/man8}
-install -m755 bozohttpd $PKG/usr/bin
-install -m644 bozohttpd.8 $PKG/usr/man/man8
+make -f Makefile.boot OPT="$SLKCFLAGS -Wall" LOCAL_CFLAGS="-DDO_HTPASSWD $LUAOPT"
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+mkdir -p $PKG/usr/bin $PKG/usr/sbin $PKG/usr/man/man8
+install -s -m755 $PRGNAM $PKG/usr/sbin
+ln -s ../sbin/$PRGNAM $PKG/usr/bin/$PRGNAM
+gzip -9c < $PRGNAM.8 > $PKG/usr/man/man8/$PRGNAM.8.gz
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a CHANGES $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CHANGES $EXTRADOC $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@WITHLUA@,$WITHLUA," $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
