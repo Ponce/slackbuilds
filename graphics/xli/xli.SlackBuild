@@ -2,7 +2,7 @@
 
 # Slackware build script for xli
 
-# Copyright 2014 Leonard Schmidt <lems@gmx.net>
+# Copyright 2014 Leonard Schmidt <email removed>
 # All rights reserved.
 #
 # Permission to use, copy, modify, and distribute this software for any purpose
@@ -20,10 +20,28 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# Now maintained by B. Watson <yalhcru@gmail.com>
+
+# 20180629 bkw:
+# - Take over maintenance.
+# - BUILD=2.
+# - Stop spamming /etc/X11/app-defaults and /usr/bin (!!)
+# - Add -DHAVE_GUNZIP and -DHAVE_BUNZIP2 options, to support viewing
+#   compressed images.
+# - Install xliguide.5 man page.
+# - Make system-wide config file actually work as documented in the
+#   man page. Previous it was getting installed (straight to /etc, not
+#   as part of the package!) and totally ignored at runtime.
+# - Include chkgamma.jpg in doc dir, since ABOUTGAMMA references it.
+
+# TODO: find out why "-border" doesn't seem to work. The -fullscreen
+# window border is always white, no matter what color you give to
+# -border. I only moderately care about this, TBH.
+
 PRGNAM=xli
 VERSION=${VERSION:-1.17}
 SRCVER=${SRCVER:-2005-02-27}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -64,9 +82,9 @@ cd $PRGNAM-$SRCVER
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
 # These patches are from NetBSD's pkgsrc:
 # <http://cvsweb.netbsd.org/bsdweb.cgi/pkgsrc/graphics/xli/patches/?only_with_tag=MAIN>
@@ -74,18 +92,46 @@ for i in c d e f g h; do
 	patch -p0 < $CWD/patch-a${i}
 done
 
+# 20180629 bkw: Seems we have to explicitly define the system-wide
+# config file in CCOPTIONS. Might as well add .gz and .bz2 support,
+# while we're at it.
+APPDEF=/etc/X11/app-defaults/Xli
 xmkmf -a
-make CDEBUGFLAGS="$SLKCFLAGS"
-make install install.man DESTDIR=$PKG
+make \
+  CDEBUGFLAGS="$SLKCFLAGS" \
+  CCOPTIONS="-DHAVE_GUNZIP -DHAVE_BUNZIP2 -DSYSPATHFILE=\\\"$APPDEF\\\""
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# 20180629 bkw: Do not use 'make install', it doesn't fully support
+# DESTDIR and spams stuff to /usr/bin and /etc/X11/app-defaults.
+mkdir -p $PKG/usr/bin $PKG/usr/man/man1 $PKG
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+for i in $PRGNAM ${PRGNAM}to; do
+  install -s -m0755 -oroot -groot $i $PKG/usr/bin
+  gzip -9c < $PRGNAM.man > $PKG/usr/man/man1/$i.1x.gz
+done
+
+for i in xview xsetbg; do
+  ln -s $PRGNAM $PKG/usr/bin/$i
+  ln -s $PRGNAM.1x.gz $PKG/usr/man/man1/$i.1x.gz
+done
+
+# This is API doc, for extending xli with new image formats. Not
+# necessarily useful, but why not package it?
+mkdir -p $PKG/usr/man/man5
+gzip -9c < xliguide.man > $PKG/usr/man/man5/xliguide.5.gz
+
+# The defaults file is only 2 lines, easier to create here than
+# try to make the Makefile play nice with DESTDIR. Plus, the hard-coded
+# defaults need modifying anyway (add formats to extension= and use dirs
+# that actually exist for path=).
+mkdir -p $PKG/etc/X11/app-defaults
+cat <<EOF >$PKG/etc/X11/app-defaults/Xli
+path=/usr/share/pixmaps /usr/share/icons
+extension=.png .gif .jpg .PNG .GIF .JPG .jpeg .JPEG .xpm .pcx .PCX .bmp .BMP .pbm .pgm .ppm .tga .TGA .rle .csun .msun .sun .face .xbm .bm
+EOF
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a ABOUTGAMMA CHANGES README README.xloadimage TODO $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a ABOUTGAMMA CHANGES README* TODO chkgamma.jpg $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
