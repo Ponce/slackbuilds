@@ -2,7 +2,7 @@
 
 # Slackware build script for tnftp
 
-# Copyright (c) 2014, 2015 Leonard Schmidt <lems@gmx.net>
+# Copyright (c) 2014, 2015 Leonard Schmidt <email removed>
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -21,9 +21,17 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# Now maintained by B. Watson <yalhcru@gmail.com>.
+
+# 20180629 bkw:
+# - Take over maintenance.
+# - Add 'todo' to docdir, BUILD=2.
+# - Build with optional SOCKS support if dante is installed.
+# - Script simplification.
+
 PRGNAM=tnftp
 VERSION=${VERSION:-20151004}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -64,35 +72,61 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib$LIBDIRSUFFIX \
-  --sysconfdir=/etc/tnftp \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --build=$ARCH-slackware-linux \
-  --enable-editcomplete \
-  --enable-ipv6 \
-  --enable-ssl
+# ./configure --enable-ipv6 --with-socks
+#   configure: WARNING: IPv6 is incompatible with socks, disabling IPv6 support
+# We can't build a single binary with both. So what we do here is build
+# 2 binaries (tnftp.ipv6 and tnftp.socks), symlink the ipv6 one to
+# /usr/bin/tnftp, and tell the user he can call the socks one by name,
+# or replace the symlink.
 
+# These configure options are used for both builds:
+runconfig() {
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  ./configure \
+    --prefix=/usr \
+    --libdir=/usr/lib$LIBDIRSUFFIX \
+    --sysconfdir=/etc/tnftp \
+    --mandir=/usr/man \
+    --docdir=/usr/doc/$PRGNAM-$VERSION \
+    --build=$ARCH-slackware-linux \
+    --enable-editcomplete \
+    --enable-ssl \
+    "$@"
+}
+
+# First time around, build with ipv6 and no socks:
+runconfig --enable-ipv6 --without-socks
 make
 make install-strip DESTDIR=$PKG
+gzip -9 $PKG/usr/man/man1/$PRGNAM.1
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+mv $PKG/usr/bin/$PRGNAM $PKG/usr/bin/$PRGNAM.ipv6
+ln -s $PRGNAM.ipv6 $PKG/usr/bin/$PRGNAM
+
+# 2nd build, with socks but no ipv6, if dante is installed and
+# the user hasn't set SOCKS=no. Only the binary needs to be
+# installed, so don't "make install" again.
+if [ "${SOCKS:-yes}" = "yes" -a -e /usr/include/socks.h ]; then
+  WITHSOCKS="with"
+  make distclean
+  runconfig --disable-ipv6 --with-socks
+  make
+  install -s src/$PRGNAM $PKG/usr/bin/$PRGNAM.socks
+else
+  WITHSOCKS="without"
+fi
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a COPYING ChangeLog NEWS README THANKS $PKG/usr/doc/$PRGNAM-$VERSION/
+cp -a COPYING ChangeLog NEWS README THANKS todo $PKG/usr/doc/$PRGNAM-$VERSION/
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@WITHSOCKS@,$WITHSOCKS," $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
