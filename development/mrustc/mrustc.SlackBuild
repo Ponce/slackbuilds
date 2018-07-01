@@ -23,7 +23,7 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=mrustc
-GITREV=${GITREV:-b03d61ed130dad6fa88a3beb4c32e48f86fdf84e}
+GITREV=${GITREV:-35c11b8e48fc92ad4b0992cf0b73f3e570468874}
 VERSION=${VERSION:-git$(echo "$GITREV" | sed 's/^\(.\{7\}\).*$/\1/')}
 RUSTCVERSION=${RUSTCVERSION:-1.19.0}
 BUILD=${BUILD:-1}
@@ -43,23 +43,24 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
+  RUSTC_TARGET="i586-unknown-linux-gnu"
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
+  RUSTC_TARGET="i686-unknown-linux-gnu"
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
+  RUSTC_TARGET="x86_64-unknown-linux-gnu"
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
+elif [ "$ARCH" = "arm" ] ; then
+  RUSTC_TARGET="arm-unknown-linux-gnueabi"
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
-fi
-
-# https://github.com/thepowersgang/mrustc/issues/38#issuecomment-352158861
-if [ "$ARCH" != "x86_64" ]; then
-  echo "Sorry, mrustc currently only supports x86_64."
-  exit 1
 fi
 
 set -e
@@ -84,15 +85,29 @@ find -L . \
 
 make RUSTCSRC
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-CC=gcc \
-make -f minicargo.mk
+LLVM_TARGETS="X86"
+
+if [ "$ARCH" = "arm" ] ; then
+  LLVM_TARGETS="$LLVM_TARGETS;ARM"
+fi
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
+RUSTC_TARGET="$RUSTC_TARGET" \
+LLVM_TARGETS="$LLVM_TARGETS" \
 CC=gcc \
-make -j1 -C run_rustc
+make -f minicargo.mk
+
+WITH_RUSTC=${WITH_RUSTC:-yes}
+
+if [ "$WITH_RUSTC" = "yes" ] ; then
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  RUSTC_TARGET="$RUSTC_TARGET" \
+  LLVM_TARGETS="$LLVM_TARGETS" \
+  CC=gcc \
+  make -j1 -C run_rustc
+fi
 
 mkdir -p $PKG/usr/bin
 install -m 0755 bin/mrustc $PKG/usr/bin/mrustc
@@ -101,14 +116,16 @@ install -m 0755 tools/bin/minicargo $PKG/usr/bin/minicargo
 mkdir -p $PKG/usr/share/mrustc
 find output -name '*.hir' -maxdepth 1 -exec install -m 0644 {} $PKG/usr/share/mrustc/ \;
 
-mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/rustlib/$ARCH-unknown-linux-gnu/lib/
-cp -a run_rustc/prefix/lib/rustlib/$ARCH-unknown-linux-gnu/lib/* $PKG/usr/lib$LIBDIRSUFFIX/rustlib/$ARCH-unknown-linux-gnu/lib/
+if [ "$WITH_RUSTC" = "yes" ] ; then
+  mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/rustlib/$ARCH-unknown-linux-gnu/lib/
+  cp -a run_rustc/prefix/lib/rustlib/$ARCH-unknown-linux-gnu/lib/* $PKG/usr/lib$LIBDIRSUFFIX/rustlib/$ARCH-unknown-linux-gnu/lib/
 
-find $PKG/usr/lib$LIBDIRSUFFIX -name "*.so" -exec chmod 755 "{}" \;
+  find $PKG/usr/lib$LIBDIRSUFFIX -name "*.so" -exec chmod 755 "{}" \;
 
-install -m 0755 output/rustc $PKG/usr/bin/rustc
-install -m 0755 output/cargo $PKG/usr/bin/cargo
-install -m 0755 output/rustc-build/rustdoc $PKG/usr/bin/rustdoc
+  install -m 0755 output/rustc $PKG/usr/bin/rustc
+  install -m 0755 output/cargo $PKG/usr/bin/cargo
+  install -m 0755 output/rustc-build/rustdoc $PKG/usr/bin/rustdoc
+fi
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
