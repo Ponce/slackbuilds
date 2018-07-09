@@ -1,0 +1,106 @@
+#!/bin/sh
+
+# Slackware build script for glktermw
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Notes:
+
+# Upstream doesn't support shared libraries. I could patch the Makefile
+# and do a shared lib, but I'd be inventing my own shared-lib versioning
+# scheme (see office/mupdf/README_shared.txt for my reasons not to want
+# to do this).
+
+# Using -Os rather than -O2 in SLKCFLAGS. This makes the static library
+# 15% smaller with no noticeable difference in speed, since a text game
+# spends most of its time waiting for the user to type something. Please,
+# SBo admins, don't change this unless you have evidence that the
+# optimization is causing an actual problem with running software that
+# links to the library. Currently only one thing links with it (fizmo)
+# and I've tested it pretty thoroughly.
+
+# The includes get installed in /usr/include/glktermw instead of directly
+# in /usr/include as upstream recommends. This is because remglk (another
+# glk implementation) wants to install slightly different headers in
+# the same place... so both get subdirectories.
+
+PRGNAM=glktermw
+VERSION=${VERSION:-1.0.4}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-Os -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-Os -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-Os -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-Os"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+# tarball inner dir name, *not* the same as PRGNAM. Grr.
+DIRNAM=glkterm
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $DIRNAM
+tar xvf $CWD/$PRGNAM-${VERSION//./}.tar.gz
+cd $DIRNAM
+
+# no subdirs, no scripts, no need for the huge find|chown template stuff.
+chown -R root:root .
+chmod 644 *
+
+# The readme.txt says to edit gtoption.h if needed; we don't need to.
+# The -Wno-endif-labels quiets some pointless warnings (about comments,
+# not labels, despite the warning's name).
+make OPTIONS="$SLKCFLAGS -Wno-endif-labels"
+
+# Careful, warrior! strip strips too much from a static lib by default.
+strip --strip-unneeded lib$PRGNAM.a
+
+# No install target, Makefile comments explain how to install it.
+# Make.glktermw really shouldn't go in /usr/include, it's *not* a C
+# include (it's a Makefile include), but that's where upstream wants it,
+# and where stuff that builds with glktermw looks for it (?)
+# The Makefile says we only need to install glk.h and glkstart.h,
+# but fizmo wants to include gi_blorb.h. Also gi_dispa.h looks like
+# public API stuff.
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX $PKG/usr/include/$PRGNAM
+cat lib$PRGNAM.a > $PKG/usr/lib$LIBDIRSUFFIX/lib$PRGNAM.a
+for i in glk.h glkstart.h Make.$PRGNAM gi_*.h; do
+  cat $i > $PKG/usr/include/$PRGNAM/$i
+done
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a *.txt $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
