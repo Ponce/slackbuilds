@@ -7,8 +7,29 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20180710 bkw:
+# - updated for 20180424_8fc2d54 (latest git).
+# - finally fix long-standing segfault bug.
+# - document new optional deps in README.
+# - make slack-desc show runtime library deps.
+# - remove freepats from REQUIRES. I've never been able to get the
+#   music to play in jfsw anyway.
+
+# When updating to the latest commit of jfsw, we gotta make sure we
+# get the correct commits of the other 3 sources (jfaudiolib, jfbuild,
+# jfmact). To do this:
+#   git clone https://github.com/jonof/jfsw.git jfsw.tmp
+#   cd jfsw.tmp
+#   git submodule init
+#   git submodule update
+# Fortunately only the .info file needs to be updated. This script
+# parses it instead of having the commit hashes hardcoded here too.
+# VERSION is duplicated as usual, but here it only serves to name the
+# package (you could build just fine with any VERSION so long as the
+# .info file is correct).
+
 PRGNAM=jfsw
-VERSION=${VERSION:-20160220_54912c4}
+VERSION=${VERSION:-20180424_8fc2d54}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -41,49 +62,84 @@ fi
 
 set -e
 
+# We got 4 source tarballs to extract, so create an enclosing $PRGNAM
+# dir to put them all in (for ease of cleanup, if nothing else). When
+# we're ready to build, the source will all be in $TMP/$PRGNAM/$PRGNAM.
 rm -rf $PKG
-mkdir -p $TMP $PKG $OUTPUT
-cd $TMP
-for SRCNAM in \
-  jfsw-54912c4964a5d68d4fd68dba1d3affcfe2062766 \
-  jfaudiolib-ea5613edadcf691a4867a750546f33ef84885fbf \
-  jfbuild-b129b7ee9ce468022610dc8194786c0bac1f66ef \
-  jfmact-f915216973de73c42c326fdd3b1734ac12316427 \
-; do
+rm -rf $TMP/$PRGNAM
+mkdir -p $TMP/$PRGNAM $PKG $OUTPUT
+cd $TMP/$PRGNAM
+
+# 20180710 bkw: this is an unusual thing for a SlackBuild to do:
+# parse its own .info file. Done this way to avoid duplicating
+# all those full-length git hashes in both files.
+if [ ! -e "$CWD/$PRGNAM.info" ]; then
+  echo "$PRGNAM.info not found, where did it go?" 1>&2
+  exit 1
+fi
+
+# For paranoia's sake, don't actually source the entire .info file, just
+# grab the DOWNLOAD= assignment. This rather cryptic sed command means
+# "start printing lines when you hit one that starts with DOWNLOAD,
+# and exit when you hit one that ends with gz and a double-quote
+# (plus possible trailing whitespace)". Result is the multi-line DOWNLOAD
+# assigment only.
+DLFRAG="$( mktemp ./tmp.info.XXXXXX )"
+sed -n '/^DOWNLOAD/,$p;/gz" *$/q' < "$CWD/$PRGNAM.info" > $DLFRAG
+source $DLFRAG
+
+for URL in $DOWNLOAD; do
+  SRCNAM="$( basename "$URL" .tar.gz )"
   PNAM=$(echo $SRCNAM | sed -e 's/-.*//')
+  [ "$PNAM" = "$PRGNAM" ] || DIRS="$TMP/$PRGNAM/$PNAM $DIRS"
   rm -rf $SRCNAM $PNAM
   tar xvf $CWD/$SRCNAM.tar.gz
   mv $SRCNAM $PNAM
 done
 
 cd $PRGNAM
-mv \
-  $TMP/jfaudiolib \
-  $TMP/jfbuild \
-  $TMP/jfmact \
-  .
+mv $DIRS .
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
-patch -p1 < $CWD/jfsw-use-me.patch
+# 20180711 bkw: how to trigger a known segfault:
+# <orbea> make a save game, load that save game, die while holding the
+#         fire button
+# I came up with a band-aid to work around the segfault. Stops the
+# fire button from working the same as a Y keypress (or at all), in Y/N
+# prompts. Patch was sent upstream: https://github.com/jonof/jfsw/issues/14
+patch -p1 < $CWD/fixsegfault.diff
+
+# 20180711 bkw: The -Wno-return-type isn't needed for gcc but does no
+# harm. Left in place in case someone wants to build this with clang
+# (add a CC=clang arg to the make command, or 'export CC=clang').
+
+# 20180711 bkw: JFAUDIOLIB_USE_SDLMIXER=1 doesn't work (build fail due
+# to missing driver_sdlmixer.c). Maybe someday it'll work and then we
+# can maybe hear the in-game music? (or not?)
 
 make \
   RELEASE=1 \
   PREFIX=/usr/share/games/$PRGNAM \
-  CFLAGS="$SLKCFLAGS" \
+  CFLAGS="$SLKCFLAGS -Wno-return-type" \
   CXXFLAGS="$SLKCFLAGS"
 
-# no 'make install' target
+# So far, we haven't got options to disable the optional stuff, but
+# at least document what the binary package needs in its slack-desc.
 BIN_NAME=sw
+SDLVER=1.2
+WITHFLUID=without
+ldd $BIN_NAME | grep -q libSDL2 && SDLVER=2.0
+ldd $BIN_NAME | grep -q libfluidsynth && WITHFLUID=with
+
+# no 'make install' target
 mkdir -p $PKG/usr/games
 install -s -m0755 -oroot -groot $BIN_NAME $PKG/usr/games
-cd $PKG/usr/games
-  ln -s $BIN_NAME $PRGNAM
-cd -
+ln -s $BIN_NAME $PKG/usr/games/$PRGNAM
 
 # Data directory included in package, even though we don't include data file.
 # Why? Because the user might be grabbing sw.grp from a retail CD-ROM, and
@@ -98,14 +154,14 @@ mkdir -p $PKG/usr/share/applications
 cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  GNU.TXT readme.txt releasenotes.html \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a GNU.TXT readme.txt releasenotes.html $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README_SBo.txt
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s,@WITHFLUID@,$WITHFLUID," \
+    -e "s,@SDLVER@,$SDLVER, " \
+    $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
