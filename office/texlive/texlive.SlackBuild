@@ -2,9 +2,9 @@
 
 # TeXLive build script for Slackware
 
-# Copyright 2009, 2017  Patrick J. Volkerding, Sebeka, MN, USA
-# Copyright 2009-2014  Robby Workman, Northport, AL, USA
-# Copyright 2016-2017  Johannes Schoepfer, Germany
+# Copyright 2009, 2017 - 2018  Patrick J. Volkerding, Sebeka, MN, USA
+# Copyright 2009 - 2014  Robby Workman, Northport, AL, USA
+# Copyright 2016 - 2017  Johannes Schoepfer, Germany
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -26,10 +26,11 @@
 
 # URL: ftp://tug.org/historic/systems/texlive/
 # Testrelease: ftp://tug.org/texlive/Images/test/
+# Upstream stable fixes: svn://tug.org/texlive/branches/branch2018/Build/source
 
 PRGNAM=texlive
-SOURCEVERSION=20170520
-VERSION=${VERSION:-2017.171108}
+SOURCEVERSION=20180414
+VERSION=${VERSION:-2018.180630}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -63,7 +64,7 @@ fi
 # recompiled with pretty much every poppler update, as they almost always
 # bump the shared library version. But sometimes you do what you have
 # to do...
-SYSTEMPOPPLER=${SYSTEMPOPPLER:-YES}
+SYSTEMPOPPLER=${SYSTEMPOPPLER:-NO}
 if [ "$SYSTEMPOPPLER" = "NO" ]; then
   POPPLER="--without-system-poppler --without-system-xpdf"
 else
@@ -92,21 +93,23 @@ sed -i \
 # prevent compiling Xdvi with libXp
 sed -i 's|-lXp ||' texk/xdvik/configure
 
-# Thanks to the lfs-folks ...
-patch -Np1 -i $CWD/patches/texlive-20170524-source-gcc7-1.patch || exit 1
-patch -Np1 -i $CWD/patches/texlive-20170524-source-upstream_fixes-2.patch || exit 1
+# Upstream stable fixes
+patch -Np0 -i $CWD/patches/20180625.diff || exit 1
 
-## Needed on -current, 2017-10-06
-## Thanks to archlinux for the poppler-0.59 API fixup patch:
+# Needed on -current, 2018-05-06
+# The 2018 version of texlive ships with support for poppler-0.57.0 and older,
+# but it includes alternative newpoppler files which enable building with
+# poppler-0.62.0 or newer.
 #if [ ! "$SYSTEMPOPPLER" = "NO" ]; then
-#	patch -Np1 -i $CWD/patches/texlive-poppler-0.59.patch || exit 1
+#  mv -v texk/web2c/pdftexdir/pdftoepdf{-newpoppler,}.cc || exit 1
+#  mv -v texk/web2c/pdftexdir/pdftosrc{-newpoppler,}.cc  || exit 1
 #fi
 
 # --with-system-harfbuzz requires graphite2 (and harfbuzz linked to it)
 mkdir build
 cd build
   CFLAGS="$SLKCFLAGS" \
-  CXXFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS -fpermissive" \
   ../configure \
     --prefix=/usr \
     --libdir=/usr/lib${LIBDIRSUFFIX} \
@@ -142,6 +145,7 @@ cd build
     --without-system-harfbuzz \
     --disable-aleph \
     --disable-dump-share \
+    --disable-linked-scripts \
     $POPPLER \
     --build=$ARCH-slackware-linux || exit 1
 
@@ -149,29 +153,29 @@ cd build
   # make check || exit 1
   make install-strip DESTDIR=$PKG || exit 1
 
-  # Don't ship .la files:
-  rm -f $PKG/usr/lib${LIBDIRSUFFIX}/*.la
-
-  # Remove all files which are covered by tlnet
-  rm -rf $PKG/usr/share $PKG/usr/man $PKG/usr/info
-
-  # install the tlnet stuff
-  mkdir -p $PKG/usr/share
-  tar xvf $CWD/texlive-base-$VERSION.tar.xz -C $PKG/usr/share || exit 1
-  chown -R root:root $PKG
-  chmod -R u+w,go-w,a+rX-st $PKG
-
-  # Create symlinks
-  make texlinks DESTDIR=$PKG || exit 1
-
 cd ..
+
+# Don't ship .la files:
+rm -f $PKG/usr/lib${LIBDIRSUFFIX}/*.la
+
+# Remove all files which are covered by tlnet
+rm -rf $PKG/usr/share $PKG/usr/man $PKG/usr/info
+
+# install the tlnet stuff
+mkdir -p $PKG/usr/share
+tar xvf $CWD/texlive-base-$VERSION.tar.xz -C $PKG/usr/share || exit 1
+chown -R root:root $PKG
+chmod -R u+w,go-w,a+rX-st $PKG
+
+# use symlinks/scripts from tlnet
+mv $PKG/usr/share/texmf-dist/linked_scripts/* $PKG/usr/bin
+rmdir $PKG/usr/share/texmf-dist/linked_scripts
 
 # set some paths
 sed -i \
   -e 's|^TEXMFROOT.*|TEXMFROOT = $SELFAUTODIR/share|' \
   -e 's|^TEXMFLOCAL.*|TEXMFLOCAL = $TEXMFROOT/texmf-local|' \
   -e 's|^OSFONTDIR.*|OSFONTDIR = ~/.fonts:/usr/share/fonts|' \
-  -e 's|texlive20[0-9][0-9]|texlive|g' \
   $PKG/usr/share/texmf-dist/web2c/texmf.cnf
 
 # disable obsolete aleph/lamed/cslatex/pdfcslatex
@@ -186,7 +190,6 @@ sed -i \
 sed -i \
   -e 's|selfautoparent:|/usr/share/|g' \
   -e 's|\(TEXMFLOCAL[ ]*=[ ]*\)[^,]*|\1"/usr/share/texmf-local"|' \
-  -e 's|texlive20[0-9][0-9]|texlive|g' \
   -e '/selfautodir/d' \
   -e '/texmflocal/d' \
   $PKG/usr/share/texmf-dist/web2c/texmfcnf.lua
