@@ -1,1 +1,1 @@
-. /opt/OpenFOAM/OpenFOAM-5.0/etc/bashrc
+. /opt/OpenFOAM/OpenFOAM-6/etc/bashrc
