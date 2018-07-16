@@ -1,0 +1,119 @@
+#!/bin/sh
+
+# Slackware build script for z88dk
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# TODO: someday include the zsdcc stuff. Probably sometime after z88dk's
+# 2.0 release. If no 2.0 release exists by, say, the start of 2019, I'll
+# probably change this build so it works with a git snapshot instead
+# of a release. I'll admit, my motivation for that will be that I want
+# to have a C compiler that targets Pac-Man arcade hardware (the 1.99B
+# release doesn't, current git does).
+
+PRGNAM=z88dk
+VERSION=${VERSION:-1.99B}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM
+unzip $CWD/$PRGNAM-src-$VERSION.zip
+cd $PRGNAM
+
+# Upstream permissions are bad. Please don't replace with "find . -L
+# ..." boilerplate.
+find . -name CVS -print0 | xargs -0 rm -rf
+find . -type f   -print0 | xargs -0 chmod 0644
+find . -type d   -print0 | xargs -0 chmod 0755
+chmod +x *.sh
+
+# Sneaky ways to inject CFLAGS.
+sed -i "s/CC=gcc/CC='gcc $SLKCFLAGS'/" build.sh
+export CXX="g++ $SLKCFLAGS"
+
+# Default prefix.
+sed -i "s,/usr/local,/usr," Makefile
+
+# Upstream seems to be in the middle of migrating from /usr/lib to
+# /usr/share or vice versa. The compiler looks for stuff in lib that's
+# actually installed to share, if I don't do this:
+sed -i '/^prefix_share/s,/share,/lib,' Makefile
+
+# Note to well-intentioned maintainers: please don't try to move
+# this stuff to /usr/lib64 on 64-bit systems. There's no native code
+# (no ELF executables, no shared or static libraries full of x86_64
+# code). Everthing in /usr/lib/z88dk is either headers, source, or
+# z88dk's own .lib format for z80 object code. From Linux's point
+# of view, it's just data. It's no different from Pat keeping udev
+# rules in /lib/udev on 64-bit.
+
+# Parallel make of the compiler itself works OK, but not of the
+# z80 native libraries.
+sed -i '/^\$MAKE *-e/aexport MAKEFLAGS="-j1"' build.sh
+
+./build.sh
+
+# install-libs doesn't seem to support DESTDIR.
+make install prefix=$PKG/usr
+make install-libs prefix=$PKG/usr
+
+# 'make install' doesn't install everything the compiler needs...
+# Trying to build the examples I got "sh: zpragma: command not found".
+cp -a bin/* $PKG/usr/bin/
+
+# strip strips everything but chokes on the perl script.
+strip $PKG/usr/bin/* 2>/dev/null || true
+
+# man pages from Debian:
+# http://http.debian.net/debian/pool/main/z/z88dk/z88dk_1.8.ds1-10.debian.tar.gz
+# They're for an older version of z88dk, and there's not a complete
+# set of them, but it's better than nothing I hope.
+mkdir -p $PKG/usr/man/man1
+for i in $CWD/man/*.1; do
+  gzip -9c < $i > $PKG/usr/man/man1/$( basename $i ).gz
+done
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README* LICENSE EXTENSIONS doc examples support \
+      $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
