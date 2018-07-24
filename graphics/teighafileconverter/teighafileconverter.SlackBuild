@@ -2,7 +2,8 @@
 
 # Slackware build script for TeighaFileConverter
 
-# Copyright 2012-2014  Fridrich von Stauffenberg <cancellor2@gmail.com>
+# Copyright 2012-2014  Fridrich von Stauffenberg <email removed>
+# Copyright 2018 B. Watson <yalhcru@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,42 +23,79 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20180724 bkw:
+# - Take over maintenance.
+# - Update for v19.5.0.0. This adds x86_64 support, but means qt5 is
+#   now required.
+# - Pacify desktop-file-validate.
+# - Simplify script a bit.
+# - Clarify README and slack-desc.
+# - Name the x86 package according to ARCH (i586 or i686). No effect on
+#   the package contents, just the filename.
+
 PRGNAM=teighafileconverter
-VERSION=${VERSION:-4.00.0}
+VERSION=${VERSION:-19.5.0.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-ARCH=i386
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
 
-ORIG_PRGNAM=TeighaFileConverter
+ORIGNAM=TeighaFileConverter
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
+case "$ARCH" in
+  i?86)   DEBARCH=X86 ; LIBDIRSUFFIX=""   ;;
+  x86_64) DEBARCH=X64 ; LIBDIRSUFFIX="64" ;;
+  *)      echo "Unsupported ARCH, only i?86 and x86_64 supported" 1>&2
+          exit 1 ;;
+esac
+
 set -e
+
+# No "source" directory, extract directly to $PKG.
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $PKG
-ar xv $CWD/${ORIG_PRGNAM}_lnxX86_4.4dll_${VERSION}_$ARCH.deb
-tar xvf data.tar.gz
-rm -f data.tar.gz control.tar.gz debian-binary
+
+# How to extract a .deb without creating temp files. If you're using this
+# in your own SlackBuild, be aware that some .debs contain data.tar.xz
+# instead of .gz.
+ar p $CWD/${ORIGNAM}_QT5_lnx${DEBARCH}_*dll.deb data.tar.gz | tar xvfz -
+
 chown -R root:root .
 find . -type d -exec chmod 755 {} \;
 find -L . \! -name '*.so' \! -name '*.tx*' -type f -exec chmod 644 {} \;
 
-mkdir -p $PKG/usr/lib
-mv $PKG/usr/bin/${ORIG_PRGNAM}_$VERSION $PKG/usr/lib/$ORIG_PRGNAM
-cat $CWD/$PRGNAM.sh > $PKG/usr/bin/$ORIG_PRGNAM
-chmod 755 $PKG/usr/bin/$ORIG_PRGNAM $PKG/usr/lib/$ORIG_PRGNAM/$ORIG_PRGNAM
+# Binaries aren't stripped, according to 'file', but they don't get any
+# smaller if I strip them, so leave them as-is.
 
-mv $PKG/usr/share/applications/${ORIG_PRGNAM}{_$VERSION,}.desktop
-sed -i 's@/usr/bin/@@g' $PKG/usr/share/applications/$ORIG_PRGNAM.desktop
+PKGLIB=$PKG/usr/lib$LIBDIRSUFFIX
+mkdir -p $PKGLIB
+mv $PKG/usr/bin/${ORIGNAM}_$VERSION $PKGLIB/$ORIGNAM
+sed "s,@LIBDIRSUFFIX@,$LIBDIRSUFFIX,g" $CWD/$PRGNAM.sh > $PKG/usr/bin/$ORIGNAM
+chmod 755 $PKG/usr/bin/$ORIGNAM $PKGLIB/$ORIGNAM/$ORIGNAM
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-mv $PKG/usr/share/doc/$ORIG_PRGNAM/* $PKG/usr/doc/$PRGNAM-$VERSION
+# .desktop file spec says they *must* be UTF-8, upstream used 8859-1...
+PKGAPP=$PKG/usr/share/applications
+iconv -f ISO-8859-1 -t UTF-8 $PKGAPP/${ORIGNAM}_$VERSION.desktop | \
+  sed 's@/usr/bin/@@g' > \
+  $PKGAPP/${ORIGNAM}.deskop
+rm -f $PKGAPP/${ORIGNAM}_$VERSION.desktop
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+mv $PKG/usr/share/doc/$ORIGNAM/* $PKGDOC
 rm -rf $PKG/usr/share/doc
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
