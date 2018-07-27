@@ -1,0 +1,168 @@
+#!/bin/sh
+
+# Slackware build script for elo-mt-usb
+
+# Copyright 2018 Jan F. Chadima <jfch@jagda.eu>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=elo-mt-usb
+VERSION=${VERSION:-2.5.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+KERN=${KERN:-"$(uname -r)"}
+PKGVER="$(printf %s "${VERSION}_${KERN}" | tr - _)"
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf elo-mt-usb
+case "$ARCH" in
+  i?86)
+    tar xvf $CWD/SW602616_Elo_Linux_MT_USB_Driver_v${VERSION}_i686.tgz
+    ;;
+  x86_64)
+    tar xvf $CWD/SW602617_Elo_Linux_MT_USB_Driver_v${VERSION}_x86_64.tgz
+    ;;
+#  arm*)
+#    tar xvf $CWD/SW602618_Elo_Linux_MT_USB_Driver_v${VERSION}_armv7l.tgz
+#    ;;
+  *)
+    echo "Unsupported architecture" >&2
+    exit 1
+esac
+cd bin-mt-usb
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+cd elo_mt_input_mod_src
+
+  # Add source of the module
+  mkdir -p $PKG/usr/src/elo-mt-usb
+  install -m 644 Makefile $PKG/usr/src/elo-mt-usb
+  install -m 644 elo_mt_input.c $PKG/usr/src/elo-mt-usb
+
+  # Make module and install it
+  make CFLAGS="$SLKCFLAGS" KDIR=/lib/modules/$KERN/build
+  mkdir -p $PKG/lib/modules/$KERN/elo-mt-usb
+  install -m 644 elo_mt_input_mod.ko $PKG/lib/modules/$KERN/elo-mt-usb/
+
+cd -
+
+# Install udev rules
+mkdir -p $PKG/lib/udev/rules.d
+install -m 644 99-elotouch.rules $PKG/lib/udev/rules.d/
+
+# Prepare "directory" for drivers and eloconfig
+mkdir -p $PKG/etc/opt
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/elo-mt-usb
+ln -s ../../usr/lib$LIBDIRSUFFIX/elo-mt-usb $PKG/etc/opt
+
+mkdir -p $PKG/etc/elo
+touch $PKG/etc/elo/eloconfig.new
+ln -s ../../etc/elo $PKG/usr/lib$LIBDIRSUFFIX/elo-mt-usb/
+
+# Patch cpl program
+hexdump -ve '1/1 "%.2X"' cpl | sed "s/6C6962586D2E736F2E33/6C6962586D2E736F2E34/g" | xxd -r -p > cpl.patched
+
+# Install content to a separate directory
+install -s -m 755 cpl.patched $PKG/usr/lib$LIBDIRSUFFIX/elo-mt-usb/cpl
+install -s -m 755 cplcmd $PKG/usr/lib$LIBDIRSUFFIX/elo-mt-usb/
+install -s -m 755 elomtusbd $PKG/usr/lib$LIBDIRSUFFIX/elo-mt-usb/
+install -s -m 755 elova $PKG/usr/lib$LIBDIRSUFFIX/elo-mt-usb/
+
+# Install rc.script
+mkdir -p $PKG/etc/rc.d
+install -m 755 $CWD/rc.elo-mt-usb.new $PKG/etc/rc.d
+
+# Create /usr/bin programs
+mkdir -p $PKG/usr/bin
+
+cat > $PKG/usr/bin/cpl << EOF
+#!/bin/sh
+
+exec /etc/opt/elo-mt-usb/cpl
+EOF
+chmod +x $PKG/usr/bin/cpl
+ln -s cpl $PKG/usr/bin/touchscreen_setup
+ln -s cpl $PKG/usr/bin/touchscreen_setup.elo-mt-usb
+
+cat > $PKG/usr/bin/cplcmd << EOF
+#!/bin/sh
+
+exec /etc/opt/elo-mt-usb/cplcmd
+EOF
+chmod +x $PKG/usr/bin/cplcmd
+
+cat > $PKG/usr/bin/elova << EOF
+#!/bin/sh
+
+exec /etc/opt/elo-mt-usb/elova
+EOF
+chmod +x $PKG/usr/bin/elova
+ln -s elova $PKG/usr/bin/touchscreen_calibrate
+ln -s elova $PKG/usr/bin/touchscreen_calibrate.elo-mt-usb
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  readme.txt Elo_OEM_\&_EU_LA.txt Elo-Linux-MT-USB-Driver_List-of-New-Features.txt \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+chmod 644 $PKG/usr/doc/$PRGNAM-$VERSION/*
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$PKGVER-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
