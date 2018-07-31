@@ -6,6 +6,18 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20180730 bkw:
+# - BUILD=2.
+# - add libretro/RetroArch, thanks to orbea.
+# - add --without-portaudio to configure args. snes9x runs about
+#   1 frame/sec if I start it up with the sound driver set to portaudio,
+#   and I've gotten a report of it blasting high-volume white noise
+#   thru the speakers if you switch to portaudio while a ROM is already
+#   running. I can't see any reason to use it in favor of pulse, alsa,
+#   oss, or sdl audio.
+# - don't extract windows, mac, old-school unix stuff from tarball.
+#   uses 50% less $TMP space.
+
 # 20180623 bkw: update for 1.56.2.
 # 20180611 bkw:
 # - update for 1.56.1.
@@ -27,7 +39,7 @@
 
 PRGNAM=snes9x
 VERSION=${VERSION:-1.56.2}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -63,14 +75,19 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+# Don't extract the stuff we don't need, this saves 7.9MB in $TMP.
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz \
+        --wildcards --exclude '*/win32/*' \
+        --exclude '*/macosx/*' --exclude '*/unix/*'
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# Fix the libretro build for 14.2.
+# From upstream git: https://github.com/snes9xgit/snes9x.git
+# commits abb4b4c39 and a77b3b379b
+patch -p1 < $CWD/libretro.diff
 
 cd gtk
 ./autogen.sh
@@ -91,26 +108,44 @@ CXXFLAGS="$SLKCFLAGS" \
   --without-system-zip \
   --with-gtk2 \
   --without-gtk3 \
+  --without-portaudio \
   $PULSEOPT \
   --build=$ARCH-slackware-linux
 
 make
 make install-strip DESTDIR=$PKG
 
+# RetroArch support, contributed by orbea (Hunter Sezen).
+# Note that the source here is self-contained, there's no build-time
+# dependency on RetroArch or libretro or such.
+# snes9x_libretro-info originally came from:
+# https://raw.githubusercontent.com/libretro/libretro-super/383f18fd7c36ffd5fe76ebac58e9e596dde67e66/dist/info/snes9x_libretro.info
+# Renamed .info => -info to avoid confusing SBo tools that deal with
+# SBo's .info files.
+( LIBNAM=${PRGNAM}_libretro
+  cd ../libretro
+  make
+  install -sDm0755 $LIBNAM.so $PKG/usr/lib${LIBDIRSUFFIX}/libretro/$LIBNAM.so
+  install -Dm0644 $CWD/$LIBNAM-info \
+    $PKG/usr/lib${LIBDIRSUFFIX}/libretro/info/$LIBNAM.info
+)
+
 mkdir -p $PKG/usr/man/man6
 gzip -9c $CWD/snes9x-gtk.6 > $PKG/usr/man/man6/snes9x-gtk.6.gz
 ln -s $PRGNAM-gtk.6.gz $PKG/usr/man/man6/$PRGNAM.6.gz
 ln -s $PRGNAM-gtk $PKG/usr/games/$PRGNAM
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/${PRGNAM}_original_docs
-cp doc/* $PKG/usr/doc/$PRGNAM-$VERSION
-cp ../docs/* $CWD/README_docs.txt \
-	$PKG/usr/doc/$PRGNAM-$VERSION/${PRGNAM}_original_docs
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+OLDDOC=$PKGDOC/${PRGNAM}_original_docs
+mkdir -p $OLDDOC
+cp -a doc/* $PKGDOC
+cp -a ../docs/* $OLDDOC
+cat $CWD/README_docs.txt > $PKGDOC/README_docs.txt
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 # We don't need 3 copies of the LGPL v2.1 (we already have the GPL
 # and proprietary snes9x licenses...)
-cd $PKG/usr/doc/$PRGNAM-$VERSION
+cd $PKGDOC
   rm -f snes_ntsc_license.txt ${PRGNAM}_original_docs/lgpl-2.1.txt
   ln -s lgpl.txt snes_ntsc_license.txt
   ln -s ../lgpl.txt ${PRGNAM}_original_docs/lgpl-2.1.txt
