@@ -1,2 +1,2 @@
 #!/bin/sh
-exec java -Xmx512m -jar /usr/share/openstego/openstego.jar "$@"
+exec java -Xmx1024m -jar /usr/share/openstego/openstego.jar "$@"
