@@ -1,0 +1,63 @@
+#!/bin/sh
+
+# "Simple" init script for SBo ipxnet, by B. Watson <yalhcru@gmail.com>. If
+# you need something fancier (multiple instances of ipxnet), feel free
+# to implement it here and send me the updated script. I'll add it to
+# the SBo build.
+
+# Note that ipxnet daemonizes itself immediately (before even checking if
+# it got the right number of command line arguments) and doesn't create a
+# PID file. Trying to capture the PID of the just-spawned ipxnet process
+# in this script is problematic, so I didn't bother with a PID file. We
+# can't even capture error messages (because it closed its stdout/stderr).
+
+# The default settings:
+IPXPORT=19900
+
+# If config file found, source it (can override IPXPORT)
+[ -e /etc/rc.d/rc.ipxnet.conf ] && source /etc/rc.d/rc.ipxnet.conf
+
+ok_fail() {
+  if [ "$?" = "0" ]; then
+    echo "OK"
+    exit 0
+  else
+    echo "FAIL"
+    exit 1
+  fi
+}
+
+# returns success if an ipxnet process is listening on our port.
+is_running() {
+  lsof +c 0 -i 4UDP:$IPXPORT | grep -q ipxnet-system
+}
+
+# ipxnet doesn't exit with error status if it fails to start. So we have
+# to check whether it started or not... we wait up to 20 sec or so, then
+# give up.
+check_start() {
+  for i in 0.2 0.5 1 3 6 10; do
+    sleep $i
+    is_running && return 0
+  done
+  return 1
+}
+
+case "${1:-start}" in
+  start)
+    echo -n "Starting ipxnet on UDP port $IPXPORT: "
+    if is_running; then
+      echo "Already running!"
+      exit 1
+    fi
+    /usr/sbin/ipxnet-system $IPXPORT
+	 check_start
+    ok_fail
+  ;;
+
+  stop)    echo -n "Stopping ipxnet: "; killall ipxnet-system ; ok_fail ;;
+
+  restart) $0 stop ; sleep 1; exec $0 start ;;
+
+  *) echo "Usage: $0 stop|stop|restart"
+esac

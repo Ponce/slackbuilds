@@ -1,0 +1,94 @@
+#!/bin/sh
+
+# Slackware build script for ipxnet
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# We install the binary setuid nobody/nogroup by default.
+IPXUSER="${IPXUSER:-nobody}"
+IPXGROUP="${IPXGROUP:-nogroup}"
+
+PRGNAM=ipxnet
+VERSION=${VERSION:-20120808.0dce97e}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+chmod 644 *
+
+# We build 2 binaries: One with logging enabled, setuid nobody/nogroup,
+# for persistent daemon (init script) use... and one that doesn't log
+# to a file or daemonize (just prints to stdout), for normal users to
+# start at will.
+
+# System version first:
+sed -i "/#define *LOGNAME/s, \".*, \"/var/log/$PRGNAM.log\"," config.h
+make CXXFLAGS="$SLKCFLAGS" LIBS="-lSDL_net -lSDL"
+install -D -m6550 -o$IPXUSER -g$IPXGROUP -s $PRGNAM $PKG/usr/sbin/${PRGNAM}-system
+
+# Now the user one:
+sed -i "/#define *LOG_TO_FILE/s,#define,#undef," config.h
+make clean
+make CXXFLAGS="$SLKCFLAGS" LIBS="-lSDL_net -lSDL"
+install -D -m755 -oroot -groot -s $PRGNAM $PKG/usr/bin/$PRGNAM
+
+# Startup script. Not enabled by default (README explains what to do).
+mkdir -p $PKG/etc/rc.d
+cat $CWD/rc.$PRGNAM > $PKG/etc/rc.d/rc.$PRGNAM.new
+cat $CWD/rc.$PRGNAM.conf > $PKG/etc/rc.d/rc.$PRGNAM.conf.new
+
+# doinst.sh installs blank log file, only need to include /var/log here.
+mkdir -p $PKG/var/log
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README.md $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s,@IPXUSER@,$IPXUSER,g"   \
+    -e "s,@IPXGROUP@,$IPXGROUP,g" \
+    $CWD/doinst.sh > $PKG/install/doinst.sh
+
+# Our README includes init script instructions, include it.
+cat $CWD/README > $PKG/install/README_SBo.txt
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
