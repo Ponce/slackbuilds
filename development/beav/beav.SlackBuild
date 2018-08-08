@@ -1,0 +1,118 @@
+#!/bin/sh
+
+# Slackware build script for beav
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# This is a seriously old piece of software. The timestamps inside
+# the tarball all read 'Nov 30 1994' so it's almost 24 years old (old
+# enough to buy beer, even in the US). I'm adding it to SBo mainly for
+# old-timers to use, people who are used to using beav on other distros
+# or OSes.
+
+# At this point, the original maintainer and homepage for beav are long
+# gone, so I'm considering the Debian page for it as the 'official'
+# source. VERSION matches the Debian patchlevel, e.g. 1.40-18 => 1.40_18.
+# Also included a compile fix patch based on one from AUR, plus my own
+# patch to add the arrow keys to the default keybindings.
+
+# Entertaining piece of trivia for you: the Debian maintainer of beav
+# is none other than Sam Hocevar, who also invented the WTFPL license
+# that's used for this script and most of my other SBo builds. Hi, Sam!
+
+PRGNAM=beav
+VERSION=${VERSION:-1.40_18}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+MAINVER="$( echo $VERSION | cut -d_ -f1 )"
+TARVER="$( echo $MAINVER | sed 's/\.//g' )"
+PATCHVER="$( echo $VERSION | cut -d_ -f2 )"
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$TARVER
+tar xvf $CWD/${PRGNAM}_$MAINVER.orig.tar.gz
+cd $PRGNAM-$TARVER
+chown -R root:root .
+chmod 644 *
+
+# apply Debian's patches
+zcat $CWD/${PRGNAM}_$MAINVER-$PATCHVER.diff.gz | patch -p1
+
+# compile fix patch is basically this from AUR:
+# https://aur.archlinux.org/cgit/aur.git/tree/beav_on_archlinux.patch?h=beav
+# but with SLKCFLAGS support in the Makefile, and redone as a -p1 patch.
+patch -p1 < $CWD/compilefixes.diff
+
+# Arrow key support:
+
+# FFS, arrow keys have been standard on damn near all keyboards for
+# 40+ years now, even creaky old dinosaurs like me use them. beav only
+# supports them if you go thru the laborious process of defining them
+# in your .beavrc.
+
+# This patch adds them to the default keybind list (without affecting
+# the original ^B ^F ^N ^P bindings, so they still work).
+
+# Bindings tested & working with:
+# linux console, xterm, rxvt, urxvt, xfce4-terminal, konsole.
+
+# Might not work on some oddball terminal, but in that case, the user
+# can define their weird arrow key combos in .beavrc as usual.  Patch was
+# sent to the Debian maintainer (Sam Hocevar) on 20180807.
+patch -p1 < $CWD/arrow_keys.diff
+
+# fix Debianized doc dir reference
+sed -i \
+  's:/usr/share/doc[^ ]*:/usr/doc/'$PRGNAM-$VERSION/$PRGNAM$TARVER.txt: \
+  $PRGNAM.1
+
+# can't use CFLAGS for this...
+make SLKCFLAGS="$SLKCFLAGS"
+
+install -D -s -m0755 -oroot -groot $PRGNAM $PKG/usr/bin/$PRGNAM
+mkdir -p $PKG/usr/man/man1
+gzip -9c $PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a read.me $PRGNAM$TARVER.txt debian/changelog $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
