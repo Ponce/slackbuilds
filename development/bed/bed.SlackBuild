@@ -1,0 +1,157 @@
+#!/bin/sh
+
+# Slackware build script for bed
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+PRGNAM=bed
+VERSION=${VERSION:-3.0.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.src.tar.xz
+cd $PRGNAM-$VERSION
+
+# Ships as a broken symlink... gets recreated during the build anyway.
+rm -f ./plugins/mainprocedures.h
+
+# The permissions are a bit wonky (a few executable C source files) but
+# no harm done.
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# I found the startup message confusing, it says "Alt-X to open menu",
+# where X is used in the algebra sense (to mean "whatever"). I kept
+# expecting a literal Alt-X to mean "open menu", when it really means
+# "exit". So:
+sed -i '/Press F1 in menu/s/X/[x]/g' plugins/examples/helpf1.cc
+
+# Not sure the --without-x does anything, but it doesn't hurt either.
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --without-x \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --build=$ARCH-slackware-linux
+
+# Hardcoded -O3 here:
+sed -i "s/-O3/$SLKCFLAGS/g" plugins/examples/Makefile
+
+# Source ships pregenerated versions of these that were made on a
+# cygwin system. They break the build.
+rm -f src/dataproc.h src/dataprocer.h
+
+# The Makefile hates -jN where N>1.
+
+# The TOBUILD* stuff below is because we said
+# "--build=$ARCH-slackware-linux" as usual in the ./configure
+# above, and bed is expecting there to be an actual compiler called
+# $ARCH-slackware-linux-cc in $PATH, which there ain't. If we were
+# cross-compiling, this would have to be solved some other way.
+
+# Regenerate the 2 headers removed above, plus one more that fails
+# to be generated for whatever reason.
+make -j1 -C src TOBUILDCC=gcc TOBUILDCXX=g++ OPTIM="$SLKCFLAGS" \
+      dataproc.h dataprocer.h helptext.h
+
+# *Now* we can compile for real.
+make -j1 TOBUILDCC=gcc TOBUILDCXX=g++ OPTIM="$SLKCFLAGS"
+
+# No 'install-strip' target, but the binary's installed stripped
+# and the man page is gzipped already.
+make -j1 install DESTDIR=$PKG
+
+# Lot of stuff below uses this
+PKGBEDLIB=$PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM-$VERSION
+
+# Replace .desktop file with cleaned-up version that passes
+# desktop-file-validate. There's no icon defined in the file, nor shipped
+# with bed, so I'm leaving that as-is. The desktop menu specification
+# doesn't have a HexEditor or even a generic Editor category (which IMO
+# is a symptom of how broken the thinking behind the specification is),
+# so I had to pick between the generic System and slightly-less-generic
+# Development categories...
+DT=bed-binary-editor.desktop
+cat $CWD/$DT > $PKG/usr/share/applications/$DT
+
+# The rxvt stuff (rxvt.plug) doesn't get built by this script. The build
+# process is too horrendous and baroque for me to spend more time trying
+# to understand why. The default config file tries to load rxvt.plug and
+# shows a scary but harmless "rxvt.plug: cannot open shared object file"
+# error on startup, so I'm just going to disable it in the config.
+
+# In case you're wondering, the editor's fully functional without the
+# plugin. What it actually does is allows you to adjust the terminal
+# bed is running in (the font size, set reverse video, and disable the
+# scrollbar) from within bed. Most (all?) terminals already supply their
+# own ways to do these things, so this is really extra fluff.
+RC=$PKGBEDLIB/bedrc
+sed -e 's/^ *plugin *rxvt\.plug/#&/' \
+    -e 's/^ *menuitem  *8/#&/' \
+    $RC > $RC.new
+rm -f $RC
+
+# The magic stuff for file. doinst.sh handles the rest.
+mkdir -p $PKG/etc/file/magic
+mv $PKGBEDLIB/bedmagic $PKG/etc/file/magic
+rm -f $PKGBEDLIB/bedmagic.short $PKGBEDLIB/addmagic
+
+# Don't want this (use removepkg instead):
+rm -f $PKGBEDLIB/uninstallbed.sh
+
+# There's still some cruft in $PKGBEDLIB (e.g. sources for the plugins),
+# but it's stuff that could be considered documentation so I'll leave it.
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+for i in LICENSE README; do
+  ln -s ../../lib$LIBDIRSUFFIX/$PRGNAM-$VERSION/$i $PKG/usr/doc/$PRGNAM-$VERSION
+done
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n -p $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
