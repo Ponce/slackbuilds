@@ -1,0 +1,130 @@
+#!/bin/sh
+
+# Slackware build script for bless
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+PRGNAM=bless
+VERSION=${VERSION:-0.6.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+# Compiled .net code is "anycpu" by default.
+# I see no reason to use lib64 for this. It would mean having separate
+# 32-bit and 64-bit packages, even though the actual object code is
+# noarch. Also, no CFLAGS because, no C... since I'm not a mono/C#
+# expert, I dunno what the equivalent optimization flags should be
+# (or if they even exist) so we'll go with whatever upstream does.
+
+ARCH=noarch
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/${PRGNAM}_$VERSION.orig.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# Begin rant. FWIW, I'm not very impressed with bless:
+# - It has show-stopper bugs that were left in place when the maintainer
+#   abandoned it a few years ago (others have fixed the worst of them
+#   by now, patches included here).
+# - It starts up in Insert mode which definitely violates the principle
+#   of least surprise (in normal hex editors, overwrite is generally the
+#   default and often only mode). This is so annoying that I patched it.
+#   Even in overwrite mode, it'll let you append bytes to the end of
+#   the file, which a hex editor shouldn't do in its default mode.
+# - It ships with 3 .layout files that get installed in /usr/share, but
+#   the layout dialog is broken: you can't choose between the
+#   "system" layouts, though you can load them if you copy them to
+#   ~/.config/bless/layouts. (But, they don't appear to *do* anything...)
+# - Finally, and maybe this is just my own personal bias, I don't see an
+#   obvious way to change the white background to black (if the .layout
+#   files are capable of it, great, but I tried really hard to get them
+#   to work and they don't seem to behave the way the docs say they do).
+#   This means I won't be using this application very much, as it hurts
+#   my eyes to look at it for more than a few minutes.
+# If it's so awful, why am I writing a SlackBuild for it? Because it's
+# a GUI hex editor that (a) uses GTK, and (b) doesn't require KDE and
+# its horde of daemons. Someone is going to be glad it's here. People
+# who grew up using GUIs are going to prefer this to a textmode app.
+# Here endeth the rant.
+
+# Patch from Debian. Might not be needed with newer versions of mono,
+# but no harm done.
+patch -p1 < $CWD/patches/force_gtk_action_namespace.patch
+
+# Patch from dead gna.org site:
+# http://web.archive.org/web/20170205194531/http://gna.org/bugs/?14878
+# Fixes "not enough space" error when trying to save.
+patch -p1 < $CWD/patches/fix_save.patch
+
+# Patch from: https://bugs.launchpad.net/ubuntu/+source/bless/+bug/1622951
+# Fixes broken preferences saving.
+patch -p1 < $CWD/patches/fixxmltextwriter.patch
+
+# Make bless act like all other hex editors on the planet by NOT starting
+# up in Insert mode. I wouldn't have patched this, except that bless
+# doesn't auto-save the Insert/Overwrite state across sessions. You can
+# set the default via Edit/Preferences, but it doesn't remember the last
+# state if you just press Insert to toggle it.
+patch -p1 < $CWD/patches/default_overwrite.patch
+
+# Grr. The configure script doesn't allow setting CS or MCS or CSC or
+# anything to override the compiler (like normal stuff does with CC).
+# FFS, it's even hardcoded in C# code...
+sed -i 's,gmcs,mcs,g' configure builder/ModuleBuilder.cs
+
+./configure \
+  --without-scrollkeeper \
+  --prefix=/usr \
+  --libdir=/usr/lib \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION
+
+# GRR. Even with --without-scrollkeeper we have to fake it out. I
+# could look into using rarian, but I'm not sure what good it would
+# do: the .xml and .html help files are already installed in the right
+# places, and help_script.sh knows how to display them when you click
+# Help/Contents or press F1.
+cp doc/user/bless-manual.omf.in doc/user/bless-manual.omf
+
+make
+make install DESTDIR=$PKG
+
+# --docdir is ignored.
+mkdir -p $PKG/usr/doc/
+mv $PKG/usr/share/doc/$PRGNAM $PKG/usr/doc/$PRGNAM-$VERSION
+rm -rf $PKG/usr/share/doc
+
+# The help script needed help.
+PKGHELP=$PKG/usr/share/$PRGNAM/help_script.sh
+sed "s/@VERSION@/$VERSION/g" $CWD/help_script.sh > $PKGHELP
+chmod 755 $PKGHELP
+
+# Man page from Debian. Not much to it, but not much was needed.
+mkdir -p $PKG/usr/man/man1
+gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
