@@ -6,49 +6,24 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20180828 bkw:
+# - update for 0.35
+# - build with --without-oss by default, add OSS=yes option
+# - get rid of alsa_first.diff (doesn't apply any more anyway)
+# - add PULSE=no option
+# - move cruft out of here & into ChangeLog.old
+# - SDL 1.x build broke in 0.35, so remove SDL2=no and add SDL2
+#   to REQUIRES.
+
 # 20170822 bkw:
 # - update for 0.34.8
 # - add SDL2=no and GTKGLEXT=no options, mostly for my own testing
 # - record build options in slack-desc
 
-# 20170122 bkw:
-# - update for 0.34.7
-
-# 20161016 bkw:
-# - update for 0.34.5
-# - move binary to /usr/games
-# - mention SDL2 in README
-# - fix jack option (--with-jack, not --enable-jack)
-
-# 20150912 bkw:
-# - update for 0.33.2
-# - use upstream's man page, get rid of mine
-
-# 20140824 bkw:
-# - update for 0.32
-# - somehow I lost the POD source to the man page, recreate from xroar.6
-
-# 20140313 bkw:
-# - update for 0.31.1
-# - change download link to upstream's, looks OK now
-# - update alsa_first.diff (module.c -> src/module.c)
-# - update man page (new options, convert to POD)
-# - add jack support
-
-# 20130617 bkw:
-# - update for 0.29.5
-
-# 20121218 bkw:
-# - update for 0.28.1
-# - change download link to my own server, since upstream changes their URL
-#   for every release
-# - include missing .png file for HTML doc
-# - add patch to prefer ALSA over OSS
-# - LDFLAGS=-lm (wasn't needed for old version)
-# - mention gtkglext in README as an optional dep
+# 20170122 bkw: update for 0.34.7
 
 PRGNAM=xroar
-VERSION=${VERSION:-0.34.8}
+VERSION=${VERSION:-0.35}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -88,22 +63,37 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# Have the emulator try ALSA before OSS. This prevents the emu from
-# taking over the ALSA device when using OSS emulation (stops other
-# apps from making any sound at all!)
-patch -p1 < $CWD/alsa_first.diff
+# Most users will want to leave OSS and PULSE alone.
+
+# Can't check ldd output to see if OSS is built-in, so take
+# some care to leave the value of OSS presentable for use in
+# the slack-desc.
+OSS="${OSS:-no}"
+case "$OSS" in
+  y*|Y*) OSS=yes ;;
+  *)     OSS=no  ;;
+esac
+
+[ "$OSS"          = "yes" ] ||   OSSOPT="--without-oss"
+[ "${PULSE:-yes}" = "yes" ] || PULSEOPT="--without-pulse"
 
 # Not sure why anyone would need this, but it's easy to support.
 JACKOPT="--without-jack"
 [ "${JACK:-no}" = "yes" ] && JACKOPT="--with-jack"
 
-[ "${SDL2:-yes}" = "no" ] && SDL2OPT="--without-sdl2"
+# 20180829 bkw: SDL 1.x build is broken in xroar-0.35!  If upstream
+# fixes it, uncomment the SDL2 check below, remove SDL2 from REQUIRES
+# in the .info file, and re-add this to the README:
+
+## SDL2 - if you prefer SDL2 to SDL1, install SDL2 before building xroar.
+##   I haven't noticed any difference between xroar built with SDL1 or SDL2,
+##   but the option is there in case you need it. If SDL2 is installed,
+##   you can build without it by setting SDL2=no in the environment.
+
+#[ "${SDL2:-yes}" = "no" ] && SDL2OPT="--without-sdl2"
 
 [ "${GTKGLEXT:-yes}" = "no" ] && GTKGLOPT="--without-gtkgl"
 
@@ -113,7 +103,7 @@ LDFLAGS="-lm" \
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
-  $JACKOPT $SDL2OPT $GTKGLOPT \
+  $OSSOPT $PULSEOPT $JACKOPT $SDL2OPT $GTKGLOPT \
   --bindir=/usr/games \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
@@ -131,10 +121,12 @@ strip $PKG/usr/games/$PRGNAM
 SDLVER=1.2
 JACK=no
 GTKGLEXT=no
+PULSE=no
 ldd $PKG/usr/games/$PRGNAM > ldd.tmp
-grep -q libSDL2 ldd.tmp     && SDLVER=2
+grep -q libSDL2 ldd.tmp     && SDLVER=2.0
 grep -q libjack ldd.tmp     && JACK=yes
 grep -q libgtkglext ldd.tmp && GTKGLEXT=yes
+grep -q libpulse.so ldd.tmp && PULSE=yes
 
 # man page needs to be in section 6, since this is in games/
 mkdir -p $PKG/usr/man/man6
@@ -198,6 +190,8 @@ sed -e "s,@JACK@,$JACK," \
     -e "s,@SDLVER@,$SDLVER," \
     -e "s,@GTKGLEXT@,$GTKGLEXT," \
     -e "s,@ROMS@,$ROMS," \
+    -e "s,@PULSE@,$PULSE," \
+    -e "s,@OSS@,$OSS," \
     $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
