@@ -2,7 +2,7 @@
 
 # Slackware build script for subsurface
 
-# Copyright 2014-2017 Larry Hajali <larryhaja[at]gmail[dot]com>
+# Copyright 2014-2018 Larry Hajali <larryhaja[at]gmail[dot]com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -24,7 +24,8 @@
 
 PRGNAM=subsurface
 SRCNAM=Subsurface
-VERSION=${VERSION:-4.6.4}
+VERSION=${VERSION:-4.8.1}
+MD5LONG=${MD5LONG:-54a357f9590d9cf011bf1713589f66bad65e00eb}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -64,7 +65,7 @@ rm -rf $SRCNAM-$VERSION
 tar xvf $CWD/$SRCNAM-$VERSION.tgz
 cd $SRCNAM-$VERSION
 tar xvf $CWD/libdivecomputer-$PRGNAM-branch-$VERSION.tgz
-tar xvf $CWD/marble-$PRGNAM-branch-$VERSION.tgz
+tar xvf $CWD/googlemaps-$MD5LONG.tar.gz
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -79,6 +80,9 @@ sed -i 's|#include <grantlee_templates.h>|#include "grantlee_templates_local.h"|
 cat /usr/include/Grantlee5/grantlee_templates.h | \
   sed -e 's|grantlee/|Grantlee5/grantlee/|'\
   > grantlee_templates_local.h
+
+# Fix the location detection of googlemaps
+sed -i "s|../install-root|googlemaps-$MD5LONG|" CMakeLists.txt
 
 # We already have packages for libdivecomputer and marble on the system.
 # Subsurface requires newer (custom) packages then what is currently available,
@@ -102,26 +106,13 @@ make
 make install DESTDIR="$PWD/.."
 cd -
 
-mkdir -p marble-$PRGNAM-branch-$VERSION/build
-cd marble-$PRGNAM-branch-$VERSION/build
-  cmake -G "Unix Makefiles" \
-    -DCMAKE_INSTALL_PREFIX:PATH="/usr" \
-    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS -std=c++11" \
-    -DQT5BUILD:BOOL=ON \
-    -DQTONLY:BOOL=TRUE \
-    -DBUILD_MARBLE_APPS:BOOL=OFF \
-    -DBUILD_MARBLE_EXAMPLES:BOOL=OFF \
-    -DBUILD_MARBLE_TESTS:BOOL=OFF \
-    -DBUILD_MARBLE_TOOLS:BOOL=OFF \
-    -DWITH_DESIGNER_PLUGIN:BOOL=OFF \
-    -DBUILD_TESTING:BOOL=OFF \
-    -DBUILD_WITH_DBUS:BOOL=OFF \
-    -DLIB_SUFFIX:STRING="$LIBDIRSUFFIX" \
-    -DCMAKE_BUILD_TYPE=Release ..
+# Build qt5 locations googlemaps plugin
+cd googlemaps-$MD5LONG
+qmake-qt5 QMAKE_CFLAGS+="$SLKCFLAGS" QMAKE_CXXLAGS+="$SLKCFLAGS" \
+  -o Makefile googlemaps.pro
 
-  make VERBOSE=1
-  make -C src/lib/marble install DESTDIR=$PKG
+make
+make install INSTALL_ROOT=$PKG
 cd -
 
 # Build subsurface with libftdi support. Default is no.
@@ -142,13 +133,11 @@ mkdir build
 cd build
   cmake -G "Unix Makefiles" \
     -DCMAKE_INSTALL_PREFIX:PATH="/usr" \
-    -DUSE_LIBGIT23_API:BOOL=ON \
     -DFTDISUPPORT:BOOL="$FTDISUPPORT" \
     -DUSE_WEBENGINE:BOOL="$QWEBSUPPORT" \
+    -DMAKE_TESTS:BOOL=OFF \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
-    -DMARBLE_LIBRARIES="$PKG/usr/lib${LIBDIRSUFFIX}/libssrfmarblewidget.so" \
-    -DMARBLE_INCLUDE_DIR="$PKG/usr/include" \
     -DLIBDIVECOMPUTER_INCLUDE_DIR="../usr/include" \
     -DLIBDIVECOMPUTER_LIBRARIES="../usr/lib${LIBDIRSUFFIX}/libdivecomputer.a" \
     -DCMAKE_BUILD_TYPE=Release ..
@@ -160,12 +149,8 @@ cd -
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-# Remove unneeded files/directories.
-rm -rf $PKG/usr/include/marble
-find $PKG -type d -empty -delete
-
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a gpl-2.0.txt INSTALL README SupportedDivecomputers.* TODO.CCR \
+cp -a gpl-2.0.txt INSTALL README.md SupportedDivecomputers.* TODO.CCR \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
