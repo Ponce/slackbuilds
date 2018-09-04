@@ -24,3 +24,4 @@ preserve_perms() {
 
 preserve_perms etc/rc.d/rc.vms.new
 config etc/rc.d/rc.vms.conf.new
+config var/lib/vms/vm.sh.new
