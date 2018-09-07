@@ -8,6 +8,9 @@
 # Note that this script doesn't need to be run as root. It does
 # need to be able to write to the current directory it's run from.
 
+# Takes one optional argument, which is the commit or tag to create
+# a tarball of. With no arg, HEAD is used.
+
 PRGNAM=cc65
 CLONE_URL=https://github.com/$PRGNAM/$PRGNAM.git
 
@@ -19,6 +22,11 @@ git clone $CLONE_URL $GITDIR
 
 CWD="$( pwd )"
 cd $GITDIR
+
+if [ "$1" != "" ]; then
+  git reset --hard "$1" || exit 1
+fi
+
 GIT_SHA=$( git rev-parse --short HEAD )
 sed -i "1iGIT_SHA=$GIT_SHA" src/Makefile
 
@@ -52,3 +60,7 @@ cd "$CWD"
 rm -rf $PRGNAM-$VERSION $PRGNAM-$VERSION.tar.xz
 mv $GITDIR $PRGNAM-$VERSION
 tar cvfJ $PRGNAM-$VERSION.tar.xz $PRGNAM-$VERSION
+
+echo
+echo "Created tarball: $PRGNAM-$VERSION.tar.xz"
+echo "VERSION=$VERSION"
