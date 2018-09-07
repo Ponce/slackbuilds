@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# texmf_get.sh (c) 2016-2018 Johannes Schoepfer, Germany, slackbuilds[at]schoepfer[dot]info
+# texmf_get.sh (c) 2016 - 2018 Johannes Schoepfer, Germany, slackbuilds[at]schoepfer[dot]info
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -20,7 +20,7 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-#  V 15.0.0
+#  V 15.0.2
 #
 #  Prepare xz-compressed tarballs of texlive-texmf-trees based on texlive.tlpdb
 #  This script takes care of dependencies(as far as these are present in texlive.tlpdb)
@@ -29,7 +29,7 @@
 # -base: the most usefull stuff, most binaries/scripts,
 #  manpages for compiled binaries  65mb 2017-11-07
 # -docs: -base documentation only, no manpages/GNU infofiles
-# -extra: remaining stuff
+# -extra: remaining stuff and corresponding docs
 #
 #  texlive netarchive policy: Every package is included as dependency
 #  in exactly one collection. A package may have dependencies on other
@@ -39,46 +39,51 @@
 
 #set -e
 MAJORVERSION=2018
+mirror="http://mirror.ctan.org/systems/texlive/tlnet/"
+TMP=$PWD/tmp
 
-# -excluded packages, which are
+# Globally excluded packages, which are/contain
 # -useless without tlmgr-installer
 # -non-linux
-# -covered by an external package e.g. asymptote on SBo
-# -obsolete
+# -covered by an external package, e.g. asymptote on SBo
+# -obsolete, e.g. omega
+# -java dependend packages
 # -binaries provided already by texlive.Slackbuild
-# -does only contain sources, or hyphen directives, e.g. metatype1, patch, ...
-# -does only contain hyphen directives, e.g. hyphen-farsi ...
+# -binaries provided already other system packages, e.g. texlive-scripts.ARCH
+# -only sources, or hyphen directives, e.g. metatype1, patch, ...
+# -only hyphen directives, e.g. hyphen-farsi ...
 
 global_exclude="
-  hyphen-farsi
-  hyphen-arabic
-  asymptote
-  tlcockpit
-  tlshell
-  texlive.infra
-  texlive-docindex
-  texlive-scripts
-  texlive-msg-translations
-  texosquery
-  texliveonfly
-  texworks
   aleph
-  omega
   antomega
-  omegaware
+  asymptote
+  bibtexu
+  cslatex
+  dviout.win32
+  hyphen-arabic
+  hyphen-farsi
   lambda
-  otibet
+  metatype1
   ocherokee
   oinuit
-  cslatex
-  bibarts
-  metatype1
+  omega
+  omegaware
+  otibet
   patch
+  texlive-common
+  texlive-docindex
+  texlive-msg-translations
+  texlive-scripts
+  texlive.infra
+  texliveonfly
+  texosquery
+  texworks
+  tlcockpit
+  tlshell
   wintools.win32
-  dviout.win32
   "
 
-  # special packages, move their type1 fonts(if metfonts are present)
+  # special packages, move their type1 fonts(if metafonts are present)
   # and/or docs to -extra
 special_packages="
   koma-script
@@ -390,7 +395,7 @@ untar () {
       then
         tar xf ${package}${flavour}.tar.xz --exclude tlpkg -C $relocated || exit 1
       else
-        #tar vxf ${package}${flavour}.tar.xz --exclude tlpkg -C $relocated 
+        #tar vxf ${package}${flavour}.tar.xz --exclude tlpkg -C $relocated
         tar vxf ${package}${flavour}.tar.xz --exclude tlpkg -C $relocated | egrep '\.sty$|\.bbx$|\.cls$' > $texmf/$package.deps
         if [ -n "$texmf/$package.deps" ]
         then
@@ -423,11 +428,9 @@ untar () {
         fi
       fi
 
-      # Check for binaries, delete them as these should be provided
-      #  by texlive.Slackbuild, keep symlinks and scripts
+      # Delete binaries, these are provided
+      # by texlive.Slackbuild, keep symlinks and scripts
 
-      unset binaries
-      unset scripts
       for arch in $platforms
       do
         if [ -d $texmf/texmf-dist/bin/$arch ]
@@ -439,16 +442,19 @@ untar () {
           do
             ln -sf $(readlink $link | sed "s/^..\/..\(.*\)/..\/share\1/" ) $link || exit 1
           done
-          # move symlinks/scripts to linked_scripts
+          # move symlinks to linked_scripts
           find $texmf/texmf-dist/bin/$arch -type l -exec mv '{}' $texmf/texmf-dist/linked_scripts/ \;
 
-          binaries="$(find $texmf/texmf-dist/bin/$arch -type f -exec file '{}' + | grep -e "executable" -e "shared object" | grep ELF | cut -f 1 -d : )"
-          for bin in $binaries
+          # keep only binaries of special packages
+          # remove xindy.mem(gzip compresses data) to prevent overwriting
+          for bin in $(find $texmf/texmf-dist/bin/$arch \
+            -type f -exec file '{}' + | \
+            grep -e "executable" -e "shared object" -e "gzip compressed data" | \
+            grep -e ELF -e "gzip compressed data" | cut -f 1 -d : )
           do
-            # keep binaries of special packages
             for binary in $keep_precompiled
             do
-              if [ "$(echo $bin | rev | cut -d'/' -f1 | rev )" != "$binary" ]
+              if [ "$(echo $bin | rev | cut -d'/' -f1 | rev)" != "$binary" ]
               then
                 rm $bin
                 echo $bin | rev | cut -d'/' -f1 | rev >> $binary_removed.$edition
@@ -723,12 +729,7 @@ exit 0
 
 # Main
 
-# release mirror
-mirror="http://mirror.ctan.org/systems/texlive/tlnet/"
-# pre-test mirror 2016
-# mirror="http://ftp.cstug.cz/pub/tex/local/tlpretest/"
 LANG=C
-TMP=$PWD/tmp
 output=$TMP/packages
 output_doc=$TMP/packages.doc.tmp
 errorlog=$TMP/error.log
@@ -777,7 +778,7 @@ fi
 # Get linenumbers of empty lines from $db
 emptylines="$(grep -n ^$ $db | cut -d':' -f1)"
 
-# Provide TLCore packages for -base, as these packages(and their dependencies) should be present in any case.
+# Provide TLCore packages for -base, as these packages(and their dependencies) should be present in any case. 
 grep -B1 ^'category TLCore' $db | grep -v ^'category TLCore' |  grep -v ^-- | grep -v '\.' | cut -d' ' -f2 > $corepackages
 
 # Make a list of all collections
@@ -790,7 +791,7 @@ do
   then
     for arch in $platforms
     do
-      global_exclude+=" $(echo $exclude | sed "s/\.ARCH$/\.$arch/")"
+      global_exclude+=" $(echo $exclude | sed "s/\.ARCH$/\.$arch/")" 
     done
     global_exclude=${global_exclude/$exclude/}
   fi
@@ -995,6 +996,26 @@ case $edition in
 Content of -$edition:
 $(sed "/-linux$/d" $packages_base | sort)
 EOF
+  # add texdoc cache file
+  if [ $(command -v texdoc) ]
+  then
+    mkdir -p $texmf/texmf-dist/tlpkg
+    mkdir -p texmf-dist/scripts/texdoc
+    ln -s ${db}.orig $texmf/texmf-dist/tlpkg/texlive.tlpdb
+    TEXMFVAR=$texmf/texmf-dist \
+      texdoc -lM texlive-en >/dev/null
+    mv texmf-dist/texdoc/cache-tlpdb.lua \
+      texmf-dist/scripts/texdoc/Data.tlpdb.lua
+    rm -rf $texmf/texmf-dist/tlpkg
+  else
+    echo "WARNING: texdoc/texlive is not installed, the texdoc cache"
+    echo "Data.tlpdb.lua can't be created and wont't be available."
+    echo "texdoc will not wotk without this."
+    echo ""
+    echo "Continue with any key or abort with ctrl-c"
+    read -n1
+  fi
+
 #Splitted packages, type1 fonts/docs moved to -extra:
 #$(echo $special_packages)
 #EOF
@@ -1003,6 +1024,7 @@ EOF
   tar rf $tarball --owner=0 --group=0 --sort=name \
     texmf-dist/doc/man/ texmf-dist/doc/info/ \
     texmf-dist/packages.$edition.gz \
+    texmf-dist/scripts/texdoc/Data.tlpdb.lua \
     || exit 1
 #  # add cm-super minimal maps/config
 #  tar rf $tarball --owner=0 --group=0 --sort=name \
