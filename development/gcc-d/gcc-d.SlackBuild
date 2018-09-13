@@ -26,9 +26,10 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=gcc-d
-SRCNAM=gdc
-VERSION=${VERSION:-2.076.0_b5}
-GCC_VERSION=5.5.0
+VERSION=${VERSION:-2.081.2}
+GCC_VERSION=8.2.0
+HOST_GDC=2.076.0
+HOST_GCC=7.3.0
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -73,49 +74,41 @@ case "$ARCH" in
   *)    TARGET=$ARCH-slackware-linux ;;
 esac
 
-# Create directories.
-set -e
-rm -rf $PKG
-mkdir -p $TMP $PKG $OUTPUT
-cd $TMP
-rm -rf $SRCNAM-$VERSION gcc-$GCC_VERSION
-tar xvf $CWD/gcc-$GCC_VERSION.tar.?z*
-tar xvf $CWD/$SRCNAM-$VERSION.tar.?z*
-
-# Apply patches.
-cd $TMP/gcc-$GCC_VERSION/gcc
-
-cd $TMP/$SRCNAM-$VERSION
-sh setup-gcc.sh ../gcc-$GCC_VERSION
-
-cd $TMP/gcc-$GCC_VERSION
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
-
 if [ "$ARCH" != "x86_64" ]; then
   GCC_ARCHOPTS="--with-arch=$ARCH"
 else
   GCC_ARCHOPTS="--disable-multilib"
 fi
+MAJOR=$( echo $GCC_VERSION | cut -d. -f1 )
+
+set -e
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+
+# Build bootstrap compiler
+cd $TMP
+rm -rf gdc-$HOST_GDC gcc-$HOST_GCC $TMP/bootstrap-gcc-d
+tar xvf $CWD/gcc-$HOST_GCC.tar.?z*
+tar xvf $CWD/gdc-$HOST_GDC.tar.?z*
+
+# Apply patches.
+cd $TMP/gcc-$HOST_GCC/gcc
+
+cd $TMP/gdc-$HOST_GDC
+sh setup-gcc.sh ../gcc-$HOST_GCC
+
+cd $TMP/gcc-$HOST_GCC
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
-../gcc-$GCC_VERSION/configure \
-  --prefix=/usr \
-  --libdir=/usr/lib$LIBDIRSUFFIX \
-  --mandir=/usr/man \
-  --infodir=/usr/info \
+../gcc-$HOST_GCC/configure \
+  --prefix=$TMP/bootstrap-$PRGNAM \
   --enable-shared \
   --disable-bootstrap \
   --enable-languages=c,c++,d \
   --enable-threads=posix \
   --enable-checking=release \
   --with-system-zlib \
-  --with-python-dir=/lib$LIBDIRSUFFIX/python2.7/site-packages \
   --enable-libstdcxx-dual-abi \
   --disable-libunwind-exceptions \
   --enable-__cxa_atexit \
@@ -131,35 +124,94 @@ CXXFLAGS="$SLKCFLAGS" \
   --host=${TARGET}
 
 make
+make install
+
+# Build D compiler
+cd $TMP
+rm -rf gdc-$VERSION gcc-$GCC_VERSION
+tar xvf $CWD/gcc-$GCC_VERSION.tar.?z*
+tar xvf $CWD/gdc-$VERSION.tar.?z*
+
+# Apply patches.
+cd $TMP/gcc-$GCC_VERSION/gcc
+
+cd $TMP/gdc-$VERSION
+sh setup-gcc.sh ../gcc-$GCC_VERSION
+
+cd $TMP/gcc-$GCC_VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
+
+CC="$TMP/bootstrap-$PRGNAM/bin/gcc" \
+CXX="$TMP/bootstrap-$PRGNAM/bin/g++" \
+CPP="$TMP/bootstrap-$PRGNAM/bin/cpp" \
+GDC="$TMP/bootstrap-$PRGNAM/bin/gdc" \
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+../gcc-$GCC_VERSION/configure \
+  --prefix=/opt/gdc \
+  --libdir=/opt/gdc/lib$LIBDIRSUFFIX \
+  --mandir=/usr/man \
+  --infodir=/usr/info \
+  --enable-shared \
+  --enable-bootstrap \
+  --enable-languages=c,c++,d \
+  --enable-threads=posix \
+  --enable-checking=release \
+  --with-system-zlib \
+  --enable-libstdcxx-dual-abi \
+  --disable-libunwind-exceptions \
+  --enable-__cxa_atexit \
+  --enable-libssp \
+  --enable-lto \
+  --disable-install-libiberty \
+  --with-gnu-ld \
+  --verbose \
+  --with-arch-directory=$LIB_ARCH \
+  --program-suffix="-$MAJOR" \
+  --with-pkgversion="GDC $VERSION" \
+  $GCC_ARCHOPTS \
+  --target=${TARGET} \
+  --build=${TARGET} \
+  --host=${TARGET}
+
+make
 make install DESTDIR=$PKG
 
 # Remove not D related stuff, already available in GCC
-find $PKG/usr/bin -type f -not -name "*gdc*" -delete
 find $PKG/usr/info -type f -not -name "*gdc*" -delete
-find $PKG/usr/man/man1 -type f -not -name "*gdc*" -delete
 rm -r $PKG/usr/man/man7
-rm -r $PKG/usr/share
-rm -r $PKG/usr/include
-rm -r $PKG/usr/lib$LIBDIRSUFFIX/python2.7
+#rm -r $PKG/usr/share
+#rm -r $PKG/usr/include
 
-find $PKG/usr/libexec/gcc \
-  \( -type f -or -type l \) -not -name "cc1d" \
-  -delete
+#find $PKG/usr/libexec/gcc \
+#  \( -type f -or -type l \) -not -name "cc1d" \
+#  -delete
 
-find $PKG/usr/lib$LIBDIRSUFFIX/gcc -mindepth 3 \
-  \( -type f -or -type l \) -not -regex ".*/d/.*" \
-  -delete
+#find $PKG/usr/lib$LIBDIRSUFFIX/gcc -mindepth 3 \
+#  \( -type f -or -type l \) -not -regex ".*/d/.*" \
+#  -delete
 
-find $PKG/usr/lib$LIBDIRSUFFIX -maxdepth 1 \
-  \( -type f -or -type l \)  \
-  -not \( -name "*phobos*" -or -name "*gdruntime*" \) \
-  -delete
+#find $PKG/usr/lib$LIBDIRSUFFIX -maxdepth 1 \
+#  \( -type f -or -type l \)  \
+#  -not \( -name "*phobos*" -or -name "*gdruntime*" \) \
+#  -delete
 
-find $PKG/usr -type d -empty -delete
-
+#find $PKG/usr -type d -empty -delete
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/bin
+for bin in $PKG/opt/gdc/bin/g* $PKG/opt/gdc/bin/c*; do
+  binary=$( basename $bin )
+  ln -s /opt/gdc/bin/$binary $PKG/usr/bin/$binary
+done
+ln -s gdc-$MAJOR $PKG/usr/bin/gdc
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
@@ -167,7 +219,7 @@ for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; r
 gzip -9 $PKG/usr/info/*.info
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp $TMP/$SRCNAM-$VERSION/README.md $PKG/usr/doc/$PRGNAM-$VERSION
+cp $TMP/gdc-$VERSION/README.md $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
