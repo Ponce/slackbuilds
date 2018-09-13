@@ -24,4 +24,4 @@ for file in "${BACKUP_CONF[@]}"; do
 done
 
 # enable cgroups service as required by openrc 0.35+
-[ ! -e etc/runlevels/sysinit/cgroups ] && /sbin/rc-update add cgroups sysinit
+[ ! -e etc/runlevels/sysinit/cgroups ] && chroot . /sbin/rc-update add cgroups sysinit
