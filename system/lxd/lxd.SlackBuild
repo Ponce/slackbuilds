@@ -1,0 +1,92 @@
+#!/bin/sh
+
+# Slackware build script for lxd
+
+# Copyright 2017-2018 Vasco Santos <valexsantos[at]gmail[dot]com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=lxd
+VERSION=${VERSION:-3.0.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+
+PREFIX=/opt/lxd
+
+mkdir -p $PKG/$PREFIX/bin
+export GOPATH=$TMP/$PRGNAM-$VERSION/dist
+go build -o $PKG$PREFIX/bin/lxd github.com/lxc/lxd/lxd
+go build -o $PKG$PREFIX/bin/lxc github.com/lxc/lxd/lxc
+go build -o $PKG$PREFIX/bin/fuidshift github.com/lxc/lxd/fuidshift
+go build -o $PKG$PREFIX/bin/lxd-p2c github.com/lxc/lxd/lxd-p2c
+cp -a scripts/lxc-to-lxd $PKG/$PREFIX/bin
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/man/man1
+help2man $PKG$PREFIX/bin/lxd -n "The container hypervisor - daemon" --no-info --no-discard-stderr > $PKG/usr/man/man1/lxd.1
+help2man $PKG$PREFIX/bin/lxc -n "The container hypervisor - client" --no-info --no-discard-stderr > $PKG/usr/man/man1/lxc.1
+help2man $PKG$PREFIX/bin/fuidshift -n "uid/gid shifter" --no-info --no-discard-stderr > $PKG/usr/man/man1/fuidshift.1
+help2man $PKG$PREFIX/bin/lxd-p2c -n "uid/gid shifter" --no-info --no-discard-stderr > $PKG/usr/man/man1/lxd-p2c.1
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+install -D -m0755 $CWD/service-log-lxd-run $PKG$PREFIX/service/log/run.new
+install -D -m0755 $CWD/service-lxd-run     $PKG$PREFIX/service/run.new
+
+install -D -m0755 $CWD/etc-profile-d-lxd.sh  $PKG/etc/profile.d/lxd.sh.new
+install -D -m0755 $CWD/etc-profile-d-lxd.csh $PKG/etc/profile.d/lxd.csh.new
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  AUTHORS COPYING README.md contributing.md \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
