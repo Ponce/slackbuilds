@@ -1,0 +1,323 @@
+diff -ru mpack-1.6/common.h mpack-1.6.new/common.h
+--- mpack-1.6/common.h	2003-07-21 19:49:06.000000000 -0400
++++ mpack-1.6.new/common.h	2018-09-14 18:11:58.197469285 -0400
+@@ -43,4 +43,26 @@
+ #ifndef HAVE_STRCHR
+ #define strchr index
+ #define strrchr rindex
++
++#else 
++#include "part.h"
++
++void os_perror(char *);
++int encode(FILE *infile, FILE *applefile, char *fname, FILE *descfile, char *subject, char *headers, long int maxsize, char *typeoverride, char *outfname);
++int to64(FILE *infile, FILE *outfile, long int limit);
++int handleMultipart(struct part *inpart, char *contentType, params contentParams, int extractText);
++int handleMessage(struct part *inpart, char *defaultContentType, int inAppleDouble, int extractText);
++int handleUuencode(struct part *inpart, char *subject, int extractText);
++void chat(char *str);
++
++void os_donewithdir(char *dir);
++void os_warnMD5mismatch(void);
++void os_closetypedfile(FILE *outfile);
++int os_binhex(struct part *inpart, int part, int nparts);
++
++int parseSubject(char *subject, char **fnamep, int *partp, int *npartsp);
++int saveUuFile(struct part *inpart, char *fname, int part, int nparts, char *firstline);
++int descEnd(char *line);
++int uudecodefiles(char *dir, int nparts);
++void uudecodeline(char *line, FILE *outfile);
+ #endif
+diff -ru mpack-1.6/decode.c mpack-1.6.new/decode.c
+--- mpack-1.6/decode.c	2003-07-21 16:47:54.000000000 -0400
++++ mpack-1.6.new/decode.c	2018-09-14 18:01:42.518631805 -0400
+@@ -28,6 +28,9 @@
+ #include <stdio.h>
+ #include <string.h>
+ #include <ctype.h>
++#include <err.h>
++#include <stdlib.h>
++#include <unistd.h>
+ #include "xmalloc.h"
+ #include "common.h"
+ #include "part.h"
+@@ -49,6 +52,12 @@
+ void from64(struct part *inpart, FILE *outfile, char **digestp, int suppressCR);
+ void fromqp(struct part *inpart, FILE *outfile, char **digestp);
+ void fromnone(struct part *inpart, FILE *outfile, char **digestp);
++
++static int handlePartial(struct part *inpart, char *headers, params contentParams, int extractText);
++static int ignoreMessage(struct part *inpart);
++static int handleText(struct part *inpart, enum encoding contentEncoding);
++static int saveToFile(struct part *inpart, int inAppleDouble, char *contentType, params contentParams, enum encoding contentEncoding, char *contentDisposition, char *contentMD5);
++
+ /*
+  * Read and handle an RFC 822 message from the body-part 'inpart'.
+  */
+diff -ru mpack-1.6/encode.c mpack-1.6.new/encode.c
+--- mpack-1.6/encode.c	2003-07-21 16:35:31.000000000 -0400
++++ mpack-1.6.new/encode.c	2018-09-14 17:41:08.054275377 -0400
+@@ -24,6 +24,9 @@
+  */
+ #include <stdio.h>
+ #include <string.h>
++#include <sys/wait.h>
++#include <stdlib.h>
++#include "common.h"
+ 
+ extern char *magic_look(FILE *infile);
+ extern char *os_genid(void);
+diff -ru mpack-1.6/macmpack.c mpack-1.6.new/macmpack.c
+--- mpack-1.6/macmpack.c	1995-02-16 16:39:45.000000000 -0500
++++ mpack-1.6.new/macmpack.c	2018-09-14 17:59:49.099714204 -0400
+@@ -239,7 +239,7 @@
+ 
+ /* chat with user
+  */
+-chat(char *str)
++void chat(char *str)
+ {
+ 	PCstr tmpstr[257];
+ 
+diff -ru mpack-1.6/macos.c mpack-1.6.new/macos.c
+--- mpack-1.6/macos.c	2003-07-21 15:23:54.000000000 -0400
++++ mpack-1.6.new/macos.c	2018-09-14 18:06:11.447748498 -0400
+@@ -204,8 +204,7 @@
+  * We are done with the directory returned by os_idtodir()
+  * Remove it
+  */
+-os_donewithdir(dir)
+-char *dir;
++void os_donewithdir(char dir)
+ {
+ 	PCstr buf[257];
+ 	short uqid;
+@@ -343,8 +342,7 @@
+ /*
+  * Close a file opened by os_newTypedFile()
+  */
+-os_closetypedfile(outfile)
+-FILE *outfile;
++void os_closetypedfile(FILE *outfile)
+ {
+ 	char buf[128];
+ 	
+@@ -365,7 +363,7 @@
+  * Warn user that the MD5 digest of the last file created by os_newtypedfile()
+  * did not match that supplied in the Content-MD5: header.
+  */
+-os_warnMD5mismatch()
++void os_warnMD5mismatch(void)
+ {
+     char *warning;
+ 
+diff -ru mpack-1.6/magic.c mpack-1.6.new/magic.c
+--- mpack-1.6/magic.c	2003-07-21 16:35:31.000000000 -0400
++++ mpack-1.6.new/magic.c	2018-09-14 17:43:49.684313535 -0400
+@@ -23,6 +23,7 @@
+  * SOFTWARE.
+  */
+ #include <stdio.h>
++#include <string.h>
+ 
+ /* Description of the various file formats and their magic numbers */
+ struct magic {
+Only in mpack-1.6.new: mpack.1
+Only in mpack-1.6.new: munpack.1
+diff -ru mpack-1.6/part.c mpack-1.6.new/part.c
+--- mpack-1.6/part.c	2003-07-21 16:35:31.000000000 -0400
++++ mpack-1.6.new/part.c	2018-09-14 18:12:33.772824677 -0400
+@@ -28,6 +28,7 @@
+ 
+ #include <stdio.h>
+ #include <string.h>
++#include <stdlib.h>
+ 
+ #include "part.h"
+ #include "xmalloc.h"
+diff -ru mpack-1.6/part.h mpack-1.6.new/part.h
+--- mpack-1.6/part.h	2003-07-21 16:35:31.000000000 -0400
++++ mpack-1.6.new/part.h	2018-09-14 18:05:08.812881992 -0400
+@@ -1,3 +1,5 @@
++#ifndef __part_H__
++#define __part_H__
+ /*
+  * Read MIME body-part, stopping on boundaries.
+  */
+@@ -54,6 +56,13 @@
+ 
+ #define part_ungetc(c, s) ((s)->cnt++, ((s)->boundary_seen = (s)->boundary_num), (*--(s)->ptr = (c)))
+ 
+-extern struct part *part_init(FILE *infile);
+-extern char *part_gets(char *s, int n, struct part *part);
++int part_fill(struct part *part);
++int part_ungets(char *s, struct part *part);
++struct part *part_init(FILE *infile);
++char *part_gets(char *s, int n, struct part *part);
++int part_depth(struct part *part);
++int part_close(struct part *part);
++int part_addboundary(struct part *part, char *boundary);
++int part_readboundary(struct part *part);
+ 
++#endif /* __part_H__ */
+Only in mpack-1.6.new: root
+Only in mpack-1.6.new: tags
+diff -ru mpack-1.6/unixos.c mpack-1.6.new/unixos.c
+--- mpack-1.6/unixos.c	2003-07-21 16:54:05.000000000 -0400
++++ mpack-1.6.new/unixos.c	2018-09-14 17:29:24.583154415 -0400
+@@ -30,6 +30,11 @@
+ #include <sys/param.h>
+ #include <netdb.h>
+ #include <fcntl.h>
++#include <unistd.h>
++#include <time.h>
++#include <sys/stat.h>
++#include <stdlib.h>
++#include <err.h>
+ #include "xmalloc.h"
+ #include "common.h"
+ #include "part.h"
+@@ -39,7 +44,6 @@
+ #endif
+ 
+ extern int errno;
+-extern char *malloc();
+ extern char *getenv();
+ 
+ int overwrite_files = 0;
+@@ -49,7 +53,8 @@
+ static char *output_fname = 0;
+ 
+ /* Characters that shouldn't be in filenames */
+-#define BADCHARS "!$&*()|\'\";<>[]{}?/`\\ \t"
++#define BADCHARS "/"
++#define SUBSTCHAR '_'
+ 
+ /* Generate a message-id */
+ char *os_genid(void)
+@@ -75,7 +80,7 @@
+ 	}
+     }
+ 
+-    result = malloc(25+strlen(hostname));
++    result = xmalloc(25+strlen(hostname));
+     sprintf(result, "%d.%d@%s", pid, curtime++, hostname);
+     return result;
+ }
+@@ -166,12 +171,6 @@
+ 
+     if (!fname) fname = "";
+ 
+-    /* If absolute path name, chop to tail */
+-    if (*fname == '/') {
+-	p = strrchr(fname, '/');
+-	fname = p+1;
+-    }
+-
+     /* Get rid of leading ~ or ~/ */
+     while (*fname == '~' || *fname == '/') fname++;
+ 
+@@ -181,13 +180,13 @@
+     for (p=fname; *p; p++) {
+ 	if (*p == '/') {
+ 	    if (!strncmp(p, "/../", 4)) {
+-		p[1] = p[2] = 'X';
++		p[1] = p[2] = SUBSTCHAR;
+ 	    }
+ 	    *p = '\0';
+ 	    (void) mkdir(fname, 0777);
+ 	    *p = '/';
+ 	}
+-	else if (!isprint(*p) || strchr(BADCHARS, *p)) *p = 'X';
++	else if (!isprint(*p) || strchr(BADCHARS, *p)) *p = SUBSTCHAR;
+     }
+ 
+     if (!fname[0]) {
+diff -ru mpack-1.6/unixpk.c mpack-1.6.new/unixpk.c
+--- mpack-1.6/unixpk.c	2003-07-21 16:50:41.000000000 -0400
++++ mpack-1.6.new/unixpk.c	2018-09-14 17:43:07.581085162 -0400
+@@ -25,6 +25,10 @@
+ #include <stdio.h>
+ #include <string.h>
+ #include <errno.h>
++#include <stdlib.h>
++#include <unistd.h>
++#include <sys/types.h>
++#include <sys/wait.h>
+ #include "common.h"
+ #include "version.h"
+ #include "xmalloc.h"
+@@ -160,14 +164,25 @@
+     }	
+ 
+     if (!outfname) {
++        int fd;
++
+ 	if (getenv("TMPDIR")) {
+ 	    strcpy(fnamebuf, getenv("TMPDIR"));
+ 	}
+ 	else {
+-	    strcpy(fnamebuf, "/usr/tmp");
++	    strcpy(fnamebuf, "/tmp");
+ 	}
+ 	strcat(fnamebuf, "/mpackXXXXXX");
+-	mktemp(fnamebuf);
++	if ((fd = mkstemp(fnamebuf)) == -1) {
++	    os_perror(fnamebuf);
++	    exit(1);
++        }
++        /*
++        ** mkstemp() creates/opens the file for us but this case expects
++        ** paths to be passed around. So just close it here. outfname
++        ** will be used later.
++        */
++        close (fd);
+ 	outfname = strsave(fnamebuf);
+     }
+ 
+diff -ru mpack-1.6/unixunpk.c mpack-1.6.new/unixunpk.c
+--- mpack-1.6/unixunpk.c	2003-07-21 16:51:55.000000000 -0400
++++ mpack-1.6.new/unixunpk.c	2018-09-14 17:55:15.622733776 -0400
+@@ -23,6 +23,9 @@
+  * SOFTWARE.
+  */
+ #include <stdio.h>
++#include <unistd.h>
++#include <stdlib.h>
++#include "common.h"
+ #include "version.h"
+ #include "part.h"
+ 
+diff -ru mpack-1.6/uudecode.c mpack-1.6.new/uudecode.c
+--- mpack-1.6/uudecode.c	2003-07-21 16:46:37.000000000 -0400
++++ mpack-1.6.new/uudecode.c	2018-09-14 18:11:31.387955015 -0400
+@@ -25,6 +25,8 @@
+ #include <stdio.h>
+ #include <ctype.h>
+ #include <string.h>
++#include <stdlib.h>
++#include <unistd.h>
+ #include "xmalloc.h"
+ #include "common.h"
+ #include "part.h"
+@@ -826,7 +828,7 @@
+ /*
+  * Decode a uuencoded line to 'outfile'
+  */
+-int uudecodeline(char *line, FILE *outfile)
++void uudecodeline(char *line, FILE *outfile)
+ {
+     int c, len;
+ 
+diff -ru mpack-1.6/xmalloc.c mpack-1.6.new/xmalloc.c
+--- mpack-1.6/xmalloc.c	2003-07-21 16:35:31.000000000 -0400
++++ mpack-1.6.new/xmalloc.c	2018-09-14 13:17:28.574643725 -0400
+@@ -24,7 +24,7 @@
+  */
+ #include <stdio.h>
+ #include <string.h>
+-extern char *malloc(), *realloc();
++#include <stdlib.h>
+ 
+ char *xmalloc (int size)
+ {
