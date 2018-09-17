@@ -6,11 +6,11 @@
 # Nobbled from Slacky and sanitised for sanity :)
 # Modified by dunkyp <dunkyp@gmail.com>
 # Modified by the Slackbuilds.org project
-# Maintained 2015-2016 by Christoph Willing <chris.willing@linux.com>
+# Maintained 2015-2018 by Christoph Willing <chris.willing@linux.com>
 
 PRGNAM=qwt
 VERSION=${VERSION:-6.1.3}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -40,6 +40,9 @@ else
     LIBDIRSUFFIX=""
 fi
 
+# If Qt5 is installed, assume we want to use it
+QWT_QT5="no" ; pkg-config --exists Qt5 ; if [ "$?" = "0" ]; then QWT_QT5="yes" ; fi
+
 set -e 
 
 rm -rf $PKG
@@ -48,8 +51,7 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
 cd $PRGNAM-$VERSION
-patch -p0 < $CWD/patch-6.1.2-qwtconfig.diff
-patch -p0 < $CWD/patch-6.1.2-pkgconfig.diff
+patch -p0 < $CWD/patch-6.1.2-config.diff
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
@@ -57,11 +59,30 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-qmake LIBDIRSUFFIX=$LIBDIRSUFFIX
-make \
-  CFLAGS+="$SLKCFLAGS" \
-  CXXFLAGS+="$SLKCFLAGS"
+mkdir -p build-qt4
+cd build-qt4
+qmake .. LIBDIRSUFFIX=$LIBDIRSUFFIX
+make CFLAGS+="$SLKCFLAGS" CXXFLAGS+="$SLKCFLAGS"
 make install INSTALL_ROOT=$PKG
+cd ..
+
+if [ "$QWT_QT5" = "yes" ]; then
+  echo "Supporting Qt5"
+  mkdir -p build-qt5
+  cd build-qt5
+  qmake-qt5 .. LIBDIRSUFFIX=$LIBDIRSUFFIX
+  make CFLAGS+="$SLKCFLAGS" CXXFLAGS+="$SLKCFLAGS -std=c++11 -fPIC"
+  make install INSTALL_ROOT=$PKG
+  cd ..
+fi
+
+# Rationalise the pkgconfig default filenames
+( cd $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig 
+  ln -s qwt.pc Qwt6.pc
+  if [ -f Qt5Qwt6.pc ]; then
+    ln -s Qt5Qwt6.pc qwt-qt5.pc
+  fi
+)
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -74,9 +95,17 @@ rm -f $PKG/usr/man/man3/_tmp*
 )
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/examples
-find ./examples/ -name moc -type d |xargs rm -rf
-find ./examples/ -name obj -type d |xargs rm -rf
-cp -a ./examples/* $PKG/usr/doc/$PRGNAM-$VERSION/examples
+find ./build-qt4/examples/ -name moc -type d |xargs rm -rf
+find ./build-qt4/examples/ -name obj -type d |xargs rm -rf
+cp -a ./build-qt4/examples/* $PKG/usr/doc/$PRGNAM-$VERSION/examples
+
+if [ -d build-qt5 ]; then
+  mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/examples-qt5
+  find ./build-qt5/examples/ -name moc -type d |xargs rm -rf
+  find ./build-qt5/examples/ -name obj -type d |xargs rm -rf
+  cp -a ./build-qt5/examples/* $PKG/usr/doc/$PRGNAM-$VERSION/examples-qt5
+fi
+
 mv $PKG/usr/doc/html $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a CHANGES* COPYING INSTALL README $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
