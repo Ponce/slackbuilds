@@ -2,7 +2,7 @@
 
 # Slackware build script for qwtpolar
 
-# Copyright 2015 Christoph Willing   Brisbane, Australia
+# Copyright 2015-2018 Christoph Willing   Brisbane, Australia
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -24,7 +24,7 @@
 
 PRGNAM=qwtpolar
 VERSION=${VERSION:-1.1.1}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -54,6 +54,11 @@ else
   LIBDIRSUFFIX=""
 fi
 
+# If Qt5 is installed, assume we want to use it
+QWTP_QT5="no" ; pkg-config --exists Qt5 ; if [ "$?" = "0" ]; then QWTP_QT5="yes" ; fi
+# Also need qwt to have been built with Qt5 support
+pkg-config --exists Qt5Qwt6 ; if [ "$?" != "0" ]; then QWTP_QT5="no" ; fi
+
 set -e
 
 rm -rf $PKG
@@ -65,6 +70,7 @@ cd $PRGNAM-$VERSION
 
 patch -p1 < $CWD/qwtpolar-1.1.1-qt_paths.patch
 patch -p1 < $CWD/qwtpolar-1.1.1-pkgconfig.patch
+patch -p1 < $CWD/qwtpolar-1.1.1-qt5.patch
 
 chown -R root:root .
 find -L . \
@@ -73,9 +79,22 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-qmake qwtpolar.pro LIBDIRSUFFIX=$LIBDIRSUFFIX
+mkdir build-qt4
+cd build-qt4
+qmake ../qwtpolar.pro LIBDIRSUFFIX=$LIBDIRSUFFIX
 make
 make install INSTALL_ROOT=$PKG
+cd ..
+
+if [ "$QWTP_QT5" = "yes" ]; then
+  echo "Supporting Qt5"
+  mkdir build-qt5
+  cd build-qt5
+  qmake-qt5 ../qwtpolar.pro LIBDIRSUFFIX=$LIBDIRSUFFIX
+  make
+  make install INSTALL_ROOT=$PKG
+  cd ..
+fi
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -85,9 +104,15 @@ find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/examples
-find ./examples/ -name moc -type d |xargs rm -rf
-find ./examples/ -name obj -type d |xargs rm -rf
-cp -a ./examples/*  $PKG/usr/doc/$PRGNAM-$VERSION/examples/
+find ./build-qt4/examples/ -name moc -type d |xargs rm -rf
+find ./build-qt4/examples/ -name obj -type d |xargs rm -rf
+cp -a ./build-qt4/examples/*  $PKG/usr/doc/$PRGNAM-$VERSION/examples/
+if [ -d build-qt5 ]; then
+  mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/examples-qt5
+  find ./build-qt5/examples/ -name moc -type d |xargs rm -rf
+  find ./build-qt5/examples/ -name obj -type d |xargs rm -rf
+  cp -a ./build-qt5/examples/*  $PKG/usr/doc/$PRGNAM-$VERSION/examples-qt5/
+fi
 cp -a CHANGES* COPYING INSTALL $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
