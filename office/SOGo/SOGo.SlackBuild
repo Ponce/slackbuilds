@@ -1,0 +1,166 @@
+#!/bin/sh
+
+# Slackware build script for SOGo
+
+# Copyright 2018 Chris Walker Kempner, TX
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=SOGo
+VERSION=${VERSION:-4.0.2}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+PRGUID=356
+PRGGID=356
+PRGUSR=${PRGUSR:-sogo}
+PRGGRP=${PRGGRP:-sogo}
+
+if [ -z "$(getent passwd $PRGUSR)" -o -z "$(getent group $PRGGRP)" ]; then
+  echo
+  echo "You must have the $PRGUSR user and $PRGGRP group in order to build $PRGNAM."
+  echo
+  echo "Example:"
+  echo "  # groupadd -g $PRGGID $PRGGRP"
+  echo "  # useradd -u $PRGUID -m -d /var/lib/$PRGUSR -s /bin/bash -g $PRGGRP $PRGUSR"
+  echo
+  exit 1
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --enable-strip
+
+make
+make install DESTDIR=$PKG GNUSTEP_INSTALLATION_DOMAIN=SYSTEM
+
+# The symbolic links created to libSOGo.so are broken; remove them and create
+# symbolic links that work
+( cd $PKG/usr/lib${LIBDIRSUFFIX}/sogo
+  ln -sf ../../lib/GNUstep/Frameworks/SOGo.framework/Versions/Current/sogo/libSOGo.so libSOGo.so
+  ln -sf ../../lib/GNUstep/Frameworks/SOGo.framework/Versions/Current/sogo/libSOGo.so.4 libSOGo.so.4
+  ln -sf ../../lib/GNUstep/Frameworks/SOGo.framework/Versions/Current/sogo/libSOGo.so.4.0.2 libSOGo.so.4.0.2
+)
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/var/log/sogo $PKG/var/spool/sogo $PKG/var/run/sogo
+chown $PRGUSR:$PRGGRP $PKG/var/log/sogo $PKG/var/spool/sogo $PKG/var/run/sogo
+
+# Install daemon script
+mkdir -p $PKG/etc/rc.d
+sed -e "s,USER=sogo,USER=$PRGUSR,g" $CWD/rc.sogo > $PKG/etc/rc.d/rc.sogo.new
+
+# Install crontab files
+mkdir -p $PKG/etc/cron.d
+sed -e "s,\s\+sogo\s\+/usr/sbin, /usr/sbin,g" \
+  -e "s,\s\+sogo\s\+/usr/share/doc/sogo, /usr/doc/$PRGNAM-$VERSION,g" \
+  Scripts/sogo.cron > $PKG/etc/cron.d/sogo.new
+
+mkdir -p $PKG/etc/cron.daily
+cat Scripts/tmpwatch > $PKG/etc/cron.daily/sogo.new
+chmod +x $PKG/etc/cron.daily/sogo.new
+
+# Install logrotate config
+mkdir -p $PKG/etc/logrotate.d
+cat Scripts/logrotate > $PKG/etc/logrotate.d/sogo.new
+
+# Install configuration files
+mkdir -p $PKG/etc/{sogo,sysconfig}
+cat Scripts/sogo.conf > $PKG/etc/sogo/sogo.conf.new
+sed -e "s,USER=sogo,USER=$PRGUSR,g" Scripts/sogo-default > $PKG/etc/sysconfig/sogo.new
+
+# Install example SOGo Apache configuration files
+mkdir -p $PKG/etc/httpd/extra
+cat Apache/SOGo.conf > $PKG/etc/httpd/extra/httpd-sogo.conf.new
+
+# Install documentation
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  COPYING.GPL COPYING.LGPL ChangeLog ChangeLog.old NEWS README.md \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Install backup script
+cat Scripts/sogo-backup.sh > $PKG/usr/doc/$PRGNAM-$VERSION/sogo-backup.sh
+chmod +x $PKG/usr/doc/$PRGNAM-$VERSION/sogo-backup.sh
+
+# Install fail2ban configuration files
+cp -r Scripts/fail2ban $PKG/usr/doc/$PRGNAM-$VERSION
+
+# Install Thunderbird extension propagation script
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/Thunderbird
+cat Scripts/updates.php > $PKG/usr/doc/$PRGNAM-$VERSION/Thunderbird/updates.php
+
+# Install database scripts
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/db
+cp -a \
+  Scripts/mysql-utf8mb4.sql Scripts/sql-update-*.sh \
+  $PKG/usr/doc/$PRGNAM-$VERSION/db
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
