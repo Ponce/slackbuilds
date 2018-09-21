@@ -39,6 +39,12 @@ start_instance() {
         fi
     fi
 
+    mkdir -p $(dirname ${PIDFILE[$1]})
+    # The child (unprivileged) process needs write access or the PID will not
+    # be written.
+    chmod 0700 $(dirname ${PIDFILE[$1]})
+    chown ${USER[$1]} $(dirname ${PIDFILE[$1]})
+
     OPTIONS="-d"
     if [ -n "${LISTENADDRESS[$1]}" ]; then
         OPTIONS="${OPTIONS} --listen-address=${LISTENADDRESS[$1]}"
@@ -50,7 +56,11 @@ start_instance() {
         OPTIONS="${OPTIONS} --user=${USER[$1]}"
     fi
     if [ -n "${DNSCRYPTDIR[$1]}" ]; then
-        OPTIONS="${OPTIONS} --crypt-secretkey-file=${DNSCRYPTDIR[$1]}/crypt_secret.key"
+        if [ -n "$2" ] && [ "$2" == "rotate" ]; then
+            OPTIONS="${OPTIONS} --crypt-secretkey-file=${DNSCRYPTDIR[$1]}/crypt_secret.key,${DNSCRYPTDIR[$1]}/crypt_secret.key_prev"
+        else
+            OPTIONS="${OPTIONS} --crypt-secretkey-file=${DNSCRYPTDIR[$1]}/crypt_secret.key"
+        fi
         OPTIONS="${OPTIONS} --provider-publickey-file=${DNSCRYPTDIR[$1]}/public.key"
         OPTIONS="${OPTIONS} --provider-secretkey-file=${DNSCRYPTDIR[$1]}/secret.key"
     fi
@@ -70,7 +80,11 @@ start_instance() {
         OPTIONS="${OPTIONS} --provider-name=${PROVIDERNAME[$1]}"
     fi
     if [ -n "${PROVIDERCERTFILE[$1]}" ]; then
-        OPTIONS="${OPTIONS} --provider-cert-file=${PROVIDERCERTFILE[$1]}"
+        if [ -n "$2" ] && [ "$2" == "rotate" ]; then
+            OPTIONS="${OPTIONS} --provider-cert-file=${PROVIDERCERTFILE[$1]},${PROVIDERCERTFILE[$1]}_prev"
+        else
+            OPTIONS="${OPTIONS} --provider-cert-file=${PROVIDERCERTFILE[$1]}"
+        fi
     fi
     if [ "${UNAUTHENTICATED[$1]}" == "yes" ]; then
         OPTIONS="${OPTIONS} --unauthenticated"
@@ -123,13 +137,41 @@ generate-keys_instance() {
         echo "DNSCRYPTDIR not set for instance $1! Either set DNSCRYPTDIR or generate keys manually."
         return
     fi
+    OPTIONS=""
+    if [ "${NOLOG[$1]}" == "yes" ]; then
+        OPTIONS="${OPTIONS} --nolog"
+    fi
+    if [ "${DNSSEC[$1]}" == "yes" ]; then
+        OPTIONS="${OPTIONS} --dnssec"
+    fi
     (
     echo "Generating keys for instance $1. You should record the fingerprint, since this will be used by clients."
     cd ${DNSCRYPTDIR[$1]}
-    rm -f crypt_secret.key public.key secret.key
-    $DAEMON --gen-provider-keypair
+    rm -f public.key secret.key
+    $DAEMON $OPTIONS --gen-provider-keypair \
+        --provider-name=${PROVIDERNAME[$1]} \
+        --ext-address=${EXTADDRESS[$1]}
+
+    chmod 0600 public.key secret.key
+    )
+}
+
+generate-cryptkeys_instance() {
+    if [ -z ${PIDFILE[$1]} ]; then
+        echo "No configuration for instance $1 found!"
+        return
+    fi
+    if [ -z ${DNSCRYPTDIR[$1]} ]; then
+        echo "DNSCRYPTDIR not set for instance $1! Either set DNSCRYPTDIR or generate keys manually."
+        return
+    fi
+    (
+    echo "Generating cryptkeys for instance $1."
+    cd ${DNSCRYPTDIR[$1]}
+    rm -f crypt_secret.key
+
     $DAEMON --gen-crypt-keypair
-    chmod 0600 crypt_secret.key public.key secret.key
+    chmod 0600 crypt_secret.key
     )
 }
 
@@ -157,6 +199,9 @@ generate-cert_instance() {
     if [ -z "${DNSCRYPTDIR[$1]}" ] && [ -n "${PROVIDERSECRETKEYFILE[$1]}" ]; then
         OPTIONS="${OPTIONS} --provider-secretkey-file=${PROVIDERSECRETKEYFILE[$1]}"
     fi
+    if [ -n "${CERTEXPIRATION[$1]}" ]; then
+        OPTIONS="${OPTIONS} --cert-file-expire-days=${CERTEXPIRATION[$1]}"
+    fi
     (
     echo "Generating certificate for instance $1."
     mkdir /tmp/dnscrypt-wrapper-$$
@@ -166,6 +211,35 @@ generate-cert_instance() {
     mv -f dnscrypt.cert ${PROVIDERCERTFILE[$1]}
     cd /
     rmdir /tmp/dnscrypt-wrapper-$$
+    )
+}
+
+rotate-keys_instance() {
+    if [ -z ${PIDFILE[$1]} ]; then
+        echo "No configuration for instance $1 found!"
+        return
+    fi
+    if [ -z ${DNSCRYPTDIR[$1]} ]; then
+        echo "DNSCRYPTDIR not set for instance $1! Either set DNSCRYPTDIR or rotate keys manually."
+        return
+    fi
+    if [ -z ${PROVIDERCERTFILE[$1]} ]; then
+        echo "PROVIDERCERTFILE for instance $1 not set! Set PROVIDERCERTFILE before rotating keys."
+        return
+    fi
+    (
+    echo "Backing up existing keys for instance $1."
+    cd ${DNSCRYPTDIR[$1]}
+    cp -f crypt_secret.key crypt_secret.key_prev
+    cp -f ${PROVIDERCERTFILE[$1]} ${PROVIDERCERTFILE[$1]}_prev
+
+    chmod 0600 crypt_secret.key_prev ${PROVIDERCERTFILE[$1]}_prev
+
+    generate-cryptkeys_instance $1
+    generate-cert_instance $1
+    stop_instance $1
+    sleep 1
+    start_instance $1 "rotate"
     )
 }
 
@@ -197,10 +271,24 @@ generate-keys() {
     done
 }
 
+generate-cryptkeys() {
+    for i in `/usr/bin/seq 0 $((${#PIDFILE[@]}-1))`
+    do
+        generate-cryptkeys_instance $i
+    done
+}
+
 generate-cert() {
     for i in `/usr/bin/seq 0 $((${#PIDFILE[@]}-1))`
     do
         generate-cert_instance $i
+    done
+}
+
+rotate-keys() {
+    for i in `/usr/bin/seq 0 $((${#PIDFILE[@]}-1))`
+    do
+        rotate-keys_instance $i
     done
 }
 
@@ -221,8 +309,14 @@ case "$1" in
     'generate-keys')
         generate-keys
         ;;
+    'generate-cryptkeys')
+        generate-cryptkeys
+        ;;
     'generate-cert')
         generate-cert
+        ;;
+    'rotate-keys')
+        rotate-keys
         ;;
     *_start)
         INSTANCE=`echo $1 | /bin/cut -d '_' -f 1`
@@ -246,12 +340,20 @@ case "$1" in
         INSTANCE=`echo $1 | /bin/cut -d '_' -f 1`
         generate-keys_instance $INSTANCE
         ;;
+    *_generate-cryptkeys)
+        INSTANCE=`echo $1 | /bin/cut -d '_' -f 1`
+        generate-cryptkeys_instance $INSTANCE
+        ;;
     *_generate-cert)
         INSTANCE=`echo $1 | /bin/cut -d '_' -f 1`
         generate-cert_instance $INSTANCE
         ;;
+    *_rotate-keys)
+        INSTANCE=`echo $1 | /bin/cut -d '_' -f 1`
+        rotate-keys_instance $INSTANCE
+        ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status|generate-keys|generate-cert|#_start|#_stop|#_restart|#_status|#_generate-keys|#_generate-cert}"
+        echo "Usage: $0 {start|stop|restart|status|generate-keys|generate-cryptkeys|generate-cert|rotate-keys|#_start|#_stop|#_restart|#_status|#_generate-keys|#_generate-cryptkeys|#_generate-cert|#_rotate-keys}"
         exit 1
         ;;
 esac
