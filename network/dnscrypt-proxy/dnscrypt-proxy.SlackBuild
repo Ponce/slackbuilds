@@ -2,7 +2,7 @@
 
 # Slackware build script for dnscrypt-proxy
 
-# Copyright 2017 T3slider <t3slider@gmail.com>
+# Copyright 2018 T3slider <t3slider@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,15 +22,17 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# Thanks to Larry Hajali for work on README.Slackware, some configure options,
-# the basis for the sample dnsmasq configuration, the logrotate configuration,
-# and the idea for an init script. His contributions significantly improved the
-# value of this script!
+# Thanks to Larry Hajali for work on README.Slackware, the basis for the sample
+# dnsmasq configuration, and the idea for an init script. His contributions
+# significantly improved the value of this script!
 
 PRGNAM=dnscrypt-proxy
-VERSION=${VERSION:-1.9.5}
+VERSION=${VERSION:-2.0.16}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+
+DOMAIN=github.com
+ORG=jedisct1
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -46,16 +48,12 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
-  SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
 
@@ -65,8 +63,11 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
-cd $PRGNAM-$VERSION
+mkdir -p $PRGNAM-$VERSION/src/$DOMAIN/$ORG
+cd $PRGNAM-$VERSION/src/$DOMAIN/$ORG
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+mv $PRGNAM-$VERSION $PRGNAM
+cd $PRGNAM
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -74,39 +75,30 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --enable-plugins \
-  --enable-plugins-root \
-  --enable-static=no \
-  --disable-ltdl-install \
-  --without-included-ltdl \
-  --build=$ARCH-slackware-linux
+# Error compiling with go 1.11; fixed in dnscrypt-proxy master but not in the
+# latest release
+patch -p1 < $CWD/poly1305.patch
 
-make
-make install-strip DESTDIR=$PKG
+export GOPATH="$TMP/$PRGNAM-$VERSION"
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+go install -a -x ./...
 
-mkdir -p $PKG/var/{run,log}/$PRGNAM $PKG/etc/default
-chmod 0700 $PKG/var/{run,log}/$PRGNAM
+mkdir -p $PKG/usr/sbin
+
+install -m 755 "$TMP/$PRGNAM-$VERSION/bin/${PRGNAM}" $PKG/usr/sbin/${PRGNAM}
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/var/log/$PRGNAM $PKG/etc/default $PKG/etc/$PRGNAM
+chmod 0700 $PKG/var/log/$PRGNAM
 sed "s/@VERSION@/$VERSION/" $CWD/$PRGNAM.default > $PKG/etc/default/$PRGNAM.new
 install -D -m 0755 $CWD/rc.$PRGNAM $PKG/etc/rc.d/rc.$PRGNAM.new
-rm -f $PKG/etc/$PRGNAM.conf
-install -D -m 0644 $CWD/$PRGNAM.conf $PKG/etc/$PRGNAM.conf.new
-install -D -m 0644 $CWD/$PRGNAM.logrotate $PKG/etc/logrotate.d/$PRGNAM.new
+install -D -m 0644 $CWD/$PRGNAM.toml $PKG/etc/$PRGNAM/$PRGNAM.toml.new
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  AUTHORS ChangeLog INSTALL NEWS README THANKS \
+  ChangeLog LICENSE README.md utils $PRGNAM/example-* \
   $PKG/usr/doc/$PRGNAM-$VERSION
 sed "s/@VERSION@/$VERSION/g" $CWD/README.Slackware > $PKG/usr/doc/$PRGNAM-$VERSION/README.Slackware
 cat $CWD/dnsmasq.conf > $PKG/usr/doc/$PRGNAM-$VERSION/dnsmasq.conf

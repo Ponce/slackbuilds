@@ -24,5 +24,4 @@ preserve_perms() {
 
 preserve_perms etc/rc.d/rc.dnscrypt-proxy.new
 config etc/default/dnscrypt-proxy.new
-config etc/dnscrypt-proxy.conf.new
-config etc/logrotate.d/dnscrypt-proxy.new
+config etc/dnscrypt-proxy/dnscrypt-proxy.toml.new

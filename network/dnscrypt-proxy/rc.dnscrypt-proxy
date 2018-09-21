@@ -10,39 +10,28 @@ start_instance() {
         echo "No configuration for instance $1 found!"
         return
     fi
-    PIDFILE=$(grep -i "^[[:space:]]*PidFile[[:space:]]\+." ${DNSCRYPTCONFIG[$1]} | awk '{print $2}')
-    if [ -z ${PIDFILE} ]; then
+    if [ -z ${PIDFILE[$1]} ]; then
         echo "No PID configuration for instance $1 found!"
         return
     fi
-    if [ -r ${PIDFILE} ]; then
+    if [ -z ${USER[$1]} ]; then
+        echo "No user configuration for instance $1 found!"
+        return
+    fi
+    if [ -r ${PIDFILE[$1]} ]; then
         echo "dnscrypt-proxy (instance $1) already running!"
         return
     fi
 
-    # dnscrypt-proxy will work without this, but it drops privileges before
-    # seeding the PRNG. libevent tries to work around a missing /dev/urandom
-    # but it's safer just to make sure it is available in the chroot.
-    if [ -n "${CHROOTDIR[$1]}" ]; then
-        if [ "$(readlink -f ${CHROOTDIR[$1]})" != "/" ]; then
-            if [ ! -d ${CHROOTDIR[$1]} ]; then
-                mkdir -p ${CHROOTDIR[$1]}
-                chmod 755 ${CHROOTDIR[$1]}
-            fi
-            if [ ! -d ${CHROOTDIR[$1]}/dev ]; then
-                mkdir -p ${CHROOTDIR[$1]}/dev
-                chmod 755 ${CHROOTDIR[$1]}/dev
-            fi
-            if [ ! -c ${CHROOTDIR[$1]}/dev/urandom ]; then
-                mknod -m 666 ${CHROOTDIR[$1]}/dev/urandom c 1 9
-            fi
-            if [ ! -c ${CHROOTDIR[$1]}/dev/random ]; then
-                mknod -m 666 ${CHROOTDIR[$1]}/dev/random c 1 8
-            fi
-        fi
-    fi
+    mkdir -p $(dirname ${PIDFILE[$1]})
+    # The child (unprivileged) process needs write access or the PID will not
+    # be written.
+    chmod 0700 $(dirname ${PIDFILE[$1]})
+    chown ${USER[$1]} $(dirname ${PIDFILE[$1]})
 
-    $DAEMON ${DNSCRYPTCONFIG[$1]}
+    # The new Go-based dnscrypt-proxy no longer has the ability to daemonize.
+    # In the absence of a standard Slackware daemon tool we'll use nohup. :(
+    nohup $DAEMON -config ${DNSCRYPTCONFIG[$1]} -pidfile ${PIDFILE[$1]} >> /dev/null 2>&1 &
 }
 
 stop_instance() {
@@ -50,17 +39,16 @@ stop_instance() {
         echo "No configuration for instance $1 found!"
         return
     fi
-    PIDFILE=$(grep -i "^[[:space:]]*PidFile[[:space:]]\+." ${DNSCRYPTCONFIG[$1]} | awk '{print $2}')
-    if [ -z ${PIDFILE} ]; then
+    if [ -z ${PIDFILE[$1]} ]; then
         echo "No PID configuration for instance $1 found!"
         return
     fi
-    if [ ! -r ${PIDFILE} ]; then
+    if [ ! -r ${PIDFILE[$1]} ]; then
         echo "dnscrypt-proxy (instance $1) is not running!"
         return
     fi
     echo "Stopping dnscrypt-proxy (instance $1)..."
-    kill $(cat ${PIDFILE})
+    kill $(cat ${PIDFILE[$1]})
 }
 
 status_instance() {
@@ -68,16 +56,15 @@ status_instance() {
         echo "No configuration for instance $1 found!"
         return
     fi
-    PIDFILE=$(grep -i "^[[:space:]]*PidFile[[:space:]]\+." ${DNSCRYPTCONFIG[$1]} | awk '{print $2}')
-    if [ -z ${PIDFILE} ]; then
+    if [ -z ${PIDFILE[$1]} ]; then
         echo "No PID configuration for instance $1 found!"
         return
     fi
-    if [ ! -r ${PIDFILE} ]; then
+    if [ ! -r ${PIDFILE[$1]} ]; then
         echo "dnscrypt-proxy (instance $1) is not running."
         return
     fi
-    PID=$(cat ${PIDFILE})
+    PID=$(cat ${PIDFILE[$1]})
     if [ -z "$PID" ]; then
         echo "PID file is empty! dnscrypt-proxy (instance $1) does not appear to be running, but there is a stale PID file."
     elif kill -0 $PID ; then
