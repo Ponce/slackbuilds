@@ -11,5 +11,4 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/thermald/thermal-conf.xml.new
 config etc/thermald/thermal-cpu-cdev-order.xml.new
