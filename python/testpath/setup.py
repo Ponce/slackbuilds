@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='testpath',
-    version='0.3',
+    version='0.4.1',
     description='Test utilities for Python code working with files and commands',
     url='https://github.com/jupyter/testpath',
     author='The Jupyter Development Team',
