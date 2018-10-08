@@ -1,7 +1,4 @@
 #!/bin/sh
-DAVMAIL_HOME=/usr/share/davmail
-for name in $DAVMAIL_HOME/lib/*.jar ; do
-  CP=$CP:$name
-done
-CP=$CP:$DAVMAIL_HOME/davmail.jar
-exec "$JAVA_HOME/bin/java" -cp $CP 'davmail.DavGateway' "$@"
+BASE=/usr/share/davmail
+for i in $BASE/lib/*; do export CLASSPATH=$CLASSPATH:$i; done
+exec java -Xmx512M -Dsun.net.inetaddr.ttl=60 -cp $BASE/davmail.jar:$CLASSPATH davmail.DavGateway $1
