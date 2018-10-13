@@ -22,17 +22,34 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-PRGNAM=PySolFC
-PKGNAM=pysolfc
-VERSION=${VERSION:-2.0}
+# Now maintained by B. Watson <yalhcru@gmail.com>
+
+# 20181013 bkw:
+# - Take over maintenance.
+# - Update for v2.4.0. Incompatible changes, can't build the old
+#   version with VERSION=2.0, sorry.
+# - Upstream removed all the cardsets from the source tarball, moved
+#   them to a separate "minimal" cardset tarball, so add it to DOWNLOAD
+#   and script stuff to handle it.
+# - Get rid of the option to include the complete cardsets tarball. Moved
+#   to a separate pysylfc-extra-cardsets build.
+# - Install the correct man page for the FC edition, not the old pre-fork
+#   pysol one.
+# - Include all_games.html in the docdir (with fixed paths for the links).
+# - Update README and slack-desc.
+
+SRCNAM=PySolFC
+PRGNAM=pysolfc
+VERSION=${VERSION:-2.4.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-CARDSETS=$PRGNAM-Cardsets-$VERSION
+CARDSETVER=${CARDSETVER:-2.0}
+CARDSETS=$SRCNAM-Cardsets--Minimal-$CARDSETVER
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+    i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
@@ -40,7 +57,7 @@ fi
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
-PKG=$TMP/package-$PKGNAM
+PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 set -e
@@ -48,36 +65,54 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
-cd $PRGNAM-$VERSION
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.xz
+cd $SRCNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# 20181012 bkw: Slightly dirty hack, to combat a dirty hack from upstream.
+# Begin rant:
+# Basically, the old versions of pysol used the python 'random' library,
+# which ships with python2 (included in Slackware). With 2.4.0, they've
+# ported the code so it's python3-compatible (though it still works
+# with python2). The python3 random library is API-incompatible with
+# the python2 one... so someone ported the python2 random to python3
+# and named it 'random2'. random2 is also python2-compatible... so the
+# PySolFC devs changed their code to require random2, even on python
+# 2. So I'm changing it back, to avoid adding an extra (redundant) dependency.
+# The reason for going into such detail about it here, is that maintainers
+# of other python-based packages might run into the same issue someday.
+# I'll have a handy URL to point them to with the fix.
+# Here endeth the rant.
+
+sed -i 's,\<random2\>,random,' pysollib/pysolrandom.py
 
 python setup.py install --root $PKG
 
 mkdir -p $PKG/usr/man/man6
-cat docs/pysol.6 > $PKG/usr/man/man6/pysol.6 ; gzip $PKG/usr/man/man6/pysol.6
+gzip -9c < docs/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
 
-## Are we installing extra cardsets?
-if [ -e $CWD/$CARDSETS.tar.bz2 ]; then
-   echo -e "Extracting extra cardsets (this may take some time)..."
-   tar xf $CWD/$CARDSETS.tar.bz2 -C $TMP
-   cp -a $TMP/$CARDSETS/* $PKG/usr/share/$PRGNAM/
-fi
+# Executable is called pysol.py, there damn well better be a man
+# page with the same name.
+ln -s $PRGNAM.6.gz $PKG/usr/man/man6/pysol.py.6
 
-mkdir -p $PKG/usr/doc/$PKGNAM-$VERSION
-cp -a docs/README COPYING $PKG/usr/doc/$PKGNAM-$VERSION
-cp -a README $PKG/usr/doc/$PKGNAM-$VERSION/README.install
-cat $CWD/$PKGNAM.SlackBuild > $PKG/usr/doc/$PKGNAM-$VERSION/$PKGNAM.SlackBuild
+# The minimal cardsets are now required, since the source tarball
+# has none. Extract directly to $PKG instead of extracting and copying.
+tar xvf $CWD/$CARDSETS.tar.xz -C $PKG/usr/share/$SRCNAM/ --strip-components=1
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README.md COPYING docs/README $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Handy HTML list of all the games, but with hardcoded (wrong) paths.
+sed '/href=/s,"[^"]*/data,"/usr/share/'$SRCNAM, docs/all_games.html > \
+     $PKG/usr/doc/$PRGNAM-$VERSION/all_games.html
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PKGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
