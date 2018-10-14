@@ -23,8 +23,7 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=alacritty
-GITREV=${GITREV:-593d7718d0d3e1e2071021d34178856079ac8bf7}
-VERSION=${VERSION:-git$(echo "$GITREV" | sed 's/^\(.\{7\}\).*$/\1/')}
+VERSION=${VERSION:-0.2.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -66,12 +65,9 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$GITREV
-tar xvf $CWD/$PRGNAM-$GITREV.tar.gz
-cd $PRGNAM-$GITREV
-
-# force offline for git crate dependencies
-patch -p1 < $CWD/patch_crate_deps.diff
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
 
 # build offline
 # configuration tells cargo to use the configured directory
@@ -100,7 +96,6 @@ mkdir vendor
                     atty=0.2.11 \
                     base64=0.9.3 \
                     bitflags=0.7.0 \
-                    bitflags=0.8.2 \
                     bitflags=1.0.4 \
                     block=0.1.6 \
                     byteorder=1.2.6 \
@@ -132,8 +127,8 @@ mkdir vendor
                     fnv=1.0.6 \
                     foreign-types-shared=0.1.1 \
                     foreign-types=0.3.2 \
-                    freetype-rs=0.13.0 \
-                    freetype-sys=0.4.0 \
+                    freetype-rs=0.19.0 \
+                    freetype-sys=0.7.0 \
                     fsevent-sys=0.1.6 \
                     fsevent=0.2.17 \
                     fuchsia-zircon-sys=0.3.3 \
@@ -211,6 +206,8 @@ mkdir vendor
                     serde_derive=1.0.79 \
                     serde_json=1.0.28 \
                     serde_yaml=0.7.5 \
+                    servo-fontconfig-sys=4.0.7 \
+                    servo-fontconfig=0.4.0 \
                     shared_library=0.1.9 \
                     siphasher=0.2.3 \
                     slab=0.3.0 \
@@ -259,41 +256,17 @@ mkdir vendor
                     x11-dl=2.18.3 \
                     xdg=2.1.0 \
                     xml-rs=0.7.0 \
-                    yaml-rust=0.4.2 \
-                    servo-fontconfig=0.4.0 \
-                    servo-fontconfig-sys=4.0.3 ; do
+                    yaml-rust=0.4.2 ; do
     dep="$(echo "$dependency" | cut -d= -f1)"
     ver="$(echo "$dependency" | cut -d= -f2)"
 
-    if [ "$dep" = "servo-fontconfig" ] || [ "$dep" = "servo-fontconfig-sys" ] ; then
-      if [ "$dep" = "servo-fontconfig" ] ; then
-        srcnam="rust-fontconfig"
-        sha1="be2b94de833ec69cf767186262a5fb8360fa5b45"
-      else
-        srcnam="libfontconfig"
-        sha1="5c1845e1bffa11cf4d3e6fb27f456bf5c814ce1b"
-      fi
-
-      crate="$CWD/$srcnam-$sha1.tar.gz"
-      tar xvf "$crate"
-      mv "$srcnam-$sha1" "$dep-$ver"
-
-      if [ "$dep" = "servo-fontconfig" ] ; then
-        (
-          cd "$dep-$ver"
-          sed -i 's/^servo-fontconfig-sys =.*/servo-fontconfig-sys = "4.0.3"/' Cargo.toml
-        )
-      fi
-    else
-      crate="$CWD/$dep-$ver.crate"
-      tar xvf "$crate"
-    fi
+    tar xvf $CWD/$dep-$ver.crate
 
     touch $dep-$ver/.cargo-ok
 
     # generate checksum
     {
-      printf "{\\n"
+      printf "{\n"
       printf '    "files": {\n'
 
       (
@@ -301,19 +274,12 @@ mkdir vendor
         find . -type f -print0 | xargs -0 sha256sum | sed -n '/\.cargo-checksum\.json/!p' | sed 's/\.\///;s/^\([^ ]*\)[[:space:]][[:space:]]*\(.*\)$/"\2":"\1",/'
       ) | sed '$ s/,$//'
 
-      printf "    },\\n"
+      printf "    },\n"
       printf '    "package": "'
 
-      if [ "$dep" = "servo-fontconfig" ] || [ "$dep" = "servo-fontconfig-sys" ] ; then
-        checksum="$(tar cz $dep-$ver | sha256sum | cut -f1 -d' ')"
-        sed -i "s/^\(\"checksum $dep [^=]*\)= \".*$/\1= \"$checksum\"/" ../Cargo.lock
+      sha256sum "$CWD/$dep-$ver.crate" | cut -f1 -d' ' | sed 's/$/"/'
 
-        printf "%s\"\\n" "$checksum"
-      else
-        sha256sum "$crate" | cut -f1 -d' ' | sed 's/$/"/'
-      fi
-
-      printf "}\\n"
+      printf "}\n"
     } | python -c "import sys, json; data = sys.stdin.read(); print json.dumps(json.loads(data), sort_keys=True, indent=4, separators=(',', ' : '))" > $dep-$ver/.cargo-checksum.json
   done
 )
