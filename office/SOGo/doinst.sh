@@ -26,6 +26,6 @@ config etc/cron.d/sogo.new
 preserve_perms etc/cron.daily/sogo.new
 config etc/httpd/extra/httpd-sogo.conf.new
 config etc/logrotate.d/sogo.new
-preserve_perms etc/rc.d/rc.sogo.new
+preserve_perms etc/rc.d/rc.sogod.new
 config etc/sogo/sogo.conf.new
 config etc/sysconfig/sogo.new
