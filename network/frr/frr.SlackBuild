@@ -1,0 +1,160 @@
+#!/bin/sh
+
+# Slackware build script for frr
+
+# Copyright 2018 Thibaut Notteboom, Paris, FRANCE
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=frr
+VERSION=${VERSION:-6.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+if [ "$(grep "^frr:x:357:357" /etc/passwd)" = "" -o \
+     "$(grep "^frr:x:357:" /etc/group)" = "" -o \
+     "$(grep "^frrvty:x:358:frr" /etc/group)" = "" ]; then
+cat << EOF
+The frr user/group and/or the frrvty group do not exist on this system.
+Before running this script, please add them with the following commands:
+
+groupadd -g 357 frr
+groupadd -g 358 frrvty
+useradd -c "FRR FRRouting suite" -d /var/run/frr -s /bin/false -u 357 -g frr -G frrvty frr
+
+EOF
+  exit 1
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+./bootstrap.sh
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --sbindir=/usr/sbin \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc/frr \
+  --localstatedir=/var/run/frr \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --infodir=/usr/info \
+  --enable-exampledir=/usr/doc/$PRGNAM-$VERSION/examples \
+  --enable-snmp=agentx \
+  --enable-multipath=256 \
+  --enable-user=frr \
+  --enable-group=frr \
+  --enable-vty-group=frrvty \
+  --enable-configfile-mask=0640 \
+  --enable-logfile-mask=0640 \
+  --enable-shell-access \
+  --enable-rpki \
+  --enable-fpm \
+  --enable-vtysh \
+  --enable-watchfrr \
+  --disable-systemd \
+  --disable-static \
+  --without-libpam \
+  --build=$ARCH-slackware-linux
+
+make
+make install-strip DESTDIR=$PKG
+
+install -d -m 750 -o frr -g frr $PKG/etc/frr $PKG/var/log/frr $PKG/var/run/frr
+
+install -D -m 640 -o frr -g frr redhat/daemons $PKG/etc/frr/daemons.new
+install -D -m 640 -o frr -g frrvty tools/etc/frr/vtysh.conf $PKG/etc/frr/vtysh.conf.new
+
+install -D -m 644 redhat/frr.init $PKG/etc/rc.d/rc.frr.new
+install -D -m 644 redhat/frr.logrotate $PKG/etc/logrotate.d/frr.new
+
+install -D -m 644 bgpd/BGP4-MIB.txt $PKG/usr/share/snmp/mibs/BGP4-MIB.txt
+install -D -m 644 eigrpd/EIGRP-MIB.txt $PKG/usr/share/snmp/mibs/EIGRP-MIB.txt
+install -D -m 644 ospf6d/OSPFv3-MIB.txt $PKG/usr/share/snmp/mibs/OSPFv3-MIB.txt
+install -D -m 644 ospfd/OSPF-MIB.txt $PKG/usr/share/snmp/mibs/OSPF-MIB.txt
+install -D -m 644 ospfd/OSPF-TRAP-MIB.txt $PKG/usr/share/snmp/mibs/OSPF-TRAP-MIB.txt
+install -D -m 644 ripd/RIPv2-MIB.txt $PKG/usr/share/snmp/mibs/RIPv2-MIB.txt
+
+# Fix paths
+sed -i 's|usr/lib/frr|usr/sbin|g' $PKG/etc/rc.d/rc.frr.new $PKG/etc/frr/daemons.new
+
+# Don't ship .la files:
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+rm -f $PKG/usr/lib${LIBDIRSUFFIX}/frr/modules/*.la
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+rm -f $PKG/usr/info/dir
+gzip -9 $PKG/usr/info/*.info*
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  AUTHORS COPYING* ChangeLog INSTALL NEWS README* \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
