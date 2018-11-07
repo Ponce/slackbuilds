@@ -12,16 +12,16 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-BACKUP_FILE=(inittab rc.conf logrotate.d/openrc)
-BACKUP_CONF=(bootmisc consolefont devfs dmesg fsck hostname hwclock keymaps killprocs localmount modules mtab net-online netmount network staticroute swap urandom)
+BACKUP_FILE=(openrc/rc.conf logrotate.d/openrc)
+BACKUP_CONF=(agetty bootmisc consolefont devfs dmesg fsck hostname hwclock keymaps killprocs localmount modules mtab net-online netmount network staticroute swap urandom)
 
 for file in "${BACKUP_FILE[@]}"; do
   config "etc/${file}.new"
 done
 
 for file in "${BACKUP_CONF[@]}"; do
-  config "etc/conf.d/${file}.new"
+  config "etc/openrc/conf.d/${file}.new"
 done
 
 # enable cgroups service as required by openrc 0.35+
-[ ! -e etc/runlevels/sysinit/cgroups ] && ln -s /etc/init.d/cgroups etc/runlevels/sysinit/cgroups
+[ ! -e etc/openrc/runlevels/sysinit/cgroups ] && ln -s /etc/openrc/init.d/cgroups etc/openrc/runlevels/sysinit/cgroups
