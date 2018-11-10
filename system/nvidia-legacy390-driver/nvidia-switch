@@ -1,0 +1,266 @@
+#!/bin/sh
+
+# Copyright 2012-2017 Edward W. Koenig, Vancouver, WA, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+# nvidia-switch utility 4.0
+#
+# A tool to install and cleanly remove the nvidia driver without stomping on the xorg files.
+# Note: this tool "should" allow switching on the fly, but why? Pick a driver! You will still
+# need to edit a bunch of other config files.
+
+# TO-DO: needs more cleanup, simplify linking using system tools
+
+ROOT="${ROOT:-/}"
+CWD=$(pwd)
+COMPAT32="LIB32FLAG" # This will be replaced in the build script (yes | no)
+LIBSUFFIX="LIBDIRSUFFIX" # This will be replaced in the build script
+INC="${ROOT}usr/include/GL"
+LIB="${ROOT}usr/lib${LIBSUFFIX}"
+LIB32="${ROOT}usr/lib"
+XMOD="${LIB}/xorg/modules"
+XLIB="$XMOD/extensions"
+NV_VERSION="PKGVERSION" # This will be replaced in the build script
+GL_VERSION="1.2.0"
+GLVND="GLVNDFLAG" # This will be replaced in the build script (yes | no)
+NV_CONF="${ROOT}usr/share/X11/xorg.conf.d/10-nvidia.conf"
+SAVELIBS="${ROOT}var/log/nvidia"
+
+save_GL(){
+# backup original mesa and xorg conflicts to /var/log/nvidia
+  cd $2
+  # Need to make sure save path is reset incase of multilib
+  SAVELIBS="${ROOT}var/log/nvidia"
+  if [ "$2" = "$LIB32" ]; then
+     SAVELIBS="${SAVELIBS}/32"
+  elif [ "$2" = "$LIB" ]; then
+     SAVELIBS="${SAVELIBS}/64"
+  fi
+
+  case "$1" in
+    "nvidia")
+
+      mv libGL.so.$GL_VERSION $SAVELIBS/libGL.so.$GL_VERSION
+      mv libGL.la $SAVELIBS/libGL.la
+      mv libEGL.so.1.0.0 $SAVELIBS/libEGL.so.1.0.0
+      mv libGLESv1_CM.so.1.1.0 $SAVELIBS/libGLESv1_CM.so.1.1.0
+      mv libGLESv2.so.2.0.0 $SAVELIBS/libGLESv2.so.2.0.0
+      mv libGL.la-nvidia libGL.la
+
+      if [ "$GLVND" = "yes" ]; then
+        ln -sf libGL.so.1.7.0 libGL.so.1
+	ln -sf libGL.so.1.7.0 libGL.so
+        ln -sf libEGL.so.1.1.0-nvidia libEGL.so.1.1.0
+	ln -sf libEGL.so.1.1.0-nvidia libEGL.so
+      else
+        ln -sf libGL.so.$NV_VERSION libGL.so.1
+        ln -sf libGL.so.$NV_VERSION libGL.so
+        ln -sf libEGL.so.$NV_VERSION libEGL.so.1
+        ln -sf libEGL.so.$NV_VERSION libEGL.so
+      fi
+
+      ln -sf libGLESv1_CM.so.1.2.0-nvidia libGLESv1_CM.so.1.2.0
+      ln -sf libGLESv1_CM.so.1.2.0-nvidia libGLESv1_CM.so.1
+      ln -sf libGLESv1_CM.so.1.2.0-nvidia libGLESv1_CM.so
+
+      ln -sf libGLESv2.so.2.1.0-nvidia libGLESv2.so.2.1.0
+      ln -sf libGLESv2.so.2.1.0-nvidia libGLESv2.so.2
+      ln -sf libGLESv2.so.2.1.0-nvidia libGLESv2.so
+    ;;
+
+    "xorg")
+       mv libGL.la libGL.la-nvidia
+       mv $SAVELIBS/libGL.so.$GL_VERSION libGL.so.$GL_VERSION
+       mv $SAVELIBS/libGL.la libGL.la
+       mv $SAVELIBS/libEGL.so.1.0.0 libEGL.so.1.0.0
+       mv $SAVELIBS/libGLESv1_CM.so.1.1.0 libGLESv1_CM.so.1.1.0
+       mv $SAVELIBS/libGLESv2.so.2.0.0 libGLESv2.so.2.0.0
+
+       ln -sf libGL.so.$GL_VERSION libGL.so.1
+       ln -sf libGL.so.$GL_VERSION libGL.so
+       ln -sf libEGL.so.1.0.0 libEGL.so.1
+       ln -sf libEGL.so.1.0.0 libEGL.so
+       rm -f libEGL.so.1.1.0
+
+       ln -sf libGLESv1_CM.so.1.1.0 libGLESv1_CM.so.1
+       ln -sf libGLESv1_CM.so.1.1.0 libGLESv1_CM.so
+       ln -sf libGLESv2.so.2.0.0 libGLESv2.so.2
+       ln -sf libGLESv2.so.2.0.0 libGLESv2.so
+       rm -f libGLESv1_CM.so.1.2.0
+       rm -f libGLESv2.so.2.1.0
+  ;;
+
+  *)
+        echo "nothing to do for save_gl?"
+        exit 1
+  ;;
+  esac
+  cd "$CWD"
+}
+
+save_glx(){
+  cd "$XLIB"
+  case "$1" in
+      "nvidia")
+        if [ -e libglx.so ]; then
+          mv libglx.so xorg-libglx.so
+        fi
+	  ln -sf libglx.so.$NV_VERSION libglx.so
+      ;;
+      "xorg")
+        if [ -e xorg-libglx.so ]; then
+          rm -f libglx.so
+          mv xorg-libglx.so libglx.so
+        else
+          rm -f libglx.so
+        fi
+      ;;
+        *)
+          echo "nothing to do for save_glx?"
+          exit 1
+      ;;
+  esac
+  cd "$CWD"
+}
+
+save_wfb(){
+  cd "$XMOD"
+  if [ -e libwfb.so ]; then
+    echo "Using existing Xorg libwfb..."
+  else
+    if [ "$1" = "nvidia" ]; then
+	ln -sf libwfb.so.$NV_VERSION libwfb.so.1
+	ln -sf libwfb.so.1 libwfb.so
+    fi
+    if [ "$1" = "xorg" ]; then
+	rm -f libwfb.so
+	rm -f libwfb.so.1
+    fi
+  fi
+  cd "$CWD"
+}
+
+nvidia_install(){
+  if [ ! -d $SAVELIBS ]; then
+     echo "Creating missing $SAVELIB ..."
+     mkdir -p $SAVELIBS
+  fi
+  echo $'Installing to nvidia-legacy390-driver files!\n'
+  echo "Make sure the nvidia driver is ENABLED in /etc/X11/xorg.conf"
+  echo "and in /etc/X11/xorg.conf.d."
+  echo "Otherwise, this may lead to improperly working drivers."
+
+  save_glx "nvidia"
+  save_GL "nvidia" $LIB
+  save_wfb "nvidia"
+# Check for multilib configuration
+  if [ "$COMPAT32" = "yes" ]; then
+    save_GL "nvidia" $LIB32
+  fi
+}
+
+nvidia_remove(){
+  echo $'Returning to stock xorg files!\n'
+  echo "Make sure the nvidia driver is DISABLED in /usr/share/X11/xorg.conf.d"
+  echo "/etc/X11/xorg.conf and in /etc/X11/xorg.conf.d."
+  echo "Otherwise, this may lead to improperly working drivers."
+
+  save_glx "xorg"
+  save_GL "xorg" $LIB
+  save_wfb "xorg"
+
+# Check for multilib configuration
+  if [ "$COMPAT32" = "yes" ]; then
+    save_GL "xorg" $LIB32
+  fi
+
+  if [ -e $NV_CONF ]; then
+    echo "removing $NV_CONF: you will need to provide your own"
+    echo "or reinstall nvidia-legacy390-driver."
+    rm -f $NV_CONF
+  fi
+}
+
+restore(){
+# Attempt to reinstall damaged stock packages if something went wrong.
+# Obviously, you will need to run this after '--remove' and before
+# 'removepkg nvidia-legacy390-driver'.
+# User must:
+# 1. remove any dangling symlinks and xorg-*, *-nvidia files in /usr/lib*/,
+#    and any other housekeeping tasks.
+# 2. copy stock Slackware packages to /root/Slackware or provide an alternate location
+# 3. be running Slackware-14.2, not current
+# 4. realize that COMPAT32 is not stable ;-)
+
+if [ "$LIBSUFFIX" = "64" ]; then
+  ARCH="x86_64"
+else
+  ARCH="x86"
+fi
+
+PKGPATH=${PKGPATH:-/root/Slackware}
+MESA="mesa-11.2.2-$ARCH-1.txz"
+MESA32="mesa-compat32-11.2.2-$ARCH-1compat32.txz"
+XORG="xorg-server-1.18.3-$ARCH-2.txz"
+# Note: The above is for stock 14.2; modify as needed for /patches or
+# multilib updates
+if [ -d $PKGPATH ]; then
+  if [ `find $PKGPATH -prune -empty -type d` ]; then
+    echo "Your $PKGPATH is empty!"
+  else
+    upgradepkg --reinstall --install-new $MESA $XORG
+    if [ "COMPAT32" = "yes" ]; then
+      upgradepkg --reinstall --install-new $MESA32
+    fi
+  fi
+else
+  echo "Please create $PKGPATH containing the appropriate packages"
+fi
+}
+
+usage(){
+  echo "Usage:"
+  echo " --install    Set up nvidia driver files"
+  echo " --remove     Return to stock xorg files and restore all symlinks"
+  echo " --restore    Reinstall stock Mesa and xorg-server [EXPERIMENTAL]"
+  echo "              mesa-11.2.2, org-server-1.18.3, and optionally"
+  echo "              mesa-compat32-11.2.2 are expected in /root/Slackware"
+  echo "              Use 'PKGPATH=\"<location>\" nvidia-switch --restore'"
+  echo "              to override."
+  echo " --help	      Show this help message"
+}
+
+case "$1" in
+  "--install")
+    nvidia_install
+    ;;
+  "--remove")
+    nvidia_remove
+    ;;
+  "--restore")
+    restore
+    ;;
+  "--help")
+    usage
+    ;;
+  *)
+    usage
+    ;;
+esac

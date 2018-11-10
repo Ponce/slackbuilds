@@ -1,0 +1,357 @@
+#!/bin/sh
+
+# Slackware build script for nvidia-legacy390-driver
+
+# Copyright 2012-2017 Edward W. Koenig, Vancouver, WA, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# see changelog.txt
+
+PRGNAM=nvidia-legacy390-driver
+VERSION=${VERSION:-390.87}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+GLVND=${GLVND:-yes}
+# libglnvd may land in mesa and is Nvidia recommended
+
+set -e
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  TARGET="x86"
+  LIBDIRSUFFIX=""
+  COMPAT32=no
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  TARGET="x86"
+  LIBDIRSUFFIX=""
+  COMPAT32=no
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  TARGET="x86_64"
+  LIBDIRSUFFIX="64"
+# Set 32-bit compatibility flag default
+  COMPAT32=${COMPAT32:-no}
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+  COMPAT32=no
+fi
+
+SRCNAM=NVIDIA-Linux-$TARGET-${VERSION}
+
+# make a clean package directory tree
+rm -rf $PKG
+rm -rf $TMP/$SRCNAM
+mkdir -p $TMP $PKG $OUTPUT $PKG/install
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/{drivers,extensions} \
+  $PKG/etc/OpenCL/vendors/ $PKG/usr/{bin,doc,man/man1,sbin} \
+  $PKG/usr/share/{applications,nvidia,pixmaps,egl/egl_external_platform.d} \
+  $PKG/usr/include/GL $PKG/etc/vulkan/icd.d $PKG/etc/X11/xorg.conf.d \
+  $PKG/etc/X11/glvnd/egl_vendor.d $PKG/var/log/nvidia/{32,64} \
+
+if [ "$COMPAT32" = "yes" ]; then
+  mkdir -p $PKG/usr/lib/tls
+fi
+
+# Extract all the sources
+cd $TMP
+rm -rf nvidia-installer-$VERSION
+tar xvf $CWD/nvidia-installer-$VERSION.tar.bz2
+rm -rf nvidia-settings-$VERSION
+tar xvf $CWD/nvidia-settings-$VERSION.tar.bz2
+rm -rf nvidia-xconfig-$VERSION
+tar xvf $CWD/nvidia-xconfig-$VERSION.tar.bz2
+rm -rf nvidia-modprobe-$VERSION.tar.bz2
+tar xvf $CWD/nvidia-modprobe-$VERSION.tar.bz2
+rm -rf nvidia-persistenced-$VERSION.tar.bz2
+tar xvf $CWD/nvidia-persistenced-$VERSION.tar.bz2
+sh $CWD/$SRCNAM.run --extract-only
+cd $SRCNAM
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Compiling the various open source apps instead of using the precompiled binaries
+# Compiling nvidia-installer from source
+cd $TMP/nvidia-installer-$VERSION
+
+# Let's try to remove the conflicting files and GPU detection
+  patch -p0 < $CWD/skip_conflict-GPU_detect.patch
+
+  chown -R root:root .
+  find -L . \
+   \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+    -o -perm 511 \) -exec chmod 755 {} \; -o \
+   \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+    -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+  CFLAGS="$SLKCFLAGS" LDFLAGS="-lz" make
+
+  install -m 755 _out/Linux_$TARGET/nvidia-installer $PKG/usr/bin/
+  install -m 644 _out/Linux_$TARGET/nvidia-installer.1.gz $PKG/usr/man/man1/
+
+cd -
+
+# Now we need to copy the newly patched and compiled nvidia-installer
+# to the driver source tree for use
+mv -f $PKG/usr/bin/nvidia-installer $TMP/$SRCNAM
+mv -f $PKG/usr/man/man1/nvidia-installer.1.gz $TMP/$SRCNAM
+
+# Configure options
+if [ "$GLVND" = "yes" ]; then
+  GLVNDOPT="--install-libglvnd --glvnd-glx-client --glvnd-egl-client"
+else
+  GLVNDOPT="--no-install-libglvnd --no-glvnd-glx-client --no-glvnd-egl-client"
+fi
+if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
+    COMP32="--install-compat32-libs --compat32-prefix=$PKG/usr"
+    MULTI="_multi"
+else
+    if [ ! "$ARCH" = "x86_64" ]; then
+        COMP32=""
+    else
+        COMP32="--no-install-compat32-libs"
+	MULTI=""
+    fi
+fi
+
+# Install the binary libs using nvidia-installer compiled above
+cd $TMP/$SRCNAM
+./nvidia-installer -s --no-kernel-module --no-drm --no-unified-memory \
+  -z -n -b --no-rpms --no-distro-scripts \
+  --no-kernel-module-source --no-x-check --force-libglx-indirect \
+  --x-prefix=$PKG/usr \
+  --x-module-path=$PKG/usr/lib${LIBDIRSUFFIX}/xorg/modules \
+  --x-library-path=$PKG/usr/lib${LIBDIRSUFFIX} \
+  --x-sysconfig-path=$PKG/etc/X11/xorg.conf.d \
+  --opengl-prefix=$PKG/usr \
+  --utility-prefix=$PKG/usr \
+  --utility-libdir=lib${LIBDIRSUFFIX} \
+  --documentation-prefix=$PKG/usr \
+  --application-profile-path=$PKG/usr/share/nvidia \
+  --glvnd-egl-config-path=$PKG/etc/X11/glvnd/egl_vendor.d \
+  --log-file-name=$PKG/var/log/nvidia-installer.log \
+  --egl-external-platform-config-path=$PKG/usr/share/egl/egl_external_platform.d \
+  --no-nvidia-modprobe \
+  $GLVNDOPT \
+  $COMP32
+
+# Clean-up: we really do not need this:
+rm -rf /var/lib/nvidia
+# which 32-bit tls? why? why?
+if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
+      install -m 755 32/tls/libnvidia-tls.so.$VERSION $PKG/usr/lib/tls/libnvidia-tls.so.$VERSION
+      cd $PKG/usr/lib
+          ln -sf tls/libnvidia-tls.so.$VERSION libnvidia-tls.so.$VERSION
+      cd -
+fi
+
+# Compile utilites from source, replacing the precompiled versions
+#
+# Compiling nvidia-settings
+cd $TMP/nvidia-settings-$VERSION
+  chown -R root:root .
+  find -L . \
+   \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+    -o -perm 511 \) -exec chmod 755 {} \; -o \
+   \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+    -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+  cd src/libXNVCtrl
+    make clean
+    CFLAGS="$SLKCFLAGS" \
+    make
+  cd ../../
+
+  CFLAGS="$SLKCFLAGS" \
+  make
+
+  install -m 755 src/_out/Linux_$TARGET/nvidia-settings $PKG/usr/bin/
+  install -m 644 doc/_out/Linux_$TARGET/nvidia-settings.1.gz $PKG/usr/man/man1/
+  install -m 644 doc/nvidia-settings.desktop $PKG/usr/share/applications/
+  install -m 644 doc/nvidia-settings.png $PKG/usr/share/pixmaps/
+# For nvidia-settings GUI support
+  install -m 755 src/_out/Linux_$TARGET/libnvidia-gtk2.so $PKG/usr/lib$LIBDIRSUFFIX/libnvidia-gtk2.so.$VERSION
+  install -m 755 src/_out/Linux_$TARGET/libnvidia-gtk3.so $PKG/usr/lib$LIBDIRSUFFIX/libnvidia-gtk3.so.$VERSION
+cd -
+
+# Compiling nvidia-xconfig
+cd $TMP/nvidia-xconfig-$VERSION
+  chown -R root:root .
+  find -L . \
+   \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+    -o -perm 511 \) -exec chmod 755 {} \; -o \
+   \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+    -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+  CFLAGS="$SLKCFLAGS" \
+  make
+
+  install -m 755 _out/Linux_$TARGET/nvidia-xconfig $PKG/usr/bin/
+  install -m 644 _out/Linux_$TARGET/nvidia-xconfig.1.gz $PKG/usr/man/man1/
+cd -
+
+# Some optional utilities, such as laptop for possible GPU switching and
+# nvidia-modprobe needed to create device nodes, see README!
+# FIXME: Needs cleanup at a later date.
+
+# Compiling nvidia-modprobe
+  cd $TMP/nvidia-modprobe-$VERSION
+    chown -R root:root .
+    find -L . \
+     \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+      -o -perm 511 \) -exec chmod 755 {} \; -o \
+     \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+      -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+    CFLAGS="$SLKCFLAGS" make
+
+    install -m 755 _out/Linux_$TARGET/nvidia-modprobe $PKG/usr/bin/
+    install -m 644 _out/Linux_$TARGET/nvidia-modprobe.1.gz $PKG/usr/man/man1/
+  cd -
+
+# Compiling nvidia-persistenced
+  cd $TMP/nvidia-persistenced-$VERSION
+    chown -R root:root .
+    find -L . \
+     \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+      -o -perm 511 \) -exec chmod 755 {} \; -o \
+     \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+      -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+    CFLAGS="$SLKCFLAGS" make
+#FIXME: need rc.nvidia-persistenced script; see doc
+    install -m 755 _out/Linux_$TARGET/nvidia-persistenced $PKG/usr/bin/
+    install -m 644 _out/Linux_$TARGET/nvidia-persistenced.1.gz $PKG/usr/man/man1/
+  cd -
+
+# Bash script to cleanly install (in doinst.sh) and uninstall the nvidia files
+# so we don't stomp on the overlapping xorg files.
+# Note: switching can be problematic ;-)
+install -m 0755 $CWD/nvidia-switch $PKG/usr/sbin/
+sed -i s/PKGVERSION/$VERSION/g $PKG/usr/sbin/nvidia-switch
+sed -i s/LIBDIRSUFFIX/$LIBDIRSUFFIX/g $PKG/usr/sbin/nvidia-switch
+if [ "$GLVND" = "yes" ]; then
+  sed -i s/GLVNDFLAG/yes/g $PKG/usr/sbin/nvidia-switch
+else
+  sed -i s/GLVNDFLAG/no/g $PKG/usr/sbin/nvidia-switch
+fi
+if [ ${COMPAT32} = "yes" ]; then
+  sed -i s/LIB32FLAG/yes/g $PKG/usr/sbin/nvidia-switch
+else
+  sed -i s/LIB32FLAG/no/g $PKG/usr/sbin/nvidia-switch
+fi
+
+# These add or correct wrong paths
+sed -i "s|$TMP/package-$PRGNAM/usr|/usr|" $PKG/usr/lib$LIBDIRSUFFIX/libGL.la
+sed -i "s|/usr/X11R6/lib|/usr/lib$LIBDIRSUFFIX|" $PKG/usr/lib$LIBDIRSUFFIX/libGL.la
+sed -i "s|__UTILS_PATH__|/usr/bin|" $PKG/usr/share/applications/nvidia-settings.desktop
+sed -i "s|__PIXMAP_PATH__|/usr/share/pixmaps|" $PKG/usr/share/applications/nvidia-settings.desktop
+sed -i "s|__NVIDIA_SETTINGS_DESKTOP_CATEGORIES__|Application;Settings;|" $PKG/usr/share/applications/nvidia-settings.desktop
+
+if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
+  sed -i "s|$TMP/package-$PRGNAM/usr|/usr|" $PKG/usr/lib/libGL.la
+  sed -i "s|/usr/X11R6/lib|/usr/lib|" $PKG/usr/lib/libGL.la
+  sed -i "s|'/usr/'|'/usr/lib'|" $PKG/usr/lib/libGL.la
+fi
+
+# rename wrong/conficting files as needed; remove conflicting symlinks created by installer
+cd $PKG/usr/lib$LIBDIRSUFFIX
+   if [ "$GLVND" = "yes" ]; then
+      mv libEGL.so.1.1.0 libEGL.so.1.1.0-nvidia
+   fi
+   mv libGL.la libGL.la-nvidia
+   mv libGLESv1_CM.so.1.2.0 libGLESv1_CM.so.1.2.0-nvidia
+   mv libGLESv2.so.2.1.0 libGLESv2.so.2.1.0-nvidia
+   rm -f libEGL.so
+   rm -f libGL.so
+   rm -f libGL.so.1
+   rm -f libGLESv1_CM.so
+   rm -f libGLESv2.so
+   rm -f xorg/modules/libwfb.so
+   rm -f xorg/modules/extensions/libglx.so
+cd -
+
+if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
+   cd $PKG/usr/lib
+         if [ "$GLVND" = "yes" ]; then
+            mv libEGL.so.1.1.0 libEGL.so.1.1.0-nvidia
+         fi
+      mv libGL.la libGL.la-nvidia
+      mv libGLESv1_CM.so.1.2.0 libGLESv1_CM.so.1.2.0-nvidia
+      mv libGLESv2.so.2.1.0 libGLESv2.so.2.1.0-nvidia
+      rm -f libEGL.so
+      rm -f libGL.so
+      rm -f libGL.so.1
+      rm -f libGLESv1_CM.so
+      rm -f libGLESv2.so
+   cd -
+# FIXME With COMPAT32=yes on pure x86_64, a weird /usr/lib/libGL.so.1 symlink to $PKG/usr/lib64/libGL.so.1
+# appears? Who would do this, so ignoring for now.
+fi
+
+# Move ICDs to $PKG and cleanup (no switch option in installer?)
+mv /etc/OpenCL/vendors/nvidia.icd $PKG/etc/OpenCL/vendors/nvidia.icd
+mv /etc/vulkan/icd.d/nvidia_icd.json $PKG/etc/vulkan/icd.d/nvidia_icd.json
+rm -rf /etc/OpenCL
+rm -rf /etc/vulkan
+
+# Remove xorg conf file since we take care of that in nvidia-legacy390-driver
+rm -rf $PKG/etc/X11/xorg.conf.d
+
+cat <<EOF > $PKG/var/log/nvidia/README.txt
+Do NOT delete this directory!
+nvidia-switch will backup the original X.org libraries here.
+EOF
+
+cd $TMP/$SRCNAM
+# put docs in the right place
+mv $PKG/usr/share/man/man1/nvidia-* $PKG/usr/man/man1
+rm -rf $PKG/usr/share/man
+mv $PKG/usr/share/doc/NVIDIA_GLX-1.0 $PKG/usr/doc/$PRGNAM-$VERSION
+rm -rf $PKG/usr/share/doc
+cp -a LICENSE NVIDIA_Changelog README.txt $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.Slackware
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+sed "s/PKGVERSION/$VERSION/g" $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+# Flag install as multlib as needed and build package.
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION$MULTI-$TARGET-$BUILD$TAG.${PKGTYPE:-tgz}
