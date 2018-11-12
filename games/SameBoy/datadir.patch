@@ -1,0 +1,175 @@
+From 91904df5e8cc7370776c37bdb46467a81887a6b4 Mon Sep 17 00:00:00 2001
+From: NieDzejkob <niedzejkob@gmail.com>
+Date: Fri, 9 Nov 2018 23:20:57 +0100
+Subject: [PATCH] Add a build-time option to change the resources directory.
+
+Normally, SameBoy would use executable-relative paths for any
+resource files, which posed problems for packaging the software
+by distributions, which usually prefer FHS-compliant file locations.
+
+This commit makes it possible to specify an alternative base
+directory with a compile-time environment variable.
+---
+ Makefile     |  4 ++++
+ README.md    |  4 +++-
+ SDL/gui.c    |  2 +-
+ SDL/main.c   |  4 ++--
+ SDL/shader.c |  4 ++--
+ SDL/utils.c  | 16 ++++++++++------
+ SDL/utils.h  |  4 ++--
+ 7 files changed, 24 insertions(+), 14 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 330f2c81..7038ee98 100755
+--- a/Makefile
++++ b/Makefile
+@@ -33,6 +33,10 @@ BIN := build/bin
+ OBJ := build/obj
+ BOOTROMS_DIR ?= $(BIN)/BootROMs
+ 
++ifdef DATA_DIR
++CFLAGS += -DDATA_DIR="\"$(DATA_DIR)\""
++endif
++
+ # Set tools
+ 
+ # Use clang if it's available.
+diff --git a/README.md b/README.md
+index b1a2011d..91e0bf6c 100644
+--- a/README.md
++++ b/README.md
+@@ -46,6 +46,8 @@ On Windows, SameBoy also requires:
+  * [GnuWin](http://gnuwin32.sourceforge.net/)
+  * Running vcvars32 before running make. Make sure all required tools and libraries are in %PATH% and %lib%, respectively.
+ 
+-To compile, simply run `make`. The targets are cocoa (Default for macOS), sdl (Default for everything else), libretro, bootroms and tester. You may also specify CONF=debug (default), CONF=release or CONF=native_release to control optimization and symbols. native_release is faster than release, but is optimized to the host's CPU and therefore is not portable. You may set BOOTROMS_DIR=... to a directory containing precompiled dmg_boot.bin and cgb_boot.bin files, otherwise the build system will compile and use SameBoy's own boot ROMs.
++To compile, simply run `make`. The targets are `cocoa` (Default for macOS), `sdl` (Default for everything else), `libretro`, `bootroms` and `tester`. You may also specify `CONF=debug` (default), `CONF=release` or `CONF=native_release` to control optimization and symbols. `native_release` is faster than `release`, but is optimized to the host's CPU and therefore is not portable. You may set `BOOTROMS_DIR=...` to a directory containing precompiled `dmg_boot.bin` and `cgb_boot.bin` files, otherwise the build system will compile and use SameBoy's own boot ROMs.
++
++By default, the SDL port will look for resource files with a path relative to executable. If you are packaging SameBoy, you may wish to override this by setting the `DATA_DIR` variable during compilation to the target path of the directory containing all files (apart from the executable, that's not necessary) from the `build/bin/SDL` directory in the source tree. Make sure the variable ends with a `/` character.
+ 
+ SameBoy was compiled and tested on macOS, Ubuntu and 32-bit Windows 7.
+diff --git a/SDL/gui.c b/SDL/gui.c
+index d43d939a..c32eec4d 100644
+--- a/SDL/gui.c
++++ b/SDL/gui.c
+@@ -746,7 +746,7 @@ void run_gui(bool is_running)
+     /* Draw the background screen */
+     static SDL_Surface *converted_background = NULL;
+     if (!converted_background) {
+-        SDL_Surface *background = SDL_LoadBMP(executable_relative_path("background.bmp"));
++        SDL_Surface *background = SDL_LoadBMP(resource_path("background.bmp"));
+         SDL_SetPaletteColors(background->format->palette, gui_palette, 0, 4);
+         converted_background = SDL_ConvertSurface(background, pixel_format, 0);
+         SDL_LockSurface(converted_background);
+diff --git a/SDL/main.c b/SDL/main.c
+index 0cf1c79d..34e2f80d 100755
+--- a/SDL/main.c
++++ b/SDL/main.c
+@@ -426,7 +426,7 @@ static void run(void)
+     bool error = false;
+     start_capturing_logs();
+     const char * const boot_roms[] = {"dmg_boot.bin", "cgb_boot.bin", "agb_boot.bin"};
+-    error = GB_load_boot_rom(&gb, executable_relative_path(boot_roms[configuration.model]));
++    error = GB_load_boot_rom(&gb, resource_path(boot_roms[configuration.model]));
+     end_capturing_logs(true, error);
+     
+     start_capturing_logs();
+@@ -442,7 +442,7 @@ static void run(void)
+     GB_load_battery(&gb, battery_save_path);
+     
+     /* Configure symbols */
+-    GB_debugger_load_symbol_file(&gb, executable_relative_path("registers.sym"));
++    GB_debugger_load_symbol_file(&gb, resource_path("registers.sym"));
+     
+     char symbols_path[path_length + 5];
+     replace_extension(filename, path_length, symbols_path, ".sym");
+diff --git a/SDL/shader.c b/SDL/shader.c
+index 5b41b2a8..ed45c42f 100644
+--- a/SDL/shader.c
++++ b/SDL/shader.c
+@@ -78,7 +78,7 @@ bool init_shader_with_name(shader_t *shader, const char *name)
+     static signed long filter_token_location = 0;
+     
+     if (!master_shader_code[0]) {
+-        FILE *master_shader_f = fopen(executable_relative_path("Shaders/MasterShader.fsh"), "r");
++        FILE *master_shader_f = fopen(resource_path("Shaders/MasterShader.fsh"), "r");
+         if (!master_shader_f) return false;
+         fread(master_shader_code, 1, sizeof(master_shader_code) - 1, master_shader_f);
+         fclose(master_shader_f);
+@@ -92,7 +92,7 @@ bool init_shader_with_name(shader_t *shader, const char *name)
+     char shader_path[1024];
+     sprintf(shader_path, "Shaders/%s.fsh", name);
+     
+-    FILE *shader_f = fopen(executable_relative_path(shader_path), "r");
++    FILE *shader_f = fopen(resource_path(shader_path), "r");
+     if (!shader_f) return false;
+     memset(shader_code, 0, sizeof(shader_code));
+     fread(shader_code, 1, sizeof(shader_code) - 1, shader_f);
+diff --git a/SDL/utils.c b/SDL/utils.c
+index 539e3518..eee6ce65 100644
+--- a/SDL/utils.c
++++ b/SDL/utils.c
+@@ -3,8 +3,11 @@
+ #include <string.h>
+ #include "utils.h"
+ 
+-const char *executable_folder(void)
++const char *resource_folder(void)
+ {
++#ifdef DATA_DIR
++    return DATA_DIR;
++#else
+     static const char *ret = NULL;
+     if (!ret) {
+         ret = SDL_GetBasePath();
+@@ -13,21 +16,22 @@ const char *executable_folder(void)
+         }
+     }
+     return ret;
++#endif
+ }
+ 
+-char *executable_relative_path(const char *filename)
++char *resource_path(const char *filename)
+ {
+     static char path[1024];
+-    snprintf(path, sizeof(path), "%s%s", executable_folder(), filename);
++    snprintf(path, sizeof(path), "%s%s", resource_folder(), filename);
+     return path;
+ }
+ 
+-    
++
+ void replace_extension(const char *src, size_t length, char *dest, const char *ext)
+ {
+     memcpy(dest, src, length);
+     dest[length] = 0;
+-    
++
+     /* Remove extension */
+     for (size_t i = length; i--;) {
+         if (dest[i] == '/') break;
+@@ -36,7 +40,7 @@ void replace_extension(const char *src, size_t length, char *dest, const char *e
+             break;
+         }
+     }
+-    
++
+     /* Add new extension */
+     strcat(dest, ext);
+ }
+diff --git a/SDL/utils.h b/SDL/utils.h
+index 7995da90..216e723e 100644
+--- a/SDL/utils.h
++++ b/SDL/utils.h
+@@ -2,8 +2,8 @@
+ #define utils_h
+ #include <stddef.h>
+ 
+-const char *executable_folder(void);
+-char *executable_relative_path(const char *filename);
++const char *resource_folder(void);
++char *resource_path(const char *filename);
+ void replace_extension(const char *src, size_t length, char *dest, const char *ext);
+ 
+ #endif /* utils_h */
