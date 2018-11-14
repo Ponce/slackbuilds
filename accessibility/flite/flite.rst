@@ -2,7 +2,7 @@
 ..   rst2man.py flite.rst > flite.1
 .. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 2.0.0
+.. |version| replace:: 2.1.0
 .. |date| date::
 
 ======
@@ -37,14 +37,19 @@ text string and spoken, and not as a file name. If *text/file*
 is omitted or **-**, text will be read from standard input.
 
 If *wavefile* is unspecified or **play**, the result is
-played on the current systems audio device.  If *wavefile*
+played on the default ALSA audio device.  If *wavefile*
 is **none**, the waveform is discarded (good for benchmarking).
 
 Any other options must appear before *text/file* and/or *wavefile*.
 
-The full documentation for **flite** can be read as a GNU
-info file with the command **info flite**, or as HTML in
-*/usr/doc/flite-|version|/html/index.html*.
+The full documentation for **flite** can be read as a GNU info
+file with the command **info flite**, or (possibly) as HTML in:
+
+/usr/doc/flite-|version|/html/index.html
+
+If the HTML documentation isn't installed locally, it can also be found at:
+
+http://festvox.org/flite/doc/index.html
 
 OPTIONS
 =======

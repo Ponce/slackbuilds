@@ -3,6 +3,17 @@
 # Slackware build script for flite
 # Originally written by Martin Lefebvre (email removed)
 # Now maintained by B. Watson (yalhcru@gmail.com), original author is MIA.
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20181114 bkw:
+# - BUILD=2
+# - add WTFPL to script
+# - always build the .info API docs
+# - get rid of DOCS env variable
+# - only build HTML docs if texi2html is available
+# - update README to document the above
+# - minor updates to man page and slack-desc
+# - add HTML=no to skip building HTML docs
 
 # 20180612 bkw: update for 2.1 (or is it 2.1.0?)
 
@@ -33,7 +44,7 @@
 
 PRGNAM=flite
 VERSION=${VERSION:-2.1}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -72,11 +83,8 @@ rm -rf $PRGNAM-$VERSION-release
 tar xvf $CWD/$PRGNAM-$VERSION-release.tar.bz2
 cd $PRGNAM-$VERSION-release
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 # fix LDLAGS to allow external programs to find libflite.so
 patch -p1 < $CWD/flite-ldflags-fix.patch
@@ -90,7 +98,6 @@ CXXFLAGS="$SLKCFLAGS" \
   --localstatedir=/var \
   --with-audio=alsa \
   --enable-shared \
-  --disable-static \
   --build=$ARCH-slackware-linux
 
 # Fix builds with SBo standalone texi2html. The -number option works
@@ -116,10 +123,25 @@ for file in $CWD/*.flitevox; do
     EXTRA=yes
 done
 
+# -current's tex is texlive, which lacks texi2html. Also lots of
+# users prefer to run texlive on 14.2, which has the same problem.
+# So only try to build the HTML docs if (a) the user forces with
+# HTML=yes, or (b) if HTML=auto (the default) and texi2html is
+# actually found on the $PATH.
+HTML="${HTML:-auto}"
+
+if [ "$HTML" = "auto" ]; then
+  if which texi2html 2>/dev/null; then
+    HTML="yes"
+  else
+    HTML="no"
+  fi
+fi
+
 # build the docs. NB don't replace subshells with "cd dir" and
 # "cd -", as they don't nest.
 HTMLDOC=""
-if [ "${DOCS:-yes}" = "yes" ]; then
+if [ "$HTML" = "yes" ]; then
   HTMLDOC="doc/html"
   ( cd doc
     # build the HTML docs.
@@ -137,13 +159,15 @@ if [ "${DOCS:-yes}" = "yes" ]; then
         -e 's,\.tar\.gz,.tar.bz2,g' \
         ${PRGNAM}_toc.html
     )
-  
-    # build the GNU info docs
-    makeinfo $PRGNAM.texi
-    mkdir -p $PKG/usr/info
-    gzip -9c < $PRGNAM.info > $PKG/usr/info/$PRGNAM.info.gz
   )
 fi
+
+# 20181114 bkw: always build the GNU info docs.
+( cd doc
+  makeinfo $PRGNAM.texi
+  mkdir -p $PKG/usr/info
+  gzip -9c < $PRGNAM.info > $PKG/usr/info/$PRGNAM.info.gz
+)
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a ACKNOWLEDGEMENTS COPYING README* $HTMLDOC doc/*.txt doc/alice \
@@ -165,7 +189,7 @@ else
 fi
 
 # doinst.sh needed because we append to /usr/info/dir.
-[ "${DOCS:-yes}" = "yes" ] && cat $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
