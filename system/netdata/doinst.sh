@@ -24,22 +24,32 @@ preserve_perms() {
 
 config etc/netdata/netdata.conf.new
 
-for L in `ls etc/netdata/*.new`
+for L in `ls usr/lib%LIBDIRSUFFIX%/netdata/conf.d/*.new`
 do
 config $L
 done
 
-for L in `ls etc/netdata/python.d/*.new`
+for L in `ls usr/lib%LIBDIRSUFFIX%/netdata/conf.d/python.d/*.new`
 do
 config $L
 done
 
-for L in `ls etc/netdata/charts.d/*.new`
+for L in `ls usr/lib%LIBDIRSUFFIX%/netdata/conf.d/charts.d/*.new`
 do
 config $L
 done
 
-for L in `ls etc/netdata/health.d/*.new`
+for L in `ls usr/lib%LIBDIRSUFFIX%/netdata/conf.d/health.d/*.new`
+do
+config $L
+done
+
+#for L in `ls usr/lib%LIBDIRSUFFIX%/netdata/conf.d/node.d/*.new`
+#do
+#config $L
+#done
+
+for L in `ls usr/lib%LIBDIRSUFFIX%/netdata/conf.d/statsd.d/*.new`
 do
 config $L
 done
