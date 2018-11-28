@@ -1,8 +1,8 @@
 #!/usr/bin/python
 # not compatible with python 3
 __author__      = "Sander Granneman"
-__copyright__   = "Copyright 2017"
-__version__     = "1.3.2"
+__copyright__   = "Copyright 2018"
+__version__     = "1.3.3"
 __credits__     = ["Sander Granneman","Hywell Dunn Davies"]
 __maintainer__  = ["Rob van Nues, via SlackBuilds.org"]
 __email__       = "sgrannem@staffmail.ed.ac.uk"
