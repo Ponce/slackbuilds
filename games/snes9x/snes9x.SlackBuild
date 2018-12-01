@@ -6,6 +6,21 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20181201 bkw:
+# - update for 1.57.
+# - disable OSS audio by default, add OSS=yes option.
+# - autodetect RetroArch, add RETROARCH=yes|no option.
+# - document the above in the README.
+# - document PULSE=no io README.
+# - stop including snes9x.conf.default in the docdir, since it's
+#   outdated and will cause snes9x to segfault if you try to use it!
+# - since we now have 3 build options, make slack-desc show them.
+# - add patch from upstream to speed up linking the libretro core if
+#   -jX is in MAKEFLAGS.
+# - add patch fro upstream to stop segfaulting if the config file is
+#   missing the ScanlineIntensity variable. Means I can finaly remove
+#   the "you should delete your old config file" from the README.
+
 # 20180730 bkw:
 # - BUILD=2.
 # - add libretro/RetroArch, thanks to orbea.
@@ -38,8 +53,8 @@
 # can't build 1.53 any more.
 
 PRGNAM=snes9x
-VERSION=${VERSION:-1.56.2}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.57}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -84,20 +99,50 @@ chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# Fix the libretro build for 14.2.
-# From upstream git: https://github.com/snes9xgit/snes9x.git
-# commits abb4b4c39 and a77b3b379b
-patch -p1 < $CWD/libretro.diff
+# Various patches, depending on the version we're building. Currently
+# this script should work with 1.56.2 and 1.57. Anything older and you're
+# on your own.
+
+# For 1.56.2, libretro.diff fixes the libretro build, it's upstream's
+# commits abb4b4c39 and a77b3b379b. Already included in 1.57.
+
+# For 1.57 (and 1.56.2 I hope), fix_config_file_segfaults.diff is
+# upstream's commit 5e9f068. libretro_lto_variable is 21d6275 (thanks
+# to orbea for coding this one & sending it upstream, based on my vague
+# idea). Future 1.57.x or 1.58 will include these already.
+
+# At some point, this set of cases will be too complex for me to want to
+# maintain & test it, and it'll go away (this script will only support
+# the latest version, whatever that happens to be).
+
+case "$VERSION" in
+  1.5[0-5]*|1.[0-4]*) ;; # doubt these build anyway
+  1.56.2) PATCHES="libretro" ;;
+  1.57)   PATCHES="fix_config_file_segfaults libretro_lto_variable";;
+  *)      ;;
+esac
+
+[ -n "$PATCHES" ] && for p in $PATCHES; do
+  [ -e "$CWD/$p.diff" ] && patch -p1 < "$CWD/$p.diff"
+done
 
 cd gtk
 ./autogen.sh
 
+WITHPULSE=yes
 if [ "$PULSE" = "no" ] || ! pkg-config --exists libpulse; then
   PULSEOPT="--without-pulseaudio"
+  WITHPULSE=no
 fi
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
+WITHOSS=yes
+if [ "${OSS:-no}" = "no" ]; then
+  OSSOPT="--without-oss"
+  WITHOSS=no
+fi
+
+CFLAGS="-g $SLKCFLAGS" \
+CXXFLAGS="-g $SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
@@ -110,10 +155,11 @@ CXXFLAGS="$SLKCFLAGS" \
   --without-gtk3 \
   --without-portaudio \
   $PULSEOPT \
+  $OSSOPT \
   --build=$ARCH-slackware-linux
 
 make
-make install-strip DESTDIR=$PKG
+make install DESTDIR=$PKG
 
 # RetroArch support, contributed by orbea (Hunter Sezen).
 # Note that the source here is self-contained, there's no build-time
@@ -122,13 +168,32 @@ make install-strip DESTDIR=$PKG
 # https://raw.githubusercontent.com/libretro/libretro-super/383f18fd7c36ffd5fe76ebac58e9e596dde67e66/dist/info/snes9x_libretro.info
 # Renamed .info => -info to avoid confusing SBo tools that deal with
 # SBo's .info files.
-( LIBNAM=${PRGNAM}_libretro
-  cd ../libretro
-  make
-  install -sDm0755 $LIBNAM.so $PKG/usr/lib${LIBDIRSUFFIX}/libretro/$LIBNAM.so
-  install -Dm0644 $CWD/$LIBNAM-info \
-    $PKG/usr/lib${LIBDIRSUFFIX}/libretro/info/$LIBNAM.info
-)
+# 20181201 bkw: made this optional, auto-detected, and controllable
+# via environment. It makes the build take 7x as long, no point wasting
+# time building it if it's not wanted/needed.
+
+case "$RETROARCH" in
+  yes) build_ra=yes ;;
+  no)  build_ra=no ;;
+  *)   if [ -x /usr/share/games/retroarch ]; then
+         build_ra=yes
+       else
+         build_ra=no
+       fi ;;
+esac
+
+if [ "$build_ra" = "yes" ]; then
+  echo "=== Building libretro core"
+  ( LIBNAM=${PRGNAM}_libretro
+    cd ../libretro
+    make LTO="-flto=jobserver"
+    install -sDm0755 $LIBNAM.so $PKG/usr/lib${LIBDIRSUFFIX}/libretro/$LIBNAM.so
+    install -Dm0644 $CWD/$LIBNAM-info \
+      $PKG/usr/lib${LIBDIRSUFFIX}/libretro/info/$LIBNAM.info
+  )
+else
+  echo "=== NOT building libretro core"
+fi
 
 mkdir -p $PKG/usr/man/man6
 gzip -9c $CWD/snes9x-gtk.6 > $PKG/usr/man/man6/snes9x-gtk.6.gz
@@ -138,6 +203,7 @@ ln -s $PRGNAM-gtk $PKG/usr/games/$PRGNAM
 PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
 OLDDOC=$PKGDOC/${PRGNAM}_original_docs
 mkdir -p $OLDDOC
+rm -f ../docs/snes9x.conf.default # outdated, useless
 cp -a doc/* $PKGDOC
 cp -a ../docs/* $OLDDOC
 cat $CWD/README_docs.txt > $PKGDOC/README_docs.txt
@@ -154,7 +220,11 @@ cd -
 cat data/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s,@WITHPULSE@,$WITHPULSE," \
+    -e "s,@WITHOSS@,$WITHOSS," \
+    -e "s,@build_ra@,$build_ra," \
+    < $CWD/slack-desc \
+    > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
