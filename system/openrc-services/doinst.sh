@@ -36,12 +36,7 @@ for file in "${openrc_accessibility[@]}" "${openrc_base[@]}" "${openrc_desktop[@
   config "etc/openrc/conf.d/${file}.new"
 done
 
-BACKUP_FILE=(logrotate.d/jenkins)
-for file in "${BACKUP_FILE[@]}"; do
-  config "etc/${file}.new"
-done
-
-BACKUP_LOCAL=(rcM.start rcd_net.start)
+BACKUP_LOCAL=(rcM.start)
 for file in "${BACKUP_LOCAL[@]}"; do
   preserve_perms "etc/openrc/local.d/${file}.new"
 done
