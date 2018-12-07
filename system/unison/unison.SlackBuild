@@ -3,6 +3,7 @@
 # Slackware build script for unison
 
 # Copyright 2007-2011 Ferenc Deak <ferenc.deak@gmail.com>
+# Copyright 2018 Andrew Clemons, Wellington New Zealand
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -11,19 +12,19 @@
 # 1. Redistributions of this script must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 #
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
-# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
-# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=unison
-VERSION=${VERSION:-2.48.4}
+VERSION=${VERSION:-2.51.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -40,16 +41,28 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-mkdir $PRGNAM-$VERSION
-cd $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd src
+cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -57,28 +70,49 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Apply patches
-for _p in $(ls $CWD/*.patch); do
-	patch -p1 -i $_p
-done
-
-# no need to set CFLAGS
-
-# FLAVOR lets the user enable their choice of interfaces. Defaults to gtk2
+# FLAVOUR lets the user enable their choice of interfaces. Defaults to 'gtk2 text'
 # If you want to enable specifically for gtk2 or text simply pass this
-# variable to the script: $ FLAVOR=text ./unison.SlackBuild
-FLAVOR=${FLAVOR:-gtk2}
+# variable to the script: $ FLAVOUR=text ./unison.SlackBuild
+FLAVOUR=${FLAVOUR:-}
 
-# Fixes for poor values of FLAVOR
-if [ "$FLAVOR" = "gtk2" -o "$FLAVOR" = "GTK2" -o "$FLAVOR" = "GTK" -o "$FLAVOR" = "gtk" ]; then
-    FLAVOR=gtk2
-elif [ "$FLAVOR" = "text" -o "$FLAVOR" = "TEXT" -o "$FLAVOR" = "TXT" -o "$FLAVOR" = "txt" ]; then
-    FLAVOR=text
+if [ -z "$FLAVOUR" ] ; then
+  # also support US spelling
+  FLAVOUR=${FLAVOR:-}
 fi
 
-make UISTYLE=$FLAVOR DEBUGGING=false THREADS=true NATIVE=true
+if [ -z "$FLAVOUR" ] ; then
+  FLAVOURS="gtk2 text" # default
+else
+  FLAVOURS="$FLAVOUR"
+fi
+
+for flavour in $FLAVOURS ; do
+  # Fixes for poor values of flavour
+  if [ "$flavour" = "gtk2" ] || [ "$flavour" = "GTK2" ] || [ "$flavour" = "GTK" ] || [ "$flavour" = "gtk" ]; then
+    flavour="gtk2"
+  elif [ "$flavour" = "text" ] || [ "$flavour" = "TEXT" ] || [ "$flavour" = "TXT" ] || [ "$flavour" = "txt" ]; then
+    flavour="text"
+  fi
+
+  cp -a . ../work
+  mv ../work .
+  (
+    cd work
+
+    make -C src UISTYLE="$flavour" DEBUGGING=false THREADS=true NATIVE=true
+    mv src/unison ../unison-"$flavour"
+    mv src/unison-fsmonitor ../
+  )
+
+  rm -rf work
+done
+
 mkdir -p $PKG/usr/bin
-install -m 0755 $PRGNAM $PKG/usr/bin
+install -m 0755 $PRGNAM-* $PKG/usr/bin
+
+if [ -e $PKG/usr/bin/unison-text ] ; then
+  ln -s unison-text $PKG/usr/bin/unison
+fi
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -86,11 +120,19 @@ find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | gr
 mkdir -p $PKG/usr/share/applications
 cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
 mkdir -p $PKG/usr/share/pixmaps
-cp $CWD/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+install -m 0644 icons/U.32x32x16m.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+yes '' | make -C doc real
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a COPYING NEWS README BUGS.txt $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/unison-$VERSION-manual.html > $PKG/usr/doc/$PRGNAM-$VERSION/unison-manual.html
+cp -a src/{BUGS.txt,CONTRIB,COPYING,INSTALL*,NEWS,README,ROADMAP.txt,TODO.txt} $PKG/usr/doc/$PRGNAM-$VERSION
+install -m 0644 doc/unison-manual.pdf $PKG/usr/doc/$PRGNAM-$VERSION
+
+# html manual only built if hevea installed
+if [ -e doc/unison-manual.html ] ; then
+  install -m 0644 doc/unison-manual.html $PKG/usr/doc/$PRGNAM-$VERSION
+fi
+
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
