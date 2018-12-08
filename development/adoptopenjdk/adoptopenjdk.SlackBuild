@@ -2,7 +2,7 @@
 
 # Slackware build script for adoptopenjdk
 
-# Copyright 2018 Sukma Wardana <sukma.wardana>
+# Copyright 2018 Sukma Wardana <sukma.wardana@mail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
 # and associated documentation files (the "Software"), to deal in the Software without restriction,
@@ -21,61 +21,97 @@
 # THE SOFTWARE.
 
 PRGNAM=adoptopenjdk
-VERSION=${VERSION:-11+28}
+VERSION=${VERSION:-11.0.1+13}
 BUILD=${BUILD:-1}
-TAG=${TAG:-_SBo}
+ARCH=${ARCH:-$(uname -m)}
+TAG=${TAG:=_SBo}             # Submission for SlackBuilds.org
+
+MAJORVER=${VERSION%+*}
+MINORVER=${VERSION#*+}
+
+# The name of openjdk provided by AdoptOpenJDK has structured :
+#
+# OpenJDK11-jdk_x64_linux_hotspot_11_28
+#
+# The extracted openjdk archive will show directory named :
+#
+# jdk-11+28
+
+TARNAM=OpenJDK11U-jdk_x64_linux_hotspot_${MAJORVER}_${MINORVER}.tar.gz
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
-PKG=$TMP/package-$PRGNAM
+PKG=${TMP}/package-${PRGNAM}
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "${ARCH:-$(uname -m)}" != "x86_64" ]; then
+if [ "${ARCH}" != "x86_64" ]; then
   echo "Architecture ${ARCH} is not supported."
   exit 1
 fi
 LIBDIRSUFFIX="64"
 
+# Exit on most errors.
 set -e
 
-MAJORVER=${VERSION%+*}
-MINORVER=${VERSION#*+}
+rm -rf ${PKG}
+mkdir -p ${TMP} ${PKG} ${OUTPUT}
 
-TARNAM=OpenJDK${MAJORVER}-jdk_x64_linux_hotspot_${MAJORVER}_${MINORVER}
+mkdir -p ${PKG}/usr/lib${LIBDIRSUFFIX}/${PRGNAM}${MAJORVER}
+# Extract start from sub-directory 1 level beneath
+cd ${PKG}/usr/lib${LIBDIRSUFFIX}/${PRGNAM}${MAJORVER}
+tar -xvzf ${CWD}/${TARNAM} --strip-components=1
 
-rm -rf $PKG
-mkdir -p $TMP $PKG $OUTPUT
-
-mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/${PRGNAM}${MAJORVER}
-cd $PKG/usr/lib${LIBDIRSUFFIX}/${PRGNAM}${MAJORVER}
-tar xvf $CWD/$TARNAM.tar.gz --strip-components=2
 chown -R root:root .
 find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+    -o -perm 511 \) -exec chmod 755 {} \; -o \
+  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+    -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# Define whether or not a symlink to libjvm.so library must
+# be created into /usr/lib${LIBDIRSUFFIX}. Can be set to "yes"
+# or "no". Default to "yes".
+if [ "${CREATE_LIBJVM_SYMLINK:-yes}" = "yes" ]; then
+  # Important Note:
+  # --------------
+  # This will create symlink under /usr/lib${LIBDIRSUFFIX}
+  cd ${PKG}/usr/lib${LIBDIRSUFFIX}
+  ln -sf ./${PRGNAM}${MAJORVER}/lib/server/libjvm.so \
+    ${PKG}/usr/lib${LIBDIRSUFFIX}/libjvm.so
+fi
 
-find ./man -type f -exec gzip -9 {} \;
-for i in $( find ./man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-
-mkdir -p $PKG/etc/profile.d
-for SCRIPT in $PRGNAM.sh $PRGNAM.csh ; do
-  sed -e "s;@MAJORVER@;$MAJORVER;" \
-    < $CWD/${SCRIPT} \
-    > $PKG/etc/profile.d/${SCRIPT}
-  chmod 755 $PKG/etc/profile.d/${SCRIPT}
+# Add profile scripts.
+mkdir -p ${PKG}/etc/profile.d
+for SCRIPT in $(ls "${CWD}/profile.d/${PRGNAM}"*) ; do
+    sed -e "s;@MAJORVER@;${MAJORVER};" \
+      < ${SCRIPT} \
+      > ${PKG}/etc/profile.d/$(basename ${SCRIPT})
+  chmod 755 ${PKG}/etc/profile.d/*
 done
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a release $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# Create documentation directory.
+mkdir -p ${PKG}/usr/doc/${PRGNAM}-${MAJORVER}
+# Copy documentation within OpenJDK binary.
+cd ${PKG}/usr/lib${LIBDIRSUFFIX}/${PRGNAM}${MAJORVER}
+cp -a release ${PKG}/usr/doc/${PRGNAM}-${MAJORVER}
+# Copy SlackBuild docfile.
+cat ${CWD}/${PRGNAM}.SlackBuild > \
+  ${PKG}/usr/doc/${PRGNAM}-${MAJORVER}/${PRGNAM}.SlackBuild
 
-mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+# Create install directory.
+mkdir -p ${PKG}/install
+# Copy slack-desc into install directory.
+cat ${CWD}/slack-desc > ${PKG}/install/slack-desc
 
-cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+# Strip some libraries and binaries
+(
+  cd $PKG
+    find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+      xargs strip --strip-unneeded 2> /dev/null
+    find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+      xargs strip --strip-unneeded 2> /dev/null
+)
+
+# Build the package.
+cd ${PKG}
+/sbin/makepkg -l y -c n ${OUTPUT}/${PRGNAM}-${VERSION}-${ARCH}-${BUILD}${TAG}.${PKGTYPE:-tgz}
