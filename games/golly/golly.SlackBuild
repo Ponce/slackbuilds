@@ -3,6 +3,7 @@
 # Slackware build script for golly
 
 # Copyright 2012-15, Glenn Becker, Arlington MA USA
+# Now maintained by B. Watson <yalhcru@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,14 +24,24 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #  Updated for golly 2.6 -- the source directory structure got changed a bit too!
 
+# 20181211 bkw:
+# - Take over maintenance.
+# - i486 => i586.
+# - Upgrade for v3.2.
+# - Switch from wxPython (2.x) to wxGTK3. It's possible to build with
+#   either version of wx, but for v3.2, the grid in the UI doesn't display
+#   if you build with wxPython. Someone with more wx experience than me
+#   is invited to investigate why this happens...
+# - Minor simplifications and cleanups.
+
 PRGNAM=golly
-VERSION=${VERSION:-2.7}
+VERSION=${VERSION:-3.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+    i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
@@ -41,8 +52,8 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
@@ -60,37 +71,42 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
+rm -rf $PRGNAM-$VERSION-src
 tar xvf $CWD/$PRGNAM-${VERSION}-src.tar.gz
-mv $PRGNAM-$VERSION-src $PRGNAM-$VERSION
-cd $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION-src
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-cd 'gui-wx/configure'
+# 20181211 bkw: wxPython and wxGTK3 both install a /usr/bin/wx-config
+# symlink. We *need* wxGTK3, so don't trust the symlink as it points to
+# whichever was most recently installed.
+WXDEF="$( /bin/ls /usr/lib$LIBDIRSUFFIX/wx/config/gtk*unicode*3.0 | head -1 )"
+WXCONF="${WXCONF:-$WXDEF}"
+if [ -z "$WXCONF" ]; then
+  echo "Can't find wxGTK3-3.0.x, install wxGTK3 or set WXCONF in environment." 1>&2
+  exit 1
+fi
+
+cd gui-wx/configure
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
+  --with-wx-config="$WXCONF" \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --mandir=/usr/man \
+  --bindir=/usr/games \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
   --build=$ARCH-slackware-linux
 
 make
-make install DESTDIR=$PKG
+make install-strip DESTDIR=$PKG
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-cd '../icons'
+cd ../icons
 
 for i in 16 32 48; do
         convert appicon${i}.ico -resize ${i}x${i}! $PRGNAM-${i}.png
@@ -102,16 +118,22 @@ done
 convert appicon.xpm $PRGNAM.png
 install -D -m 0644 $PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
-cd '../../docs'
+cd ../../docs
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  License.html ReadMe.html ToDo.html \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a License.html ReadMe.html ToDo.html $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
+# 20181211 bkw: WARNING:  gzip test failed on <...>/weekender-distaff.rle.gz
+# Get rid of .gz extension for any non-gzipped data files.
+find $PKG/usr/share/$PRGNAM -name \*.gz | while read FILE; do
+  if file $FILE | grep -qv gzip ; then
+    rename .gz '' "$FILE"
+  fi
+done
+
 mkdir $PKG/usr/share/applications
-cat $CWD/golly.desktop > $PKG/usr/share/applications/golly.desktop
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
