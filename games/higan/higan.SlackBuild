@@ -2,9 +2,10 @@
 
 # Slackware build script for higan
 
-# Based on bsnes SlackBuild by Erik Hanson <erik@slackbuilds.org>
-# Maintained by Gabriel Magno <gabrielmagno1[at]gmail[dot]com>
-# Modified by Johannes Schoepfer <slackbuilds[at]schoepfer[dot]info>
+# Based on bsnes SlackBuild by Erik Hanson <email removed>
+# Maintained by Gabriel Magno <email removed>
+# Modified by Johannes Schoepfer <email removed>
+# Modified again & now maintained by B. Watson <yalhcru@gmail.com>
 
 # Copyright 2013 Gabriel Magno, Belo Horizonte, MG, Brazil
 # All rights reserved.
@@ -26,8 +27,24 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20181211 bkw:
+# This update would not have happened without assistance and moral support
+# from Yossi Ne'eman. Thanks!
+# - Take over maintenance.
+# - Update for v106.
+# - Use the gtk frontend, not the *broken* qt one.
+# - Make OpenAL dep optional & autodetected (and OPENAL=no to force-disable).
+# - Add OSS (default no) and PULSE (default yes) env vars.
+# - Fix permissions of the stuff installed to /usr/share/higan: everything
+#   was executable, ugh.
+# - Install binary in /usr/games (it's a game system emulator, people).
+# - Update the README, include link to the semi-official doc site.
+# - Update slack-desc with current list of supported systems.
+# - Add man pages. Note to SBo admins: please don't remove my *.rst man
+#   page sources!
+
 PRGNAM=higan
-VERSION=${VERSION:-101}
+VERSION=${VERSION:-106}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -60,45 +77,85 @@ fi
 
 set -e
 
+SRCNAM=${PRGNAM}_v${VERSION}-source
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf ${PRGNAM}_v${VERSION}-source
-7z x $CWD/${PRGNAM}_v${VERSION}-source.7z
-cd ${PRGNAM}_v${VERSION}-source
-find . -type d -exec chmod -R 0755 {} \;
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+rm -rf $SRCNAM
+7z x $CWD/$SRCNAM.7z
+cd $SRCNAM
 
-# Thanks to the Arch folks
-patch -p1 -i $CWD/higan-flags.patch
+# Bletcherous permissions, please don't replace with template code.
+find . -type d -exec chmod 0755 {} \+
+find . -type f -exec chmod 0644 {} \+
+chown -R root:root .
+
+# Thanks to the Arch folks for these patches. -flags allows us to pass
+# custom CFLAGS, and -paths makes the emulator look in /usr/share/higan
+# for its support files if they're not found in ~/.local/share/higan.
+patch -p1 -i $CWD/higan-flags.diff
+patch -p1 -i $CWD/higan-paths.diff
+
+# 20181212 bkw: audio system stuff. Upstream doesn't give us a way to
+# disable these on the make command line, but hacking this file works:
+HACKFILE=higan/target-tomoko/GNUmakefile
+
+# Who actually uses OSS?
+if [ "${OSS:-no}" = "no" ]; then
+  sed -i '/^ *ruby /s,audio\.oss,,' $HACKFILE
+fi
+
+# Prepare for 15.0's pure-alsa-system option.
+if [ "${PULSE:-yes}" = "no" ] || ! [ -e /usr/bin/pulseaudio ]; then
+  sed -i '/^ *ruby /s,audio\.pulse[^ ]*,,g' $HACKFILE
+fi
+
+# Upstream *should* autodetect this, but doesn't.
+if [ "${OPENAL:-yes}" = "no" ] || ! pkg-config --exists openal; then
+  sed -i '/^ *ruby /s,audio\.openal,,' $HACKFILE
+fi
+
+# 20181212 bkw: switch from hiro=qt to hiro=gtk. I have no idea why the
+# original author chose qt... the qt frontend is known to be buggy in v106
+# (per upstream's git log). Issues I ran into were segfaulting on exit,
+# and sometimes the Settings tabs wouldn't get painted... which are both
+# mentioned as known issues in the git log. There are some post-106
+# commits that may fix the qt issues; we'll see, when 107 is released.
 
 CXXFLAGS="$SLKCFLAGS" \
 make -C icarus \
   prefix=/usr \
   platform=linux \
-  hiro=qt \
+  hiro=gtk
 
 CXXFLAGS="$SLKCFLAGS" \
-make -C higan \
+make -C $PRGNAM \
   prefix=/usr \
   platform=linux \
-  hiro=qt
+  hiro=gtk
 
-install -dm 755 $PKG/usr/{bin,share/{applications,higan,pixmaps}}
-install -m 755 icarus/out/icarus $PKG/usr/bin/
-install -m 755 higan/out/higan $PKG/usr/bin/
-install -m 644 higan/data/higan.desktop $PKG/usr/share/applications/
-install -m 644 higan/data/higan.png $PKG/usr/share/pixmaps/
-cp -dr higan/systems/* higan/data/cheats.bml $PKG/usr/share/higan/
+mkdir -p $PKG/usr/games \
+  $PKG/usr/share/applications \
+  $PKG/usr/share/$PRGNAM \
+  $PKG/usr/share/pixmaps
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+install -s -m 755 $PRGNAM/out/$PRGNAM icarus/out/icarus $PKG/usr/games/
+install -m 644 $PRGNAM/data/$PRGNAM.desktop $PKG/usr/share/applications/
+install -m 644 $PRGNAM/data/$PRGNAM.png $PKG/usr/share/pixmaps/
+cp -dr $PRGNAM/systems/* $PKG/usr/share/$PRGNAM/
 
+# Man pages by B. Watson. higan.6 is basically the higan-cli.md from the
+# git repo, reformatted as RST & converted to a man page. icarus.6 was
+# written from scratch (and doesn't have much to say, you'll notice).
+mkdir -p $PKG/usr/man/man6
+for i in $PRGNAM icarus; do
+  gzip -9c < $CWD/$i.6 > $PKG/usr/man/man6/$i.6.gz
+done
+
+# Sadly there are no docs in v106. I found a docs/ dir in git, but it's not
+# in the release 7z archive. Apparently this is because the git archive is
+# somehow unofficial...?
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
