@@ -7,3 +7,7 @@ if [ -x /usr/bin/gdk-pixbuf-query-loaders ]; then
     /usr/bin/gdk-pixbuf-query-loaders > /usr/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache
   fi
 fi
+
+if [ -x /sbin/setcap ] && [ -f usr/bin/PCSX2 ]; then
+  /sbin/setcap 'CAP_NET_RAW+eip CAP_NET_ADMIN+eip' usr/bin/PCSX2
+fi
