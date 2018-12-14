@@ -23,8 +23,8 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=asterisk
-VERSION=${VERSION:-16.0.0}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-16.1.0}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -45,7 +45,8 @@ ASTERISKGRP=${ASTERISKGRP:-asterisk}
 ASTERISKUID=${ASTERISKUID:-267}
 ASTERISKGID=${ASTERISKGID:-267}
 
-IMAPDIR=imap-2007f
+CACHEDIR=$TMP/$PRGNAM-cache
+IMAPDIR=$TMP/imap-2007f
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
@@ -74,10 +75,13 @@ getent passwd ${ASTERISKUSR} >/dev/null || do_exit
 
 set -e
 
-rm -fr $PKG $TMP/$PRGNAM-$VERSION $TMP/$IMAPDIR
-mkdir -p $TMP $PKG $OUTPUT
+rm -fr $PKG $TMP/$PRGNAM-$VERSION $IMAPDIR $CACHEDIR
+mkdir -p $TMP $PKG $OUTPUT $CACHEDIR
 cd $TMP
 
+# The following configuration options are determined by the users passed
+# in command-line options. Build the configuration parameters for the
+# configure script.
 CONFIGURE_OPTS=
 
 if [ "${VM_IMAP:-no}" != "no" ] && [ "${VM_ODBC:-no}" = "no" ]; then
@@ -96,10 +100,10 @@ if [ "${VM_IMAP:-no}" != "no" ] && [ "${VM_ODBC:-no}" = "no" ]; then
       make slx EXTRACFLAGS="-I/usr/include/openssl"
     fi
   )
-  CONFIGURE_OPTS="--with-imap=$TMP/$IMAPDIR"
+  CONFIGURE_OPTS="--with-imap=$IMAPDIR"
 fi
 
-if [ "${JANSSON:-no}" != "yes" ]; then
+if [ "${JANSSON:-yes}" = "yes" ]; then
   CONFIGURE_OPTS="${CONFIGURE_OPTS} --with-jansson-bundled"
 else
   CONFIGURE_OPTS="${CONFIGURE_OPTS} --without-jansson-bundled"
@@ -110,6 +114,13 @@ if [ "${PJSIP:-no}" != "no" ]; then
 else
   CONFIGURE_OPTS="${CONFIGURE_OPTS} --without-pjproject-bundled"
 fi
+
+# The configure script will download additional files from the internet.
+# Make sure the additional files can be found by the configure script
+# before configuring the package.
+cp $CWD/asterisk-core-sounds* $CWD/asterisk-extra-sounds* \
+   $CWD/asterisk-moh-opsound* $CWD/jansson-*.tar.bz2 $CWD/pjproject-*.tar.bz2 \
+   $CACHEDIR
 
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
@@ -128,6 +139,7 @@ CXXFLAGS="$SLKCFLAGS" \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --mandir=/usr/man \
+  --with-download-cache=$CACHEDIR \
   $CONFIGURE_OPTS \
   --build=$ARCH-slackware-linux
 
@@ -136,6 +148,12 @@ CXXFLAGS="$SLKCFLAGS" \
 )
 make menuselect-tree
 
+# Supported values for LANGUAGE are: EN, EN_AU, EN_GB, EN_NX, ES, FR, IT
+# RU, JA, and SV. Until I can get around to individually listing the
+# additional files as part of this package I'm going to leave this
+# option undocumented in the README and README.SBo. Specifying anything
+# other than EN will cause the makefile to download additional sound
+# files.
 LANGUAGE=${LANGUAGE:-EN}
 
 menuselect/menuselect \
@@ -143,24 +161,16 @@ menuselect/menuselect \
   --enable CORE-SOUNDS-${LANGUAGE}-WAV \
   --enable CORE-SOUNDS-${LANGUAGE}-ULAW \
   --enable CORE-SOUNDS-${LANGUAGE}-ALAW \
-  --enable CORE-SOUNDS-${LANGUAGE}-GSM \
   --enable CORE-SOUNDS-${LANGUAGE}-G729 \
   --enable CORE-SOUNDS-${LANGUAGE}-G722 \
-  --enable CORE-SOUNDS-${LANGUAGE}-SLN16 \
-  --enable CORE-SOUNDS-${LANGUAGE}-SIREN6 \
-  --enable CORE-SOUNDS-${LANGUAGE}-SIREN17 \
   menuselect.makeopts
 
 if [ "${MOH:-no}" != "no" ]; then
   menuselect/menuselect \
     --enable MOH-OPSOUND-ULAW \
     --enable MOH-OPSOUND-ALAW \
-    --enable MOH-OPSOUND-GSM \
     --enable MOH-OPSOUND-G729 \
     --enable MOH-OPSOUND-G722 \
-    --enable MOH-OPSOUND-SLN16 \
-    --enable MOH-OPSOUND-SIREN7 \
-    --enable MOH-OPSOUND-SIREN14 \
     menuselect.makeopts
 fi
 
@@ -174,12 +184,8 @@ if [ "${SOUNDS_EXTRA:-no}" != "no" ]; then
     --enable EXTRA-SOUNDS-${LANGUAGE_EXTRA}-WAV \
     --enable EXTRA-SOUNDS-${LANGUAGE_EXTRA}-ULAW \
     --enable EXTRA-SOUNDS-${LANGUAGE_EXTRA}-ALAW \
-    --enable EXTRA-SOUNDS-${LANGUAGE_EXTRA}-GSM \
     --enable EXTRA-SOUNDS-${LANGUAGE_EXTRA}-G729 \
     --enable EXTRA-SOUNDS-${LANGUAGE-EXTRA}-G722 \
-    --enable EXTRA-SOUNDS-${LANGUAGE-EXTRA}-SLN16 \
-    --enable EXTRA-SOUNDS-${LANGUAGE_EXTRA}-SIREN7 \
-    --enable EXTRA-SOUNDS-${LANGUAGE_EXTRA}-SIREN14 \
     menuselect.makeopts
 fi
 
@@ -225,7 +231,9 @@ cp -a CHANGES COPYING CREDITS ChangeLog LICENSE README* UPGRADE* doc/ contrib/as
   $PKG/usr/doc/$PRGNAM-$VERSION/
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
-# Install a few typical config files for common asterisk servers
+# Install config files for a typical asterisk server; some of these
+# files don't make sense, but recent changes in the module autoloader
+# will require empty files to be in place for some items to work
 for i in \
   asterisk codecs extensions iax indications musiconhold sip smdi modules voicemail ;
   do
@@ -247,9 +255,8 @@ chown -R $ASTERISKUSR:$ASTERISKGRP $PKG/var/log/asterisk
 chown -R $ASTERISKUSR:$ASTERISKGRP $PKG/var/run/asterisk
 chown $ASTERISKUSR:$ASTERISKGRP $PKG/usr/sbin/asterisk
 
-# The following permissions are a bit weird; if you have the voicemail config
-# file needs to writeable by the asterisk user otherwise password changes aren't
-# preserved
+# The voicemail config file needs to writeable by the asterisk user
+# otherwise password changes aren't preserved
 chown -R root:$ASTERISKGRP $PKG/etc/asterisk
 chmod 664 $PKG/etc/asterisk/voicemail.conf.new
 
