@@ -67,6 +67,52 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
+EXAMPLES=${EXAMPLES:-no}
+DOCS=${DOCS:-no}
+PROPRIETARY_CODECS=${PROPRIETARY_CODECS:-no}
+PULSEAUDIO=${PULSEAUDIO:-yes}
+CCACHE=${CCACHE:-no}
+WEBENGINE=${WEBENGINE:-yes}
+
+printf "\n%s\n\n" "SlackBuild Options:"
+printf "%s\n" "CCACHE:             $CCACHE"
+printf "%s\n" "DOCS:               $DOCS"
+printf "%s\n" "EXAMPLES:           $EXAMPLES"
+printf "%s\n" "PROPRIETARY_CODECS: $PROPRIETARY_CODECS"
+printf "%s\n" "PULSEAUDIO:         $PULSEAUDIO"
+printf "%s\n" "WEBENGINE:          $WEBENGINE"
+printf "\n"
+
+# Default is no.
+if [ "$EXAMPLES" == "yes" ]; then
+  BUILD_EXAMPLES=""
+else
+  BUILD_EXAMPLES="-nomake examples"
+fi
+
+# Default is yes.
+if [ "$PULSEAUDIO" = "no" ]; then
+  PULSE="-no-pulseaudio"
+fi
+
+# Default is no.
+if [ "$CCACHE" = "yes" ]; then
+  CCACHE="-ccache"
+else
+  unset CCACHE
+fi
+
+if [ "$WEBENGINE" = "no" ]; then
+  EXCLUDE="--exclude=qtweb*"
+  PKGVERSION="${VERSION}_nowebengine"
+else
+  PKGVERSION="${VERSION}"
+  # Note that this changes to -webengine-proprietary-codecs in later versions
+  if [ "$PROPRIETARY_CODECS" = "yes" ]; then
+    CODECS="-proprietary-codecs"
+  fi
+fi
+
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
@@ -101,7 +147,7 @@ mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 echo "Removing any existing source directory. Please wait..."
 rm -rf ${PRGNAM/5/}-everywhere-opensource-src-$VERSION
-tar xvf $CWD/${PRGNAM/5/}-everywhere-opensource-src-$VERSION.tar.xz
+tar xvf $CWD/${PRGNAM/5/}-everywhere-opensource-src-$VERSION.tar.xz $EXCLUDE
 cd ${PRGNAM/5/}-everywhere-opensource-src-$VERSION
 chown -R root:root .
 find -L . \
@@ -119,23 +165,6 @@ else
 fi
 
 sed -i "s|-O2|$SLKCFLAGS|" qtbase/mkspecs/common/gcc-base.conf
-
-# Build examples. Default is no.
-if [ "${EXAMPLES:-no}" == "yes" ]; then
-  BUILD_EXAMPLES=""
-else
-  BUILD_EXAMPLES="-nomake examples"
-fi
-
-if [ "${PULSEAUDIO:-yes}" = "no" ]; then
-  PULSE="-no-pulseaudio"
-fi
-
-# New codec option.
-# Note that this changes to -webengine-proprietary-codecs in later versions
-if [ "${PROPRIETARY_CODECS:-no}" = "yes" ]; then
-  CODECS="-proprietary-codecs"
-fi
 
 export CFLAGS="$SLKCFLAGS"
 export CXXFLAGS="$SLKCFLAGS -std=c++11"
@@ -167,6 +196,7 @@ export CXXFLAGS="$SLKCFLAGS -std=c++11"
   -release \
   -no-use-gold-linker \
   -c++std c++11 \
+  $CCACHE \
   $CODECS \
   $PULSE \
   $RELOCATIONS \
@@ -176,7 +206,7 @@ make
 make install INSTALL_ROOT=$PKG
 
 # Install documentation. Default is not to install documentation.
-if [ "${DOCS:-no}" == "yes" ]; then
+if [ "$DOCS" == "yes" ]; then
   # Recreate Makefiles in order to use the just compiled qdoc.
   for doc in $(find . -name "Makefile*" | xargs egrep "^\s/usr/lib${LIBDIRSUFFIX}/qt5/bin/" \
     | cut -d':' -f1 | uniq)
@@ -236,11 +266,13 @@ Description: Qt5 Configuration
 Version: $VERSION
 EOF
 
-# Fix internal linking for Qt5WebEngineCore.pc.
-sed -i \
-  -e 's|-Wl,--start-group.* -Wl,--end-group||' \
-  -e "s|-L${PWD}/qtwebengine/src/core/api/Release||" \
-  $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/Qt5WebEngineCore.pc
+if [ "$WEBENGINE" = "yes" ]; then
+  # Fix internal linking for Qt5WebEngineCore.pc.
+  sed -i \
+    -e 's|-Wl,--start-group.* -Wl,--end-group||' \
+    -e "s|-L${PWD}/qtwebengine/src/core/api/Release||" \
+    $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/Qt5WebEngineCore.pc
+fi
 
 # While we are at it, there isn't any reason to keep references to $PKG in the *.prl files.
 for PRL in $(find $PKG -name "*\.prl"); do
@@ -291,6 +323,7 @@ find $PKG \( -name "*.qml" -o -name "*.app" \) -perm 755 -exec chmod 644 '{}' \;
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
   README qtbase/{header*,LGPL_EXCEPTION.txt,LICENSE.*L} \
+  $CWD/README.benchmarks $CWD/README.ccache \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
@@ -299,6 +332,6 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$PKGVERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
 
 # vim: expandtab
