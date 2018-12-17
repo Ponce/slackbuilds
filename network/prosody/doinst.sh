@@ -14,7 +14,8 @@ config etc/prosody/certs/openssl.cnf.new
 config etc/prosody/certs/localhost.key.new
 config etc/prosody/certs/example.com.key.new
 config etc/prosody/certs/example.com.crt.new
-config etc/prosody/certs/Makefile.new
+config etc/prosody/certs/GNUmakefile.new
+config etc/prosody/certs/makefile.new
 config etc/prosody/certs/localhost.cnf.new
 config etc/prosody/certs/localhost.crt.new
 
