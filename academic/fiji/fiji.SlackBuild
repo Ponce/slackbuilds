@@ -1,0 +1,140 @@
+#!/bin/sh
+
+# Slackware build script for fiji
+
+# Copyright 2018 Petar Petrov slackalaxy@gmail.com
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=fiji
+DIRNAM=Fiji.app
+VERSION=${VERSION:-20181207}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i386 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+UPDATER=imagej-updater-0.9.3.jar
+
+set -e
+
+# Stop if arch is not supported
+if [ "$ARCH" != "i386" ] && [ "$ARCH" != "x86_64" ]; then
+  printf "\n\n$ARCH is not supported... \n"
+  exit 1
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $DIRNAM
+tar xvf $CWD/${PRGNAM}-nojre.tar.gz
+cd $DIRNAM
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Rename the binary we need
+if [ "$ARCH" = "x86_64" ]; then
+  mv ImageJ-linux64 $PRGNAM
+else
+  mv ImageJ-linux32 $PRGNAM
+fi
+
+# We will put here two tools, so they are not run at startup.
+mkdir -p unused
+cd unused
+
+# Remove the check for required updates. If you want it, comment out
+# the next lines. You can "enable" it any time by just placing it in the
+# plugins/Scripts/Plugins/AutoRun/ folder.
+mv ../plugins/Scripts/Plugins/AutoRun/Check_Required_Update_Sites.js .
+
+# We do not want updates when the program is installed. As above, it
+# is your system, so if you want this functionality, then comment out
+# the line below. You can always "enable it, by placing it in the jars
+# folder.
+mv ../jars/$UPDATER .
+
+cd ..
+
+# Update plugins, so that the latest are included in the package. This
+# will download stuff during the package creation, something that is
+# against the policy of SlackBuilds.org. However, it is your system,
+# so if you _really_ want this, uncomment the line below.
+# ./$PRGNAM --update list-local-only
+
+# Copy the folders, db.xml and the renamed binary to /opt
+mkdir -p $PKG/opt/$PRGNAM
+cp -a \
+  images \
+  jars \
+  luts \
+  macros \
+  plugins \
+  retro \
+  scripts \
+  db.xml.gz \
+  $PRGNAM \
+$PKG/opt/$PRGNAM
+
+# If a file called "ImageJ2.desktop" is not present in the directory
+# of fiji, it will create (and re-create it if you delete it) the file
+# "~/.local/share/applications/ImageJ2.desktop" upon start. So, let it
+# have its desktop file. This is a very stupid workaround, but it is
+# really the best I could think of. At first I thought that deleting
+# "plugins/Scripts/Plugins/Utilities/Create_Desktop_Icon.bsh" will do
+# the trick, but no...
+cp $CWD/ImageJ2.desktop $PKG/opt/$PRGNAM
+
+# Install the simple wrapper
+install -D -m755 $CWD/$PRGNAM $PKG/usr/bin/$PRGNAM
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/share/{applications,pixmaps}
+cp $CWD/ImageJ2.desktop $PKG/usr/share/applications
+cp images/icon.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README.md WELCOME.md $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/References > $PKG/usr/doc/$PRGNAM-$VERSION/References
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
