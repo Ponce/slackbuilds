@@ -1,0 +1,85 @@
+=== modified file 'application.pro'
+--- application.pro	2018-05-04 18:00:34 +0000
++++ application.pro	2018-05-05 05:57:24 +0000
+@@ -227,6 +227,8 @@
+     !without_pkgconfig:system(pkg-config --exists synctex) {
+         CONFIG += link_pkgconfig
+         PKGCONFIG += synctex
++
++        system(pkg-config --atleast-version=2.0.0 synctex):DEFINES += HAS_SYNCTEX_2
+     } else {
+         HEADERS += synctex/synctex_parser.h synctex/synctex_parser_utils.h synctex/synctex_parser_local.h
+         SOURCES += synctex/synctex_parser.c synctex/synctex_parser_utils.c
+
+=== modified file 'sources/documentview.cpp'
+--- sources/documentview.cpp	2018-03-28 19:19:40 +0000
++++ sources/documentview.cpp	2018-05-05 05:57:24 +0000
+@@ -56,6 +56,15 @@
+ 
+ #include <synctex_parser.h>
+ 
++#ifndef HAS_SYNCTEX_2
++
++typedef synctex_scanner_t synctex_scanner_p;
++typedef synctex_node_t synctex_node_p;
++
++#define synctex_scanner_next_result(scanner) synctex_next_result(scanner)
++
++#endif // HAS_SYNCTEX_2
++
+ #endif // WITH_SYNCTEX
+ 
+ #include "settings.h"
+@@ -245,11 +254,11 @@
+ {
+     DocumentView::SourceLink sourceLink;
+ 
+-    if(synctex_scanner_t scanner = synctex_scanner_new_with_output_file(filePath.toLocal8Bit(), 0, 1))
++    if(synctex_scanner_p scanner = synctex_scanner_new_with_output_file(filePath.toLocal8Bit(), 0, 1))
+     {
+         if(synctex_edit_query(scanner, page, pos.x(), pos.y()) > 0)
+         {
+-            for(synctex_node_t node = synctex_next_result(scanner); node != 0; node = synctex_next_result(scanner))
++            for(synctex_node_p node = synctex_scanner_next_result(scanner); node != 0; node = synctex_scanner_next_result(scanner))
+             {
+                 sourceLink.name = QString::fromLocal8Bit(synctex_scanner_get_name(scanner, synctex_node_tag(node)));
+                 sourceLink.line = qMax(synctex_node_line(node), 0);
+
+=== modified file 'sources/main.cpp'
+--- sources/main.cpp	2018-05-04 05:40:07 +0000
++++ sources/main.cpp	2018-05-05 05:57:24 +0000
+@@ -45,6 +45,16 @@
+ 
+ #include <synctex_parser.h>
+ 
++#ifndef HAS_SYNCTEX_2
++
++typedef synctex_scanner_t synctex_scanner_p;
++typedef synctex_node_t synctex_node_p;
++
++#define synctex_scanner_next_result(scanner) synctex_next_result(scanner)
++#define synctex_display_query(scanner, file, line, column, page) synctex_display_query(scanner, file, line, column)
++
++#endif // HAS_SYNCTEX_2
++
+ #endif // WITH_SYNCTEX
+ 
+ #include "documentview.h"
+@@ -326,13 +336,11 @@
+ 
+         if(!file.sourceName.isNull())
+         {
+-            synctex_scanner_t scanner = synctex_scanner_new_with_output_file(file.filePath.toLocal8Bit(), 0, 1);
+-
+-            if(scanner != 0)
++            if(synctex_scanner_p scanner = synctex_scanner_new_with_output_file(file.filePath.toLocal8Bit(), 0, 1))
+             {
+-                if(synctex_display_query(scanner, file.sourceName.toLocal8Bit(), file.sourceLine, file.sourceColumn) > 0)
++                if(synctex_display_query(scanner, file.sourceName.toLocal8Bit(), file.sourceLine, file.sourceColumn, -1) > 0)
+                 {
+-                    for(synctex_node_t node = synctex_next_result(scanner); node != 0; node = synctex_next_result(scanner))
++                    for(synctex_node_p node = synctex_scanner_next_result(scanner); node != 0; node = synctex_scanner_next_result(scanner))
+                     {
+                         int page = synctex_node_page(node);
+                         QRectF enclosingBox(synctex_node_box_visible_h(node), synctex_node_box_visible_v(node), synctex_node_box_visible_width(node), synctex_node_box_visible_height(node));
+
