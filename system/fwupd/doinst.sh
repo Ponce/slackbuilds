@@ -9,7 +9,11 @@ config() {
 }
 
 config etc/fwupd/daemon.conf.new
+if [ -e etc/fwupd/uefi.conf ] ; then
+  config etc/fwupd/uefi.conf.new
+fi
 config etc/fwupd/remotes.d/fwupd.conf.new
+config etc/fwupd/remotes.d/fwupd-tests.conf.new
 config etc/fwupd/remotes.d/lvfs-testing.conf.new
 config etc/fwupd/remotes.d/lvfs.conf.new
 config etc/fwupd/remotes.d/vendor.conf.new
