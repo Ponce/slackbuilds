@@ -25,3 +25,7 @@ done
 
 # enable cgroups service as required by openrc 0.35+
 [ ! -e etc/openrc/runlevels/sysinit/cgroups ] && ln -s /etc/openrc/init.d/cgroups etc/openrc/runlevels/sysinit/cgroups
+
+# enable save keymaps and termencoding services as needed by openrc 0.40+
+[ ! -e etc/openrc/runlevels/boot/save-keymaps ] && ln -s /etc/openrc/init.d/save-keymaps etc/openrc/runlevels/boot/save-keymaps
+[ ! -e etc/openrc/runlevels/boot/save-termencoding ] && ln -s /etc/openrc/init.d/save-termencoding etc/openrc/runlevels/boot/save-termencoding
