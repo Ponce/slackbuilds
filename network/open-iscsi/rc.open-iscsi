@@ -1,0 +1,76 @@
+#!/bin/sh
+
+# Slackware rc.open-iscsi script, derived from init.debian in the
+# open-iscsi source package.
+
+DAEMON=/sbin/iscsid
+ADM=/sbin/iscsiadm
+PIDFILE=/var/run/iscsid.pid
+
+[ -e /etc/default/open-iscsi ] && . /etc/default/open-iscsi 
+
+[ -x "$DAEMON" ] || exit 0
+
+if [ ! -d /sys/class/ ]
+then
+    echo "iSCSI requires a mounted sysfs, not started." >&2
+    exit 1
+fi
+
+start() {
+    echo "Starting iSCSI initiator service" "iscsid"
+    modprobe -q iscsi_tcp 2>/dev/null || :
+    modprobe -q ib_iser 2>/dev/null || :
+    $DAEMON $ARGS
+    sleep 1
+    starttargets
+}
+
+starttargets() {
+    echo "Setting up iSCSI targets"
+    $ADM -m node --loginall=automatic
+}
+
+stoptargets() {
+    echo "Disconnecting iSCSI targets"
+    sync
+    $ADM -m node --logoutall=all
+}
+
+stop() {
+    stoptargets
+    sleep 1
+    echo "Stopping iSCSI initiator service"
+    pkill -F $PIDFILE
+    rm -f $PIDFILE
+
+    modprobe -r iscsi_tcp
+    modprobe -r ib_iser
+}
+
+restart() {
+    stop
+    sleep 1
+    start
+}
+
+restarttargets() {
+    stoptargets
+    starttargets
+}
+
+status() {
+    echo "$(pgrep -c -F $PIDFILE -f $DAEMON) $DAEMON process(es) running"
+    echo "Current active iSCSI sessions:"
+    $ADM -m session
+}
+
+case "$1" in
+    start|starttargets|stop|stoptargets|restart|restarttargets|status)
+        $1
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status}"
+        exit 1
+        ;;
+esac
