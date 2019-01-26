@@ -14,7 +14,6 @@ config() {
 config etc/PackageKit/PackageKit.conf.new
 config etc/PackageKit/Vendor.conf.new
 config etc/PackageKit/CommandNotFound.conf.new
-config etc/PackageKit/Katja.conf.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
