@@ -7,6 +7,7 @@ config() {
     rm $NEW
   fi
 }
+
 preserve_perms() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
@@ -17,18 +18,19 @@ preserve_perms() {
   fi
   config $NEW
 }
-config etc/xinetd.conf.new
-config etc/xinetd.d/chargen-dgram.new 
-config etc/xinetd.d/chargen-stream.new
-config etc/xinetd.d/daytime-dgram.new
-config etc/xinetd.d/daytime-stream.new
-config etc/xinetd.d/discard-dgram.new
-config etc/xinetd.d/discard-stream.new
-config etc/xinetd.d/echo-dgram.new
-config etc/xinetd.d/echo-stream.new
-config etc/xinetd.d/ftp-sensor.new
-config etc/xinetd.d/tcpmux-server.new
-config etc/xinetd.d/time-dgram.new
-config etc/xinetd.d/time-stream.new
-preserve_perms etc/rc.d/rc.xinetd.new
 
+config etc/xinetd.conf.new
+config etc/xinetd.d/chargen.new
+config etc/xinetd.d/chargen-udp.new
+config etc/xinetd.d/daytime.new
+config etc/xinetd.d/daytime-udp.new
+config etc/xinetd.d/discard.new
+config etc/xinetd.d/discard-udp.new
+config etc/xinetd.d/echo.new
+config etc/xinetd.d/echo-udp.new
+config etc/xinetd.d/servers.new
+config etc/xinetd.d/services.new
+config etc/xinetd.d/time.new
+config etc/xinetd.d/time-udp.new
+
+preserve_perms etc/rc.d/rc.xinetd.new
