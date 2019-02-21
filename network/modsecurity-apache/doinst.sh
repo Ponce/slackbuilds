@@ -12,5 +12,7 @@ config() {
 }
 
 config etc/httpd/extra/modsecurity-recommended.conf.new
-config etc/httpd/crs/modsecurity_crs_10_setup.conf.new
+config etc/httpd/crs/crs-setup.conf.new
+config etc/httpd/crs/rules/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf.new
+config etc/httpd/crs/rules/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf.new
 
