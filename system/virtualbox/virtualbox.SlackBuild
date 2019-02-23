@@ -2,7 +2,7 @@
 
 # Slackware build script for virtualbox-ose
 
-# Copyright 2008-2017 Heinz Wiesinger, Amsterdam, The Netherlands
+# Copyright 2008-2018 Heinz Wiesinger, Amsterdam, The Netherlands
 # Copyright 2008 Mauro Giachero <mauro.giachero@gmail.com>
 # All rights reserved.
 #
@@ -25,7 +25,7 @@
 
 PRGNAM=virtualbox
 SRCNAM=VirtualBox
-VERSION=${VERSION:-5.0.40}
+VERSION=${VERSION:-5.2.8}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -62,7 +62,7 @@ else
   harden="--disable-hardening"
 fi
 
-# Support for the qt4-frontend
+# Support for the Qt & SDL frontends
 if [ "${HEADLESS:-no}" = "no" ]; then
   guiapp="VirtualBox VBoxSDL"
 else
@@ -132,17 +132,15 @@ MODE="755"
 # Use virtualbox-kernel.SlackBuild for this.
 patch -d src/VBox/Installer/linux -i $CWD/vboxdrv.sh-setup.diff
 
-# Fix building against newer versions of gsoap
-patch -p1 -i $CWD/virtualbox-gsoap.patch
-
 # Fix wrong path to rdesktop-vrdp-keymaps
 patch -p1 -i $CWD/006-rdesktop-vrdp-keymap-path.patch
 
 # Remove gcc version check
 sed -i 's/^check_gcc$/#check_gcc/' ./configure
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
+# Use our CFLAGS
+sed -i "s|CXX_FLAGS=\"\"|CXX_FLAGS=\"$SLKCFLAGS -std=c++11\"|" ./configure
+
 ./configure \
   --disable-kmods \
   --enable-vde \
@@ -158,20 +156,16 @@ CXXFLAGS="$SLKCFLAGS" \
 
 cp $CWD/LocalConfig.kmk .
 sed -i "s|LIBDIR|lib$LIBDIRSUFFIX|" ./LocalConfig.kmk
+sed -i "s|CXXFLAGS|$SLKCFLAGS -std=c++11|" ./LocalConfig.kmk
 
 kmk -j ${JOBS} LOCALCFG=./LocalConfig.kmk
-
-# build VBoxFUSE
-cd src/VBox/ImageMounter/VBoxFUSE
-  kmk -j ${JOBS}
-cd -
 
 mkdir -p $PKG/usr/{lib$LIBDIRSUFFIX,share,include}/virtualbox \
   $PKG/usr/{bin,src} \
   $PKG/usr/share/{pixmaps,mime/packages} \
   $PKG/etc/{default,rc.d,vbox}
 
-for i in vboxdrv.sh.in vboxballoonctrl-service.sh vboxautostart-service.sh; do
+for i in vboxdrv.sh vboxballoonctrl-service.sh vboxautostart-service.sh; do
   SCRIPT=$(echo $i | cut -d "." -f 1)
   cp -f src/VBox/Installer/linux/$i $PKG/etc/rc.d/rc.$SCRIPT.new
   sed -i "s/%PACKAGE%/virtualbox/g" $PKG/etc/rc.d/rc.$SCRIPT.new
@@ -218,8 +212,7 @@ cd out/linux.$BUILDDIR/release/bin/
   install -m $MODE -g $GROUP VBoxSysInfo.sh $PKG/usr/share/virtualbox/
   install -m $MODE -g $GROUP VBoxCreateUSBNode.sh $PKG/usr/share/virtualbox/
   install -m $MODE -g $GROUP VBoxTunctl $PKG/usr/bin/
-  install -m $MODE -g $GROUP VBoxFUSE $PKG/usr/bin/
-  rm -f VBoxSysInfo.sh VBoxCreateUSBNode.sh VBoxTunctl VBoxFUSE
+  rm -f VBoxSysInfo.sh VBoxCreateUSBNode.sh VBoxTunctl
   mv * $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/
   chown -R root:$GROUP $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/
   chmod -R $MODE $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/
@@ -257,6 +250,7 @@ fi
 # install headers. Needed by some third party tools
 cp -rf include/* $PKG/usr/include/virtualbox/
 rm -f $PKG/usr/include/virtualbox/Makefile.kmk
+find $PKG/usr/include/virtualbox -name "Makefile.kup" -print0 | xargs -0 rm -f
 
 cp -f $CWD/VBoxGuestAdditions_$VERSION.iso \
   $PKG/usr/share/virtualbox/VBoxGuestAdditions.iso
