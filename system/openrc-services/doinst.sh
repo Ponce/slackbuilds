@@ -28,7 +28,7 @@ openrc_base=(device-mapper dmcrypt lvm mdadm mdraid udev udev-settle udev-trigge
 openrc_desktop=(acpid alsasound xdm gpm wpa_supplicant)
 openrc_devel=(git-daemon influxdb mysqld postgresql svn distccd jenkins redis)
 openrc_misc=(bitlbee cpupower connman ntpd ntp-client sntp rsyslog saned metalog pulseaudio syslog-ng sensord fancontrol lm_sensors lircd irexec haveged salt-master salt-minion salt-syncdic hdparm clamd boinc atd libvirtd docker)
-openrc_net=(named dhcpd dhcrelay dhcrelay6 hostapd dnsmasq iptables ip6tables rpcbind nfs nfsclient nginx openntpd slapd sshd openvpn quota rsyncd samba saslauthd squid transmission-daemon ufw vnstatd xinetd tor NetworkManager httpd syncthing)
+openrc_net=(named dhcpd dhcrelay dhcrelay6 hostapd dnsmasq iptables ip6tables rpcbind nfs nfsclient nginx openntpd slapd sshd openvpn quota rsyncd samba saslauthd squid transmission-daemon ufw vnstatd xinetd tor NetworkManager httpd syncthing tftpd-hpa)
 openrc_slack=(dcron sendmail snmpd snmptrapd sysklogd fail2ban)
 openrc_video=(vgl bumblebee nvidia-persistenced)
 
