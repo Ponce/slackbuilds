@@ -22,4 +22,4 @@ preserve_perms() {
   config $NEW
 }
 
-#preserve_perms etc/rc.d/rc.nexus.new
+# preserve_perms etc/rc.d/rc.nexus
