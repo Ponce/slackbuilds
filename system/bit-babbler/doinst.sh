@@ -23,3 +23,4 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.seedd.new
+preserve_perms etc/bit-babbler/seedd.conf.new
