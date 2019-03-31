@@ -2,28 +2,28 @@
 
 # Slackware build script for memtest86+
 
-# Copyright 2013 Kyle Guinn <elyk03@gmail.com>, USA
+# Copyright 2013-2019 Kyle Guinn <elyk03@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
 # permitted provided that the following conditions are met:
 #
 # 1. Redistributions of this script must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
+#    notice, this list of conditions and the following disclaimer.
 #
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
-# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
-# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=memtest86+
-VERSION=${VERSION:-4.20}
+VERSION=${VERSION:-5.01}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -32,10 +32,10 @@ ARCH=i486
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
-PKG=$TMP/package-$PRGNAM
+PKG=$TMP/package-$PRGNAM-$VERSION
 OUTPUT=${OUTPUT:-/tmp}
 
-DOCS="FAQ README*"
+DOCS="FAQ README* changelog"
 
 set -e
 
@@ -46,23 +46,52 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+chmod -R u+w,go-w,a+rX-st .
 
-# Fix false positives in test #7
-# https://bugzilla.novell.com/show_bug.cgi?id=773569
-patch -p1 < $CWD/patches/asm-inline-fix.diff
+# Upstream is dead.  Lots of patches courtesy of Debian and Gentoo.
+# If these get out-of-hand, consider switching to coreboot's fork:
+# https://review.coreboot.org/cgit/memtest86plus.git/
 
-make CC="gcc -fgnu89-inline"
-install -D -m 0644 memtest.bin $PKG/boot/memtest86+.bin
+# https://sources.debian.org/patches/memtest86+/5.01-3/
+# Last 3 are covered or made unnecessary by Gentoo's patches.
+# Multiboot is disabled due to it being experimental and
+# possibly not working correctly:  https://bugs.debian.org/568176
+# Note that we aren't installing the multiboot image (memtest_shared).
+# Note that patches multiboot and memtest86+-5.01-hardcoded_cc.patch conflict.
+patch -p1 < $CWD/patches/doc-serialconsole
+#patch -p1 < $CWD/patches/multiboot
+#patch -p1 < $CWD/patches/memtest86+-5.01-O0.patch
+#patch -p1 < $CWD/patches/memtest86+-5.01-array-size.patch
+#patch -p1 < $CWD/patches/gcc-5
+
+# https://gitweb.gentoo.org/repo/gentoo.git/tree/sys-apps/memtest86+/files
+patch -p1 < $CWD/patches/memtest86+-5.01-gcc-473.patch
+patch -p1 < $CWD/patches/memtest86+-5.01-hardcoded_cc.patch
+patch -p1 < $CWD/patches/memtest86+-5.01-no-scp.patch
+patch -p1 < $CWD/patches/memtest86+-5.01-io-extern-inline.patch
+patch -p1 < $CWD/patches/memtest86+-5.01-reboot-def.patch
+patch -p1 < $CWD/patches/memtest86+-5.01-no-clean.patch
+patch -p1 < $CWD/patches/memtest86+-5.01-no-C-headers.patch
+patch -p1 < $CWD/patches/memtest86+-5.01-test-random-cflags.patch
+
+# More CFLAGS/CPPFLAGS cleanup, inspired by the previous patch.
+patch -p1 < $CWD/patches/makefile.diff
+
+# https://bugs.debian.org/795421
+patch -p1 < $CWD/patches/memtest86+-test-7-smp.patch
+
+# https://bugs.debian.org/629506
+patch -p1 < $CWD/patches/bug_629506_message_15.mbox
+
+make
+install -D -m 0755 memtest $PKG/boot/$PRGNAM-$VERSION
+install -D -m 0644 memtest.bin $PKG/boot/$PRGNAM-$VERSION.bin
+ln -s $PRGNAM-$VERSION $PKG/boot/$PRGNAM
+ln -s $PRGNAM-$VERSION.bin $PKG/boot/$PRGNAM.bin
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc

@@ -1,0 +1,142 @@
+From viro@ftp.linux.org.uk Fri Feb 27 20:21:34 2015
+Received: (at 629506) by bugs.debian.org; 27 Feb 2015 20:21:34 +0000
+X-Spam-Checker-Version: SpamAssassin 3.4.0-bugs.debian.org_2005_01_02
+	(2014-02-07) on buxtehude.debian.org
+X-Spam-Level: 
+X-Spam-Status: No, score=-2.3 required=4.0 tests=BAYES_00,FOURLA,MONEY,
+	MURPHY_DRUGS_REL8,RCVD_IN_DNSWL_MED,STOCKLIKE,T_RP_MATCHES_RCVD autolearn=no
+	autolearn_force=no version=3.4.0-bugs.debian.org_2005_01_02
+X-Spam-Bayes: score:0.0000 Tokens: new, 43; hammy, 150; neutral, 234; spammy,
+	0. spammytokens: hammytokens:0.000-+--UD:patch, 0.000-+--H*u:1.5.21,
+	0.000-+--H*UA:1.5.21, 0.000-+--H*u:2010-09-15, 0.000-+--H*UA:2010-09-15
+Return-path: <viro@ftp.linux.org.uk>
+Received: from zeniv.linux.org.uk ([195.92.253.2])
+	by buxtehude.debian.org with esmtps (TLS1.0:DHE_RSA_AES_256_CBC_SHA1:256)
+	(Exim 4.80)
+	(envelope-from <viro@ftp.linux.org.uk>)
+	id 1YRRPi-0007QW-72
+	for 629506@bugs.debian.org; Fri, 27 Feb 2015 20:21:34 +0000
+Received: from viro by ZenIV.linux.org.uk with local (Exim 4.76 #1 (Red Hat Linux))
+	id 1YRQyr-0000Hl-OS
+	for 629506@bugs.debian.org; Fri, 27 Feb 2015 19:53:49 +0000
+Date: Fri, 27 Feb 2015 19:53:49 +0000
+From: Al Viro <viro@ZenIV.linux.org.uk>
+To: 629506@bugs.debian.org
+Subject: memtest86+.bin crashes if loader ends up putting it not at 9000:0000
+Message-ID: <20150227195349.GN29656@ZenIV.linux.org.uk>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+User-Agent: Mutt/1.5.21 (2010-09-15)
+Sender: Al Viro <viro@ftp.linux.org.uk>
+X-Greylist: delayed 1658 seconds by postgrey-1.34 at buxtehude; Fri, 27 Feb 2015 20:21:33 UTC
+
+	FWIW, the effects described in this bug report are 100% reproducible
+on any version, as long as the loader (lilo, grub, whatever) ends up putting
+the bootsect+setup in any location below 9000:0000.
+
+	zImage-type images consist of 3 parts - bootsect, setup and
+payload.  Payload is loaded at 1000:0, bootsect and setup - n:0 and
+n+2:0 resp., near the top of lowmem.  Payload is protected mode code,
+setup - real mode one.  Bootsect isn't executed at all; when the
+same image is booted directly it would've been the only part loaded
+by BIOS and it would copy itself and read the rest of the image to
+expected locations and pass control to setup.  Values in it can be
+used by setup, though, so it must be present even when the image had been
+brought in by a loader.
+
+	The thing is, we can't be guaranteed n == 0x9000.  E.g. ACPI and
+SMM have every right to use _anything_ in range 512K..1M for their
+state, declaring it reserved.  That's what BIOS int 0x12 is for - it
+reports how high (in kilobytes) can you go in lowmem without running into
+reserved areas.  And while having it report 512K is rare, something like
+20K reserved just below the VRAM (i.e. report 620K) is nothing unusual.
+
+	I hadn't looked into details of GRUB behaviour, but LILO puts its
+secondary loader as high in lowmem as it can, then puts the bootsect and
+setup parts of image below that.  It tries to load at 9000:0 if possible,
+but if there's no space, it'll go lower.  With the sizes it uses 20K reserved
+below 640K is enough to push bootsect + setup combination (just) below 9000:0.
+And memtest86+ setup has that 0x9000 hardwired - this
+gdt_48:
+        .word   0x800           # gdt limit=2048, 256 GDT entries
+        .word   512+gdt - start,0x9     # gdt base = 0X9xxxx
+in setup.S really depends on 'start' (entry to setup) loaded at
+0x90200 physical.  Have it loaded at any other address and you'll trigger
+an exception as soon as you try to assign any segment register after you switch
+to protected mode.  Which will escalate to triple-fault and reboot the
+damn thing immediately.
+
+	GRUB might be better or worse in triggering that "load not at
+9000:0" situation, but it can't possibly avoid it in all cases.  If nothing
+else, 9000:0 might be within one of the reserved areas.  It simply isn't
+guaranteed to be available, period.
+
+	Another issue is that setup of memtest86+ expects to see in %dx
+the value left there by the bootsect of memtest86+.  Fortunately, it's
+not critical - in
+        movw    $INITSEG, %ax
+        movw    %ax, %ds
+        movw    %ax, %es
+        movw    %ax, %fs
+        movw    %ax, %ss        # reset the stack to INITSEG:0x4000-12.
+        movw    %dx, %sp
+        push    %cs
+        pop     %ds
+we really need only the last two instructions.  The stack footprint
+of what follows is fairly low *and* these values are not used past the
+reload of segment registers immediately after protected mode switch.
+
+It's not the only problem in there - the bits after
+# start from grub-a20.patch
+are clearly cargo-culted from grub, badly.  There it was a part of a function
+that expects an argument on stack (it can turn A20 both on and off) and that
+got blindly copied, nevermind that the value on stack is random or that
+we follow it with (unconditional) use of 8042-based method anyway.  I'd rather
+see upstream opinion on that particular piece of code first, though.
+
+Anyway, the patch below fixes dependency on being loaded at 9000:0 and it
+seems to work here without regressions.  Have fun...
+
+--- memtest86+-5.01/setup.S	2013-08-09 22:01:58.000000000 -0400
++++ fixed/setup.S	2015-02-27 14:18:47.000000000 -0500
+@@ -26,14 +26,13 @@
+ # APs also execute this code
+ #ljmp	$INITSEG, $(reload - start + 0x200)
+ reload:
+-	movw	$INITSEG, %ax
+-	movw	%ax, %ds
+-	movw	%ax, %es
+-	movw	%ax, %fs
+-	movw	%ax, %ss	# reset the stack to INITSEG:0x4000-12.
+-	movw	%dx, %sp
++	xorl	%eax, %eax
+ 	push	%cs
+-	pop	%ds
++	pop	%ax
++	movw	%ax, %ds
++	shll	$4, %eax
++	addl    %eax, (gdt_48 - start + 2)
++
+ 	lidt	idt_48 - start	# load idt with 0,0
+ 	lgdt	gdt_48 - start	# load gdt with whatever appropriate
+ 
+@@ -88,6 +87,7 @@
+ 	movw	%ax, %ds
+ 	movw	%ax, %es
+ 	movw	%ax, %ss
++	xorl	%esp, %esp	# 32bit code will set it then
+ 	movw	%ax, %fs
+ 	movw	%ax, %gs
+ 
+@@ -144,7 +144,7 @@
+ 
+ gdt_48:
+ 	.word	0x800		# gdt limit=2048, 256 GDT entries
+-	.word	512+gdt - start,0x9	# gdt base = 0X9xxxx
++	.word	gdt - start,0	# gdt base, needs to be adjusted
+ 
+ msg1:
+ 	.asciz "Setup.S\r\n"
+
+
