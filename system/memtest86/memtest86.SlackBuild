@@ -2,29 +2,29 @@
 
 # Slackware build script for memtest86
 
-# Copyright 2012-2016 Kyle Guinn <elyk03@gmail.com>, USA
+# Copyright 2012-2019 Kyle Guinn <elyk03@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
 # permitted provided that the following conditions are met:
 #
 # 1. Redistributions of this script must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
+#    notice, this list of conditions and the following disclaimer.
 #
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
-# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
-# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=memtest86
-VERSION=${VERSION:-4.1.0}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-4.3.7}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 # i486 only.  Modify the Makefile at your own risk :-)
@@ -32,7 +32,7 @@ ARCH=i486
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
-PKG=$TMP/package-$PRGNAM
+PKG=$TMP/package-$PRGNAM-$VERSION
 OUTPUT=${OUTPUT:-/tmp}
 
 DOCS="README*"
@@ -42,19 +42,48 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
+rm -rf src
 tar xvf $CWD/$PRGNAM-$VERSION-src.tar.gz
-cd $PRGNAM-$VERSION
+cd src
 chown -R root:root .
 chmod -R u+w,go-w,a+rX-st .
 
-make CC="gcc -fgnu89-inline"
-install -D -m 0644 memtest.bin $PKG/boot/memtest86.bin
+# Permissions and line endings need to be sanitized.
+# Required so that memtest86+ backported patches will apply cleanly.
+find . -type f -exec chmod -x {} +
+find . -name precomp.bin -prune -o \
+       -type f -exec sed -i 's/\x0d$//' {} \;
+
+# https://gitweb.gentoo.org/repo/gentoo.git/tree/sys-apps/memtest86+/files
+patch -p1 < $CWD/patches/memtest86+-5.01-io-extern-inline.patch
+patch -p1 < $CWD/patches/memtest86+-5.01-reboot-def.patch
+
+# The following patches from Gentoo don't apply cleanly and/or have a few
+# unnecessary additions or omissions.  This combines and fixes them.
+#patch -p1 < $CWD/patches/memtest86+-5.01-hardcoded_cc.patch
+#patch -p1 < $CWD/patches/memtest86+-5.01-no-clean.patch
+#patch -p1 < $CWD/patches/memtest86+-5.01-test-random-cflags.patch
+patch -p1 < $CWD/patches/makefile.diff
+
+# https://bugs.debian.org/779504 -> https://bugs.debian.org/629506
+patch -p1 < $CWD/patches/bug_629506_message_15.mbox
+
+# TBD whether these memtest86+ patches should be backported:
+# https://sources.debian.org/patches/memtest86+/5.01-3/
+# https://bugs.debian.org/250864 suggests that it could be backported.
+#patch -p1 < $CWD/patches/multiboot
+# https://bugs.debian.org/795421
+#patch -p1 < $CWD/patches/memtest86+-test-7-smp.patch
+
+make
+install -D -m 0755 memtest $PKG/boot/$PRGNAM-$VERSION
+install -D -m 0644 memtest.bin $PKG/boot/$PRGNAM-$VERSION.bin
+ln -s $PRGNAM-$VERSION $PKG/boot/$PRGNAM
+ln -s $PRGNAM-$VERSION.bin $PKG/boot/$PRGNAM.bin
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
