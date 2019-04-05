@@ -1,10 +1,11 @@
+
 config() {
-  NEW="$1"
-  OLD="$(dirname $NEW)/$(basename $NEW .new)"
+  NEW="${1}.new"
+  OLD="$1"
   # If there's no config file by that name, mv it over:
   if [ ! -r $OLD ]; then
     mv $NEW $OLD
-  elif [ "$(cat $OLD | md5sum)" = "$(cat $NEW | md5sum)" ]; then
+  elif [ "$(md5sum <$OLD)" = "$(md5sum <$NEW)" ]; then
     # toss the redundant copy
     rm $NEW
   fi
