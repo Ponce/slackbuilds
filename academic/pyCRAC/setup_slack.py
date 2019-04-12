@@ -1,11 +1,11 @@
 #!/usr/bin/python
-# not compatible with python 3
+
 __author__      = "Sander Granneman"
-__copyright__   = "Copyright 2018"
-__version__     = "1.3.3"
+__copyright__   = "Copyright 2019"
+__version__     = "1.4.4"
 __credits__     = ["Sander Granneman","Hywell Dunn Davies"]
-__maintainer__  = ["Rob van Nues, via SlackBuilds.org"]
-__email__       = "sgrannem@staffmail.ed.ac.uk"
+__maintainer__  = ["Sander Granneman","Rob van Nues via SlackBuilds.org"]
+__email__       = ["sgrannem@staffmail.ed.ac.uk", "sborg63@disroot.org"]
 __status__      = "Production"
 
 import sys
@@ -13,18 +13,12 @@ import os
 import platform
 import setuptools
 from setuptools import setup
+from setuptools.command import easy_install
 
 DEFAULT_PATH = "/usr/share/"
 
-if sys.version[0:3] < '2.7' : raise ImportError('Python version 2.7 or above is required for pyCRAC')
-if sys.version[0:3] >= '3.0': raise ImportError('pyCRAC is not compatible with Python 3.0 or higher')
-
 sys.stdout.write("\nInstalling pyCRAC version %s...\n" % __version__)
 
-path_files = open("pyCRAC/defaults.py","w")
-#path_files.write("DEFAULT_PATH=\"%s\"\n" % DEFAULT_PATH)
-path_files.write("GTF=\"%spyCRAC-%s/db/Saccharomyces_cerevisiae.EF2.59.1.3.gtf\"\nTAB=\"%spyCRAC-%s/db/Saccharomyces_cerevisiae.EF2.59.1.0.fa.tab\"\nCHROM=\"%spyCRAC-%s/db/Saccharomyces_cerevisiae.EF2.59.1.0_chr_lengths.txt\"\n" % (DEFAULT_PATH,__version__,DEFAULT_PATH,__version__,DEFAULT_PATH,__version__))
-path_files.close()
 
 setup(name='pyCRAC',
 	version='%s' % __version__,
@@ -33,7 +27,7 @@ setup(name='pyCRAC',
 	author_email='sgrannem@staffmail.ed.ac.uk',
 	url='http://sandergranneman.bio.ed.ac.uk/Granneman_Lab/pyCRAC_software.html',
 	packages=['pyCRAC','pyCRAC.Parsers','pyCRAC.Classes','pyCRAC.Methods'],
-	install_requires=['numpy >= 1.5.1', 'cython >=0.19', 'pysam >= 0.6'],
+	install_requires=['numpy >= 1.5.1', 'cython >=0.19', 'pysam >= 0.6','six >= 1.9.0'],
 	scripts=[
 					'pyCRAC/pyReadAligner.py',
 					'pyCRAC/pyMotif.py',
@@ -64,17 +58,16 @@ setup(name='pyCRAC',
 					'pyCRAC/kinetic_crac_pipeline/CRAC_pipeline_PE.py',
 					'pyCRAC/kinetic_crac_pipeline/CRAC_pipeline_PeakFinder.py',
 					'pyCRAC/kinetic_crac_pipeline/CRAC_pipeline_SE.py',
-					'pyCRAC/kinetic_crac_pipeline/TrimNucs.py'
 				],
 	classifiers=[   'Development Status :: 5 - Production/Stable',
-					'Environment :: Terminal',
+					'Environment :: Console',
 					'Intended Audience :: Education',
 					'Intended Audience :: Developers',
 					'Intended Audience :: Science/Research',
 					'License :: Freeware',
 					'Operating System :: MacOS :: MacOS X',
 					'Operating System :: POSIX',
-					'Programming Language :: Python :: 2.7',
+					'Programming Language :: Python :: 3.6',
 					'Topic :: Scientific/Engineering :: Bio-Informatics',
 					'Topic :: Software Development :: Libraries :: Application Frameworks'
 				],
