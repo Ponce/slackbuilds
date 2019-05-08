@@ -31,4 +31,6 @@ config etc/asterisk/indications.conf.new
 config etc/asterisk/modules.conf.new
 config etc/asterisk/musiconhold.conf.new
 config etc/asterisk/sip.conf.new
+config etc/asterisk/smdi.conf.new
+config etc/asterisk/voicemail.conf.new
 
