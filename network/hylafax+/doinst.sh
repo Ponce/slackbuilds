@@ -35,6 +35,20 @@ config var/spool/hylafax/etc/dialrules.ext.new
 config var/spool/hylafax/etc/dialrules.uk.new
 config var/spool/hylafax/etc/dialrules.world.new
 
+if [ -d usr/lib64 ]; then
+  config usr/lib64/hylafax/faxcover.ps.new
+  config usr/lib64/hylafax/faxmail.ps.new
+  config usr/lib64/hylafax/hfaxd.conf.new
+  config usr/lib64/hylafax/pagesizes.new
+  config usr/lib64/hylafax/typerules.new
+else
+  config usr/lib/hylafax/faxcover.ps.new
+  config usr/lib/hylafax/faxmail.ps.new
+  config usr/lib/hylafax/hfaxd.conf.new
+  config usr/lib/hylafax/pagesizes.new
+  config usr/lib/hylafax/typerules.new
+fi
+
 # We warn about needed configuration to the /etc/inittab file.
 printf "\nThe following line will need be added to your /etc/inittab:
 please check if it is the correct tty device for the modem,
