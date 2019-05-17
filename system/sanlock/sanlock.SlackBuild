@@ -1,0 +1,131 @@
+#!/bin/sh
+
+# Slackware build script for sanlock
+
+# Copyright 2019  Mario Preksavec, Zagreb, Croatia
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=sanlock
+VERSION=${VERSION:-3.7.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+# Bail if user or group isn't valid on your system
+if ! grep ^$PRGNAM: /etc/passwd 2>&1 > /dev/null; then
+  cat << EOF
+
+  You must have a $PRGNAM user to run this script
+
+  # groupadd -g 363 $PRGNAM
+  # useradd -u 363 -d /var/run/$PRGNAM -s /bin/false -g $PRGNAM $PRGNAM
+
+  The disk group is also needed
+
+  # usermod -a -G disk $PRGNAM
+
+EOF
+  exit
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf {,$PRGNAM-}$PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz || tar xvf $CWD/$PRGNAM-$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION || cd $PRGNAM-$PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# We don't have stack clash protection support yet
+sed -i 's/-fstack-clash-protection//' */Makefile
+
+CFLAGS="$SLKCFLAGS" make -C wdmd
+CFLAGS="$SLKCFLAGS" make -C src
+CFLAGS="$SLKCFLAGS" make -C python
+
+make -C src install LIBDIR=/usr/lib${LIBDIRSUFFIX} DESTDIR=$PKG
+make -C wdmd install LIBDIR=/usr/lib${LIBDIRSUFFIX} DESTDIR=$PKG
+make -C python install LIBDIR=/usr/lib${LIBDIRSUFFIX} DESTDIR=$PKG
+
+install -D -m0755 -oroot -groot init.d/sanlock $PKG/etc/rc.d/rc.sanlock.new
+install -D -m0755 -oroot -groot init.d/wdmd $PKG/etc/rc.d/rc.wdmd.new
+sed -e "s|/etc/sysconfig|/etc/default|g" \
+    -i $PKG/etc/rc.d/rc.sanlock.new \
+    -i $PKG/etc/rc.d/rc.wdmd.new
+
+install -D -m0644 -oroot -groot src/logrotate.sanlock $PKG/etc/logrotate.d/sanlock.new
+install -D -m0644 -oroot -groot src/sanlock.conf $PKG/etc/sanlock/sanlock.conf.new
+install -D -m0644 -oroot -groot init.d/wdmd.sysconfig $PKG/etc/default/wdmd.new
+
+mkdir -p $PKG/{etc/wdmd.d,var/run/sanlock}
+
+mv $PKG/usr/share/man $PKG/usr
+rmdir $PKG/usr/share
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README.rst $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
