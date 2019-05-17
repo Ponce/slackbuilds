@@ -1,0 +1,352 @@
+--- a/opendmarc/opendmarc.c	2016-12-21 18:01:21.322036404 +0100
++++ b/opendmarc/opendmarc.c	2016-12-21 18:01:48.893181823 +0100
+@@ -2057,6 +2057,7 @@
+ 	char *apolicy = NULL;
+ 	char *aresult = NULL;
+ 	char *adisposition = NULL;
++	char *deliveryresult = NULL;
+ 	char *hostname = NULL;
+ 	char *authservid = NULL;
+ 	char *spfaddr;
+@@ -2774,6 +2775,154 @@
+ 	}
+ 
+ 	/*
++	**  Enact policy based on DMARC results.
++	*/
++
++	result = DMARC_RESULT_ACCEPT;
++
++	switch (policy)
++	{
++	  case DMARC_POLICY_ABSENT:		/* No DMARC record found */
++	  case DMARC_FROM_DOMAIN_ABSENT:	/* No From: domain */
++		aresult = "none";
++		ret = SMFIS_ACCEPT;
++		result = DMARC_RESULT_ACCEPT;
++		break;
++
++	  case DMARC_POLICY_NONE:		/* Alignment failed, but policy is none: */
++		aresult = "fail";		/* Accept and report */
++		ret = SMFIS_ACCEPT;
++		result = DMARC_RESULT_ACCEPT;
++		break;
++
++	  case DMARC_POLICY_PASS:		/* Explicit accept */
++		aresult = "pass";
++		ret = SMFIS_ACCEPT;
++		result = DMARC_RESULT_ACCEPT;
++		break;
++
++	  case DMARC_POLICY_REJECT:		/* Explicit reject */
++		aresult = "fail";
++
++		if (conf->conf_overridemlm != NULL &&
++		    (dmarcf_checkhost(cc->cctx_host, conf->conf_overridemlm) ||
++		    (dmarcf_checkip((struct sockaddr *)&cc->cctx_ip, conf->conf_overridemlm))))
++		{
++			if (conf->conf_dolog)
++			{
++				syslog(LOG_INFO, "%s: overriding policy for mail from %s: MLM",
++				       dfc->mctx_jobid, dfc->mctx_fromdomain);
++			}
++			ret = SMFIS_ACCEPT;
++			result = DMARC_RESULT_OVRD_MAILING_LIST;
++		}
++		else
++		{
++			if (conf->conf_rejectfail && random() % 100 < pct)
++			{
++				snprintf(replybuf, sizeof replybuf,
++					 "rejected by DMARC policy for %s", pdomain);
++
++				status = dmarcf_setreply(ctx, DMARC_REJECT_SMTP,
++							 DMARC_REJECT_ESC, replybuf);
++				if (status != MI_SUCCESS && conf->conf_dolog)
++				{
++					syslog(LOG_ERR, "%s: smfi_setreply() failed",
++					       dfc->mctx_jobid);
++				}
++
++				ret = SMFIS_REJECT;
++				result = DMARC_RESULT_REJECT;
++			}
++
++			if (conf->conf_copyfailsto != NULL)
++			{
++				status = dmarcf_addrcpt(ctx, conf->conf_copyfailsto);
++				if (status != MI_SUCCESS && conf->conf_dolog)
++				{
++					syslog(LOG_ERR, "%s: smfi_addrcpt() failed",
++					       dfc->mctx_jobid);
++				}
++			}
++		}
++
++		break;
++
++	  case DMARC_POLICY_QUARANTINE:		/* Explicit quarantine */
++		aresult = "fail";
++
++		if (conf->conf_overridemlm != NULL &&
++		    (dmarcf_checkhost(cc->cctx_host, conf->conf_overridemlm) ||
++		    (dmarcf_checkip((struct sockaddr *)&cc->cctx_ip, conf->conf_overridemlm))))
++		{
++			if (conf->conf_dolog)
++			{
++				syslog(LOG_INFO, "%s: overriding policy for mail from %s: MLM",
++				       dfc->mctx_jobid, dfc->mctx_fromdomain);
++			}
++			ret = SMFIS_ACCEPT;
++			result = DMARC_RESULT_OVRD_MAILING_LIST;
++		}
++		else
++		{
++			if (conf->conf_rejectfail && random() % 100 < pct &&
++			    conf->conf_holdquarantinedmessages)
++			{
++				snprintf(replybuf, sizeof replybuf,
++					 "quarantined by DMARC policy for %s",
++					 pdomain);
++
++				status = smfi_quarantine(ctx, replybuf);
++				if (status != MI_SUCCESS && conf->conf_dolog)
++				{
++					syslog(LOG_ERR, "%s: smfi_quarantine() failed",
++					       dfc->mctx_jobid);
++				}
++
++				ret = SMFIS_ACCEPT;
++				result = DMARC_RESULT_QUARANTINE;
++			}
++
++			if (conf->conf_copyfailsto != NULL)
++			{
++				status = dmarcf_addrcpt(ctx, conf->conf_copyfailsto);
++				if (status != MI_SUCCESS && conf->conf_dolog)
++				{
++					syslog(LOG_ERR, "%s: smfi_addrcpt() failed",
++					       dfc->mctx_jobid);
++				}
++			}
++		}
++
++		break;
++
++	  default:
++		aresult = "temperror";
++		ret = SMFIS_TEMPFAIL;
++		result = DMARC_RESULT_TEMPFAIL;
++		break;
++	}
++
++	/* prepare human readable dispositon string for later processing */
++	switch (result)
++	{
++	  case DMARC_RESULT_REJECT:
++		adisposition = "reject";
++		deliveryresult = "reject";
++		break;
++
++	  case DMARC_RESULT_QUARANTINE:
++		adisposition = "quarantine";
++		deliveryresult = "policy";
++		break;
++
++	  default:
++		adisposition = "none";
++		deliveryresult = "delivered";
++		break;
++	}
++
++	/*
+ 	**  Generate a failure report.
+ 	*/
+ 
+@@ -2931,8 +3080,11 @@
+ 			                   "Auth-Failure: dmarc\n");
+ 
+ 			dmarcf_dstring_printf(dfc->mctx_afrf,
+-			                      "Authentication-Results: %s; dmarc=fail header.from=%s\n",
+-			                      authservid,
++			                      "Authentication-Results: %s;\n",
++			                      authservid);
++			dmarcf_dstring_printf(dfc->mctx_afrf,
++					      "     dmarc=%s (p=%s dis=%s) header.from=%s\n",
++			                      aresult, apolicy, adisposition,
+ 			                      dfc->mctx_fromdomain);
+ 
+ 			dmarcf_dstring_printf(dfc->mctx_afrf,
+@@ -2949,6 +3101,20 @@
+ 			                      cc->cctx_host);
+ 
+ 			dmarcf_dstring_printf(dfc->mctx_afrf,
++			                      "Source-Port: %u\n",
++			                      cc->cctx_ip.ss_family == AF_INET6 ? ntohs(((struct sockaddr_in6*) &cc->cctx_ip)->sin6_port) : ntohs(((struct sockaddr_in*) &cc->cctx_ip)->sin_port));
++
++			dmarcf_dstring_printf(dfc->mctx_afrf,
++			                      "Identity-Alignment: %s%s%s\n",
++			                      align_dkim == DMARC_POLICY_DKIM_ALIGNMENT_PASS ? "dkim" : "",
++					      ((align_dkim == DMARC_POLICY_DKIM_ALIGNMENT_PASS) && (align_spf == DMARC_POLICY_SPF_ALIGNMENT_PASS)) ? ", " : ((align_dkim != DMARC_POLICY_DKIM_ALIGNMENT_PASS) && (align_spf != DMARC_POLICY_SPF_ALIGNMENT_PASS)) ? "none" : "",
++					      align_spf == DMARC_POLICY_SPF_ALIGNMENT_PASS ? "spf" : "");
++
++			dmarcf_dstring_printf(dfc->mctx_afrf,
++			                      "Delivery-Result: %s\n",
++			                      deliveryresult);
++
++			dmarcf_dstring_printf(dfc->mctx_afrf,
+ 			                      "Reported-Domain: %s\n\n",
+ 			                      dfc->mctx_fromdomain);
+ 
+@@ -3015,151 +3181,6 @@
+ 		}
+ 	}
+ 
+-	/*
+-	**  Enact policy based on DMARC results.
+-	*/
+-
+-	result = DMARC_RESULT_ACCEPT;
+-
+-	switch (policy)
+-	{
+-	  case DMARC_POLICY_ABSENT:		/* No DMARC record found */
+-	  case DMARC_FROM_DOMAIN_ABSENT:	/* No From: domain */
+-		aresult = "none";
+-		ret = SMFIS_ACCEPT;
+-		result = DMARC_RESULT_ACCEPT;
+-		break;
+-
+-	  case DMARC_POLICY_NONE:		/* Alignment failed, but policy is none: */
+-		aresult = "fail";		/* Accept and report */
+-		ret = SMFIS_ACCEPT;
+-		result = DMARC_RESULT_ACCEPT;
+-		break;
+-
+-	  case DMARC_POLICY_PASS:		/* Explicit accept */
+-		aresult = "pass";
+-		ret = SMFIS_ACCEPT;
+-		result = DMARC_RESULT_ACCEPT;
+-		break;
+-
+-	  case DMARC_POLICY_REJECT:		/* Explicit reject */
+-		aresult = "fail";
+-
+-		if (conf->conf_overridemlm != NULL &&
+-		    (dmarcf_checkhost(cc->cctx_host, conf->conf_overridemlm) ||
+-		    (dmarcf_checkip((struct sockaddr *)&cc->cctx_ip, conf->conf_overridemlm))))
+-		{
+-			if (conf->conf_dolog)
+-			{
+-				syslog(LOG_INFO, "%s: overriding policy for mail from %s: MLM",
+-				       dfc->mctx_jobid, dfc->mctx_fromdomain);
+-			}
+-			ret = SMFIS_ACCEPT;
+-			result = DMARC_RESULT_OVRD_MAILING_LIST;
+-		}
+-		else
+-		{
+-			if (conf->conf_rejectfail && random() % 100 < pct)
+-			{
+-				snprintf(replybuf, sizeof replybuf,
+-					 "rejected by DMARC policy for %s", pdomain);
+-
+-				status = dmarcf_setreply(ctx, DMARC_REJECT_SMTP,
+-							 DMARC_REJECT_ESC, replybuf);
+-				if (status != MI_SUCCESS && conf->conf_dolog)
+-				{
+-					syslog(LOG_ERR, "%s: smfi_setreply() failed",
+-					       dfc->mctx_jobid);
+-				}
+-
+-				ret = SMFIS_REJECT;
+-				result = DMARC_RESULT_REJECT;
+-			}
+-
+-			if (conf->conf_copyfailsto != NULL)
+-			{
+-				status = dmarcf_addrcpt(ctx, conf->conf_copyfailsto);
+-				if (status != MI_SUCCESS && conf->conf_dolog)
+-				{
+-					syslog(LOG_ERR, "%s: smfi_addrcpt() failed",
+-					       dfc->mctx_jobid);
+-				}
+-			}
+-		}
+-
+-		break;
+-
+-	  case DMARC_POLICY_QUARANTINE:		/* Explicit quarantine */
+-		aresult = "fail";
+-
+-		if (conf->conf_overridemlm != NULL &&
+-		    (dmarcf_checkhost(cc->cctx_host, conf->conf_overridemlm) ||
+-		    (dmarcf_checkip((struct sockaddr *)&cc->cctx_ip, conf->conf_overridemlm))))
+-		{
+-			if (conf->conf_dolog)
+-			{
+-				syslog(LOG_INFO, "%s: overriding policy for mail from %s: MLM",
+-				       dfc->mctx_jobid, dfc->mctx_fromdomain);
+-			}
+-			ret = SMFIS_ACCEPT;
+-			result = DMARC_RESULT_OVRD_MAILING_LIST;
+-		}
+-		else
+-		{
+-			if (conf->conf_rejectfail && random() % 100 < pct &&
+-			    conf->conf_holdquarantinedmessages)
+-			{
+-				snprintf(replybuf, sizeof replybuf,
+-					 "quarantined by DMARC policy for %s",
+-					 pdomain);
+-
+-				status = smfi_quarantine(ctx, replybuf);
+-				if (status != MI_SUCCESS && conf->conf_dolog)
+-				{
+-					syslog(LOG_ERR, "%s: smfi_quarantine() failed",
+-					       dfc->mctx_jobid);
+-				}
+-
+-				ret = SMFIS_ACCEPT;
+-				result = DMARC_RESULT_QUARANTINE;
+-			}
+-
+-			if (conf->conf_copyfailsto != NULL)
+-			{
+-				status = dmarcf_addrcpt(ctx, conf->conf_copyfailsto);
+-				if (status != MI_SUCCESS && conf->conf_dolog)
+-				{
+-					syslog(LOG_ERR, "%s: smfi_addrcpt() failed",
+-					       dfc->mctx_jobid);
+-				}
+-			}
+-		}
+-
+-		break;
+-
+-	  default:
+-		aresult = "temperror";
+-		ret = SMFIS_TEMPFAIL;
+-		result = DMARC_RESULT_TEMPFAIL;
+-		break;
+-	}
+-
+-	/* prepare human readable dispositon string for later processing */
+-	switch (result)
+-	{
+-	  case DMARC_RESULT_REJECT:
+-		adisposition = "reject";
+-		break;
+-
+-	  case DMARC_RESULT_QUARANTINE:
+-		adisposition = "quarantine";
+-		break;
+-
+-	  default:
+-		adisposition = "none";
+-		break;
+-	}
+-
+ 	if (conf->conf_dolog)
+ 	{
+ 		syslog(LOG_INFO, "%s: %s %s", dfc->mctx_jobid,

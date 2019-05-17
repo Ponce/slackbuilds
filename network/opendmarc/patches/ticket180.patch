@@ -1,0 +1,280 @@
+diff --git a/opendmarc/opendmarc-config.h b/opendmarc/opendmarc-config.h
+index 7ba394b..28f605e 100644
+--- a/opendmarc/opendmarc-config.h
++++ b/opendmarc/opendmarc-config.h
+@@ -36,6 +36,7 @@ struct configdef dmarcf_config[] =
+ 	{ "IgnoreHosts",		CONFIG_TYPE_STRING,	FALSE },
+ 	{ "IgnoreMailFrom",		CONFIG_TYPE_STRING,	FALSE },
+ 	{ "MilterDebug",		CONFIG_TYPE_INTEGER,	FALSE },
++	{ "OverrideMLM",		CONFIG_TYPE_STRING,	FALSE },
+ 	{ "PidFile",			CONFIG_TYPE_STRING,	FALSE },
+ 	{ "PublicSuffixList",		CONFIG_TYPE_STRING,	FALSE },
+ 	{ "RecordAllMessages",		CONFIG_TYPE_BOOLEAN,	FALSE },
+diff --git a/opendmarc/opendmarc.c b/opendmarc/opendmarc.c
+index ba04312..07e089d 100644
+--- a/opendmarc/opendmarc.c
++++ b/opendmarc/opendmarc.c
+@@ -168,6 +168,7 @@ struct dmarcf_config
+ 	char *			conf_ignorelist;
+ 	char **			conf_trustedauthservids;
+ 	char **			conf_ignoredomains;
++	struct list *		conf_overridemlm;
+ };
+ 
+ /* LIST -- basic linked list of strings */
+@@ -1221,6 +1222,18 @@ dmarcf_config_load(struct config *data, struct dmarcf_config *conf,
+ 		if (str != NULL)
+ 			dmarcf_mkarray(str, &conf->conf_ignoredomains);
+ 
++		str = NULL;
++		(void) config_get(data, "OverrideMLM", &str, sizeof str);
++		if (str != NULL)
++		{
++			if (!dmarcf_loadlist(str, &conf->conf_overridemlm))
++			{
++				fprintf(stderr,
++					"%s: can't load override MLM list from %s: %s\n",
++					progname, str, strerror(errno));
++			}
++		}
++
+ 		(void) config_get(data, "AuthservIDWithJobID",
+ 		                  &conf->conf_authservidwithjobid,
+ 		                  sizeof conf->conf_authservidwithjobid);
+@@ -2982,30 +2995,45 @@ mlfi_eom(SMFICTX *ctx)
+ 	  case DMARC_POLICY_REJECT:		/* Explicit reject */
+ 		aresult = "fail";
+ 
+-		if (conf->conf_rejectfail && random() % 100 < pct)
++		if (conf->conf_overridemlm != NULL &&
++		    (dmarcf_checkhost(cc->cctx_host, conf->conf_overridemlm) ||
++		    (dmarcf_checkip((struct sockaddr *)&cc->cctx_ip, conf->conf_overridemlm))))
+ 		{
+-			snprintf(replybuf, sizeof replybuf,
+-			         "rejected by DMARC policy for %s", pdomain);
+-
+-			status = dmarcf_setreply(ctx, DMARC_REJECT_SMTP,
+-			                         DMARC_REJECT_ESC, replybuf);
+-			if (status != MI_SUCCESS && conf->conf_dolog)
++			if (conf->conf_dolog)
+ 			{
+-				syslog(LOG_ERR, "%s: smfi_setreply() failed",
+-				       dfc->mctx_jobid);
++				syslog(LOG_INFO, "%s: overriding policy for mail from %s: MLM",
++				       dfc->mctx_jobid, dfc->mctx_fromdomain);
+ 			}
+-
+-			ret = SMFIS_REJECT;
+-			result = DMARC_RESULT_REJECT;
++			ret = SMFIS_ACCEPT;
++			result = DMARC_RESULT_OVRD_MAILING_LIST;
+ 		}
+-
+-		if (conf->conf_copyfailsto != NULL)
++		else
+ 		{
+-			status = dmarcf_addrcpt(ctx, conf->conf_copyfailsto);
+-			if (status != MI_SUCCESS && conf->conf_dolog)
++			if (conf->conf_rejectfail && random() % 100 < pct)
++			{
++				snprintf(replybuf, sizeof replybuf,
++					 "rejected by DMARC policy for %s", pdomain);
++
++				status = dmarcf_setreply(ctx, DMARC_REJECT_SMTP,
++							 DMARC_REJECT_ESC, replybuf);
++				if (status != MI_SUCCESS && conf->conf_dolog)
++				{
++					syslog(LOG_ERR, "%s: smfi_setreply() failed",
++					       dfc->mctx_jobid);
++				}
++
++				ret = SMFIS_REJECT;
++				result = DMARC_RESULT_REJECT;
++			}
++
++			if (conf->conf_copyfailsto != NULL)
+ 			{
+-				syslog(LOG_ERR, "%s: smfi_addrcpt() failed",
+-				       dfc->mctx_jobid);
++				status = dmarcf_addrcpt(ctx, conf->conf_copyfailsto);
++				if (status != MI_SUCCESS && conf->conf_dolog)
++				{
++					syslog(LOG_ERR, "%s: smfi_addrcpt() failed",
++					       dfc->mctx_jobid);
++				}
+ 			}
+ 		}
+ 
+@@ -3014,30 +3042,45 @@ mlfi_eom(SMFICTX *ctx)
+ 	  case DMARC_POLICY_QUARANTINE:		/* Explicit quarantine */
+ 		aresult = "fail";
+ 
+-		if (conf->conf_rejectfail && random() % 100 < pct)
++		if (conf->conf_overridemlm != NULL &&
++		    (dmarcf_checkhost(cc->cctx_host, conf->conf_overridemlm) ||
++		    (dmarcf_checkip((struct sockaddr *)&cc->cctx_ip, conf->conf_overridemlm))))
+ 		{
+-			snprintf(replybuf, sizeof replybuf,
+-			         "quarantined by DMARC policy for %s",
+-			         pdomain);
+-
+-			status = smfi_quarantine(ctx, replybuf);
+-			if (status != MI_SUCCESS && conf->conf_dolog)
++			if (conf->conf_dolog)
+ 			{
+-				syslog(LOG_ERR, "%s: smfi_quarantine() failed",
+-				       dfc->mctx_jobid);
++				syslog(LOG_INFO, "%s: overriding policy for mail from %s: MLM",
++				       dfc->mctx_jobid, dfc->mctx_fromdomain);
+ 			}
+-
+ 			ret = SMFIS_ACCEPT;
+-			result = DMARC_RESULT_QUARANTINE;
++			result = DMARC_RESULT_OVRD_MAILING_LIST;
+ 		}
+-
+-		if (conf->conf_copyfailsto != NULL)
++		else
+ 		{
+-			status = dmarcf_addrcpt(ctx, conf->conf_copyfailsto);
+-			if (status != MI_SUCCESS && conf->conf_dolog)
++			if (conf->conf_rejectfail && random() % 100 < pct)
++			{
++				snprintf(replybuf, sizeof replybuf,
++					 "quarantined by DMARC policy for %s",
++					 pdomain);
++
++				status = smfi_quarantine(ctx, replybuf);
++				if (status != MI_SUCCESS && conf->conf_dolog)
++				{
++					syslog(LOG_ERR, "%s: smfi_quarantine() failed",
++					       dfc->mctx_jobid);
++				}
++
++				ret = SMFIS_ACCEPT;
++				result = DMARC_RESULT_QUARANTINE;
++			}
++
++			if (conf->conf_copyfailsto != NULL)
+ 			{
+-				syslog(LOG_ERR, "%s: smfi_addrcpt() failed",
+-				       dfc->mctx_jobid);
++				status = dmarcf_addrcpt(ctx, conf->conf_copyfailsto);
++				if (status != MI_SUCCESS && conf->conf_dolog)
++				{
++					syslog(LOG_ERR, "%s: smfi_addrcpt() failed",
++					       dfc->mctx_jobid);
++				}
+ 			}
+ 		}
+ 
+diff --git a/opendmarc/opendmarc.conf.5.in b/opendmarc/opendmarc.conf.5.in
+index bdf2550..9ee16ae 100644
+--- a/opendmarc/opendmarc.conf.5.in
++++ b/opendmarc/opendmarc.conf.5.in
+@@ -190,6 +190,14 @@ Sets the debug level to be requested from the milter library.  The
+ default is 0.
+ 
+ .TP
++.I OverrideMLM (string)
++Specifies the path to a file that contains a list of hostnames, IP
++addresses, and/or CIDR expressions identifying hosts that run
++mailing lists. Mails from these systems will be accepted even if
++all DMARC tests fail. Such cases will be reported as "override/
++reason: MLM"
++
++.TP
+ .I PidFile (string)
+ Specifies the path to a file that should be created at process start
+ containing the process ID.
+diff --git a/opendmarc/opendmarc.conf.sample b/opendmarc/opendmarc.conf.sample
+index 97b210f..fbfa49d 100644
+--- a/opendmarc/opendmarc.conf.sample
++++ b/opendmarc/opendmarc.conf.sample
+@@ -212,6 +212,17 @@
+ #
+ # MilterDebug 0
+ 
++##  OverrideMLM (path)
++##  	default (none)
++##
++##  Specifies the path to a file that contains a list of hostnames, IP
++##  addresses, and/or CIDR expressions identifying hosts that run
++##  mailing lists. Mails from these systems will be accepted even if
++##  all DMARC tests fail. Such cases will be reported as "override/
++##  reason: MLM"
++#
++# OverrideMLM /usr/local/etc/opendmarc/overrideMLM.conf
++
+ ##  PidFile path
+ ##  	default (none)
+ ##
+diff --git a/opendmarc/opendmarc.h b/opendmarc/opendmarc.h
+index c1d6593..f9b1e0b 100644
+--- a/opendmarc/opendmarc.h
++++ b/opendmarc/opendmarc.h
+@@ -52,6 +52,12 @@
+ #define	DMARC_RESULT_ACCEPT	2
+ #define	DMARC_RESULT_TEMPFAIL	3
+ #define	DMARC_RESULT_QUARANTINE	4
++#define	DMARC_RESULT_OVRD_FORWARDED	5
++#define	DMARC_RESULT_OVRD_SAMPLED_OUT	6
++#define	DMARC_RESULT_OVRD_TRUSTED_FORWARDER	7
++#define	DMARC_RESULT_OVRD_MAILING_LIST	8
++#define	DMARC_RESULT_OVRD_LOCAL_POLICY	9
++#define	DMARC_RESULT_OVRD_OTHER	10
+ 
+ /* prototypes, etc., exported for test.c */
+ extern char *progname;
+diff --git a/reports/opendmarc-reports.in b/reports/opendmarc-reports.in
+index 2da1c31..a489c95 100755
+--- a/reports/opendmarc-reports.in
++++ b/reports/opendmarc-reports.in
+@@ -91,6 +91,8 @@ my $ipaddr;
+ my $fromdomain;
+ my $envdomain;
+ my $dkimdomain;
++my $reason;
++my $comment;
+ 
+ my $repdest;
+ 
+@@ -609,6 +611,8 @@ foreach (@$domainset)
+ 	while ($dbi_a = $dbi_s->fetchrow_arrayref())
+ 	{
+ 		undef $msgid;
++		undef $reason;
++		undef $comment;
+ 
+ 		if (defined($dbi_a->[0]))
+ 		{
+@@ -656,6 +660,12 @@ foreach (@$domainset)
+ 			case 1	{ $dispstr = "reject"; }
+ 			case 2	{ $dispstr = "none"; }
+ 			case 4	{ $dispstr = "quarantine"; }
++			case 5	{ $dispstr = "none"; $reason = "forwarded"; }
++			case 6	{ $dispstr = "none"; $reason = "sampled_out"; }
++			case 7	{ $dispstr = "none"; $reason = "trusted_forwarder"; }
++			case 8	{ $dispstr = "none"; $reason = "mailing_list"; }
++			case 9	{ $dispstr = "none"; $reason = "local_policy"; $comment = ""; }
++			case 10	{ $dispstr = "none"; $reason = "other"; $comment = ""; }
+ 			else	{ $dispstr = "unknown"; }
+ 		}
+ 
+@@ -697,6 +707,16 @@ foreach (@$domainset)
+ 		print $tmpout "    <disposition>$dispstr</disposition>\n";
+ 		print $tmpout "    <dkim>$align_dkimstr</dkim>\n";
+ 		print $tmpout "    <spf>$align_spfstr</spf>\n";
++		if (defined($reason))
++		{
++			print $tmpout "    <reason>\n";
++			print $tmpout "      <type>$reason</type>\n";
++			if (defined($comment))
++			{
++				print $tmpout "      <comment>$comment</$comment>\n";
++			}
++			print $tmpout "    </reason>\n";
++		}
+ 		print $tmpout "   </policy_evaluated>\n";
+ 		print $tmpout "  </row>\n";
+ 		print $tmpout "  <identifiers>\n";

@@ -1,0 +1,83 @@
+diff --git a/opendmarc/opendmarc-config.h b/opendmarc/opendmarc-config.h
+index 28f605e..ff4983d 100644
+--- a/opendmarc/opendmarc-config.h
++++ b/opendmarc/opendmarc-config.h
+@@ -32,6 +32,7 @@ struct configdef dmarcf_config[] =
+ 	{ "FailureReportsOnNone",	CONFIG_TYPE_BOOLEAN,	FALSE },
+ 	{ "FailureReportsSentBy",	CONFIG_TYPE_STRING,	FALSE },
+ 	{ "HistoryFile",		CONFIG_TYPE_STRING,	FALSE },
++	{ "HoldQuarantinedMessages",	CONFIG_TYPE_BOOLEAN,	FALSE },
+ 	{ "IgnoreAuthenticatedClients",	CONFIG_TYPE_BOOLEAN,	FALSE },
+ 	{ "IgnoreHosts",		CONFIG_TYPE_STRING,	FALSE },
+ 	{ "IgnoreMailFrom",		CONFIG_TYPE_STRING,	FALSE },
+diff --git a/opendmarc/opendmarc.c b/opendmarc/opendmarc.c
+index 0179f4d..5aade55 100644
+--- a/opendmarc/opendmarc.c
++++ b/opendmarc/opendmarc.c
+@@ -155,6 +155,7 @@ struct dmarcf_config
+ 	_Bool			conf_spfselfvalidate;
+ #endif /* WITH_SPF */
+ 	_Bool			conf_ignoreauthclients;
++	_Bool			conf_holdquarantinedmessages;
+ 	unsigned int		conf_refcnt;
+ 	unsigned int		conf_dnstimeout;
+ 	struct config *		conf_data;
+@@ -1297,6 +1298,10 @@ dmarcf_config_load(struct config *data, struct dmarcf_config *conf,
+ 		                  &conf->conf_recordall,
+ 		                  sizeof conf->conf_recordall);
+ 
++		(void) config_get(data, "HoldQuarantinedMessages",
++		                  &conf->conf_holdquarantinedmessages,
++		                  sizeof conf->conf_holdquarantinedmessages);
++
+ 		(void) config_get(data, "IgnoreAuthenticatedClients",
+ 		                  &conf->conf_ignoreauthclients,
+ 		                  sizeof conf->conf_ignoreauthclients);
+@@ -3064,7 +3069,8 @@ mlfi_eom(SMFICTX *ctx)
+ 		}
+ 		else
+ 		{
+-			if (conf->conf_rejectfail && random() % 100 < pct)
++			if (conf->conf_rejectfail && random() % 100 < pct &&
++			    conf->conf_holdquarantinedmessages)
+ 			{
+ 				snprintf(replybuf, sizeof replybuf,
+ 					 "quarantined by DMARC policy for %s",
+diff --git a/opendmarc/opendmarc.conf.5.in b/opendmarc/opendmarc.conf.5.in
+index 9ee16ae..565e992 100644
+--- a/opendmarc/opendmarc.conf.5.in
++++ b/opendmarc/opendmarc.conf.5.in
+@@ -167,6 +167,13 @@ rather periodically imported into a relational database from which the
+ aggregate reports can be extracted.
+ 
+ .TP
++.I HoldQuarantinedMessages (Boolean)
++If set to true, causes mail that fails the DMARC tests to get hold
++by the MTA if the purported sender of the message has a policy of
++"quarantine". Does nothing if the policy is either "none" or "reject".
++The default is "true".
++
++.TP
+ .I IgnoreAuthenticatedClients (Boolean)
+ If set, causes mail from authenticated clients (i.e., those that used
+ SMTP AUTH) to be ignored by the filter.  The default is "false".
+diff --git a/opendmarc/opendmarc.conf.sample b/opendmarc/opendmarc.conf.sample
+index fbfa49d..a2e1da3 100644
+--- a/opendmarc/opendmarc.conf.sample
++++ b/opendmarc/opendmarc.conf.sample
+@@ -177,6 +177,15 @@
+ #
+ # HistoryFile /var/run/opendmarc.dat
+ 
++##  HoldQuarantinedMessages { true | false }
++##  	default "true"
++##
++##  If set to true, causes mail that fails the DMARC tests to get hold
++##  by the MTA if the purported sender of the message has a policy of
++##  "quarantine". Does nothing if the policy is either "none" or "reject".
++#
++# HoldQuarantinedMessages true
++
+ ##  IgnoreAuthenticatedClients { true | false }
+ ##  	default "false"
+ ##

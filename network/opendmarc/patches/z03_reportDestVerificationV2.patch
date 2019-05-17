@@ -1,0 +1,487 @@
+diff --git b/reports/opendmarc-reports.in a/reports/opendmarc-reports.in
+index 43be1ff..fff9f8d 100755
+--- b/reports/opendmarc-reports.in
++++ a/reports/opendmarc-reports.in
+@@ -24,6 +24,8 @@ use POSIX;
+ use MIME::Base64;
+ use Net::SMTP;
+ use Time::Local;
++use Net::DNS;
++use Domain::PublicSuffix;
+ 
+ require DBD::@SQL_BACKEND@;
+ 
+@@ -39,7 +41,6 @@ my $showversion   = 0;
+ my $interval;
+ 
+ my $gen;
+-my $uri;
+ 
+ my $buf;
+ 
+@@ -95,8 +96,6 @@ my $dkimdomain;
+ my $reason;
+ my $comment;
+ 
+-my $repdest;
+-
+ my $smtpstatus;
+ my $smtpfail;
+ 
+@@ -140,6 +139,18 @@ my $smtp;
+ 
+ my $answer;
+ 
++my $suffix;
++my $publicsuffixlist = "/etc/opendmarc/public_suffix_list.dat";
++if (-r $publicsuffixlist) {
++	$suffix = Domain::PublicSuffix->new(
++		{ 'data_file' => $publicsuffixlist }
++	);
++}
++else
++{
++	$suffix = Domain::PublicSuffix->new();
++}
++
+ ###
+ ### NO user-serviceable parts beyond this point
+ ###
+@@ -172,6 +183,71 @@ sub usage
+ 	print STDERR "\t--version          print version and exit\n";
+ }
+ 
++sub check_size_restriction
++{
++	my ($destination, $size) = @_;
++	my $report_maxbytes = $report_maxbytes_global;
++
++	# check for max report size
++	if ($destination =~ m/^(\S+)!(\d{1,15})([kmgt])?$/i)
++	{
++		$destination = $1;
++		$report_maxbytes = $2;
++		if ($3)
++		{
++			my $letter = lc($3);
++			if ($letter eq 'k')
++			{
++				$report_maxbytes = $report_maxbytes * 1024;
++			}
++			if ($letter eq 'm')
++			{
++				$report_maxbytes = $report_maxbytes * 1048576;
++			}
++			if ($letter eq 'g')
++			{
++				$report_maxbytes = $report_maxbytes * (2**30);
++			}
++			if ($letter eq 't')
++			{
++				$report_maxbytes = $report_maxbytes * (2**40);
++			}
++		}
++
++		if ($size > $report_maxbytes)
++		{
++			return 0;
++		}
++	}
++	return 1;
++}
++
++sub check_uri
++{
++	my $uri = URI->new($_[0]);
++	if (!defined($uri) ||
++	    !defined($uri->scheme) ||
++	    $uri->opaque eq "")
++	{
++		print STDERR "$progname: can't parse reporting URI for domain $domain\n";
++		return "";
++	}
++	# ensure a scheme is present
++	elsif (!defined($uri->scheme))
++	{
++		if ($verbose >= 2)
++		{
++			print STDERR "$progname: unknown URI scheme in '$repuri' for domain $domain\n";
++		}
++		return "";
++	}
++	elsif ($uri->scheme eq "mailto")
++	{
++		return $uri->opaque;
++	}
++	return "";
++}
++
+ # set locale
+ setlocale(LC_ALL, 'C');
+ 
+@@ -798,86 +874,181 @@ foreach (@$domainset)
+ 		print STDERR "$progname: keeping report file \"$repfile\"\n";
+ 	}
+ 
++	if (!open($zipin, $zipfile))
++	{
++		print STDERR "$progname: can't read zipped report for $domain: $!\n";
++		next;
++	}
++	my $encoded_report;
++	while (read($zipin, $buf, 60*57))
++	{
++		$encoded_report .= encode_base64($buf);
++	}
++	close($zipin);
++	my $reportsize = length($encoded_report);
++
++	my $repdest = "";
++	my $repdest_fallback = "";
++
+ 	# decode the URI
+ 	@repuris = split(',', $repuri);
+ 
+ 	for $repuri (@repuris)
+ 	{
+-		$uri = URI->new($repuri);
+-		if (!defined($uri) ||
+-		    !defined($uri->scheme) ||
+-		    $uri->opaque eq "")
++		my $raw_address = check_uri($repuri);
++		if ($raw_address eq "")
+ 		{
+-			print STDERR "$progname: can't parse reporting URI for domain $domain\n";
+ 			next;
+ 		}
+-
+-		$repdest = $uri->opaque;
+-		my $report_maxbytes = $report_maxbytes_global;
+-
+-		# check for max report size
+-		if ($repdest =~ m/^(\S+)!(\d{1,15})([kmgt])?$/i)
++		else
+ 		{
+-			$repdest = $1;
+-			$report_maxbytes = $2;
+-			if ($3)
++			my $domain_orgdom = $suffix->get_root_domain(lc($domain));
++			my $address = $raw_address;
++			$address =~ s/!\d{1,15}([kmgt])?$//i;
++			my $repdestdomain = $address;
++			$repdestdomain =~ s/.*@//;
++			my $repdest_orgdom = $suffix->get_root_domain(lc($repdestdomain));
++
++			if (defined($domain_orgdom) && defined($repdest_orgdom) && $domain_orgdom eq $repdest_orgdom)
++			{
++				if (check_size_restriction($raw_address, $reportsize))
++				{
++					$repdest .= $address . ", ";
++				}
++				else
++				{
++					$repdest_fallback .= $address . ", ";
++				}
++			}
++			else
+ 			{
+-				my $letter = lc($3);
+-				if ($letter eq 'k')
++				# validate external report destinations:
++				my $replaced = 0;	# external address replaced
++				my $authorized = 0;	# external address authorized
++				my $temprepuri;
++				my $res = Net::DNS::Resolver->new(udp_timeout => 15);
++				my $reply = $res->query("$domain._report._dmarc.$repdestdomain", "TXT");
++				if ($reply)
+ 				{
+-					$report_maxbytes = $report_maxbytes * 1024;
++					foreach my $txt ($reply->answer)
++					{
++						next unless $txt->type eq "TXT";
++						my @parts = split(';', $txt->txtdata);
++						my $type = shift @parts;
++						next unless $type =~ m/^\s*v\s*=\s*DMARC1\s*/;
++						$authorized = 1;
++						# just for debugging:
++						if ($txt->txtdata ne "v=DMARC1")
++						{
++							print STDERR "$progname: DEBUG: $domain._report._dmarc.$repdestdomain: query answer: ", $txt->txtdata, "\n";
++						}
++						foreach my $parts (@parts)
++						{
++							if ($parts =~ m/^\s*rua\s*=/)
++							{
++								$replaced = 1;
++								$parts =~ s/^\s*rua\s*=\s*//;
++								foreach my $tempuri (split(',', $parts))
++								{
++									$raw_address = check_uri($tempuri);
++									if ($raw_address eq "")
++									{
++										next;
++									}
++									my $uridomain = lc($raw_address);
++									$uridomain =~ s/.*@//;
++									$uridomain =~ s/!\d{15}([kmgt])?$//;
++									if ($repdestdomain eq $uridomain)
++									{
++										$address =~ s/!\d([kmgt])?$//i;
++										if ($verbose)
++										{
++											print STDERR "$progname: adding new reporting URI for domain $domain: $address\n";
++										}
++										if (check_size_restriction($raw_address, $reportsize))
++										{
++											$repdest .= $address . ", ";
++										}
++										else
++										{
++											$repdest_fallback .= $address . ", ";
++										}
++									}
++									else
++									{
++										if ($verbose)
++										{
++											print STDERR "$progname: ignoring new reporting URI due to differing host parts: $repdestdomain != $uridomain!\n";
++										}
++									}
++								}
++								# there should be only one part with "rua=", so stop here
++								last;
++							}
++						}
++						# there should be only one TXT record starting with "v=DMARC1", so stop here
++						last;
++					}
+ 				}
+-				if ($letter eq 'm')
++				else
+ 				{
+-					$report_maxbytes = $report_maxbytes * 1048576;
++					switch ($res->errorstring)
++					{
++						case "NXDOMAIN" { }				# definitely not authorized
++						case "SERVFAIL" { $authorized = 1; }		# not a definite answer, so be kind
++						case "query timed out" { $authorized = 1; }	# not a definite answer, so be kind
++						else { $authorized = 1; }			# for now we authorize anything else
++					}
+ 				}
+-				if ($letter eq 'g')
++
++				if ($authorized && !$replaced)
+ 				{
+-					$report_maxbytes = $report_maxbytes * (2**30);
++
++					$repdest .= $address . ", ";
+ 				}
+-				if ($letter eq 't')
++				elsif (!$authorized)
+ 				{
+-					$report_maxbytes = $report_maxbytes * (2**40);
++					if ($verbose)
++					{
++						print STDERR "$progname: $domain is NOT authorized to send reports to $address, dropping address! (" . $res->errorstring . ")\n";
++					}
++					next;
+ 				}
+ 			}
+ 		}
++	}
++	$repdest =~ s/, $//;
++	$repdest_fallback =~ s/, $//;
+ 
+-		# Test mode, just report what would have been done
+-		if ($testmode)
++	# Test mode, just report what would have been done
++	if ($testmode)
++	{
++		if ($repdest ne "")
+ 		{
+ 			print STDERR "$progname: would email $domain report for " .
+-			             "$rowcount records to " .  $uri->opaque . "\n";
++				     "$rowcount records to $repdest\n";
+ 		}
+-		# ensure a scheme is present
+-		elsif (!defined($uri->scheme))
++		elsif ($repdest_fallback ne "")
+ 		{
+-			if ($verbose >= 2)
+-			{
+-				print STDERR "$progname: unknown URI scheme in '$repuri' for domain $domain\n";
+-			}
+-			next;
++			print STDERR "$progname: would email an error report for " .
++				     "$domain to $repdest_fallback\n";
+ 		}
+-		# send/post report
+-		elsif ($uri->scheme eq "mailto")
++	}
++	else
++	{
++		if ($repdest ne "")
+ 		{
+-			my $datestr;
+-			my $report_id;
+-
+-			if (!open($zipin, $zipfile))
+-			{
+-				print STDERR "$progname: can't read zipped report for $domain: $!\n";
+-				next;
+-			}
++			# send out the report:
++			$boundary = hostfqdn() . "/" . time();
+ 
+-			$boundary = "report_section";
+-
+- 			$report_id = $domain . "-" . $now . "@" . $repdom;
+-			$datestr = strftime("%a, %e %b %Y %H:%M:%S %z (%Z)",
+-			                    localtime);
++			my $report_id = $domain . "-" . $now . "@" . $repdom;
++			my $datestr = strftime("%a, %e %b %Y %H:%M:%S %z (%Z)", localtime);
+ 
+ 			$mailout  = "To: $repdest\n";
+ 			$mailout .= "From: $repemail\n";
+-			$mailout .= "Subject: Report Domain: " . $domain . " Submitter: " . $repdom . " Report-ID: " . $report_id . "\n";
++			$mailout .= "Subject: Report Domain: " . $domain . "\n";
++			$mailout .= "    Submitter: " . $repdom . "\n";
++			$mailout .= "    Report-ID: " . $report_id . "\n";
+ 			$mailout .= "X-Mailer: " . $progname . " v" . $version ."\n";
+ 			$mailout .= "Date: " . $datestr . "\n";
+ 			$mailout .= "Message-ID: <$report_id>\n";
+@@ -898,52 +1069,100 @@ foreach (@$domainset)
+ 			$mailout .= "Content-Disposition: attachment; filename=\"$zipfile\"\n";
+ 			$mailout .= "Content-Transfer-Encoding: base64\n";
+ 			$mailout .= "\n";
++			$mailout .= $encoded_report;
++			$mailout .= "\n";
++			$mailout .= "--$boundary--\n";
++			$smtpstatus = "sent";
++			$smtpfail = 0;
++			if (!$smtp->mail($repemail) ||
++			    !$smtp->to(split(', ', $repdest), {SkipBad => 1 }) ||
++			    !$smtp->data() ||
++			    !$smtp->datasend($mailout) ||
++			    !$smtp->dataend())
++			{
++				$smtpfail = 1;
++				$smtpstatus = "failed to send";
++			}
+ 
+-			while (read($zipin, $buf, 60*57))
++			if ($verbose || $smtpfail)
+ 			{
+-				$mailout .= encode_base64($buf);
++				# now perl voodoo:
++				$answer = ${${*$smtp}{'net_cmd_resp'}}[1] || $smtp->message() || 'unknown error';
++				chomp($answer);
++				print STDERR "$progname: $smtpstatus report for $domain to $repdest ($answer)\n";
+ 			}
+ 
++			$smtp->reset();
++		}
++		elsif ($repdest_fallback ne "")
++		{
++			# send error report to $repdest_fallback:
++			if ($verbose)
++			{
++				print STDERR "$progname: emailing an error report for $domain to $repdest_fallback\n";
++			}
++			$boundary = hostfqdn() . "/" . time();
++
++			my $report_id = $domain . "-" . $now . "@" . $repdom;
++			my $datestr = strftime("%a, %e %b %Y %H:%M:%S %z (%Z)", localtime);
++
++			$mailout  = "To: $repdest_fallback\n";
++			$mailout .= "From: $repemail\n";
++			$mailout .= "Subject: Error Report Domain: " . $domain . " Submitter: " . $repdom . " Report-ID: " . $report_id . "\n";
++			$mailout .= "X-Mailer: " . $progname . " v" . $version ."\n";
++			$mailout .= "Date: " . $datestr . "\n";
++			$mailout .= "Message-ID: <$report_id>\n";
++			$mailout .= "Auto-Submitted: auto-generated\n";
++			$mailout .= "MIME-Version: 1.0\n";
++			$mailout .= "Content-Type: multipart/report;\n";
++		        $mailout .= "    report-type=delivery-status;\n";
++		        $mailout .= "    boundary=\"$boundary\"\n";
++			$mailout .= "\n";
++			$mailout .= "This is a MIME-encapsulated message.\n";
++			$mailout .= "\n";
++			$mailout .= "--$boundary\n";
++			$mailout .= "Content-Description: DMARC Notification\n";
++			$mailout .= "Content-Type: text/plain\n";
++			$mailout .= "\n";
++			$mailout .= "This is a DMARC error report from host " . hostfqdn() . ".\n";
++			$mailout .= "\n";
++			$mailout .= "I'm sorry to have to inform you that a DMARC aggregate report\n";
++			$mailout .= "could not be delivered to any of your URIs mentioned in your DMARC\n";
++		        $mailout .= "DNS resource records because of size limitations.\n";
++			$mailout .= "\n";
++			$mailout .= "--$boundary\n";
++			$mailout .= "Content-Description: DMARC Error Report\n";
++			$mailout .= "Content-Type: text/plain\n";
++			$mailout .= "\n";
++			$mailout .= "Report-Date: " . strftime("%a, %b %e %Y %H:%M:%S %z (%Z)", localtime()) . "\n";
++			$mailout .= "Report-Domain: $domain\n";
++			$mailout .= "Report-ID: $report_id\n";
++			$mailout .= "Report-Size: $reportsize\n";
++			$mailout .= "Submitter: $repdom\n";
++			$mailout .= "Submitting-URI: $repdest_fallback\n";
+ 			$mailout .= "\n";
+ 			$mailout .= "--$boundary--\n";
+-			my $reportsize = length($mailout);
+-
+-			if ($reportsize > $report_maxbytes)
++			$smtpstatus = "sent";
++			$smtpfail = 0;
++			if (!$smtp->mail($repemail) ||
++			    !$smtp->to(split(', ', $repdest_fallback), { SkipBad => 1 }) ||
++			    !$smtp->data() ||
++			    !$smtp->datasend($mailout) ||
++			    !$smtp->dataend())
+ 			{
+-				# XXX -- generate an error report here
+-				print STDERR "$progname: report was too large ($reportsize bytes) per limitation of URI " . $uri->opaque . " for domain $domain\n";
++				$smtpfail = 1;
++				$smtpstatus = "failed to send";
+ 			}
+-			else
+-			{
+-				$smtpstatus = "sent";
+-				$smtpfail = 0;
+-				if (!$smtp->mail($repemail) ||
+-				    !$smtp->to($repdest) ||
+-				    !$smtp->data() ||
+-				    !$smtp->datasend($mailout) ||
+-				    !$smtp->dataend())
+-				{
+-					$smtpfail = 1;
+-					$smtpstatus = "failed to send";
+-				}
+ 
+-				if ($verbose || $smtpfail)
+-				{
+-					# now perl voodoo:
+-					$answer = ${${*$smtp}{'net_cmd_resp'}}[1] || $smtp->message() || 'unknown error';
+-					chomp($answer);
+-					print STDERR "$progname: $smtpstatus report for $domain to $repdest ($answer)\n";
+-				}
++			if ($verbose || $smtpfail)
++			{
++				# now perl voodoo:
++				$answer = ${${*$smtp}{'net_cmd_resp'}}[1] || $smtp->message() || 'unknown error';
++				chomp($answer);
++				print STDERR "$progname: $smtpstatus failure notice for report for $domain to $repdest ($answer)\n";
+ 			}
+ 
+ 			$smtp->reset();
+-
+-			close($zipin);
+-		}
+-		else
+-		{
+-			print STDERR "$progname: unsupported reporting URI scheme " . $uri->scheme . " for domain $domain\n";
+-			next;
+ 		}
+ 	}
+ 

@@ -1,0 +1,110 @@
+diff --git a/reports/opendmarc-import.8.in b/reports/opendmarc-import.8.in
+index 8f55848..4e854ac 100644
+--- a/reports/opendmarc-import.8.in
++++ b/reports/opendmarc-import.8.in
+@@ -12,8 +12,6 @@ reads per-message data recorded by an instance of
+ and inserts it into an SQL database, for later use by
+ .B opendmarc-reports(8)
+ to generate aggregate reports.
+-
+-Records are read from standard input.
+ .SH OPTIONS
+ .TP
+ .I --dbhost=hostname
+@@ -44,6 +42,9 @@ the environment variable is not set.
+ .I --help
+ Prints a help message and terminates.
+ .TP
++.I --input=file
++Reads from the named file instead of from standard input (the default).
++.TP
+ .I --verbose
+ Increase the amount of verbosity written to standard output.
+ .TP
+diff --git a/reports/opendmarc-import.in b/reports/opendmarc-import.in
+index 5a28f2f..cccbace 100755
+--- a/reports/opendmarc-import.in
++++ b/reports/opendmarc-import.in
+@@ -35,11 +35,14 @@ my $def_dbuser    = "opendmarc";
+ my $def_dbpasswd  = "opendmarc";
+ my $def_dbport    = "3306";
+ my $def_interval  = "86400";
++my $def_inputfh   = *STDIN;
+ my $dbhost;
+ my $dbname;
+ my $dbuser;
+ my $dbpasswd;
+ my $dbport;
++my $inputfile;
++my $inputfh;
+ 
+ my $dbscheme     = "@SQL_BACKEND@";
+ 
+@@ -326,6 +329,7 @@ sub usage
+ 	print STDERR "\t--dbpasswd=passwd  database password [$def_dbpasswd]\n";
+ 	print STDERR "\t--dbport=port      database port [$def_dbport]\n";
+ 	print STDERR "\t--dbuser=user      database user [$def_dbuser]\n";
++	print STDERR "\t--input=file       input file [STDIN]\n";
+ 	print STDERR "\t--help             print help and exit\n";
+ 	print STDERR "\t--verbose          verbose output\n";
+ 	print STDERR "\t--version          print version and exit\n";
+@@ -337,6 +341,7 @@ my $opt_retval = &Getopt::Long::GetOptions ('dbhost=s' => \$dbhost,
+                                             'dbpasswd=s' => \$dbpasswd,
+                                             'dbport=s' => \$dbport,
+                                             'dbuser=s' => \$dbuser,
++                                            'input=s' => \$inputfile,
+                                             'help!' => \$helponly,
+                                             'verbose!' => \$verbose,
+                                             'version!' => \$showversion,
+@@ -428,6 +433,24 @@ if ($verbose)
+ 	print STDERR "$progname: started at " . localtime() . "\n";
+ }
+ 
++
++if (!defined($inputfile))
++{
++	$inputfh = $def_inputfh;
++}
++else
++{
++	open($inputfh, "<", $inputfile) or die "$progname: unable to open $inputfile: $!\n";
++	if ($verbose)
++	{
++		print STDERR "$progname: opened file $inputfile\n"
++	}
++}
++if (!flock($inputfh, LOCK_SH))
++{
++	print STDERR "$progname: warning: unable to establish read lock\n";
++}
++
+ my $dbi_dsn = "DBI:" . $dbscheme . ":database=" . $dbname .
+               ";host=" . $dbhost . ";port=" . $dbport;
+ 
+@@ -447,13 +470,10 @@ if ($verbose)
+ # Read history file from stdin.
+ #
+ 
++	
+ $lineno = 0;
+-if (!flock(STDIN, LOCK_SH))
+-{
+-	print STDERR "$progname: warning: unable to establish read lock\n";
+-}
+ 
+-while (<STDIN>)
++while (<$inputfh>)
+ {
+ 	$lineno++;
+ 
+@@ -592,6 +612,10 @@ if (defined($jobid))
+ 	update_db();
+ }
+ 
++if (defined($inputfile))
++{
++	close($inputfh);
++}
+ #
+ # all done!
+ #
