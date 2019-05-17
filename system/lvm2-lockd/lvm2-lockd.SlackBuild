@@ -1,0 +1,141 @@
+#!/bin/sh
+
+# Slackware build script for lvm2-lockd
+
+# Copyright 2019  Mario Preksavec, Zagreb, Croatia
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=lvm2-lockd
+VERSION=${VERSION:-2.02.154}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+SRCNAM=LVM2
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM.$VERSION
+tar xvf $CWD/$SRCNAM.$VERSION.tar.xz
+cd $SRCNAM.$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Copied from lvm2.SlackBuild
+CFLAGS="$SLKCFLAGS" \
+./configure \
+  --disable-readline \
+  --enable-cmdlib \
+  --enable-dmeventd \
+  --enable-applib \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --with-usrlibdir=/usr/lib${LIBDIRSUFFIX} \
+  --mandir=/usr/man \
+  --enable-realtime \
+  --with-lvm1=internal \
+  --enable-pkgconfig \
+  --enable-udev_sync \
+  --enable-udev_rules \
+  --with-udev-prefix="" \
+  --with-device-uid=0 \
+  --with-device-gid=6 \
+  --with-device-mode=0660 \
+  --with-default-locking-dir=/run/lock/lvm \
+  --with-default-run-dir=/run/lvm \
+  --with-default-dm-run-dir=/run/lvm \
+  --with-clvmd-pidfile=/run/lvm/clvmd.pid \
+  --with-cmirrord-pidfile=/run/lvm/cmirrord.pid \
+  --with-dmeventd-pidfile=/run/lvm/dmeventd.pid \
+  --enable-use-lvmlockd \
+  --enable-lockd-${LOCK_TYPE:-sanlock} \
+  --build=$ARCH-slackware-linux
+
+make daemons man tools
+
+# Some assembly required
+install -D -m0755 -oroot -groot daemons/lvmlockd/lvmlockd $PKG/usr/sbin/lvmlockd
+install -D -m0755 -oroot -groot daemons/lvmlockd/lvmlockctl $PKG/usr/sbin/lvmlockctl
+install -D -m0755 -oroot -groot daemons/lvmetad/lvmetad $PKG/usr/sbin/lvmetad
+install -D -m0644 -oroot -groot man/lvmlockd.8 $PKG/usr/man/man8/lvmlockd.8
+install -D -m0644 -oroot -groot man/lvmlockctl.8 $PKG/usr/man/man8/lvmlockctl.8
+install -D -m0644 -oroot -groot man/lvmetad.8 $PKG/usr/man/man8/lvmetad.8
+
+install -D -m0755 -oroot -groot scripts/lvm2_lvmetad_init_red_hat $PKG/etc/rc.d/rc.lvmetad.new
+
+# Yes, we are that lazy :^)
+install -D -m0755 -oroot -groot scripts/lvm2_lvmetad_init_red_hat $PKG/etc/rc.d/rc.lvmlockd.new
+sed -e "s|metadata|locking|g" \
+    -e "s|lvmetad|lvmlockd|g" \
+    -i $PKG/etc/rc.d/rc.lvmlockd.new
+
+if [ "${CLOBBER_STOCK_BINARY:-no}" = "yes" ]; then
+  install -D -m0755 -oroot -groot tools/lvm $PKG/sbin/lvm
+fi
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
