@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# texmf_get.sh (c) 2016 - 2018 Johannes Schoepfer, Germany, slackbuilds[at]schoepfer[dot]info
+# texmf_get.sh (c) 2016 - 2019 Johannes Schoepfer, Germany, slackbuilds[at]schoepfer[dot]info
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -20,7 +20,7 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-#  V 15.0.2
+#  V 15.0.3
 #
 #  Prepare xz-compressed tarballs of texlive-texmf-trees based on texlive.tlpdb
 #  This script takes care of dependencies(as far as these are present in texlive.tlpdb)
@@ -38,7 +38,7 @@
 # package source: http://mirror.ctan.org/systems/texlive/tlnet/archive/
 
 #set -e
-MAJORVERSION=2018
+MAJORVERSION=2019
 mirror="http://mirror.ctan.org/systems/texlive/tlnet/"
 TMP=$PWD/tmp
 
@@ -81,6 +81,7 @@ global_exclude="
   tlcockpit
   tlshell
   wintools.win32
+  dvisvgm
   "
 
   # special packages, move their type1 fonts(if metafonts are present)
@@ -125,7 +126,7 @@ texmf_editions () {
     bclogo
     $(grep ^"name .*biblatex" $db | cut -d' ' -f2 )
     " texmfget extra || exit 1
-
+ 
     # packages/collections and their dependencies for -base
   PACKAGES="
     $(cat $corepackages)
@@ -139,6 +140,7 @@ texmf_editions () {
     revtex
     uptex
     uplatex
+    ucs
     collection-basic
     collection-latex
     collection-metapost
@@ -170,6 +172,7 @@ texmf_editions () {
     beamer2thesis
     beamertheme-detlevcm
     beamertheme-epyt
+    beamertheme-npbt
     beamertheme-saintpetersburg
     beebe
     bhcexam
@@ -187,6 +190,7 @@ texmf_editions () {
     ctanify
     ctanupload
     dad
+    duckuments
     ethiop-t1
     fibeamer
     fithesis
@@ -216,6 +220,8 @@ texmf_editions () {
     powerdot-tuliplab
     powerdot-FUBerlin
     quran
+    quran-de
+    realhats
     resumecls
     sanskrit-t1
     sapthesis
@@ -339,7 +345,7 @@ download () {
   then
     for run in {1..10}
     do
-      wget -t1 -c ${mirror}archive/${1}${flavour}.tar.xz
+      wget -q --show-progress -t1 -c ${mirror}archive/${1}${flavour}.tar.xz
       [ -s "${1}${flavour}.tar.xz" ] && break
     done
   fi
@@ -360,7 +366,7 @@ download () {
     then
       # Download (hopefully) newer file
       rm ${1}${flavour}.tar.xz
-      wget -t1 -c ${mirror}archive/${1}${flavour}.tar.xz
+      wget -q --show-progress -t1 -c ${mirror}archive/${1}${flavour}.tar.xz
     else
       break
     fi
@@ -387,7 +393,7 @@ untar () {
       echo "untar $package"
       # untar all packages, check for relocation, "relocate 1" -> untar in texmf-dist
       download $package || exit 1
-      # untar the tex package, relocate to texmf-dist if necessary, binpackages always need relocation
+      # untar package, relocate to texmf-dist if necessary, binary packages always need relocation
       relocated='.'
       [ -n "$(grep -w ^"relocated 1" $texmf/$package.meta)" -o -n "$(grep ^"binfiles " $texmf/$package.meta)" ] && relocated="texmf-dist" 
       # if not .doc package, investigate files for dependencies/provides
@@ -395,8 +401,7 @@ untar () {
       then
         tar xf ${package}${flavour}.tar.xz --exclude tlpkg -C $relocated || exit 1
       else
-        #tar vxf ${package}${flavour}.tar.xz --exclude tlpkg -C $relocated
-        tar vxf ${package}${flavour}.tar.xz --exclude tlpkg -C $relocated | egrep '\.sty$|\.bbx$|\.cls$' > $texmf/$package.deps
+        tar vxf ${package}${flavour}.tar.xz --exclude tlpkg -C $relocated | grep -E '\.sty$|\.bbx$|\.cls$' > $texmf/$package.deps
         if [ -n "$texmf/$package.deps" ]
         then
           unset provide
@@ -418,7 +423,6 @@ untar () {
           done
           if  [ -n "$provide" ]
           then
-            #echo "$package $provide | sort -u | tr '\n' ',' " >> $TMP/provides.run.$edition
             echo "$package $provide" >> $TMP/provides.run.$edition
           fi
           if [ -n "$depends" ]
@@ -447,8 +451,7 @@ untar () {
 
           # keep only binaries of special packages
           # remove xindy.mem(gzip compresses data) to prevent overwriting
-          for bin in $(find $texmf/texmf-dist/bin/$arch \
-            -type f -exec file '{}' + | \
+          for bin in $(find $texmf/texmf-dist/bin/$arch -type f -exec file '{}' + | \
             grep -e "executable" -e "shared object" -e "gzip compressed data" | \
             grep -e ELF -e "gzip compressed data" | cut -f 1 -d : )
           do
@@ -475,11 +478,22 @@ untar () {
         size=$(grep ^doccontainersize $texmf/$package.meta | cut -d' ' -f2)
       else
         size=$(grep ^containersize $texmf/$package.meta | cut -d' ' -f2)
+	# add maps to updmap.cfg, don't add special_packages map files to -base
+	add_map=yes
+	if [ $edition = base ]
+	then
+	  for no_map in $special_packages
+	  do
+	    [ $no_map = $package ] && add_map=no && break
+          done
+	fi
+	[ $add_map = yes ] && grep ^'execute ' $texmf/$package.meta | grep Map | cut -d' ' -f2- | sed "s/^add//g" >> $updmap.$edition
       fi
       shortdesc="$(grep ^shortdesc $texmf/$package.meta | cut -d' ' -f2- )"
       echo "$size byte, $package$flavour: $shortdesc" >> $output.meta
       # make index of uncompressed size of each package
-      echo "$(xz -l --verbose ${package}${flavour}.tar.xz | grep "Uncompressed size" | cut -d'(' -f2 | cut -d' ' -f1 ) byte, $package$flavour: $shortdesc" >> $output.meta.uncompressed
+      echo "$(xz -l --verbose ${package}${flavour}.tar.xz | grep "Uncompressed size" | \
+        cut -d'(' -f2 | cut -d' ' -f1 ) byte, $package$flavour: $shortdesc" >> $output.meta.uncompressed
     done < $1
 
     # copy packages index to texmf-dist, so included packages are known in later installation
@@ -549,7 +563,7 @@ texmfget () {
     package_meta $collection || exit 1
 
     # If $collection is a singel package(not a collection-), add it here
-    if [ -n "$(head -n1 $texmf/$collection.meta | fgrep -v "name collection" )" ]
+    if [ -n "$(head -n1 $texmf/$collection.meta | grep -v "name collection" )" ]
     then
       addpackage=no
       # if package contains docs, add to docpackages
@@ -565,7 +579,7 @@ texmfget () {
         echo "$collection added to -$1" >> $logfile
         addpackage=yes
       fi
-      # very package should be added to one edition, abort if that didn't work
+      # every package should be added to one dedicated edition, abort if that didn't work
       if [ $addpackage = no ]
       then
         echo "$collection doesn't contain any docfiles/runfiles/binfiles"
@@ -642,7 +656,6 @@ texmfget () {
   if [ "$1" = $edition -o docs = $edition ]
   then
     cd $texmf
-
     # Cleanup tar-directory
     [ -d $texmf/texmf-dist ] && rm -rf $texmf/texmf-dist
     mkdir $texmf/texmf-dist
@@ -687,7 +700,7 @@ texmfget () {
 
 lint () {
 
-echo "Comparing content of all editions, this may take a while ...";
+echo "Comparing content of all editions, this may take a while ..."
 cd $TMP
 # check if all editions of same VERSION are there, take -base as reference
 lint_version=$( ls texlive-base-*tar.xz | head -n1 | cut -d'.' -f2 || exit 1)
@@ -705,16 +718,15 @@ then
   for edition in base extra docs
   do
     >$TMP/packages.$edition.lint.dup
-    case $edition in
-      base)
-        echo "check if files of base are present in another edition"
-        while read line
-        do
-          grep ^"$line"$ $TMP/packages.extra.lint >> $TMP/packages.base.lint.dup
-          grep ^"$line"$ $TMP/packages.docs.lint >> $TMP/packages.base.lint.dup
-        done < $TMP/packages.$edition.lint
-      ;;
-    esac
+    if [ $edition = base ]
+    then
+      echo "check if files of base are present in another edition"
+      while read line
+      do
+        grep ^"$line"$ $TMP/packages.extra.lint >> $TMP/packages.base.lint.dup
+        grep ^"$line"$ $TMP/packages.docs.lint >> $TMP/packages.base.lint.dup
+      done < $TMP/packages.$edition.lint
+    fi
   done
 else
   echo "Not all editions are present to lint them. Create them first by"
@@ -746,6 +758,7 @@ dependencies=$TMP/deps
 packages_base=$TMP/packages.base
 packages_extra=$TMP/packages.extra
 packages_manpages=$TMP/packages.manpages
+updmap=$TMP/updmap.cfg
 files_split=$TMP/files.split
 platforms="x86_64-linux i386-linux"
 
@@ -760,18 +773,18 @@ esac
 
 echo "Building $edition tarball ..."
 
-# Set VERSION, get texlive.tlpdb and keep unshorten $db.orig
+# Set VERSION, get texlive.tlpdb and keep unshorten $db.orig 
 if [ ! -s ${db}.orig -o ! -s $db -o ! -s VERSION ]
 then
   echo $MAJORVERSION.$(date +%y%m%d) > VERSION
-  wget -c -O ${db}.orig ${mirror}tlpkg/texlive.tlpdb
-  # remove most content from $db to be faster on later processing.
+  wget -q --show-progress -c -O ${db}.orig ${mirror}tlpkg/texlive.tlpdb 
+  # remove most content from $db to be faster on later processing. 
   # keep dependencies/manpages/binfiles/shortdesc/sizes
-  egrep \
+  grep -E \
     '^\S|^ RELOC/doc/man|^ texmf-dist/doc/man/man|^ RELOC/doc/info/|^ texmf-dist/doc/info/|^ bin|^$' \
     ${db}.orig | grep -v ^longdesc > $db
-
-  # As $db (might be)/is new, remove the meta-files, might created again with (pontentionally) new content
+  
+  # As $db might be renewed, remove the meta-files to be created again
   rm -rf $texmf/*.meta
 fi
 
@@ -800,8 +813,8 @@ done
 for exclude in $global_exclude
 do
   sed -i "/^${exclude}$/d" $corepackages
-done
-
+done 
+  
 VERSION=$(cat $TMP/VERSION)
 tarball=$TMP/texlive-$edition-$VERSION.tar
 # set logfile
@@ -814,6 +827,7 @@ logfile=$TMP/$VERSION.log
 >$files_split
 >$manpages
 >$packages_manpages
+>$updmap.$edition
 >$packages_base
 >$packages_extra
 >$packages_base.doc
@@ -839,7 +853,7 @@ do
   fi
 done < $allcollections
 
-# cleanup
+# cleanup 
 rm $allcollections
 rm $corepackages
 rm $collections_done
@@ -860,8 +874,8 @@ do
   if [ -z "$( grep ^"$package"$ $packages_base )" ]
   then
     echo "$package was not found to be part of -base"
-    echo "Edit \$special_packages in $0"
-    echo "to contain only packages from -base, bye."
+    echo "Edit \$special_packages in $0,"
+    echo "it should contain only packages from -base, bye."
     exit 1
   fi
   unset relocated
@@ -870,7 +884,7 @@ do
     relocated="-C texmf-dist" && unset pathprefix
   # avoid big pdf docs which are also present as html
   # move (big)type1 fonts to -extra
-  # $files_split lists files to be moved from -base -extra
+  # $files_split lists files to be moved from -base to -extra
   if [ $package = "cm-super" ]
   then
     # cm-super minimal for -base, create index of extended cm-super
@@ -904,7 +918,7 @@ do
       $output.base.meta.uncompressed
     rm -rf calculate
   fi
-
+  
   if [ $edition = extra ]
   then
     mkdir -p calculate/texmf-dist
@@ -913,7 +927,7 @@ do
     size_extended=$(du -bc calculate/calc.tar.xz | tail -n1 | sed "s/[[:space:]].*//")
     size_extended_uncompressed="$(xz -l --verbose calculate/calc.tar.xz | \
       grep "Uncompressed size" | cut -d'(' -f2 | cut -d' ' -f1 )"
-
+ 
     # put new sizes in package index uncompressed
     sed -i \
       -e "s/^[0-9]* byte, $package: /$size_extended byte, $package-extended: /" \
@@ -922,8 +936,14 @@ do
       -e "s/^[0-9]* byte, $package: /$size_extended_uncompressed byte, $package-extended: /" \
       $output.extra.meta.uncompressed
     rm -rf calculate
+    
+    # put map files from splitted packages in -extra
+    mkdir meta_tmp
+    tar xf $texmf/${package}.tar.xz -C meta_tmp tlpkg/tlpobj/$package.tlpobj
+    grep ^'execute ' meta_tmp/tlpkg/tlpobj/$package.tlpobj | grep Map | cut -d' ' -f2- | sed "s/^add//g" >> $updmap.$edition
+    rm -rf meta_tmp
   fi
-
+ 
   # untar to provide files for -extra
   tar xf $texmf/${package}.tar.xz $relocated $(paste $files_split.tmp)
   if [ $package = "cm-super" ]
@@ -934,13 +954,11 @@ do
     for map in t1 t2a t2b t2c ts1 x2
     do
       grep 1000 $texmf/texmf-dist/fonts/map/dvips/cm-super/cm-super-$map.map \
-        > $texmf/texmf-dist/fonts/map/dvips/cm-super/cm-super-minimal-$map.map
-      sed -i "/.*1000\.pfb/d" $texmf/texmf-dist/fonts/map/dvips/cm-super/cm-super-$map.map
+        > $texmf/texmf-dist/fonts/map/dvips/cm-super/cm-super-minimal-$map.map 
+      sed -i "/.*1000\.pfb/d" $texmf/texmf-dist/fonts/map/dvips/cm-super/cm-super-$map.map 
     done
   fi
-
 done
-
 
 # cleanup
 rm $files_split.tmp
@@ -953,19 +971,19 @@ sed -i \
 
 # sort meta data about added packages
 sort -n $output.$edition.meta > $tmpfile
-mv $tmpfile $output.$edition.meta
+mv $tmpfile $output.$edition.meta 
 sort -n $output.$edition.meta.uncompressed > $tmpfile
-mv $tmpfile $output.$edition.meta.uncompressed
+mv $tmpfile $output.$edition.meta.uncompressed 
 
 sort -u $binary_removed.$edition > $tmpfile
 mv $tmpfile $binary_removed.$edition
 
-# include manpages/GNU infofiles in -base, write index for later exclution from other editions.
+# include manpages/GNU infofiles in -base, write index for later exclusion from other editions.
 # In -extra/-docs there should not be any manpage left.
 echo "Looking for manpages/GNU infofiles to be included in -base ..."
 for package in $(paste -s $packages_base.doc | sort -u)
 do
-  if [ -n "$(egrep "(doc/man/man|doc/info/)" $texmf/$package.meta )" ]
+  if [ -n "$(grep -E "(doc/man/man|doc/info/)" $texmf/$package.meta )" ]
   then
     echo "Adding manpage from $package.doc to -base"
     flavour=".doc" download $package || exit 1
@@ -982,49 +1000,56 @@ do
     tar xf $texmf/${package}.doc.tar.xz $relocated $(paste $manpages.tmp)
     echo "$package" >> $packages_manpages
   fi
-done
+done 
 # cleanup
 rm $manpages.tmp
 sed -i \
   -e "s/^doc/texmf-dist\/doc/g" \
   $manpages
-
+  
 case $edition in
-  base)
+  base) 
   # Content info
   cat << EOF | gzip -9 >> $texmf/texmf-dist/packages.$edition.gz
 Content of -$edition:
 $(sed "/-linux$/d" $packages_base | sort)
 EOF
-  # add texdoc cache file
+  # create texdoc cache file
   if [ $(command -v texdoc) ]
   then
-    mkdir -p $texmf/texmf-dist/tlpkg
-    mkdir -p texmf-dist/scripts/texdoc
-    ln -s ${db}.orig $texmf/texmf-dist/tlpkg/texlive.tlpdb
+    mkdir -p texmf-dist/scripts/texdoc || exit 1
     TEXMFVAR=$texmf/texmf-dist \
-      texdoc -lM texlive-en >/dev/null
+      texdoc -c texlive_tlpdb=$TMP/texlive.tlpdb.orig \
+      -DlM texlive-en >/dev/null 2>&1 
     mv texmf-dist/texdoc/cache-tlpdb.lua \
-      texmf-dist/scripts/texdoc/Data.tlpdb.lua
-    rm -rf $texmf/texmf-dist/tlpkg
+      texmf-dist/scripts/texdoc/Data.tlpdb.lua || exit 1
+    # add cache to tarball
+    tar rf $tarball --owner=0 --group=0 --sort=name \
+      texmf-dist/scripts/texdoc/Data.tlpdb.lua || exit 1
   else
-    echo "WARNING: texdoc/texlive is not installed, the texdoc cache"
+    echo "WARNING: texdoc binary(comming with texlive) is not installed, the texdoc cache"
     echo "Data.tlpdb.lua can't be created and wont't be available."
-    echo "texdoc will not wotk without this."
+    echo "Texdoc will not wotk without this."
     echo ""
     echo "Continue with any key or abort with ctrl-c"
     read -n1
   fi
 
-#Splitted packages, type1 fonts/docs moved to -extra:
-#$(echo $special_packages)
-#EOF
+  # prepare updmap.cfg
+  tar xf $tarball texmf-dist/web2c/updmap.cfg
+  end_n="$(grep -n 'end of updmap-hdr' texmf-dist/web2c/updmap.cfg | cut -d':' -f1)"
+  
+  sed "1,${end_n}!d" texmf-dist/web2c/updmap.cfg > $TMP/updmap.cfg.tmp
+  cat $updmap.$edition >> $TMP/updmap.cfg.tmp
+  mv $TMP/updmap.cfg.tmp texmf-dist/web2c/updmap.cfg
+  tar f $tarball --delete texmf-dist/web2c/updmap.cfg
+  tar rf $tarball --owner=0 --group=0 --sort=name \
+    texmf-dist/web2c/updmap.cfg
 
 # add manpages/GNU infofiles to the tarball
   tar rf $tarball --owner=0 --group=0 --sort=name \
     texmf-dist/doc/man/ texmf-dist/doc/info/ \
     texmf-dist/packages.$edition.gz \
-    texmf-dist/scripts/texdoc/Data.tlpdb.lua \
     || exit 1
 #  # add cm-super minimal maps/config
 #  tar rf $tarball --owner=0 --group=0 --sort=name \
@@ -1035,8 +1060,8 @@ EOF
   tar f $tarball --delete $(paste $files_split) || exit 1
   ;;
   extra)
-  echo "Removing manpages from $edition which now reside in -base"
-  tar f $tarball --delete $(paste $manpages) 2>/dev/null
+  echo "Removing manpages from $edition which now reside in -base" 
+  tar f $tarball --delete $(paste $manpages) 2>/dev/null 
   # content info
   echo "Content of -$edition, including documentation:" > $texmf/texmf-dist/packages.$edition
   sed "/-linux$/d" $TMP/packages.$edition | sort >> $texmf/texmf-dist/packages.$edition
@@ -1044,7 +1069,11 @@ EOF
 #  # remove cm-super minimal config, which resides in -base
 #  rm \
 #    $texmf/texmf-dist/dvips/cm-super/config-minimal.cm-super \
-#    $texmf/texmf-dist/fonts/map/dvips/cm-super/cm-super-minimal-*.map
+#    $texmf/texmf-dist/fonts/map/dvips/cm-super/cm-super-minimal-*.map 
+
+    # add -extra updmap.cfg
+    mkdir -p $texmf/texmf-dist/web2c
+    mv $updmap.$edition $texmf/texmf-dist/web2c
   tar rf $tarball --owner=0 --group=0 --sort=name \
     --exclude texmf-dist/doc \
     texmf-dist \
@@ -1060,12 +1089,13 @@ EOF
     texmf-dist/doc/ \
     texmf-dist/packages.$edition.gz \
     || exit 1
-  echo "Removing manpages from $edition which now reside in -base"
+  echo "Removing manpages from $edition which now reside in -base" 
   tar f $tarball --delete $(paste $manpages) || exit 1
   ;;
 esac
-
+  
 rm -rf texmf-dist
+[ -f $updmap.$edition ] && rm $updmap.$edition
 
 # compress the tarball as everything is in place now
 echo "Compressing $tarball ..."
