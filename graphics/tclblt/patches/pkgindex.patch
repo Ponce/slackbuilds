@@ -1,0 +1,108 @@
+Description: Patch fixes loading the libBLT library from
+    [package require BLT]. Specifically, it provides correct version
+    BLT_PATCH_LEVEL and prevents loading the library twice (once
+    by its real name and onr more time by a symlink if the blt-dev
+    package is installed). Also, it skips initializing widget bindings
+    if Tk isn't present.
+Author: Sergei Golovan
+Author: Steve Langasek <vorlon@debian.org>
+Last-Modified: Wed, 21 Mar 2018 10:53:10 +0300
+
+--- a/library/Makefile.in
++++ b/library/Makefile.in
+@@ -5,6 +5,7 @@
+ prefix       = @prefix@
+ exec_prefix  = @exec_prefix@
+ version      = @BLT_VERSION@
++patchlevel   = @BLT_PATCH_LEVEL@
+ lib_prefix    = @BLT_LIB_PREFIX@
+ srcdir       = @srcdir@
+ libdir       = @libdir@
+@@ -49,6 +50,7 @@
+ pkgIndex: 
+ 	rm -f pkgIndex.tcl
+ 	sed -e 's/%VERSION%/$(version)/' $(srcdir)/pkgIndex.tcl.in | \
++	sed -e 's/%PATCHLEVEL%/$(patchlevel)/' | \
+ 	sed -e 's/%LIB_PREFIX%/$(lib_prefix)/' | \
+ 	sed -e 's;%LIB_DIR%;$(libdir);' > pkgIndex.tcl
+ 
+--- a/library/pkgIndex.tcl.in
++++ b/library/pkgIndex.tcl.in
+@@ -7,23 +7,11 @@
+     regsub {\.} $version {} version_no_dots
+     set versuf $version$suffix
+ 
++    set taillib ${versuf}.[info tclversion]
++
+     # Determine whether to load the full BLT library or
+     # the "lite" tcl-only version.
+     
+-   if {[package vcompare [info tclversion] 8.2] < 0} {
+-        set taillib ${versuf}.8.0
+-    } elseif {[package vcompare [info tclversion] 8.3] < 0} {
+-        set taillib ${versuf}.8.2
+-    } elseif {[package vcompare [info tclversion] 8.4] < 0} {
+-        set taillib ${versuf}.8.3
+-    } elseif {[package vcompare [info tclversion] 8.5] < 0} {
+-        set taillib ${versuf}.8.4
+-    } elseif {[package vcompare [info tclversion] 8.6] < 0} {
+-        set taillib ${versuf}.8.5
+-    } else {
+-        set taillib ${versuf}.8.6
+-    }
+-
+     if { [info commands tk] == "tk" } {
+         set name1 ${prefix}BLT.${taillib}
+         set name2 ${prefix}BLT${version_no_dots}${suffix}
+@@ -49,11 +37,13 @@
+         }
+ 	if { ![file exists $library] } continue
+         load $library BLT
++	break
+     }
+ }
+ 
+ set version "%VERSION%"
++set patchlevel %PATCHLEVEL%
+ 
+-package ifneeded BLT $version [list LoadBLT25 $version $dir]
++package ifneeded BLT $patchlevel [list LoadBLT25 $version $dir]
+ 
+ # End of package index file
+--- a/library/init.tcl
++++ b/library/init.tcl
+@@ -8,7 +8,9 @@
+         }
+     }
+ 
+-   initializeLibrary
++    if {[info commands tk] == "tk"} {
++	initializeLibrary
++    }
+     
+ }
+ 
+--- a/configure.in
++++ b/configure.in
+@@ -977,6 +977,13 @@
+ 
+ BLT_VERSION=${BLT_MAJOR_VERSION}.${BLT_MINOR_VERSION}
+ 
++AC_MSG_CHECKING([BLT_PATCH_LEVEL])
++AC_CACHE_VAL(blt_cv_patch_level,
++AC_GREP_SYMBOL(blt_cv_patch_level, BLT_PATCH_LEVEL, ${srcdir}/generic/blt.h)
++)
++AC_MSG_RESULT([$blt_cv_patch_level])
++BLT_PATCH_LEVEL=${blt_cv_patch_level}
++
+ # Add BLT to the run path
+ libdir=${exec_prefix}/lib
+ 
+@@ -1386,6 +1393,7 @@
+ AC_SUBST(DEFINES)
+ AC_SUBST(BLT_MAJOR_VERSION)
+ AC_SUBST(BLT_MINOR_VERSION)
++AC_SUBST(BLT_PATCH_LEVEL)
+ AC_SUBST(BLT_VERSION)
+ AC_SUBST(AUX_LIBS)
+ AC_SUBST(TCL_LIB_DIR)
