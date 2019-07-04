@@ -3,7 +3,7 @@
 # Maintained by Klaatu at member.fsf dot org
 
 PRGNAM=MuseScore
-VERSION=${VERSION:-3.0.4}
+VERSION=${VERSION:-3.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -20,22 +20,6 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-set -e
-
-rm -rf $PKG
-mkdir -p $TMP $PKG $OUTPUT
-cd $TMP
-rm -rf $PRGNAM-$VERSION
-mkdir $PRGNAM-$VERSION
-unzip $CWD/$PRGNAM-$VERSION.zip -d $PRGNAM-$VERSION
-cd $PRGNAM-$VERSION
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
-
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
@@ -45,26 +29,54 @@ elif [ "$ARCH" = "i686" ]; then
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
-  #must hardcode arch or it fails as 32bit
-  sed -i 's|m32|m64|' ./CMakeLists.txt
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
 
-sed -i 's| qmake| qmake-qt5|' build/FindQt5.cmake
-make release PREFIX=/usr CFLAGS="$SLKCFLAGS" CXXFLAGS="$SLKCFLAGS" LDFLAGS="-pthread"
-make install PREFIX=/usr DESTDIR=$PKG UPDATE_CACHE=FALSE
+set -e
 
-mkdir -p $PKG/usr/man/man1
-mv $PKG/usr/share/man/* $PKG/usr/man/
-rm -rf $PKG/usr/share/man
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+# Copy over sound files for installation.
+cp $CWD/MuseScore_General-License.md share/sound
+cp $CWD/MuseScore_General.sf3 share/sound
 
+# Turn off Qt crash reporter.  Option isn't available in Makefile,
+# so turn it off in CMakeLists.txt
+sed -i '/(BUILD_CRASH_REPORTER/s|ON)|OFF)|' CMakeLists.txt
+sed -i 's|share/man|man|' CMakeLists.txt
+#musescore doesn't like to build with webengine with qt4 installed
+#because the qmake finder finds the qt4 version. lets patch this
+sed -i 's/qmake)/qmake-qt5)/g' build/FindQt5.cmake
+make release \
+  PREFIX=/usr \
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  LDFLAGS="-pthread" \
+  DOWNLOAD_SOUNDFONT=OFF \
+  USE_SYSTEM_FREETYPE=ON \
+  BUILD_WEBENGINE=ON \
+  VERBOSE=1
+make install \
+  -C build.release \
+  DESTDIR=$PKG \
+  UPDATE_CACHE=FALSE
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a  LICENSE.* README.md $PKG/usr/doc/$PRGNAM-$VERSION
