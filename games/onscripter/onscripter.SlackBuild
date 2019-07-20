@@ -1,0 +1,127 @@
+#!/bin/sh
+
+# Slackware build script for onscripter
+
+# Copyright 2019 GOSIKI Agiri
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=onscripter
+VERSION=${VERSION:-20190527}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# default state of variables
+ONSTARGET=${ONSTARGET:-japanese}
+ONSTOOLS=${ONSTOOLS:-no}
+## tell the user what the config is or crash if no executable is producing
+case $ONSTARGET in
+  japanese) echo "I will build Japanese ONScripter only!";
+            versiontag="Japanese games.";;
+  english) echo "I will build English ONscripter only!";
+           versiontag="English games.";;
+  both) echo "I will build both English and Japanese ONScripter!";
+        versiontag="English and Japanese games.";;
+  *) echo "Please supply ONSTARGET={japanese,english,both} only!"; exit 1;;
+esac
+if [ $ONSTOOLS == "yes" ]; then
+  echo "I will build ONScripter tools as well!"
+fi
+
+# apply the changes we need to make this build on a Slackware installation
+# this means disable avifile support and fix linking to Lua libraly
+patch -p0 < $CWD/onscripter-makefile_config.diff
+
+# make Japanese binary and install it to /usr/games
+if [ $ONSTARGET == "japanese" -o $ONSTARGET == "both" ]; then
+  make -f Makefile.Linux clean onscripter
+  install -Dm755 onscripter $PKG/usr/games/onscripter
+fi
+
+# patch with 1-byte character support if necessary and build ONScripter once again
+# install it as onscripter_english though
+if [ $ONSTARGET == "english" -o $ONSTARGET == "both" ]; then
+  sed -i Makefile.Linux -e 's/#DEFS += -DENABLE_1BYTE_CHAR/DEFS += -DENABLE_1BYTE_CHAR/'
+  make -f Makefile.Linux clean onscripter
+  install -Dm755 onscripter $PKG/usr/games/onscripter_english
+fi
+
+if [ $ONSTOOLS == "yes" ]; then
+  make -f Makefile.Linux # this will build the rest of the targets in all rule
+  install -Dm755 {nsa,sar}dec {nsa,sar}conv $PKG/usr/games/
+fi
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  README COPYING www \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+# change versiontag
+sed -i $PKG/install/slack-desc -e "s/%versiontag%/$versiontag/"
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
