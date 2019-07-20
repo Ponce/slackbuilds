@@ -2,7 +2,7 @@
 
 # Slackware build script for SameBoy
 
-# Copyright 2017-2018 Hunter Sezen California, USA
+# Copyright 2017-2019 Hunter Sezen California, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,8 +25,8 @@
 PRGNAM=SameBoy
 LIBNAM=$(printf %s $PRGNAM | tr 'A-Z' 'a-z')_libretro
 SRCNAM=${LIBNAM%%_*}
-VERSION=${VERSION:-0.11.2}
-RGBVERS=${RGBVERS:-0.3.7}
+VERSION=${VERSION:-0.12.1}
+RGBVERS=${RGBVERS:-0.3.8}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -47,6 +47,19 @@ LIBDIRSUFFIX=
 [ "$ARCH" = x86_64 ] && LIBDIRSUFFIX=64
 
 set -eu
+
+LIBRETRO="${LIBRETRO:-yes}"
+
+if pkg-config --exists sdl2; then
+  SDL="${SDL:-yes}"
+else
+  SDL=no
+fi
+
+if [ "$LIBRETRO" != yes ] && [ "$SDL" != yes ]; then
+  printf %s\\n 'ERROR: Both the SDL2 and Libretro builds are disabled.' >&2
+  exit 1
+fi
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -69,26 +82,10 @@ else
   CONF=release
 fi
 
-# Add a build-time option to change the resources directory.
-# https://github.com/LIJI32/SameBoy/commit/91904df5e8cc7370776c37bdb46467a81887a6b4
-# https://github.com/LIJI32/SameBoy/pull/129
-# https://github.com/LIJI32/SameBoy/issues/39
-patch -p1 < $CWD/datadir.patch
-
-# Reconnect the joypad when SameBoy starts directly to a ROM
-# https://github.com/LIJI32/SameBoy/commit/7ffed9c43cd533c4ab16ab9d8b0879a39a00a02b
-# https://github.com/LIJI32/SameBoy/issues/131
-patch -p1 < $CWD/joypad.patch
-
-# Apply the SDL 2.0.6 audio workaround to everything except Windows
-# https://github.com/LIJI32/SameBoy/commit/453673a2a653a45d8ee378ba5335f98df5e22efa
-# https://github.com/LIJI32/SameBoy/issues/130
-patch -p1 < $CWD/sdl.patch
-
-# Adjust DAC attributes to fix LADX’s crackling audio
-# https://github.com/LIJI32/SameBoy/commit/94136f5741b7484189af048830126c4bad04ac11
-# https://github.com/LIJI32/SameBoy/issues/125
-patch -p1 < $CWD/sound.patch
+# Fix audio issues with some RetroArch audio drivers. Fixes #189
+# https://github.com/LIJI32/SameBoy/commit/597dc72e460f3e95caad40b8c557fb01f53f18ee
+# https://github.com/LIJI32/SameBoy/issues/189
+patch -p1 < $CWD/libretro.patch
 
 PATH="$TMP/$PRGNAM-$VERSION/rgbds-$RGBVERS/bin:$PATH"
 
@@ -97,7 +94,7 @@ make -C rgbds-$RGBVERS install Q= \
   PREFIX=. \
   DESTDIR=./
 
-if pkg-config --exists sdl2; then
+if [ "$SDL" = yes ]; then
   make CONF=$CONF DATA_DIR=/usr/share/games/$SRCNAM/
   mkdir -p $PKG/usr/games $PKG/usr/share/games
   cp -av build/bin/SDL $PKG/usr/share/games/$SRCNAM
@@ -106,19 +103,21 @@ else
   make bootroms
 fi
 
-make -C libretro DEBUG=$DEBUG GIT_VERSION="${VERSION#*_}"
+if [ "$LIBRETRO" = yes ]; then
+  make -C libretro DEBUG=$DEBUG GIT_VERSION="${VERSION#*_}"
 
-install -Dm0644 build/bin/$LIBNAM.so \
-  $PKG/usr/lib${LIBDIRSUFFIX}/libretro/$LIBNAM.so
+  install -Dm0644 build/bin/$LIBNAM.so \
+    $PKG/usr/lib${LIBDIRSUFFIX}/libretro/$LIBNAM.so
 
-# sameboy_libretro.info from:
-# https://raw.githubusercontent.com/libretro/libretro-super/88176482b14e22b744b129bee84f27cb196936a9/dist/info/sameboy_libretro.info
-install -Dm0644 $CWD/$LIBNAM-info \
-  $PKG/usr/lib${LIBDIRSUFFIX}/libretro/info/$LIBNAM.info
+  # sameboy_libretro.info from:
+  # https://raw.githubusercontent.com/libretro/libretro-super/88176482b14e22b744b129bee84f27cb196936a9/dist/info/sameboy_libretro.info
+  install -Dm0644 $CWD/$LIBNAM-info \
+    $PKG/usr/lib${LIBDIRSUFFIX}/libretro/info/$LIBNAM.info
+fi
 
 if [ $DEBUG = 0 ]; then
-  find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-    | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+  find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" |
+    grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 fi
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
