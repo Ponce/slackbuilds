@@ -2,7 +2,7 @@
 
 # Slackware build script for vtcol
 
-# Copyright 2017-2018 Andrew Clemons, Wellington New Zealand
+# Copyright 2017-2019 Andrew Clemons, Wellington New Zealand
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -48,19 +48,15 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
   CARGOTARGET="--target i586-unknown-linux-gnu"
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
   CARGOTARGET="--target i686-unknown-linux-gnu"
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
   CARGOTARGET="--target x86_64-unknown-linux-gnu"
 else
   SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
   CARGOTARGET=""
 fi
 
@@ -72,18 +68,12 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 patch -p1 < $CWD/9dda18921a25f64e0a0da06e3417ce99f8bf9b41.patch
 
 # build offline
 # configuration tells cargo to use the configured directory
-# for dependencies intead of downloading from crates.io
+# for dependencies instead of downloading from crates.io
 mkdir .cargo
 cat << EOF >> .cargo/config
 [source.crates-io]
@@ -95,15 +85,17 @@ directory = '$(pwd)/vendor'
 EOF
 
 # deps and versions come from Cargo.lock
-# cargo vender can be used to generate the checksums
 mkdir vendor
 (
   cd vendor
 
-  for dependency in getopts=0.2.14 \
-                    libc=0.2.19; do
-    dep="$(echo "$dependency" | cut -d= -f1)"
-    ver="$(echo "$dependency" | cut -d= -f2)"
+  grep -h -A 3 "\[\[package\]\]" $(find ../ -maxdepth 1 -mindepth 1 -name Cargo.lock | tr '\n' ' ') | \
+    sed 's/[[:space:]]*=[[:space:]]*/=/g;s/^--//;s/^\[\[/--\n[[/' | \
+    awk 'BEGIN { RS = "--\n" ; FS="\n" } { print $2, $3, $4 }' | sed 's/"//g;s/name=//;s/ version=/=/' | \
+    grep crates\.io-index | sed 's/ source=.*$//' | sort -u | while read -r dep ; do
+
+    ver="$(printf "%s\n" "$dep" | cut -d= -f2)"
+    dep="$(printf "%s\n" "$dep" | cut -d= -f1)"
 
     tar xvf $CWD/$dep-$ver.crate
 
@@ -129,13 +121,20 @@ mkdir vendor
   done
 )
 
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 cargo build --release $CARGOTARGET
 
 mkdir -p $PKG/usr/bin/
 
-find target -name vtcol -exec install -m 755 {} $PKG/usr/bin/vtcol \;
+find target -name $PRGNAM -exec install -m 755 {} $PKG/usr/bin/$PRGNAM \;
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
