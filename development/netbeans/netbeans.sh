@@ -1,3 +1,3 @@
-#!/bin/sh
-cd $HOME
+#!/bin/bash
+cd ${HOME}
 /opt/netbeans/bin/netbeans $@
