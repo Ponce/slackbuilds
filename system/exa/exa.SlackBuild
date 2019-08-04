@@ -2,7 +2,7 @@
 
 # Slackware build script for exa
 
-# Copyright 2017 Andrew Clemons, Wellington New Zealand
+# Copyright 2017-2019 Andrew Clemons, Wellington New Zealand
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,8 +23,8 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=exa
-VERSION=${VERSION:-0.8.0}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-0.9.0}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -73,9 +73,6 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 
-# https://github.com/ogham/exa/issues/301
-patch -p1 < $CWD/upgrade_datetime_crate.diff
-
 # build offline
 # configuration tells cargo to use the configured directory
 # for dependencies intead of downloading from crates.io
@@ -94,56 +91,13 @@ mkdir vendor
 (
   cd vendor
 
-  for dependency in aho-corasick=0.5.3 \
-                    ansi_term=0.8.0 \
-                    bitflags=0.9.1 \
-                    byteorder=0.4.2 \
-                    cmake=0.1.25 \
-                    datetime=0.4.7 \
-                    env_logger=0.3.5 \
-                    gcc=0.3.53 \
-                    getopts=0.2.14 \
-                    git2=0.6.8 \
-                    glob=0.2.11 \
-                    idna=0.1.4 \
-                    iso8601=0.1.1 \
-                    kernel32-sys=0.2.2 \
-                    lazy_static=0.2.8 \
-                    libc=0.2.30 \
-                    libgit2-sys=0.6.14 \
-                    libz-sys=1.0.16 \
-                    locale=0.2.2 \
-                    log=0.3.8 \
-                    matches=0.1.6 \
-                    memchr=0.1.11 \
-                    natord=1.0.9 \
-                    nom=1.2.4 \
-                    num-traits=0.1.40 \
-                    num_cpus=1.6.2 \
-                    number_prefix=0.2.7 \
-                    pad=0.1.4 \
-                    percent-encoding=1.0.0 \
-                    pkg-config=0.3.9 \
-                    redox_syscall=0.1.31 \
-                    regex=0.1.80 \
-                    regex-syntax=0.3.9 \
-                    scoped_threadpool=0.1.7 \
-                    term_grid=0.1.6 \
-                    term_size=0.3.0 \
-                    thread-id=2.0.0 \
-                    thread_local=0.2.7 \
-                    unicode-bidi=0.3.4 \
-                    unicode-normalization=0.1.5 \
-                    unicode-width=0.1.4 \
-                    url=1.5.1 \
-                    users=0.5.3 \
-                    utf8-ranges=0.1.3 \
-                    vcpkg=0.2.2 \
-                    winapi=0.2.8 \
-                    winapi-build=0.1.1 \
-                    zoneinfo_compiled=0.4.7; do
-    dep="$(echo "$dependency" | cut -d= -f1)"
-    ver="$(echo "$dependency" | cut -d= -f2)"
+  grep -h -A 3 "\[\[package\]\]" $(find ../ -maxdepth 1 -mindepth 1 -name Cargo.lock | tr '\n' ' ') | \
+    sed 's/[[:space:]]*=[[:space:]]*/=/g;s/^--//;s/^\[\[/--\n[[/' | \
+    awk 'BEGIN { RS = "--\n" ; FS="\n" } { print $2, $3, $4 }' | sed 's/"//g;s/name=//;s/ version=/=/' | \
+    grep crates\.io-index | sed 's/ source=.*$//' | sort -u | while read -r dep ; do
+
+    ver="$(printf "%s\n" "$dep" | cut -d= -f2)"
+    dep="$(printf "%s\n" "$dep" | cut -d= -f1)"
 
     tar xvf $CWD/$dep-$ver.crate
 
@@ -169,25 +123,25 @@ mkdir vendor
   done
 )
 
+chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
   -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-mkdir -p $PKG/usr/share/bash-completion/completions/
-mkdir -p $PKG/usr/share/zsh/vendor-completions/
-mkdir -p $PKG/usr/bin
-
-sed -i 's,share/man,man,' Makefile
-
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 cargo build --release --no-default-features --features default $CARGOTARGET
 
+mkdir -p $PKG/usr/bin
 find target -name exa -exec install -m 755 {} $PKG/usr/bin/exa \;
-make install-man install-bash-completions install-zsh-completions DESTDIR=$PKG PREFIX=/usr BASHDIR=/usr/share/bash-completion/completions
 
+mkdir -p $PKG/usr/share/bash-completion/completions
+mkdir -p $PKG/usr/share/zsh/site-functions
+make install-man install-bash-completions install-zsh-completions DESTDIR=$PKG PREFIX=/usr BASHDIR=/usr/share/bash-completion/completions ZSHDIR=/usr/share/zsh/site-functions
+
+mv $PKG/usr/share/man/ $PKG/usr
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
