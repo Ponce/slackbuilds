@@ -1,0 +1,289 @@
+From 65c0b84376e8e0aa0854baa8b3c809a19217d6b5 Mon Sep 17 00:00:00 2001
+From: Alberto Milone <alberto.milone@canonical.com>
+Date: Tue, 4 Jun 2019 19:31:22 +0200
+Subject: [PATCH 1/1] Add support for Linux 5.2
+
+Use the list_is_first, introduced by 70b44595eafe9c7c235f076d653a268ca1ab9fdb
+Use put_user_page, introduced by fc1d8e7cca2daa18d2fe56b94874848adf89d7f5
+Add vm_fault_t type, introduced by 3d3539018d2cbd12e5af4a132636ee7fd8d43ef0
+Include drm_probe_helper.h for the helper functions as per fcd70cd36b9b
+---
+ common/inc/nv-linux.h                    |  8 +++++++
+ common/inc/nv-list-helpers.h             |  3 ++-
+ conftest.sh                              | 30 ++++++++++++++++++++++++
+ nvidia-drm/nvidia-drm-connector.c        |  3 +++
+ nvidia-drm/nvidia-drm-drv.c              |  3 +++
+ nvidia-drm/nvidia-drm-encoder.c          |  3 +++
+ nvidia-drm/nvidia-drm-gem-nvkms-memory.c | 13 +++++++++-
+ nvidia-uvm/nvidia-uvm.Kbuild             |  2 ++
+ nvidia-uvm/uvm8.c                        | 14 +++++++++--
+ nvidia-uvm/uvm8_tools.c                  |  2 ++
+ nvidia/nvidia.Kbuild                     |  1 +
+ 11 files changed, 78 insertions(+), 4 deletions(-)
+
+diff --git a/kernel/common/inc/nv-linux.h b/kernel/common/inc/nv-linux.h
+index bf69d62..a16dd7e 100644
+--- a/kernel/common/inc/nv-linux.h
++++ b/kernel/common/inc/nv-linux.h
+@@ -1083,6 +1083,14 @@ static inline int nv_io_remap_page_range(struct vm_area_struct *vma,
+ 
+ #define NV_PAGE_MASK    (NvU64)(long)PAGE_MASK
+ 
++#ifndef NV_VMF_INSERT_PFN_PRESENT
++#ifdef VM_FAULT_OOM
++typedef int vm_fault_t;
++#else
++typedef unsigned int vm_fault_t;
++#endif
++#endif
++
+ extern void *nvidia_stack_t_cache;
+ 
+ // Changed in 2.6.23 via commit 20c2df83d25c6a95affe6157a4c9cac4cf5ffaac
+diff --git a/kernel/common/inc/nv-list-helpers.h b/kernel/common/inc/nv-list-helpers.h
+index 0aed851..14cfa33 100644
+--- a/kernel/common/inc/nv-list-helpers.h
++++ b/kernel/common/inc/nv-list-helpers.h
+@@ -91,10 +91,11 @@
+         list_entry((pos)->member.next, typeof(*(pos)), member)
+ #endif
+ 
++#if !defined(NV_LIST_IS_FIRST_PRESENT)
+ static inline int list_is_first(const struct list_head *list,
+                                 const struct list_head *head)
+ {
+     return list->prev == head;
+ }
+-
++#endif
+ #endif // __NV_LIST_HELPERS_H__
+diff --git a/kernel/conftest.sh b/kernel/conftest.sh
+index a285cc8..a720303 100755
+--- a/kernel/conftest.sh
++++ b/kernel/conftest.sh
+@@ -106,6 +106,8 @@ test_headers() {
+     FILES="$FILES drm/drm_atomic_uapi.h"
+     FILES="$FILES drm/drm_drv.h"
+     FILES="$FILES drm/drm_framebuffer.h"
++    FILES="$FILES drm/drm_connector.h"
++    FILES="$FILES drm/drm_probe_helper.h"
+     FILES="$FILES generated/autoconf.h"
+     FILES="$FILES generated/compile.h"
+     FILES="$FILES generated/utsrelease.h"
+@@ -424,6 +426,21 @@ compile_test() {
+             compile_check_conftest "$CODE" "NV_SET_PAGES_UC_PRESENT" "" "functions"
+         ;;
+ 
++        put_user_pages)
++            #
++            # Determine if the put_user_pages() function is present.
++            # It does not exist on all architectures.
++            #
++            CODE="
++            #include <linux/mm.h>
++            void conftest_put_user_pages(void) {
++                put_user_pages();
++            }"
++
++            compile_check_conftest "$CODE" "NV_PUT_USER_PAGES_PRESENT" "" "functions"
++        ;;
++
++
+         outer_flush_all)
+             #
+             # Determine if the outer_cache_fns struct has flush_all member.
+@@ -1893,6 +1910,19 @@ compile_test() {
+             compile_check_conftest "$CODE" "NV_LIST_CUT_POSITION_PRESENT" "" "functions"
+         ;;
+ 
++        list_is_first)
++            #
++            # Determine if the list_is_first() function is present.
++            #
++            CODE="
++            #include <linux/list.h>
++            void conftest_list_is_first(void) {
++                list_is_first();
++            }"
++
++            compile_check_conftest "$CODE" "NV_LIST_IS_FIRST_PRESENT" "" "functions"
++        ;;
++
+         file_inode)
+             #
+             # Determine if the 'file' structure has
+diff --git a/kernel/nvidia-drm/nvidia-drm-connector.c b/kernel/nvidia-drm/nvidia-drm-connector.c
+index 24631c0..813cc08 100644
+--- a/kernel/nvidia-drm/nvidia-drm-connector.c
++++ b/kernel/nvidia-drm/nvidia-drm-connector.c
+@@ -30,6 +30,9 @@
+ #include "nvidia-drm-utils.h"
+ #include "nvidia-drm-encoder.h"
+ 
++#if defined(NV_DRM_DRM_PROBE_HELPER_H_PRESENT)
++#include <drm/drm_probe_helper.h>
++#endif
+ #include <drm/drm_crtc_helper.h>
+ 
+ #include <drm/drm_atomic.h>
+diff --git a/kernel/nvidia-drm/nvidia-drm-drv.c b/kernel/nvidia-drm/nvidia-drm-drv.c
+index 1c2db68..2a15fb2 100644
+--- a/kernel/nvidia-drm/nvidia-drm-drv.c
++++ b/kernel/nvidia-drm/nvidia-drm-drv.c
+@@ -41,6 +41,9 @@
+ 
+ #include <drm/drmP.h>
+ 
++#if defined(NV_DRM_DRM_PROBE_HELPER_H_PRESENT)
++#include <drm/drm_probe_helper.h>
++#endif
+ #include <drm/drm_crtc_helper.h>
+ 
+ #if defined(NV_DRM_DRM_GEM_H_PRESENT)
+diff --git a/kernel/nvidia-drm/nvidia-drm-encoder.c b/kernel/nvidia-drm/nvidia-drm-encoder.c
+index f66bbd7..e40716a 100644
+--- a/kernel/nvidia-drm/nvidia-drm-encoder.c
++++ b/kernel/nvidia-drm/nvidia-drm-encoder.c
+@@ -31,6 +31,9 @@
+ #include "nvidia-drm-crtc.h"
+ #include "nvidia-drm-helper.h"
+ 
++#if defined(NV_DRM_DRM_PROBE_HELPER_H_PRESENT)
++#include <drm/drm_probe_helper.h>
++#endif
+ #include <drm/drm_crtc_helper.h>
+ 
+ #include <drm/drm_atomic.h>
+diff --git a/kernel/nvidia-drm/nvidia-drm-gem-nvkms-memory.c b/kernel/nvidia-drm/nvidia-drm-gem-nvkms-memory.c
+index 8636eff..c0a44cd 100644
+--- a/kernel/nvidia-drm/nvidia-drm-gem-nvkms-memory.c
++++ b/kernel/nvidia-drm/nvidia-drm-gem-nvkms-memory.c
+@@ -221,8 +221,11 @@ done:
+ }
+ 
+ /* XXX Move these vma operations to os layer */
+-
++#ifdef VM_FAULT_OOM
+ static int __nv_drm_vma_fault(struct vm_area_struct *vma,
++#else
++static unsigned int __nv_drm_vma_fault(struct vm_area_struct *vma,
++#endif
+                               struct vm_fault *vmf)
+ {
+     unsigned long address = nv_page_fault_va(vmf);
+@@ -268,12 +271,20 @@ static int __nv_drm_vma_fault(struct vm_area_struct *vma,
+  */
+ 
+ #if defined(NV_VM_OPS_FAULT_REMOVED_VMA_ARG)
++#ifdef VM_FAULT_OOM
+ static int nv_drm_vma_fault(struct vm_fault *vmf)
++#else
++static unsigned int nv_drm_vma_fault(struct vm_fault *vmf)
++#endif
+ {
+     return __nv_drm_vma_fault(vmf->vma, vmf);
+ }
+ #else
++#ifdef VM_FAULT_OOM
+ static int nv_drm_vma_fault(struct vm_area_struct *vma,
++#else
++static unsigned int nv_drm_vma_fault(struct vm_area_struct *vma,
++#endif
+                                 struct vm_fault *vmf)
+ {
+     return __nv_drm_vma_fault(vma, vmf);
+diff --git a/kernel/nvidia-uvm/nvidia-uvm.Kbuild b/kernel/nvidia-uvm/nvidia-uvm.Kbuild
+index 5eb1d40..4d38d95 100644
+--- a/kernel/nvidia-uvm/nvidia-uvm.Kbuild
++++ b/kernel/nvidia-uvm/nvidia-uvm.Kbuild
+@@ -99,6 +99,7 @@ NV_CONFTEST_FUNCTION_COMPILE_TESTS += address_space_init_once
+ NV_CONFTEST_FUNCTION_COMPILE_TESTS += kbasename
+ NV_CONFTEST_FUNCTION_COMPILE_TESTS += fatal_signal_pending
+ NV_CONFTEST_FUNCTION_COMPILE_TESTS += list_cut_position
++NV_CONFTEST_FUNCTION_COMPILE_TESTS += list_is_first
+ NV_CONFTEST_FUNCTION_COMPILE_TESTS += vzalloc
+ NV_CONFTEST_FUNCTION_COMPILE_TESTS += wait_on_bit_lock_argument_count
+ NV_CONFTEST_FUNCTION_COMPILE_TESTS += proc_create_data
+@@ -109,6 +110,7 @@ NV_CONFTEST_FUNCTION_COMPILE_TESTS += usleep_range
+ NV_CONFTEST_FUNCTION_COMPILE_TESTS += radix_tree_empty
+ NV_CONFTEST_FUNCTION_COMPILE_TESTS += radix_tree_replace_slot
+ NV_CONFTEST_FUNCTION_COMPILE_TESTS += do_gettimeofday
++NV_CONFTEST_FUNCTION_COMPILE_TESTS += put_user_pages
+ 
+ NV_CONFTEST_TYPE_COMPILE_TESTS += proc_dir_entry
+ NV_CONFTEST_TYPE_COMPILE_TESTS += irq_handler_t
+diff --git a/kernel/nvidia-uvm/uvm8.c b/kernel/nvidia-uvm/uvm8.c
+index e00923d..d8cec38 100644
+--- a/kernel/nvidia-uvm/uvm8.c
++++ b/kernel/nvidia-uvm/uvm8.c
+@@ -172,7 +172,11 @@ static int uvm_vm_fault_sigbus(struct vm_area_struct *vma, struct vm_fault *vmf)
+     return VM_FAULT_SIGBUS;
+ }
+ 
++#ifdef VM_FAULT_OOM
+ static int uvm_vm_fault_sigbus_wrapper(struct vm_fault *vmf)
++#else
++static unsigned int uvm_vm_fault_sigbus_wrapper(struct vm_fault *vmf)
++#endif
+ {
+ #if defined(NV_VM_OPS_FAULT_REMOVED_VMA_ARG)
+     return uvm_vm_fault_sigbus(vmf->vma, vmf);
+@@ -389,8 +393,11 @@ static void uvm_vm_close_managed(struct vm_area_struct *vma)
+     if (current->mm != NULL)
+         uvm_record_unlock_mmap_sem_write(&current->mm->mmap_sem);
+ }
+-
++#ifdef VM_FAULT_OOM
+ static int uvm_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
++#else
++static unsigned int uvm_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
++#endif
+ {
+     uvm_va_space_t *va_space = uvm_va_space_get(vma->vm_file);
+     uvm_va_block_t *va_block;
+@@ -506,8 +513,11 @@ convert_error:
+             return VM_FAULT_SIGBUS;
+     }
+ }
+-
++#ifdef VM_FAULT_OOM
+ static int uvm_vm_fault_wrapper(struct vm_fault *vmf)
++#else
++static unsigned int uvm_vm_fault_wrapper(struct vm_fault *vmf)
++#endif
+ {
+ #if defined(NV_VM_OPS_FAULT_REMOVED_VMA_ARG)
+     return uvm_vm_fault(vmf->vma, vmf);
+diff --git a/kernel/nvidia-uvm/uvm8_tools.c b/kernel/nvidia-uvm/uvm8_tools.c
+index 521c57b..3bf815c 100644
+--- a/kernel/nvidia-uvm/uvm8_tools.c
++++ b/kernel/nvidia-uvm/uvm8_tools.c
+@@ -204,12 +204,14 @@ static bool tracker_is_counter(uvm_tools_event_tracker_t *event_tracker)
+     return event_tracker != NULL && !event_tracker->is_queue;
+ }
+ 
++#ifndef NV_PUT_USER_PAGES_PRESENT
+ static void put_user_pages(struct page **pages, NvU64 page_count)
+ {
+     NvU64 i;
+     for (i = 0; i < page_count; i++)
+         put_page(pages[i]);
+ }
++#endif
+ 
+ static void unmap_user_pages(struct page **pages, void *addr, NvU64 size)
+ {
+diff --git a/kernel/nvidia//nvidia.Kbuild b/kernel/nvidia/nvidia.Kbuild
+index acc9eba..138321a 100644
+--- a/kernel/nvidia/nvidia.Kbuild
++++ b/kernel/nvidia/nvidia.Kbuild
+@@ -191,5 +191,6 @@ NV_CONFTEST_GENERIC_COMPILE_TESTS += nvidia_grid_build
+ NV_CONFTEST_GENERIC_COMPILE_TESTS += get_user_pages
+ NV_CONFTEST_GENERIC_COMPILE_TESTS += get_user_pages_remote
+ NV_CONFTEST_GENERIC_COMPILE_TESTS += list_cut_position
++NV_CONFTEST_GENERIC_COMPILE_TESTS += list_is_first
+ 
+ NV_CONFTEST_MACRO_COMPILE_TESTS += INIT_WORK
+-- 
+2.20.1
+
