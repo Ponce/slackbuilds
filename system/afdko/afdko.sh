@@ -5,4 +5,5 @@ if [ ! "$PATH" = "" ]; then
 else
   PATH=$FDK_EXE
 fi
-export FDK_EXE
+export PATH
+unset FDK_EXE
