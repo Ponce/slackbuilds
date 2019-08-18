@@ -1,0 +1,124 @@
+Index: config/i386/i386.md
+===================================================================
+--- config/i386/i386.md	(revision 225539)
++++ config/i386/i386.md	(working copy)
+@@ -108,6 +108,7 @@
+   UNSPEC_LD_MPIC	; load_macho_picbase
+   UNSPEC_TRUNC_NOOP
+   UNSPEC_DIV_ALREADY_SPLIT
++  UNSPEC_MS_TO_SYSV_CALL
+   UNSPEC_PAUSE
+   UNSPEC_LEA_ADDR
+   UNSPEC_XBEGIN_ABORT
+@@ -11584,6 +11585,15 @@
+   "* return ix86_output_call_insn (insn, operands[0]);"
+   [(set_attr "type" "call")])
+ 
++(define_insn "*call_rex64_ms_sysv"
++  [(match_parallel 2 "call_rex64_ms_sysv_operation"
++    [(call (mem:QI (match_operand:DI 0 "call_insn_operand" "rBwBz"))
++	   (match_operand 1))
++     (unspec [(const_int 0)] UNSPEC_MS_TO_SYSV_CALL)])]
++  "TARGET_64BIT && !SIBLING_CALL_P (insn)"
++  "* return ix86_output_call_insn (insn, operands[0]);"
++  [(set_attr "type" "call")])
++
+ (define_insn "*sibcall"
+   [(call (mem:QI (match_operand:W 0 "sibcall_insn_operand" "UBsBz"))
+ 	 (match_operand 1))]
+@@ -11808,6 +11818,16 @@
+ 			 (match_dup 3)))
+ 	      (unspec [(const_int 0)] UNSPEC_PEEPSIB)])])
+ 
++(define_insn "*call_value_rex64_ms_sysv"
++  [(match_parallel 3 "call_rex64_ms_sysv_operation"
++    [(set (match_operand 0)
++	  (call (mem:QI (match_operand:DI 1 "call_insn_operand" "rBwBz"))
++		(match_operand 2)))
++     (unspec [(const_int 0)] UNSPEC_MS_TO_SYSV_CALL)])]
++ "TARGET_64BIT && !SIBLING_CALL_P (insn)"
++  "* return ix86_output_call_insn (insn, operands[1]);"
++  [(set_attr "type" "callv")])
++
+ (define_expand "call_value_pop"
+   [(parallel [(set (match_operand 0)
+ 		   (call (match_operand:QI 1)
+Index: config/i386/predicates.md
+===================================================================
+--- config/i386/predicates.md	(revision 225533)
++++ config/i386/predicates.md	(working copy)
+@@ -616,6 +616,36 @@
+ 	  && XINT (XEXP (op, 0), 1) == UNSPEC_GOTPCREL);
+ })
+ 
++;; Return true if OP is a call from MS ABI to SYSV ABI function.
++(define_predicate "call_rex64_ms_sysv_operation"
++  (match_code "parallel")
++{
++  unsigned creg_size = ARRAY_SIZE (x86_64_ms_sysv_extra_clobbered_registers);
++  unsigned i;
++
++  if ((unsigned) XVECLEN (op, 0) != creg_size + 2)
++    return false;
++
++  for (i = 0; i < creg_size; i++)
++    {
++      rtx elt = XVECEXP (op, 0, i+2);
++      enum machine_mode mode;
++      unsigned regno;
++
++      if (GET_CODE (elt) != CLOBBER
++          || GET_CODE (SET_DEST (elt)) != REG)
++        return false;
++
++      regno = x86_64_ms_sysv_extra_clobbered_registers[i];
++      mode = SSE_REGNO_P (regno) ? TImode : DImode;
++
++      if (GET_MODE (SET_DEST (elt)) != mode
++	  || REGNO (SET_DEST (elt)) != regno)
++	return false;
++    }
++  return true;
++})
++
+ ;; Match exactly zero.
+ (define_predicate "const0_operand"
+   (match_code "const_int,const_wide_int,const_double,const_vector")
+Index: config/i386/i386.c
+===================================================================
+--- config/i386/i386.c	(revision 225533)
++++ config/i386/i386.c	(working copy)
+@@ -25639,7 +25639,9 @@
+ 		  rtx callarg2,
+ 		  rtx pop, bool sibcall)
+ {
+-  rtx vec[3];
++  unsigned int const cregs_size
++    = ARRAY_SIZE (x86_64_ms_sysv_extra_clobbered_registers);
++  rtx vec[3 + cregs_size];
+   rtx use = NULL, call;
+   unsigned int vec_len = 0;
+ 
+@@ -25742,16 +25744,18 @@
+   if (TARGET_64BIT_MS_ABI
+       && (!callarg2 || INTVAL (callarg2) != -2))
+     {
+-      int const cregs_size
+-	= ARRAY_SIZE (x86_64_ms_sysv_extra_clobbered_registers);
+-      int i;
++      unsigned i;
+ 
++      vec[vec_len++] = gen_rtx_UNSPEC (VOIDmode, gen_rtvec (1, const0_rtx),
++ 				       UNSPEC_MS_TO_SYSV_CALL);
++
+       for (i = 0; i < cregs_size; i++)
+ 	{
+ 	  int regno = x86_64_ms_sysv_extra_clobbered_registers[i];
+ 	  machine_mode mode = SSE_REGNO_P (regno) ? TImode : DImode;
+ 
+-	  clobber_reg (&use, gen_rtx_REG (mode, regno));
++ 	  vec[vec_len++]
++ 	    = gen_rtx_CLOBBER (VOIDmode, gen_rtx_REG (mode, regno));
+ 	}
+     }
+ 
