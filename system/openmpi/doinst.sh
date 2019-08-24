@@ -11,6 +11,7 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
+config etc/pmix-mca-params.conf.new
 config etc/openmpi-default-hostfile.new
 config etc/openmpi-mca-params.conf.new
 config etc/openmpi-totalview.tcl.new
