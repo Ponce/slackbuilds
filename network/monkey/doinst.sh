@@ -27,13 +27,10 @@ config etc/logrotate.d/monkey.new
 config etc/monkey/monkey.conf.new
 config etc/monkey/plugins.load.new
 config etc/monkey/sites/default.new
-config etc/monkey/plugins/auth/monkey.users.new
-config etc/monkey/plugins/cgi/cgi.conf.new
 config etc/monkey/plugins/cheetah/cheetah.conf.new
 config etc/monkey/plugins/dirlisting/dirhtml.conf.new
 config etc/monkey/plugins/fastcgi/fastcgi.conf.new
 config etc/monkey/plugins/logger/logger.conf.new
 config etc/monkey/plugins/mandril/mandril.conf.new
-config var/www/monkey/404.html.new
 config var/www/monkey/favicon.ico.new
 config var/www/monkey/index.html.new
