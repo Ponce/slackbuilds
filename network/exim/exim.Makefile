@@ -237,7 +237,7 @@ TRANSPORT_SMTP=yes
 # This one is special-purpose, and commonly not required, so it is not
 # included by default.
 
-# TRANSPORT_LMTP=yes
+TRANSPORT_LMTP=yes
 
 
 #------------------------------------------------------------------------------
