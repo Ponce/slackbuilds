@@ -1,5 +1,5 @@
 #!/bin/sh
 USERDIR=$(pwd)
 cd /usr/share/games/larn
-./larn $1
+exec /usr/share/games/larn "$@"
 cd $USERDIR
