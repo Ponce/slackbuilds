@@ -2,7 +2,7 @@
 
 __author__      = "Sander Granneman"
 __copyright__   = "Copyright 2019"
-__version__     = "1.4.4"
+__version__     = "1.4.6"
 __credits__     = ["Sander Granneman","Hywell Dunn Davies"]
 __maintainer__  = ["Sander Granneman","Rob van Nues via SlackBuilds.org"]
 __email__       = ["sgrannem@staffmail.ed.ac.uk", "sborg63@disroot.org"]
