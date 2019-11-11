@@ -1,0 +1,95 @@
+#!/bin/sh
+
+# Slackware build script for STM32CubeIDE
+
+# Copyright 2019 Andrzej Telszewski, Szczecin
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=STM32CubeIDE
+VERSION=${VERSION:-1.1.0_4551_20191014_1140}
+ST_LINK_UDEV_RULES_VERSION=${ST_LINK_UDEV_RULES_VERSION:-1.0.2-2}
+SRCNAM=st-stm32cubeide_${VERSION}_amd64
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+# Only x86_64 is supported.
+ARCH=x86_64
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+mkdir -p $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+unzip $CWD/en.en.${SRCNAM}.sh.zip
+
+chmod +x ${SRCNAM}.sh
+$(pwd)/${SRCNAM}.sh \
+  --noexec --nox11 --nochown --target $(pwd)
+
+# Unpack and install STM32CubeIDE.
+mkdir -p $PKG/opt/st/stm32cubeide
+tar zvxf st-stm32cubeide_${VERSION}_amd64.tar.gz -C $PKG/opt/st/stm32cubeide
+( cd $PKG
+  chown -R root:root .
+  chmod -R a-st,u+rwX,go-w+rX .
+)
+
+# Unpack ST-Link Udev rules.
+chmod +x st-stlink-udev-rules-$ST_LINK_UDEV_RULES_VERSION-linux-noarch.sh
+$(pwd)/st-stlink-udev-rules-$ST_LINK_UDEV_RULES_VERSION-linux-noarch.sh \
+  --noexec --nox11 --nochown --target st-stlink-udev-rules
+tar zvxf st-stlink-udev-rules/st-stlink-udev-rules-$ST_LINK_UDEV_RULES_VERSION-linux-all.tar.gz \
+  -C st-stlink-udev-rules
+tar zvxf st-stlink-udev-rules/st-stlink-udev-rules.sw \
+  -C st-stlink-udev-rules
+
+# Install ST-Link Udev rules.
+mkdir -p $PKG/etc/udev/rules.d
+( cd st-stlink-udev-rules/etc/udev/rules.d
+  for rule in 49-stlinkv1.rules 49-stlinkv2-1.rules 49-stlinkv2.rules 49-stlinkv3.rules; do
+    cat $rule > $PKG/etc/udev/rules.d/$rule.new
+  done
+)
+
+# Strip binaries and libraries.
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Install desktop shortcut.
+mkdir -p $PKG/usr/share/applications
+cat $CWD/st-stm32cubeide.desktop > $PKG/usr/share/applications/st-stm32cubeide.desktop
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
