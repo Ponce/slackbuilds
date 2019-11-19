@@ -1,0 +1,195 @@
+From: Andrew Cooper <andrew.cooper3@citrix.com>
+Subject: xen/hypercall: Don't use BUG() for parameter checking in hypercall_create_continuation()
+
+Since c/s 1d429034 "hypercall: update vcpu_op to take an unsigned vcpuid",
+which incorrectly swapped 'i' for 'u' in the parameter type list, guests have
+been able to hit the BUG() in next_args()'s default case.
+
+Correct these back to 'i'.
+
+In addition, make adjustments to prevent this class of issue from occurring in
+the future - crashing Xen is not an appropriate form of parameter checking.
+
+Capitalise NEXT_ARG() to catch all uses, to highlight that it is a macro doing
+non-function-like things behind the scenes, and undef it when appropriate.
+Implement a bad_fmt: block which prints an error, asserts unreachable, and
+crashes the guest.
+
+On the ARM side, drop all parameter checking of p.  It is asymmetric with the
+x86 side, and akin to expecting memcpy() or sprintf() to check their src/fmt
+parameter before use.  A caller passing "" or something other than a string
+literal will be obvious during code review.
+
+This is XSA-296.
+
+Signed-off-by: Andrew Cooper <andrew.cooper3@citrix.com>
+Acked-by: Julien Grall <julien.grall@arm.com>
+
+diff --git a/xen/arch/arm/domain.c b/xen/arch/arm/domain.c
+index 941bbff4fe..a3da8e9c08 100644
+--- a/xen/arch/arm/domain.c
++++ b/xen/arch/arm/domain.c
+@@ -383,14 +383,15 @@ void sync_vcpu_execstate(struct vcpu *v)
+     /* Nothing to do -- no lazy switching */
+ }
+ 
+-#define next_arg(fmt, args) ({                                              \
++#define NEXT_ARG(fmt, args)                                                 \
++({                                                                          \
+     unsigned long __arg;                                                    \
+     switch ( *(fmt)++ )                                                     \
+     {                                                                       \
+     case 'i': __arg = (unsigned long)va_arg(args, unsigned int);  break;    \
+     case 'l': __arg = (unsigned long)va_arg(args, unsigned long); break;    \
+     case 'h': __arg = (unsigned long)va_arg(args, void *);        break;    \
+-    default:  __arg = 0; BUG();                                             \
++    default:  goto bad_fmt;                                                 \
+     }                                                                       \
+     __arg;                                                                  \
+ })
+@@ -405,9 +406,6 @@ unsigned long hypercall_create_continuation(
+     unsigned int i;
+     va_list args;
+ 
+-    /* All hypercalls take at least one argument */
+-    BUG_ON( !p || *p == '\0' );
+-
+     current->hcall_preempted = true;
+ 
+     va_start(args, format);
+@@ -415,7 +413,7 @@ unsigned long hypercall_create_continuation(
+     if ( mcs->flags & MCSF_in_multicall )
+     {
+         for ( i = 0; *p != '\0'; i++ )
+-            mcs->call.args[i] = next_arg(p, args);
++            mcs->call.args[i] = NEXT_ARG(p, args);
+ 
+         /* Return value gets written back to mcs->call.result */
+         rc = mcs->call.result;
+@@ -431,7 +429,7 @@ unsigned long hypercall_create_continuation(
+ 
+             for ( i = 0; *p != '\0'; i++ )
+             {
+-                arg = next_arg(p, args);
++                arg = NEXT_ARG(p, args);
+ 
+                 switch ( i )
+                 {
+@@ -454,7 +452,7 @@ unsigned long hypercall_create_continuation(
+ 
+             for ( i = 0; *p != '\0'; i++ )
+             {
+-                arg = next_arg(p, args);
++                arg = NEXT_ARG(p, args);
+ 
+                 switch ( i )
+                 {
+@@ -475,8 +473,16 @@ unsigned long hypercall_create_continuation(
+     va_end(args);
+ 
+     return rc;
++
++ bad_fmt:
++    gprintk(XENLOG_ERR, "Bad hypercall continuation format '%c'\n", *p);
++    ASSERT_UNREACHABLE();
++    domain_crash(current->domain);
++    return 0;
+ }
+ 
++#undef NEXT_ARG
++
+ void startup_cpu_idle_loop(void)
+ {
+     struct vcpu *v = current;
+diff --git a/xen/arch/x86/hypercall.c b/xen/arch/x86/hypercall.c
+index d483dbaa6b..4643e5eb43 100644
+--- a/xen/arch/x86/hypercall.c
++++ b/xen/arch/x86/hypercall.c
+@@ -80,14 +80,15 @@ const hypercall_args_t hypercall_args_table[NR_hypercalls] =
+ #undef COMP
+ #undef ARGS
+ 
+-#define next_arg(fmt, args) ({                                              \
++#define NEXT_ARG(fmt, args)                                                 \
++({                                                                          \
+     unsigned long __arg;                                                    \
+     switch ( *(fmt)++ )                                                     \
+     {                                                                       \
+     case 'i': __arg = (unsigned long)va_arg(args, unsigned int);  break;    \
+     case 'l': __arg = (unsigned long)va_arg(args, unsigned long); break;    \
+     case 'h': __arg = (unsigned long)va_arg(args, void *);        break;    \
+-    default:  __arg = 0; BUG();                                             \
++    default:  goto bad_fmt;                                                 \
+     }                                                                       \
+     __arg;                                                                  \
+ })
+@@ -109,7 +110,7 @@ unsigned long hypercall_create_continuation(
+     if ( mcs->flags & MCSF_in_multicall )
+     {
+         for ( i = 0; *p != '\0'; i++ )
+-            mcs->call.args[i] = next_arg(p, args);
++            mcs->call.args[i] = NEXT_ARG(p, args);
+     }
+     else
+     {
+@@ -121,7 +122,7 @@ unsigned long hypercall_create_continuation(
+         {
+             for ( i = 0; *p != '\0'; i++ )
+             {
+-                arg = next_arg(p, args);
++                arg = NEXT_ARG(p, args);
+                 switch ( i )
+                 {
+                 case 0: regs->rdi = arg; break;
+@@ -137,7 +138,7 @@ unsigned long hypercall_create_continuation(
+         {
+             for ( i = 0; *p != '\0'; i++ )
+             {
+-                arg = next_arg(p, args);
++                arg = NEXT_ARG(p, args);
+                 switch ( i )
+                 {
+                 case 0: regs->rbx = arg; break;
+@@ -154,8 +155,16 @@ unsigned long hypercall_create_continuation(
+     va_end(args);
+ 
+     return op;
++
++ bad_fmt:
++    gprintk(XENLOG_ERR, "Bad hypercall continuation format '%c'\n", *p);
++    ASSERT_UNREACHABLE();
++    domain_crash(curr->domain);
++    return 0;
+ }
+ 
++#undef NEXT_ARG
++
+ int hypercall_xlat_continuation(unsigned int *id, unsigned int nr,
+                                 unsigned int mask, ...)
+ {
+diff --git a/xen/common/compat/domain.c b/xen/common/compat/domain.c
+index 39877b3ab2..2531fa7421 100644
+--- a/xen/common/compat/domain.c
++++ b/xen/common/compat/domain.c
+@@ -81,7 +81,7 @@ int compat_vcpu_op(int cmd, unsigned int vcpuid, XEN_GUEST_HANDLE_PARAM(void) ar
+         }
+ 
+         if ( rc == -ERESTART )
+-            rc = hypercall_create_continuation(__HYPERVISOR_vcpu_op, "iuh",
++            rc = hypercall_create_continuation(__HYPERVISOR_vcpu_op, "iih",
+                                                cmd, vcpuid, arg);
+ 
+         break;
+diff --git a/xen/common/domain.c b/xen/common/domain.c
+index 2308588052..65bcd85e34 100644
+--- a/xen/common/domain.c
++++ b/xen/common/domain.c
+@@ -1411,7 +1411,7 @@ long do_vcpu_op(int cmd, unsigned int vcpuid, XEN_GUEST_HANDLE_PARAM(void) arg)
+ 
+         rc = arch_initialise_vcpu(v, arg);
+         if ( rc == -ERESTART )
+-            rc = hypercall_create_continuation(__HYPERVISOR_vcpu_op, "iuh",
++            rc = hypercall_create_continuation(__HYPERVISOR_vcpu_op, "iih",
+                                                cmd, vcpuid, arg);
+ 
+         break;
