@@ -1,0 +1,188 @@
+Description: Disable LASH support.
+Author: Alessio Treglia <alessio@debian.org>
+Forwarded: no
+---
+ Makefile      |    6 +--
+ azr3/main.cpp |   91 ----------------------------------------------------------
+ azr3/main.hpp |    7 ----
+ 3 files changed, 4 insertions(+), 100 deletions(-)
+
+--- azr3-jack.orig/Makefile
++++ azr3-jack/Makefile
+@@ -10,7 +10,7 @@ PACKAGE_WEBPAGE = "http://ll-plugins.non
+ PACKAGE_BUGTRACKER = "https://savannah.nongnu.org/bugs/?group=ll-plugins"
+ PACKAGE_VC = "http://git.savannah.gnu.org/cgit/ll-plugins/azr3-jack.git/"
+ 
+-PKG_DEPS = gtkmm-2.4>=2.8.8 jack>=0.103.0 lash-1.0>=0.5.3
++PKG_DEPS = gtkmm-2.4>=2.8.8 jack>=0.103.0
+ 
+ 
+ PROGRAMS = azr3
+@@ -32,8 +32,8 @@ azr3_SOURCES = \
+ 	drawbar.hpp drawbar.cpp \
+ 	textbox.hpp textbox.cpp
+ azr3_SOURCEDIR = azr3
+-azr3_CFLAGS = `pkg-config --cflags gtkmm-2.4 jack lash-1.0` -DDATADIR=\"$(pkgdatadir)\"
+-azr3_LDFLAGS = `pkg-config --libs gtkmm-2.4 jack lash-1.0`
++azr3_CFLAGS = `pkg-config --cflags gtkmm-2.4 jack` -DDATADIR=\"$(pkgdatadir)\"
++azr3_LDFLAGS = `pkg-config --libs gtkmm-2.4 jack` -lpthread
+ azr3_cpp_CFLAGS = $(shell if pkg-config --atleast-version=0.107 jack ; then echo -include azr3/newjack.hpp; fi)
+ main_cpp_CFLAGS = -DPACKAGE_VERSION=\"$(PACKAGE_VERSION)\"
+ 
+--- azr3-jack.orig/azr3/main.hpp
++++ azr3-jack/azr3/main.hpp
+@@ -25,7 +25,6 @@
+ #include <gtkmm.h>
+ #include <pthread.h>
+ #include <semaphore.h>
+-#include <lash/lash.h>
+ 
+ #include "azr3.hpp"
+ #include "azr3gui.hpp"
+@@ -65,10 +64,6 @@ protected:
+ 
+   int process(jack_nframes_t nframes);
+ 
+-  bool check_lash_events();
+-
+-  bool init_lash(lash_args_t* lash_args, const std::string& jack_name);
+-
+   void auto_connect();
+ 
+   static int static_process(jack_nframes_t frames, void* arg);
+@@ -89,10 +84,8 @@ protected:
+   sem_t m_gui_changed;
+   float m_gui_controls[63];
+   Preset m_presets[128];
+-  lash_client_t* m_lash_client;
+ 
+   bool m_ok;
+-  bool m_started_by_lashd;
+   std::string m_auto_midi;
+   std::string m_auto_audio;
+   
+--- azr3-jack.orig/azr3/main.cpp
++++ azr3-jack/azr3/main.cpp
+@@ -32,13 +32,6 @@ using namespace std;
+ 
+ 
+ Main::Main(int& argc, char**& argv) : m_ok(false) {
+-  
+-  /* this is a bit dumb, but the only way I know of to check whether we were
+-     started by lashd is to see if lash_extract_args() removes any arguments */
+-  int old_argc = argc;  
+-  lash_args_t* lash_args = lash_extract_args(&argc, &argv);
+-  m_started_by_lashd = (argc != old_argc);
+-  
+   // parse all non-LASH arguments
+   OptionParser op;
+   bool help(false);
+@@ -165,10 +158,6 @@ Main::Main(int& argc, char**& argv) : m_
+       }
+     }
+   }
+-    
+-  // initialise LASH
+-  if (!init_lash(lash_args, jack_get_client_name(m_jack_client)))
+-    return;
+   
+   m_win->set_title("AZR-3");
+   m_win->set_resizable(false);
+@@ -184,14 +173,11 @@ void Main::run() {
+   jack_activate(m_jack_client);
+ 
+   // auto-connect JACK ports if desired
+-  if (!m_started_by_lashd)
+-    auto_connect();
++  auto_connect();
+ 
+   Glib::signal_timeout().
+     connect(sigc::bind_return(sigc::mem_fun(*this, &Main::check_changes), 
+ 			      true), 10);
+-  Glib::signal_timeout().
+-    connect(sigc::mem_fun(*this, &Main::check_lash_events), 500);
+   m_kit->run(*m_win);
+   jack_deactivate(m_jack_client);
+   m_engine->deactivate();
+@@ -345,81 +331,6 @@ int Main::process(jack_nframes_t nframes
+ }
+ 
+ 
+-bool Main::check_lash_events() {
+-  lash_event_t* event;
+-  bool go_on = true;
+-  while ((event = lash_get_event(m_lash_client))) {
+-      
+-    // save
+-    if (lash_event_get_type(event) == LASH_Save_File) {
+-      cerr<<"Received LASH Save command"<<endl;
+-      string dir(lash_event_get_string(event));
+-      ofstream fout((dir + "/state").c_str());
+-      fout<<int(m_program);
+-      for (uint32_t i = 0; i < 63; ++i)
+-	fout<<" "<<m_gui_controls[i];
+-      fout<<endl;
+-      write_presets((dir + "/presets").c_str());
+-      lash_send_event(m_lash_client, 
+-		      lash_event_new_with_type(LASH_Save_File));
+-    }
+-      
+-    // restore
+-    else if (lash_event_get_type(event) == LASH_Restore_File) {
+-      cerr<<"Received LASH Restore command"<<endl;
+-      string dir(lash_event_get_string(event));
+-      for (unsigned char i = 0; i < 128; ++i)
+-	m_presets[i].empty = true;
+-      load_presets((dir + "/presets").c_str());
+-      m_gui->clear_programs();
+-      for (unsigned char i = 0; i < 128; ++i) {
+-	if (!m_presets[i].empty)
+-	  m_gui->add_program(i, m_presets[i].name.c_str());
+-      }
+-      ifstream fin((dir + "/state").c_str());
+-      int prog;
+-      fin>>prog;
+-      m_gui->set_program(prog);
+-      for (uint32_t p = 0; p < 63; ++p) {
+-	float tmp;
+-	fin>>tmp;
+-	m_gui->set_control(p, tmp);
+-      }
+-      lash_send_event(m_lash_client, 
+-		      lash_event_new_with_type(LASH_Restore_File));
+-    }
+-      
+-    // quit
+-    else if (lash_event_get_type(event) == LASH_Quit) {
+-      cerr<<"Received LASH Quit command"<<endl;
+-      Gtk::Main::instance()->quit();
+-      go_on = false;
+-    }
+-    
+-    lash_event_destroy(event);
+-  }
+-  return go_on;
+-}
+-
+-
+-bool Main::init_lash(lash_args_t* lash_args, const std::string& jack_name) {
+-  
+-  m_lash_client = lash_init(lash_args, "AZR-3", 
+-			    LASH_Config_File, LASH_PROTOCOL(2, 0));
+-  if (m_lash_client) {
+-    lash_event_t* event = lash_event_new_with_type(LASH_Client_Name);
+-    lash_event_set_string(event, "AZR-3");
+-    lash_send_event(m_lash_client, event);      
+-    lash_jack_client_name(m_lash_client, jack_name.c_str());
+-    Glib::signal_timeout().
+-      connect(sigc::mem_fun(*this, &Main::check_lash_events), 500);
+-  }
+-  else
+-    cerr<<"Could not initialise LASH!"<<endl;
+-  return (m_lash_client != 0);
+-}
+-  
+-  
+ int Main::static_process(jack_nframes_t frames, void* arg) {
+   return static_cast<Main*>(arg)->process(frames);
+ }
