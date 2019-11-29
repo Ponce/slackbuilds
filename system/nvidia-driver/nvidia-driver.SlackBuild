@@ -25,13 +25,11 @@
 # see changelog.txt
 
 PRGNAM=nvidia-driver
-VERSION=${VERSION:-430.50}
+VERSION=${VERSION:-440.36}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
-GLVND=yes
-# libglnvd landed in mesa and is Nvidia recommended; no longer optional
-# future will remove 
+CURRENT=${CURRENT:-no}
 
 set -e
 
@@ -68,7 +66,7 @@ mkdir -p $TMP $PKG $OUTPUT $PKG/install
 mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/{drivers,extensions} \
   $PKG/etc/OpenCL/vendors/ $PKG/usr/{bin,doc,man/man1,sbin} \
   $PKG/usr/share/{applications,nvidia,pixmaps,egl/egl_external_platform.d} \
-  $PKG/usr/include/GL $PKG/etc/vulkan/icd.d $PKG/etc/X11/xorg.conf.d \
+  $PKG/usr/include/GL $PKG/etc/vulkan/{icd.d,implicit_layer.d} $PKG/etc/X11/xorg.conf.d \
   $PKG/etc/X11/glvnd/egl_vendor.d $PKG/var/log/nvidia/{32,64}
 
 if [ "$COMPAT32" = "yes" ]; then
@@ -122,12 +120,6 @@ cd -
 mv -f $PKG/usr/bin/nvidia-installer $TMP/$SRCNAM
 mv -f $PKG/usr/man/man1/nvidia-installer.1.gz $TMP/$SRCNAM
 
-# Configure options
-if [ "$GLVND" = "yes" ]; then
-  GLVNDOPT="--install-libglvnd --glvnd-glx-client --glvnd-egl-client"
-else
-  GLVNDOPT="--no-install-libglvnd --no-glvnd-glx-client --no-glvnd-egl-client"
-fi
 if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
     COMP32="--install-compat32-libs --compat32-prefix=$PKG/usr"
     MULTI="_multi"
@@ -158,28 +150,39 @@ cd $TMP/$SRCNAM
   --log-file-name=$PKG/var/log/nvidia-installer.log \
   --egl-external-platform-config-path=$PKG/usr/share/egl/egl_external_platform.d \
   --no-nvidia-modprobe \
-  $GLVNDOPT \
+  --install-libglvnd \
   $COMP32
 
 # Clean-up: we really do not need this:
 rm -rf /var/lib/nvidia
-# which 32-bit tls? why? why?
-if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
-      install -m 755 32/libnvidia-tls.so.$VERSION $PKG/usr/lib/tls/libnvidia-tls.so.$VERSION
-      cd $PKG/usr/lib
-          ln -sf tls/libnvidia-tls.so.$VERSION libnvidia-tls.so.$VERSION
-      cd -
+# If running current (15.0) remove duplicate libglvnd files
+if [ "$CURRENT" = "yes" ]; then
+    rm -f $PKG/usr/lib$LIBDIRSUFFIX/libEGL.so.1.1.0
+    rm -f $PKG/usr/lib$LIBDIRSUFFIX/libGL.so.1.7.0
+    rm -f $PKG/usr/lib$LIBDIRSUFFIX/libGLESv1_CM.so.1.2.0
+    rm -f $PKG/usr/lib$LIBDIRSUFFIX/libGLESv2.so.2.1.0
+    rm -f $PKG/usr/lib$LIBDIRSUFFIX/libGLX.so.0.0.0
+    rm -f $PKG/usr/lib$LIBDIRSUFFIX/libGLdispatch.so.0.0.0
+    rm -f $PKG/usr/lib$LIBDIRSUFFIX/libGLdispatch.so.0
+    rm -f $PKG/usr/lib$LIBDIRSUFFIX/libOpenGl.0.0.0 
+    if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
+        rm -f $PKG/usr/lib/libEGL.so.1.1.0
+        rm -f $PKG/usr/lib/libGL.so.1.7.0
+        rm -f $PKG/usr/lib/libGLESv1_CM.so.1.2.0
+        rm -f $PKG/usr/lib/libGLESv2.so.2.1.0
+        rm -f $PKG/usr/lib/libGLX.so.0.0.0
+        rm -f $PKG/usr/lib/libGLdispatch.so.0.0.0
+	rm -f $PKG/usr/lib/libGLdispatch.so.0
+        rm -f $PKG/usr/lib/libOpenGl.0.0.0
+    fi
 fi
 
-# Only one conflicting lib
-cd $PKG/usr/lib$LIBDIRSUFFIX
-mv libGL.la libGL.la-nvidia
-cd -
-
+# add tls
 if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
-   cd $PKG/usr/lib
-   mv libGL.la libGL.la-nvidia
-   cd -
+    install -m 755 32/libnvidia-tls.so.$VERSION $PKG/usr/lib/tls/libnvidia-tls.so.$VERSION
+    cd $PKG/usr/lib
+        ln -sf tls/libnvidia-tls.so.$VERSION libnvidia-tls.so.$VERSION
+    cd -
 fi
 
 # Compile utilites from source, replacing the precompiled versions
@@ -261,34 +264,21 @@ cd -
     install -m 644 _out/Linux_$TARGET/nvidia-persistenced.1.gz $PKG/usr/man/man1/
   cd -
 
-# Bash script to cleanly install (in doinst.sh) and uninstall the nvidia files
-# so we don't stomp on the overlapping xorg files.
-# Note: switching can be problematic ;-)
-install -m 0755 $CWD/nvidia-switch $PKG/usr/sbin/
-sed -i s/PKGVERSION/$VERSION/g $PKG/usr/sbin/nvidia-switch
-sed -i s/LIBDIRSUFFIX/$LIBDIRSUFFIX/g $PKG/usr/sbin/nvidia-switch
-
-if [ ${COMPAT32} = "yes" ]; then
-  sed -i s/LIB32FLAG/yes/g $PKG/usr/sbin/nvidia-switch
-else
-  sed -i s/LIB32FLAG/no/g $PKG/usr/sbin/nvidia-switch
+# Don't ship .la files:
+rm -f $PKG/usr/lib${LIBDIRSUFFIX}/*.la
+if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
+    rm -f $PKG/usr/lib/*.la
 fi
 
 # These update or correct wrong paths
-sed -i "s|$TMP/package-$PRGNAM/usr|/usr|" $PKG/usr/lib$LIBDIRSUFFIX/libGL.la-nvidia
-sed -i "s|/usr/X11R6/lib|/usr/lib$LIBDIRSUFFIX|" $PKG/usr/lib$LIBDIRSUFFIX/libGL.la-nvidia
 sed -i "s|__UTILS_PATH__|/usr/bin|" $PKG/usr/share/applications/nvidia-settings.desktop
 sed -i "s|__PIXMAP_PATH__|/usr/share/pixmaps|" $PKG/usr/share/applications/nvidia-settings.desktop
 sed -i "s|__NVIDIA_SETTINGS_DESKTOP_CATEGORIES__|Application;Settings;|" $PKG/usr/share/applications/nvidia-settings.desktop
 
-if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
-  sed -i "s|$TMP/package-$PRGNAM/usr|/usr|" $PKG/usr/lib/libGL.la-nvidia
-  sed -i "s|/usr/X11R6/lib|/usr/lib|" $PKG/usr/lib/libGL.la-nvidia
-fi
-
 # Move ICDs to $PKG and cleanup (no switch option in installer?)
 mv /etc/OpenCL/vendors/nvidia.icd $PKG/etc/OpenCL/vendors/nvidia.icd
 mv /etc/vulkan/icd.d/nvidia_icd.json $PKG/etc/vulkan/icd.d/nvidia_icd.json
+mv /etc/vulkan/implicit_layer.d/nvidia_layers.json $PKG/etc/vulkan/implicit_layer.d/nvidia_layers.json
 rm -rf /etc/OpenCL
 rm -rf /etc/vulkan
 
