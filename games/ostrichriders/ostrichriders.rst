@@ -2,7 +2,7 @@
 ..   rst2man.py ostrichriders.rst > ostrichriders.6
 .. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 0.6.3
+.. |version| replace:: 0.6.5
 .. |date| date::
 
 .. converting from pod:
@@ -46,6 +46,9 @@ OPTIONS
 
 *-l* <libdir>
             Use alternate game data directory.
+
+*-a*
+            Arcade mode. Reduces available options in the game menu.
 
 FILES
 =====
