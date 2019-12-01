@@ -13,3 +13,7 @@ config() {
 
 config etc/timidity/eawpats.cfg.new
 
+# if there's no existing timidity.cfg, eawpats takes over.
+if [ ! -r etc/timidity/timidity.cfg ]; then
+  ( cd etc/timidity ; ln -sf eawpats.cfg timidity.cfg )
+fi
