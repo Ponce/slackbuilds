@@ -13,3 +13,7 @@ config() {
 config etc/timidity/crude.cfg.new
 config etc/timidity/freepats.cfg.new
 
+# if there's no existing timidity.cfg, freepats takes over.
+if [ ! -r etc/timidity/timidity.cfg ]; then
+  ( cd etc/timidity ; ln -sf crude.cfg timidity.cfg )
+fi
