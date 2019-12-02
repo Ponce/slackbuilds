@@ -6,12 +6,16 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20191126 bkw: update for 1.60. Upstream has switched from autotools
+# to meson for the build system, so this script can no longer build
+# old versions.
+
 # 20181201 bkw:
 # - update for 1.57.
 # - disable OSS audio by default, add OSS=yes option.
 # - autodetect RetroArch, add RETROARCH=yes|no option.
 # - document the above in the README.
-# - document PULSE=no io README.
+# - document PULSE=no in README.
 # - stop including snes9x.conf.default in the docdir, since it's
 #   outdated and will cause snes9x to segfault if you try to use it!
 # - since we now have 3 build options, make slack-desc show them.
@@ -53,7 +57,7 @@
 # can't build 1.53 any more.
 
 PRGNAM=snes9x
-VERSION=${VERSION:-1.57}
+VERSION=${VERSION:-1.60}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -99,67 +103,38 @@ chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# Various patches, depending on the version we're building. Currently
-# this script should work with 1.56.2 and 1.57. Anything older and you're
-# on your own.
-
-# For 1.56.2, libretro.diff fixes the libretro build, it's upstream's
-# commits abb4b4c39 and a77b3b379b. Already included in 1.57.
-
-# For 1.57 (and 1.56.2 I hope), fix_config_file_segfaults.diff is
-# upstream's commit 5e9f068. libretro_lto_variable is 21d6275 (thanks
-# to orbea for coding this one & sending it upstream, based on my vague
-# idea). Future 1.57.x or 1.58 will include these already.
-
-# At some point, this set of cases will be too complex for me to want to
-# maintain & test it, and it'll go away (this script will only support
-# the latest version, whatever that happens to be).
-
-case "$VERSION" in
-  1.5[0-5]*|1.[0-4]*) ;; # doubt these build anyway
-  1.56.2) PATCHES="libretro" ;;
-  1.57)   PATCHES="fix_config_file_segfaults libretro_lto_variable";;
-  *)      ;;
-esac
-
-[ -n "$PATCHES" ] && for p in $PATCHES; do
-  [ -e "$CWD/$p.diff" ] && patch -p1 < "$CWD/$p.diff"
-done
-
 cd gtk
-./autogen.sh
 
 WITHPULSE=yes
 if [ "$PULSE" = "no" ] || ! pkg-config --exists libpulse; then
-  PULSEOPT="--without-pulseaudio"
+  PULSEOPT="-D pulseaudio=false"
   WITHPULSE=no
 fi
 
 WITHOSS=yes
 if [ "${OSS:-no}" = "no" ]; then
-  OSSOPT="--without-oss"
+  OSSOPT="-D oss=false"
   WITHOSS=no
 fi
 
-CFLAGS="-g $SLKCFLAGS" \
-CXXFLAGS="-g $SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --bindir=/usr/games \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --with-netplay \
-  --without-system-zip \
-  --with-gtk2 \
-  --without-gtk3 \
-  --without-portaudio \
-  $PULSEOPT \
-  $OSSOPT \
-  --build=$ARCH-slackware-linux
-
-make
-make install DESTDIR=$PKG
+mkdir build
+cd build
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  meson .. \
+    $PULSEOPT $OSSOPT \
+    -D gtk3=false -D gtk2=true \
+    --buildtype=release \
+    --infodir=/usr/info \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --prefix=/usr \
+    --sysconfdir=/etc
+  ninja
+  DESTDIR=$PKG ninja install
+  mv $PKG/usr/bin $PKG/usr/games
+cd ..
 
 # RetroArch support, contributed by orbea (Hunter Sezen).
 # Note that the source here is self-contained, there's no build-time
@@ -201,23 +176,9 @@ ln -s $PRGNAM-gtk.6.gz $PKG/usr/man/man6/$PRGNAM.6.gz
 ln -s $PRGNAM-gtk $PKG/usr/games/$PRGNAM
 
 PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
-OLDDOC=$PKGDOC/${PRGNAM}_original_docs
-mkdir -p $OLDDOC
-rm -f ../docs/snes9x.conf.default # outdated, useless
-cp -a doc/* $PKGDOC
-cp -a ../docs/* $OLDDOC
-cat $CWD/README_docs.txt > $PKGDOC/README_docs.txt
+mkdir -p $PKGDOC
+cp -a ../LICENSE ../README* ../docs/* $PKGDOC
 cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
-
-# We don't need 3 copies of the LGPL v2.1 (we already have the GPL
-# and proprietary snes9x licenses...)
-cd $PKGDOC
-  rm -f snes_ntsc_license.txt ${PRGNAM}_original_docs/lgpl-2.1.txt
-  ln -s lgpl.txt snes_ntsc_license.txt
-  ln -s ../lgpl.txt ${PRGNAM}_original_docs/lgpl-2.1.txt
-cd -
-
-cat data/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
 
 mkdir -p $PKG/install
 sed -e "s,@WITHPULSE@,$WITHPULSE," \
