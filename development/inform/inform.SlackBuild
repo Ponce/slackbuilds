@@ -6,8 +6,18 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20191216 bkw: updated for 6.34_6.12.2. The secondary version number
+# is the inform6 library version. This script can no longer build the
+# old 6.32.1 version, but it should be fine for future releases.
+
+# The old 6.32.1 release shipped with a lot more include
+# files. Upstream removed a lot of them because they were either buggy
+# or license-incompatible. If you're trying to compile something that
+# needs any of these old includes, please let me know. If there's enough
+# demand, I'll dig up the old includes and re-add them to the package.
+
 PRGNAM=inform
-VERSION=${VERSION:-6.32.1}
+VERSION=${VERSION:-6.34_6.12.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -40,57 +50,69 @@ fi
 
 set -e
 
+MANVER="${MANVER:-4}"
+MANUAL=designers_manual_${MANVER}.zip
+TARVER="${VERSION/_/-}"
+DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+rm -rf $PRGNAM-$TARVER
+tar xvf $CWD/$PRGNAM-$TARVER.tar.gz
+cd $PRGNAM-$TARVER
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --build=$ARCH-slackware-linux
+# Upstream got rid of autotools, which I consider a step in the right
+# direction... but they also got rid of DESTDIR support.
 
-make
-make install-strip DESTDIR=$PKG
+make OPTS="$SLKCFLAGS" \
+     PREFIX=/usr \
 
-# Grr. Make this a relative link. Otherwise it points to /tmp/SBo
-# after installation.
-cd $PKG/usr/bin
-  rm -f $PRGNAM
-  ln -s $PRGNAM-* $PRGNAM
-cd -
+make install-strip \
+     PREFIX=$PKG/usr \
+     TUTORDIR=$DOCDIR/tutor \
+     DEMODIR=$DOCDIR/demos
 
-# Move the manual to where Slack users expect it to be.
-DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION
-mkdir -p $DOCDIR
-mv $PKG/usr/share/$PRGNAM/manual $DOCDIR/manual
+gzip $PKG/usr/man/man1/*.1
 
-# Install the demo sources + tutorials, too. Very instructive for someone
-# learning to use inform.
-mkdir -p $DOCDIR/demos
-cp demos/*.inf demos/README $DOCDIR/demos
-mkdir -p $DOCDIR/tutorials
-rm tutor/Make*
-cp tutor/* $DOCDIR/tutorials
+# Inform started life (and is still used primarily) on OSes with
+# case-insensitive filenames. The library include files are
+# duplicated here, with e.g. 3 identical files called verblib.h,
+# Verblib.h, VerbLib.h. Clean up the mess.
+( cd $PKG/usr/share/$PRGNAM/lib
+  for upper in [A-Z]*.h; do
+    lower="$( echo $upper | tr A-Z a-z )"
+    if [ -e "$lower" ]; then
+      rm -f "$upper"
+      ln -s "$lower" "$upper"
+    fi
+  done
+)
+
+# Upstream removed the manual for licensing reasons. It belongs in the
+# binary package IMO.
+mkdir -p $DOCDIR/manual
+( cd $DOCDIR/manual
+  unzip $CWD/$MANUAL
+  # manual has no subdirs
+  chmod 644 *
+  chown root.root *
+)
 
 # Inform Beginners' Guide, required reading.
 cat $CWD/IBG.pdf > $DOCDIR/inform_beginners_guide.pdf
 
-cp -a ARTISTIC AUTHORS COPYING NEWS README docs/* $DOCDIR
+mkdir -p $DOCDIR/lib
+for i in ChangeLog README.txt voices_and_tenses.txt; do
+  ln -s ../../../share/$PRGNAM/lib/$i $DOCDIR/lib
+done
+
+# ARTISTIC and COPYING are redundant: src/licence.txt includes the
+# full text of both.
+cp -a AUTHORS NEWS README* src/*.txt src/*.html docs/* $DOCDIR
 cat $CWD/$PRGNAM.SlackBuild > $DOCDIR/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
