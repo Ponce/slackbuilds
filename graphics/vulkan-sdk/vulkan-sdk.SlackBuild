@@ -25,7 +25,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=vulkan-sdk
-VERSION=${VERSION:-1.1.121.0}
+VERSION=${VERSION:-1.1.126.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -73,12 +73,13 @@ cmake_build () {
   make install DESTDIR=$PKG
 }
 
-# Vulkan-ValidationLayers requires git versions
-# listed in the known_good.json file to build.
+# For best compatibility use git versions which upstream also uses.
+# Vulkan-ValidationLayers/scripts/known_good.json
+# glslang/known_good.json
 # https://github.com/KhronosGroup/Vulkan-ValidationLayers/issues/1082
-GLSLANG_VERSION=${GLSLANG_VERSION:-34953810a62c5230cc059cfdf42dc44c5aab2246}
-SPIRV_HEADERS_VERSION=${SPIRV_HEADERS_VERSION:-38cafab379e5d16137cb97a485b9385191039b92}
-SPIRV_TOOLS_VERSION=${SPIRV_TOOLS_VERSION:-9b3cc3e05337358d0bd9fec1b7a51e3cbf55312b}
+GLSLANG_VERSION=${GLSLANG_VERSION:-b131630e7c749a5dc19faa458024260c71fb170f}
+SPIRV_HEADERS_VERSION=${SPIRV_HEADERS_VERSION:-af64a9e826bf5bb5fcd2434dd71be1e41e922563}
+SPIRV_TOOLS_VERSION=${SPIRV_TOOLS_VERSION:-02910ffdffaa2966f613ede0c516645f5555c13c}
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -111,6 +112,13 @@ find -L . \
 
 chdir glslang-$GLSLANG_VERSION
 
+# Fix #1959 by reverting 7b0e236 to put files in two places.
+# https://github.com/KhronosGroup/glslang/commit/199d115e1542fe0a8427efda5fa36158474fb6cf
+# https://github.com/KhronosGroup/glslang/pull/1963
+# https://github.com/KhronosGroup/glslang/issues/1959
+# https://code.videolan.org/videolan/libplacebo/issues/71
+patch -p1 < $CWD/glslang-revert.patch
+
 cmake_build \
   -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
   -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
@@ -125,8 +133,20 @@ cmake_build
 
 chdir Vulkan-Loader-sdk-$VERSION
 
+ORIGCFLAGS="$SLKCFLAGS"
+
+# Fix build with clang on 32-bit systems
+# https://github.com/gentoo/gentoo/pull/13369
+if [ "$ARCH" = i586 ] || [ "$ARCH" = i686 ] &&
+    "${CC:-cc}" --version 2>/dev/null | grep -qi clang; then
+  SLKCFLAGS="$SLKCFLAGS -fno-integrated-as"
+fi
+
 # Require an older cmake version.
 sed -i 's/3.10.2/3.5.2/' CMakeLists.txt
+
+# cmake 3.5.2 does not have GREATER_EQUAL
+patch -p1 < $CWD/vulkan-loader-cmake.patch
 
 cmake_build \
   -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
@@ -136,6 +156,8 @@ cmake_build \
   -DBUILD_WSI_WAYLAND_SUPPORT=OFF \
   -DVULKAN_HEADERS_INSTALL_DIR=$PKG/usr
 
+SLKCFLAGS="$ORIGCFLAGS"
+
 chdir Vulkan-ValidationLayers-sdk-$VERSION
 
 # Require an older cmake version.
@@ -143,11 +165,6 @@ sed -i 's/3.10.2/3.5.2/' CMakeLists.txt
 
 # Disable hardcoded errors
 sed -i '/-Werror/d' CMakeLists.txt
-
-# Fix build with gcc5.
-# https://github.com/KhronosGroup/Vulkan-ValidationLayers/pull/1240
-# https://github.com/KhronosGroup/Vulkan-ValidationLayers/commit/80ddc06b39dd1164733b69b68231b497f51840ad
-patch -p1 < $CWD/cmath.patch
 
 cmake_build \
   -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
