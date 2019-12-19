@@ -6,9 +6,18 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20191218 bkw:
+# - BUILD=2
+# - Update man page (still using the one from Debian).
+# - It turns out espeak supports PulseAudio, so that's now the default.
+# - Remove portaudio from REQUIRES.
+# - Add PULSE and PORTAUDIO environment variables, update README.
+# - Simplify the script (unfortunately it had to get more complex
+#   again to support the new variables).
+
 PRGNAM=espeak
 VERSION=${VERSION:-1.48.04}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -40,63 +49,82 @@ fi
 
 set -e
 
+# Support old WAVONLY variable, but don't mention it in README.
+if [ "${WAVONLY:-no}" = "yes" ]; then
+  PULSE=no
+  PORTAUDIO=no
+fi
+
+# Preemptively support -current's pure-alsa-system: if pulseaudio's
+# not installed (it normally is on 14.2), just build without it.
+PULSE="${PULSE:-yes}"
+pkg-config --exists libpulse || PULSE=no
+
+case "${PORTAUDIO:-auto}" in
+  yes) if ! pkg-config --exists portaudio-2.0; then
+         cat <<EOF
+You've requested portaudio support via PORTAUDIO=yes, but portaudio
+is not installed. Sorry.
+EOF
+         exit 1
+       fi ;;
+  no)  ;;
+  *)   pkg-config --exists portaudio-2.0 && PORTAUDIO=yes || PORTAUDIO=no ;;
+esac
+
+if [ "$PORTAUDIO" = "yes" ] && [ "$PULSE" = "yes" ]; then
+  AUDIO=runtime
+  DRIVERS="portaudio and pulseaudio"
+elif [ "$PORTAUDIO" = "yes" ]; then
+  AUDIO=portaudio
+  DRIVERS="$AUDIO"
+elif [ "$PULSE" = "yes" ]; then
+  AUDIO=pulseaudio
+  DRIVERS="$AUDIO"
+else
+  AUDIO=none
+  DRIVERS="none (.wav file output only)"
+fi
+
+echo "=== PULSE=$PULSE PORTAUDIO=$PORTAUDIO AUDIO=$AUDIO"
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION-source
-unzip $CWD/$PRGNAM-$VERSION-source.zip
+unzip $CWD/$PRGNAM-$VERSION-source.zip -x '*/linux_32bit/*' '*/platforms/*'
 cd $PRGNAM-$VERSION-source
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
-
-# Cruft...
-find . -type d -a -name .svn -print0 | xargs -0 rm -rf
-
-# Make the Makefile install everything stripped
-patch -p1 < $CWD/makefile.patch
+# Permissions are bletcherous, reset them all.
+find -L . \( -type d -a -exec chmod 755 {} + \) -o \
+          \( -type f -a -exec chmod 644 {} + \)
 
 # Note: there are two executables (speak and espeak). They seem to do the same
 # thing, except "speak" doesn't use libespeak.so at runtime. This package only
 # installs "espeak" (which is how other distros do it, too).
+# The LDFLAGS="-Wl,-s" makes gcc strip the binaries for us.
 
 cd src
-  if [ "${WAVONLY:-no}" = "yes" ]; then
-    EXTRAMAKEFLAGS="AUDIO=none"
-  else
-    # Let this script die due to "set -e" if no portaudio installed...
-    pkg-config --modversion portaudio-2.0
-    # portaudio version *should* be 19, but support 18 just in case...
-    rm -f portaudio.h
-    ln -s portaudio$( pkg-config --modversion portaudio-2.0 ).h portaudio.h
-  fi
-
+  rm -f portaudio.h # use system-wide header!
+  LIBDIR=/usr/lib$LIBDIRSUFFIX
   SLKCFLAGS="$SLKCFLAGS -Wno-narrowing"
-  make LIBDIR=/usr/lib$LIBDIRSUFFIX CXXFLAGS="$SLKCFLAGS" $EXTRAMAKEFLAGS
-  make install LIBDIR=/usr/lib$LIBDIRSUFFIX DESTDIR=$PKG $EXTRAMAKEFLAGS
-  rm -f $PKG/usr/lib$LIBDIRSUFFIX/*.a # guidelines say no static libs
-  find $PKG/usr/share -type f -print0 | xargs -0 chmod 644
+  make LDFLAGS="-Wl,-s" LIBDIR=$LIBDIR CXXFLAGS="$SLKCFLAGS" AUDIO="$AUDIO"
+  make install LIBDIR=$LIBDIR DESTDIR=$PKG
+  rm -f $PKG/$LIBDIR/*.a # guidelines say no static libs
 cd ..
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -r ReadMe *.txt docs/* $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-find $PKG/usr/doc/$PRGNAM-$VERSION -type f -exec chmod 0644 {} \;
 
 # Man page from Debian
 mkdir -p $PKG/usr/man/man1
 gzip -9c $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
-if [ "${WAVONLY:-no}" = "yes" ]; then
-  sed -i \
-  '19s/:/: This package lacks audio support (wav file output only)/' \
-  $PKG/install/slack-desc
-fi
+sed "s,@DRIVERS@,$DRIVERS," \
+  $CWD/slack-desc \
+  > $PKG/install/slack-desc
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
