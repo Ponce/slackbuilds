@@ -11,6 +11,11 @@ if [ -x /usr/bin/mkfontdir -a -x /usr/bin/mkfontscale ]; then
   )
 fi
 
+# If X is running...
+if [ "$DISPLAY" != "" ] && [ -x /usr/bin/xset ]; then
+  /usr/bin/xset fp rehash >/dev/null 2>&1
+fi
+
 # Update the X font indexes:
 if [ -x /usr/bin/fc-cache ]; then
   /usr/bin/fc-cache -f
