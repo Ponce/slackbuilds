@@ -2,6 +2,7 @@
 
 # Slackware build script for libopenraw
 # Copyright 2007-2011  Michiel van Wessem, Leicester, United Kingdom
+# Copyright 2019 B. Watson
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -23,8 +24,19 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# Now maintained by B. Watson <yalhcru@gmail.com>
+
+# 20191231 bkw:
+# - take over maintenance
+# - update for v0.1.3
+# - don't install useless INSTALL in doc dir
+# - install demo source in doc dir
+# - install tools/ordiag in /usr/bin
+# - --disable-static
+# - add doinst.sh with update-gdk-pixbuf-loaders
+
 PRGNAM=libopenraw
-VERSION=${VERSION:-0.0.9}
+VERSION=${VERSION:-0.1.3}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -64,15 +76,14 @@ rm -rf $PRGNAM-$VERSION
 tar -xvf $CWD/$PRGNAM-$VERSION.tar.bz2
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
-  -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
-    -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
+  --disable-static \
+  --enable-shared \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
@@ -84,15 +95,28 @@ CXXFLAGS="$SLKCFLAGS" \
 make V=1
 make install-strip DESTDIR=$PKG
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# for whatever reason, upstream v0.0.9 calls itself v1.0 in pkg-config,
+# but v0.1.3 calls itself v0.1. this causes raw-thumbnailer builds to
+# fail. use symlinks as a workaround.
+cd $PKG/usr/lib$LIBDIRSUFFIX/pkgconfig
+for i in $PRGNAM $PRGNAM-gnome; do
+  [ -e $i-0.1.pc ] && ln -s $i-0.1.pc $i-1.0.pc
+done
+cd -
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS COPYING ChangeLog INSTALL NEWS README TODO $PKG/usr/doc/$PRGNAM-$VERSION
+# this looks useful
+mkdir -p $PKG/usr/bin
+install -s -m0755 -oroot -groot tools/.libs/ordiag $PKG/usr/bin
+
+# the demos are example code, install just the sources.
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/demo
+cp -a AUTHORS COPYING* ChangeLog NEWS README TODO $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a demo/*.c demo/*.cpp $PKG/usr/doc/$PRGNAM-$VERSION/demo
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
