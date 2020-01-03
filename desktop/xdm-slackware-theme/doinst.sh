@@ -1,5 +1,3 @@
-# Handle the incoming configuration file
-#
 config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
