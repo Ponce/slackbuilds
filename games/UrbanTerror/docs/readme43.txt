@@ -1,23 +1,23 @@
 -----------------------------------------------
 Urban Terror: Total Conversion for Quake3:Arena
-4.2 Release
+4.3 Release
 http://www.urbanterror.info
 -----------------------------------------------
 
-This is the readme file for release 4.2 of Urban Terror.  
+This is the readme file for release 4.3 of Urban Terror.  
 Please refer to http://www.urbanterror.info/ for further details.
 
 
 Legal stuff
 ===========
-The makers of Urban Terror accept no responsibility for any damage or 
-injuries resulting from use of this software. You download and install 
+FrozenSand accept no responsibility for any damage or injuries
+resulting from use of this software. You download and install 
 this software at your own risk. 
 
-Urban Terror is a collection of mod files created by Frozen Sand/0870760 B.C. Ltd, 
+Urban Terror is a collection of files created by Frozensand Games Limited, 
 community maps and community assets which are creditted in the map 
 readme's. The files that constitute this modification are copyright 
-Frozen Sand/0870760 B.C. Ltd 2000-2012. 
+Frozensand Games Limited 2000-2017. 
 
 Use of any file contained within the mod is illegal without permission. 
 Anyone wishing to re-use any of the media contained within the official 
@@ -37,16 +37,486 @@ Installation
 ============
 If you have Quake 3 Arena and want to continue using PunkBuster: Make 
 sure you have Quake 3 Arena updated with Point Release 1.32(c) and 
-update PunkBuster with pbsetup. Copy the q3ut4 folder from 4.2 to your
+update PunkBuster with pbsetup. Copy the q3ut4 folder from 4.3 to your
 quake3-directory and make shortcut to quake3.exe. Add "+set fs_game q3ut4"
 to the targetfield of the shortcut.
 
 If you don't have Quake 3 Arena and/or don't care about PunkBuster: 
-Run the 4.2 installer or unzip the 4.2 zip.
+Run the 4.3 Auto-Updater or unzip the 4.3 zip.
 
-Beta 4.2 
+Beta 4.3
 
-4.2.015 [27.09.2013]
+The #<number> you can read in the changelog correspond to the issue numbers on our GitHub bug tracker.
+https://github.com/FrozenSand/UrbanTerror4/issues
+
+
+Beta 4.3.4 [21.06.2018]
+
+- Fixed the random crash issues which happened especially (but not only) on the map Eagle #431
+- Fixed several potential buffer overflow exploits
+- Fixed the bug where unpinning a 2nd nade in a row and switching to another weapon would result in the nade being dropped on the floor. #26
+- Fixed players being stuck with level 19 in Gun Game when g_randomorder was set to 1 #436
+- Magnum: fixed the reload animation and the reappearance of the crosshair not being completely synced
+- Bomb mode: fixed SurvivorWinner events not being written in the server logs in some situations. #293
+- In order to free up some space in the "serverinfo" variable, and to try to prevent the "info string length exceeded" error messages on the servers, and the subsequent potential bugs:
+    - Removed g_bombDefuseTime and g_bombExplodeTime from the serverinfo
+    - Changed g_teamnameRed and g_teamnameBlue to g_nameRed and g_nameBlue
+    - Removed the "Clan" and "Location" serverinfo vars from server_example.cfg - server admins are free to add them back to their configs if needed
+    - Removed auth_tags, auth_verbosity, auth_cheaters and auth_log from the serverinfo as they weren't strictly needed
+    - Removed dmflags from the serverinfo string, it's an unused leftover from Quake 2
+    - This frees up about 115 chars in the serverinfo string
+- Fixed output of the "where" client command
+- Fixed map/next map vote menu ignoring previously highlighted map and calling vote with the first map on the list #122
+- Menus: fixed inconsistencies in leading space in weapon select screen. #304
+
+
+Beta 4.3.3 [28.02.2018]
+
+- Fixed CVE-2017-6903 #73
+- Fixed a potential buffer overflow exploit with the funstuff cvars
+- Fixed a potential exploit with the cl_guid variable
+- Fixed a potential exploit: do not allow loading .menu files from the /download/ subfolder and enforce menu files to have the .menu extension
+- Fixed a potential exploit where the result of the /stats command called by a spectator while following a player would be sent to the followed player instead of the spectator
+- Fixed a potential exploit with ROM and INIT cvar types being forced to USERINFO
+- Fixed the server browser not showing any server when using the legacy Quake 3 engine
+- Fixed modern ioq3 engines crashing with the error "Engine linkage error #31" #399
+- Fixed the substitute status being sometimes applied when g_matchmode = 0 #404
+- Fixed substitute players randomly spawning and being invincible on map restart in certain game modes
+- Fixed wrong value of y-axis being used when loading a saved position in Jump mode #80
+- Jump mode: fixed persistent position saving which was sometimes loading another player's saved position #131
+- Gun Game: fixed being stuck with the HK69 when playing with g_randomorder 1 #394
+- Tweaked the FR-F1: torso/vest hits make players bleed. Zoom reset if getting >= 50% of damage (previously: 20%)
+- Tweaked P90's and Benelli's positions on screen #217
+- Potentially fixed fire mode of a spectated player's weapon being sometimes picked up #7
+- Fixed bots failing to load on Cascade and Kingdom
+- Tweaked bot files for UrT 4.3.3
+- Fixed g_inactivity timer inconsistencies #414
+- Fixed the rcon "players" command that wasn't always displaying player's auth names #419
+- Fixed /rcon players command returning wrong slot and IP values for clients
+- Added current half info to /rcon players if g_swaproles is set to 1
+- Fixed a bug where a map_restart after changing the g_matchmode cvar would spawn the same random weapon an infinite number of times #81
+- Fixed g_redteamlist and g_blueteamlist not always being recognized as valid server cvars #83
+- Potentially fixed the "Couldn't find weapon xx" error which was introduced in 4.2.014
+- Fixed the TOD50 texture file size which was causing a crash on map load when using the legacy Quake 3 engine
+- Updated quake3's master server port in server_example.cfg (please update your custom server configs!)
+- Fixed the server browser showing several times the same servers when quickly refreshing the list multiple times
+- Clarified server browser filter options
+- Fixed a bug where spamming a key binding while downloading a map would result in a "client overflow" game crash
+- Fixed ignore list not being saved on map reload/change and other inconsistencies with the /ignore command #23
+- Replaced all .png textures with .tga textures to fix some UI elements not being displayed correctly when using the legacy Quake 3 engine
+
+
+Beta 4.3.2 [04.02.2017]
+
+- Engine: Build optimizations, full SSE/SSE2 support on Windows
+- Engine: Locked sv_fps / snaps back to 20 #348
+- Engine: New mouse acceleration style 2 (cl_mouseAccelStyle 2), with logistic curve for smooth and limited accel #54
+- Engine: Various fixes for OpenBSD and 64bit systems #59 #60
+- Engine: Updated Q_CleanStr to discard multiple color code prefixes and fixed broken COM_GetExtension #63 #38
+- Engine: Fixed 'stopserverdemo' being called on clients where the command doesn't exist #63
+- Scoreboard columns sorting update: KAD columns now reads KDA (kills, deaths, assists)
+- Added assists to player sorting (K>D>A) on scoreboard
+- Renamed ".44 Magnum" to "Magnum" in the kill events
+- Fixed scores not updating in time when moving to intermission #142
+- Fixed $gametime and $roundtime calculation #346
+- Instagib: Prevent bots from switching to knife 
+- Instagib: Display a gamemode explanation text + an 'INSTAGIB' box in the team selection menu
+- Instagib: Disabled the gear selection menu in InstaGib
+- Instagib: Everyone has a medkit as their sole item 
+- Instagib: Added a gamemode identifier, ' - INSTAGIB' next to the game mode name  on the map load screen
+- Gun Game: Added a cvar g_randomorder (0/1): random gun order on map load
+- Gun Game: Fixed scoreboard sorting inconsistencies #319
+- Gun Game: Fixed a possible server crash when two players would win at the exact same time (very unlikely)
+- New sound for the Glock when a silencer is equipped
+- Minor weapon specs enhancements
+- Fixed 'bot_minplayers' not working properly
+- New version for Paris fixing #335 and #361 along with other enhancements
+- Added support for r_noborder in the menu files
+- Fixed weapon verification of items when primary is 'none' #320
+- New .arena scripts for maps to include the newer gametypes in the server creation menu
+- Updated default.cfg, server_example.cfg & mapcycle_example.txt
+- The rcon command 'players' now displays correctly auth logins and and assists were added
+
+
+Beta 4.3.1 [05.10.2016]
+
+- Fixed the FPS drops / lag issue #334
+- Slightly improved engine performances on Windows
+- Fixed Ghosttown, Paris, Mykonos appearing as 3rd party maps in the server browser #296
+- Added instagib to server_example.cfg #342
+
+
+Beta 4.3.0 [30.09.2016]
+
+- New gametype: Gun Game (g_gametype 11)
+- New game mode: Instagib (affects all gametypes with the cvar g_instagib 1|0 (1=on, 0=off))
+- New gear menus
+- New weapons: FR-F1, P90, Magnum, Benelli
+- Unlocked sv_fps and snaps (range: 20 - 125, default: 60)
+- Updated AK103 bullet description
+- Added kill assists in team gametypes
+- Added silent ladder walking (hold your walk key while climbing ladders)
+- Hid the "ut4_" prefix in the server list for map names
+- Adjusted weapon/item drop velocities (they drop towards where you aim rather than from your groin all the time)
+- Added ut_echo $cvar substitution
+- Added cg_chatBG (0 - light, 1 - dark, 2 - dependent on speed)
+- Added cg_chatOrder (1 - messages are displayed from top to bottom, 2 - from bottom to top)
+- Updated console design
+- Added console tabs
+- Added cg_radioPos (0 - normal, 1 - directional, 2 - directional + distance like the player is yelling)
+- Added support for choosing no primary weapon (it was possible before if you edited the 'gear' cvar)
+- Added ammo colours
+- Added centered team scores (cg_drawTeamScores 2)
+- Added movement keypress overlay: cg_drawKeys (1 - visible only when in spectator, 2 - always visible)
+- Fixed defusers appearing dead on the miniscoreboard #191
+- Fixed some issues with the /me command
+- Fixed unknown values for $crosshair #185
+- Fixed player name colouring in FFA #192
+- Fixed cooked grenades being fired and dropped on death
+- Cleared filter bar on connect #178
+- Fixed stamina drain on ladder sprinting #188
+- Blocked multiple flags from being taken by the same player
+- Fixed use key pickup not working on some maps #135
+- Fixed the ability to boot another player while holding the jump key despite being on the ground
+
+- New: admins can perform rcon commands directly from the in-game chat box without having to know the rcon password. Everything is handled by the auth system. Documentation incoming.
+- New: auth-unban rcon command. AccountUnban in the server logs
+- Fixed the Benelli and the P90 looking too small
+- Fixed the missing TOD50 skin and icons
+- Tweaked the P90: less damage, more accuracy
+- Disabled the countdown sound by default
+- Gun Game: added a mandatory helmet to everyone
+- Gun Game: added the weapons introduced in 4.3
+- Gun Game: fixed the level randomly showing 0/16 on the HUD
+- Gun Game: latched the cvar g_hardcore (needs a reload to be applied)
+- Gun Game: added the player's level to the scoreboard, and players are now sorted by their level
+- Gun Game: fixed being downgraded 2 levels when booted or killed with a knife
+- Gun Game: fixed earning a level when killing yourself with the HK69. Downgrades a level instead
+
+- Weapons: SR8 - tweaked damages (%): (Groin, Butt) from (97, 90) to (100, 97)
+- Weapons: FR-F1 - tweaked damages (%): (Groin, Butt) from (70, 70) to (77, 74)
+- Weapons: PSG1 - tweaked damages (%): (Groin, Butt) from (70, 70) to (75, 70)
+- Weapons: M4A1, LR300, G36 - tweaked damages (%): (Groin, Butt) from (37, 33) to (33, 31)
+- Weapons: DE - tweaked damages (%): (Groin, Butt) from (45, 41) to (42, 40)
+- Weapons: MP5K - tweaked damages (%): (Groin, Butt) from (25, 22) to (24, 22)
+- Weapons: UMP45 - tweaked damages (%): (Groin, Butt) from (36, 32) to (33, 31)
+- Weapons: AK103 - tweaked damages (%): (Groin, Butt) from (41, 34) to (39, 35)
+- Weapons: Negev - tweaked damages (%): (Groin, Butt) from (25, 22) to (24, 22)
+- Weapons: Beretta - tweaked damages (%): (Groin) from 25 to 24
+- Weapons: reduced P90's muzzle flash #219
+- Weapons: added back the P90 as a secondary weapon
+- Weapons: tweaked P90's damages, spread and recoil
+- Weapons: tweaked Magnum's damages
+- Gear menu: added a "close" button at the bottom-right corner
+- Gear menu: swapped the "secondary weapon" and "grenade" boxes
+- Gear menu: fixed a crash when trying to select a secondary weapon while having no primary weapon #221
+- Gear menu: fixed P90 being selected as primary disabling the Benelli as a secondary #229
+- Gear menu: fixed being able to have no items at all. Also fixed a bug where your whole gear would reset if you clicked somewhere outside the list of weapons on the menu. #213
+- Gun Game: added a smooth transition between weapons when leveling up
+- Gun Game: fixed knife kill not demoting a level #225
+- Gun Game: fixed the gametype showing up as "UNKNOWN" in the server browser #215
+- Gun Game: fixed having a delay before being able to shoot after a level up #224
+- Gun Game: added more ammo to the HK69 in hardcore mode
+- Instagib: fixed TOD50's positioning #216
+- Instagib: removed the movement penalty indicator for the TOD50 #216
+- Instagib: the TOD50 now has infinite ammo #216
+- Instagib: showing the number of bullets in red if the weapon isn't ready 
+- UI: capitalized prefix-less map names in the server browser #215
+- UI: added cg_scopeFRF1 to customize FRF1's scope type #232
+- UI: Added the ability to use custom crosshairs
+- Chat: added /map and /devmap to the auth-rcon commands
+- Chat: fixed a buffer overflow on /me and /chat messages #210
+- Rcon: new command: forceall <team> <destination> to force all players from a team to join another team
+- Rcon: new command: kickall <team> <reason> to mass kick teams or all players from a server
+- Rcon: extended the players command with more information
+- Misc: Removed the "missing sound" beep #246
+- Misc: If dmaHD is disabled, don't show its settings #245
+- Misc: Added a 'Device' menu setting. #245
+- Misc: Updated the credits menus #205
+- Misc: repackaged the game
+
+- Menus: gear selection menus overhaul
+- Weapons: New sounds for the following weapons: Magnum, Benelli, Colt 1911, FR-F1, Mac 11, P90 and PSG1
+- Weapons: fixed the reflection on the scopes of the FR-F1, SR8 and PSG1
+- Weapons: fixed the "empty ammo" sound not being triggered #256
+- Match mode: fixed substitute status not being applied consistently after a map change #6
+- Server: fixed not being able to change g_gravity's value through the mapcycle.cfg file #263
+- Bots: fixed bots shooting at dead players #242
+- Engine: use libcurl version 4 by default instead of v3
+- Misc: new blue/red/neutral flag designs
+- Misc: fixed tag goggles overlay not being visible to spectators. #262
+- Misc: fixed team chat not working #265
+- Misc: fixed custom func_wall / func_rotating_door not working properly in LMS gametype #259
+- Misc: defaulted sv_floodprotect to 2
+
+- Gameplay: fixed incorrect assists counting #271
+- Maps: added ut4_mykonos_a17 and ut4_paris to the official pk3
+- Maps: removed AbbeyCTF, Ambush, Commune, Company, Crossing, Harbortown, Horror, Maya, Prague_v2, Snoppis, Toxic and Tunis from the game pack.
+- Engine: added 64bit support on OSX. Removed 32bit builds (< OSX 10.6) #52
+- Engine: added OpenBSD support #51
+- Engine: added r_noborder to remove the game's window borders #283
+- Engine: added r_centerWindow to center the window when not in full screen. Defaulted to 1. When set to 0 with r_noborder, use vid_xpos and vid_ypos to set your window in a custom position
+- Engine: fixed chat messages disappearing when being sent at the moment of your death #261
+- Engine: added the ability to switch between console tabs with MOUSE1 (next tab) and MOUSE2 (prev tab)
+- Engine: fixed bots using slots reserved for private clients
+- Weapons: DE: butt -2pts of damage
+- Weapons: Beretta: updated full damage table
+- Weapons: Negev & M4A1 & LR300 & AK103 & G36: updated groin/butt damages
+- Weapons: SR8 & PSG1 & Knife: updated damage table
+- Weapons: COLT1911: reduced recoil. Torso/Vest +3pts of damage
+- Weapons: Glock: updated full damage table
+- Weapons: Mac 11: updated full damage table. Increased the fire rate a bit
+- Weapons: FN P90: updated full damage table
+- Weapons: FR-F1: updated full damage table
+- UI: added a box on the main menu to display announcements
+- UI: fixed the server browser displaying the wrong number of bots #273
+- UI: fixed the gear getting reset when switching to the team selection menu #272
+- UI: new controls menu dedicated to item binds (drop kevlar, drop flag, toggle laser, toggle nvg) #264
+- UI: hide the team select buttons in non team gamemodes #275
+- UI: fixed the Benelli icon overlapping its box in the gear selection menu #282
+- UI: added cg_autopickup to options #252
+- Gun Game: show the winner on the scoreboard at the end of the game #274
+- InstaGib: added a callvote option to set g_instagib
+- InstaGib: disabled in Jump Mode and Gun Game
+- Misc: fixed hands and gun models glitching out when repeatedly setting cg_fov to an incorrect value #291
+- Misc: fixed an issue with ut_weaptoggle when holding two secondary weapons #290
+
+- Gameplay: fixed a regression with ut_weaptoggle #297
+- Instagib: fixed random client crashes when playing INSTAGIB #234
+- Instagib: fixed TOD50's odd recoil movement. #316
+- Instagib: fixed being able to switch/drop the TOD50 before its cooldown end time #322
+- Engine: swapped MOUSE1 and MOUSE2 for the console tabs switch
+- Engine: fixed in_mouse 1 not toggling console tabs
+- Weapons: fixed some fps drops due to high poly LODs of the benelli and the p90
+
+- See the full release notes here: http://www.urbanterror.info/support/244-4-3-release-notes/
+
+
+Beta 4.2.023 [19.01.2015]
+
+- Fixed strat time causing early match termination
+- Fixed flag return message colour #176
+- Fixed negative team scores #177
+- Added s_alttabmute CVAR to control sound when game is in background. Values are: '1' for Mute (default) or '0' to keep sounds playing when game is in background. (Windows only)
+
+
+Beta 4.2.022 [20.12.2014]
+
+- New cvars to modify the text size: cg_msgSize and cg_chatSize
+- Servers now issue a DNS lookup for the master server on map change
+- Game clients now check for other master servers when the main one is down
+- Randomized team join when all factors are equal (when the scores and numbers of players were equal, you would always be placed on the red team)
+- New commands accessible through ref access: swap, pause, reload, restart, nextmap, cyclemap, map, exec, veto
+- Added a g_refNoExec cvar to control referee access to the exec command
+- Added primary, secondary, sidearm, grenade, and bomb arguments to ut_weapdrop #157
+- Added a bot indicator and filter in the server browser menu
+- Added "(next: map)" to the cyclemap vote string when g_nextmap is set
+- Updated g_stratTime to not cut into play time
+- Added cg_leftHand
+- Improved the team scores visual in HUD
+- Disabled non-numeric characters being used for colour codes (this means '^a' is not a colour anymore, but you can now use the caret in chat)
+- Enabled the percent (%) character for use in chat
+- Enabled the semicolon (;) character for use in chat
+- Added IRC-style /me command (works in chat as well)
+- Added flag drop bind to the menus #124
+- Added filter bar in the server browser menu
+- Reorganized the "General Settings" panel and added a "Meter Settings" panel
+- Added detection for vote keys #17- 
+- Enhanced dropped bomb visibility on the minimap #155
+- Fixed defusing player status shown as dead #149
+- Improved flood protect limitations: its value is the number of commands you can perform per second #154
+- Fixed a swap command issue #150
+- Fixed g_maxGameClients not working properly #146
+- Fixed g_ctfUnsubWait which never had worked properly #158
+- Fixed missing textures on some SPAS hits #160
+- Fixed gear menu showing outdated gear when using gear binds #159
+- Fixed team scores not appearing until the scoreboard is opened
+- Fixed the CI message displayed on map end for subs #113
+- Fixed the multiple bomb carriers in blue team issue #148
+- Fixed missing cvar g_nextCycleMap #53
+- Fixed the wrong time being displayed on scoreboard #47
+- Fixed server command overflows during timeouts (also fixes huge demo sizes during timeouts) #163
+- Fixed stupid radio menu behaviour - now only the 0-9 binds will be suppressed #3
+- Suppressed hit logging if target is frozen or god #164
+- Fixed reversed score order when Blue team wins #170
+- Fixed missing Freeze Tag label for g_gametype votes #172
+- Fixed $crosshair not working properly in some cases (and also allowed chat variables to be used when dead) #166
+- Fixed most custom maps not appearing in the vote menu #167
+- Fixed an exploit when spectating the referee #173
+
+Beta 4.2.021 [15.11.2014]
+
+- Updated text with new font (Roboto) and drop shadow
+- Decreased font sizes around the HUD
+- Revamp of the mini scoreboard and team overlay
+- Updated netgraph
+- Updated the player health and damage area. There's now a health percentage indicator (toggleable with cg_drawhealth)
+- Improvement of the item and weapon select boxes
+- Enhancement of the "3, 2, 1, Go" beep on warmup countdown
+- Added cvar: cg_countdownSound to disable the "3, 2, 1, Go" beeps
+- Updated the timers - right aligned and new timer and hotpotato icons
+- Highlighted map names in orange if they need to be downloaded (in the server browser menu)
+- Added $hp chat var
+- Updated chat variable substitution. Variable names that are not recognized by the server will not be consumed (you can now type $100)
+- Updated the vote HUD element
+- Used Team Survivor walls in Freeze Tag
+- Added forcesub rcon command
+- Added forcecaptain rcon command
+- Combined red and blue wave timers if they're equal
+- Added cg_showbullethits 3
+- Added ability to use "all" with the forceteam command
+- Added swap rcon command to swap two players
+- Fixed spawn arrangement on Docks #100
+- Fixed a missing texture on Ricochet #110
+- Fixed the occasional timeout flights #114
+- Fixed status of defusing players being set to "FRZN" #115
+- Made dropped bomb yellow on the minimap #82
+- Fixed cumulative g_inactivity timer #41
+- Fixed blurry ammo icons
+- Fixed speedometer and accelerometer positioning when cg_hudWeaponInfo allows it
+- Fixed speedometer overlapping weapon info
+- Fixed helmet being rendered on top of NVG shader
+- Fixed "x team wins" not using the right skin name #132
+- Fixed bomb being lost to the void #11
+- Fixed first shot accuracy in perfect conditions #134
+- Changed LEADER to LEAD on the scoreboard status in FTL #138
+- Fixed C&H flags not being counted on timelimit is hit
+- Fixed skin readme text positioning #136
+- Fixed skin selection menu starting empty #118
+- Unlocked cl_pitchspeed #139
+- Changed "Enemies: x" to "Players: x" in Jump mode
+
+Beta 4.2.020 [30.09.2014]
+
+- Fixed flag taken sound not playing #5 #14
+- Fixed ThawOutStarted log spam
+- Cleaned up disconnected thaw targets #90
+- Added completion for forcesub, goto, load, save, and timeout #46
+- Reset player stamina when frozen #94
+- Added keycatcher for radio UI #3
+- Fixed scoreboard showing "kills" instead of "points" for the blue team #70
+- Fixed scoreboard/miniscoreboard showing thawed players as dead #70 #92
+- Changed scoreboard status to FRZN for frozen players
+- Restored flags on gear change #11
+- Fixed frozen players' hitboxes #88
+- Added a bar for players who are being thawed out #89
+- Moved the thaw progress bar down #91
+- Reset the match state when swapteams is called #98
+- Set the player's leg model to crouched if frozen in a position where they can't uncrouch #99
+- Made frozen players' arrows flash cyan on the minimap
+- Fixed live player counting for Freeze Tag #92
+- Added a puff of snow for freezing, thawing, and melting
+- Fixed bots timing out if bot_pause is 1
+- Fixed frozen players taking environmental damage #106
+- Fixed login button drawing #71
+- Fixed players showing up as frozen when the round starts #111
+- Added countdown sounds for pre-game timers
+- Fixed frozen players' helmets not showing #64
+- Fixed stats menu not working when dead or spectating #39
+- Fixed give server crash #40
+- Allowed gravity to affect frozen players (this also allows them to be booted)
+- Allowed frozen players to be shot to prolong their frozen state
+
+Beta 4.2.019 [14.09.2014]
+
+- New gametype - Freeze Tag (#10) - new CVARs g_thawTime and g_meltdownTime - new log lines 
+- New map ut4_prominence 
+- New map ut4_killroom 
+- New g_stratTime CVAR - strategy time at round start in Team Survivor and BOMB modes 
+- Fixed hotpotato timer not stopping on timeout 
+- Fixed crash when using map and devmap server commands 
+- Fixed a "round end" message loop happening when only one player is connected in FFA gametype 
+- Fixed the flag capture time bug in jump mode 
+- Fixed a crash in the demos ui page 
+- Fixed a possible crash on map load on OSX 
+- Fixed a "signal 6" crash on OSX 10.9 
+- Fixed the copy/paste causing engine crash on Unix systems 
+- Fixed malformed reply to the /ignore command #10 
+- Fixed ut_weaptoggle grenade malfunction when having two types of grenades #4 
+- Added a flood protection on weapon mode change #32 
+- Fixed callvote kick bug where another player could be kicked 
+- Fixed client number for callvote server log messages 
+- Fixed callvote map unpredictability and server log messages 
+- Fixed some HUD elements being displayed while the client was paused #36 
+- Added a client info cvar named authl containing player's auth name when authenticated #35 
+- Unlocked the download speed of map packs #44 
+- Fixed dmaHD entering an infinite loop on certain maps #34 
+- Made the reconnect command work across a client restart #40 
+- Fixed the forcesub broadcast message #50 
+- Fixed bomb plant time crashing the server #52 
+- Fixed tell command not targeting the correct user #19 
+- Fixed medkit icon not appearing or randomly flickering #17 
+- Fixed third person mode persisting in sub #43 
+- Fixed Client 0 getting the kill on certain bleed outs #78 
+
+Beta 4.2.018 [25.01.2014]
+ 
+- New g_gear restriction code. It now uses weapon/item letters so you can disable whatever weapon or item you want.
+- Changed the medic badges back to the caduceus.
+- Solved FPS drops introduced in 016/017 client.
+- Fixed the issues with auth_owners.
+- Fixed the "auth string output overrun" issue.
+- Solved 'callvote map' problem where results can be unpredictable.
+- Fixed client number in callvote server log entry.
+- Fixed callvote kick bug.
+- More checks for pure servers.
+ 
+Beta 4.2.017 [17.12.2013]
+ 
+- Fixed teambalancer-skin bug
+- Fixed chat overflow bug (was overflowing on the team overlay)
+- Fixed the flag capture time
+- New cvar: cg_drawFlagCaptureTime (0: no time shown, 1: time in seconds, 2: time in seconds and milliseconds)
+- All UrT executables are now compatible with older CPUs
+- dmaHD sound system is on by default on the UrT executables
+- Fixed mousewheel scrolling of console
+- dmaHD: Fixed annoying clicks/echoes with some weapon sounds
+- dmaHD: Re-introduced all the old mixers (CVAR: dmaHD_mixer)
+- Autobalance turned off by default
+
+Beta 4.2.016 [16.11.2013]
+
+- Fixed the bug in the Auth System that appeared since 4.2.015 where sometimes lag in authentication could lead to use the account name of the previous player on the same slot
+- Fixed the "badinfo" issue (many thanks to Jacepriester)
+- Animation config updates
+- New Dr. Pink and Dr. Blue player skins
+- Correctly disable inactivity timer when g_inactivity is set to 0
+- Ability to set skins per team using cg_skinfixed0|1
+- Increased minimum value of com_hunkmegs and made the error message Hunk_Alloc failed on... more understandable
+- Updated Mac11 sounds
+- Fix for specularity on SR8 (very noticeable on bolt cap)
+- Fixed lagometer position on CTF when using Wave Respawns
+- Enhanced cg_speedo CVAR: will display client speed using (1) UPS: Quake units per second, (2) KPH: Kilometers per hour, (3) MPH: Miles per hour
+- Fixed killsound not being played upon HE Grenade kill and bleed out
+- New sniper crosshair: cross-dot (cg_scopeSR8|cg_scopePSG|cg_scopeG36 4)
+- Fixed skeetshoot map reloaders: fix target_give not resetting state after execution
+- New crosshair: cg_drawCrosshair 14 (simple cross Quake 3 style). Available in UI menu
+- Fixed respawn timer being shown after map restart
+- Added 0 padding in asset download time left and server list refresh time
+- Added sound on weapon mode change
+- Added accelerometer configurable with cg_accelero 0|1|2 and UI menu
+- Added cg_accelSize CVAR to tune dedicated accelerometer size
+- Fixed bots being kicked from the server for teamkilling
+- Added TeamBalancer. Can be controller with g_autobalance CVAR (0 = disabled, 1 = balance every minute, 2 = every 2 minutes, etc)
+- Added g_noVest CVAR for Jump Mode: is set to 1 removes the Vest from all the players
+- Added client respawn event to game log: ClientSpawn: <slot>
+- Fixed impossibility to kick zombie clients off the server
+- Fixed connection to full server resulting in Server is for low pings only
+- dmaHD engine forced to 44Khz 16-bit stereo output
+- Increased command buffer from 64KiB to 128KiB for players with large config files
+- Added separate Windows executable for non-SSE2 processors
+- Fixed substitute flag being resetted upon map change
+- Correctly update client team overlay when /forcesub command is executed
+- Added menu items in sound menu for configuring dmaHD
+- Added more in-built r_mode graphics modes for wide screen monitors
+- Added new wide resolutions in graphics menu
+- Increased chat area width and message area width
+- Hide timelimit from HUD if there are no valuable info to be displayed
+- Fixed inactivity timer kicking local client thus causing all the players to be disconnected
+- Added flag capture time. New log string: "FlagCaptureTime: <player id>: <time in milliseconds>"
+- Major overhaul of dmaHD sound system 
+
+Beta 4.2.015 [27.09.2013]
 
 - New authentication protocol securized
 - Fixed the alignment of a window texture on one of the buildings in the nonplayable area of Turnpike
@@ -86,7 +556,7 @@ Beta 4.2
 - Added a new map by Nounou called ut4_ghosttown_RC4
 
 
-4.2.014 [14.07.2013]
+Beta 4.2.014 [14.07.2013]
 
 - Fixed cg_ghost not working properly
 - Fixed map autocomplete with many maps
@@ -104,7 +574,7 @@ Beta 4.2
 - Tuned up Glock specs
 - Remove dropped items and corpses during TS warmup
 
-4.2.013 [30.06.2013]
+Beta 4.2.013 [30.06.2013]
 
 - Fixed the seam on the back of the SR8
 - Fixed the doors near the pillars and some z-fighting on Turnpike
@@ -139,7 +609,7 @@ Beta 4.2
 - Removed cg_sfxteambands (unused cvar)
 
 
-4.2.012 [19.04.2013]
+Beta 4.2.012 [19.04.2013]
 
 - Medic and bleeding timing improved
 - Fixed the armbands on race 1 and 3 of the Cavalry skins
@@ -149,7 +619,7 @@ Beta 4.2
 - Fix for missing skins on startup
 - Added funstuff with new cvars (g_allowfunstuff, cg_showfunstuff and  funfree for FFA game modes (uses red team funstuff only))
 
-4.2.011 [06.04.2013] [April 6, 2013]
+Beta 4.2.011 [06.04.2013]
 
 - Fixed g_maxWallJumps CVAR slowing down walljumps (need QA test)
 - Improved g_noStamina. Was causing some glitches (only in Jump Mode)
@@ -174,7 +644,7 @@ Beta 4.2
 - Fixed timer alignment in round based modes when using round limits
 - Updated the lighting in Turnpike so that it is closer to the 4.1 lighting
 
-4.2.010 [22.03.2013] 
+Beta 4.2.010 [22.03.2013] 
 - Added g_maxWallJumps CVAR for Jump Mode only. 
 - Preloading radio sounds and misc sounds to avoid client freezes on first playback. 
 - Fixed the ClientJumpTimerStopped log event that was returning a time of 0 secs. 
@@ -258,7 +728,7 @@ Fixed the server lag crash issue.
 - Added jump mode timers.
 
 
-Beta 4.2.007 [17.11.2012]
+Beta 4.2.007 [16.11.2012]
 - Updated the Hit Mesh.
 - Updated Linux updater binaries (GUI and command line): improved compatibility with older distributions.
 - Updated the OSX engine to catch up with the 006 update for Windows and Linux.
@@ -798,6 +1268,7 @@ ut_algiers
 ut_commune2
 ut_casa
 ut_crenshaw
+
 ut_docks
 ut_druglord3
 ut_filtration
@@ -1110,6 +1581,7 @@ Modifications:
 	user interface changes
 	callvote now includes matchready, matchstart
 	callvote to turn friendlyfire on/off
+
 	ability to kick bots from botmenu
 	added the AK to the primary weapon menu
 	flash grenade less intense when looking away
@@ -1743,7 +2215,7 @@ Beta 1.0
 - Secondary Fireing Systems
 
 
-Former/Inactive Frozen Sand, LLC/Silicon Ice Development Members:
+Former/Inactive FrozenSand, LLC/Silicon Ice Development Members:
 ========================
 
 -Apoxol
@@ -1763,6 +2235,7 @@ Former/Inactive Frozen Sand, LLC/Silicon Ice Development Members:
 -Dragonne
 -EarthQuake
 -FearMe
+-Fenix
 -Flash
 -Flux
 -FreakStorm
@@ -1770,15 +2243,20 @@ Former/Inactive Frozen Sand, LLC/Silicon Ice Development Members:
 -GottaBeKD
 -Iain
 -Jaker
+-MajkiFajki
 -Meaty
 -Miles
 -NrGizer
+-Nitro
 -Odd
 -Preacher
 -Queenbee
 -Sir Chumps
+-Smachine
 -SweetNutz
 -Thaddeus
+-TTimo
+-TwentySeven
 -WetWired
 -.EXE
 -Wu
