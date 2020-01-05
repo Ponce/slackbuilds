@@ -1,5 +1,3 @@
-#!/bin/sh
-
 config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
@@ -24,4 +22,3 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.inadyn.new
-
