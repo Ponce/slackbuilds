@@ -66,6 +66,20 @@ DIRNAME=$PRGNAM-$SHORTNAME
 
 set -e
 
+# 20200108 bkw: before doing ANYTHING else, check to make sure
+# our required deps are installed. This is helpful because if
+# they are missing, the mame compile will still start and run
+# for an hour or more before it errors out, wasting a lot of
+# time (some of which was mine).
+MISSING=""
+for i in sdl2 SDL2_ttf; do
+  pkg-config --exists $i || MISSING="$MISSING $i"
+done
+if [ -n "$MISSING" ]; then
+  echo "*** Missing required dependencies:$MISSING" 1>&2
+  exit 1
+fi
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
@@ -77,13 +91,6 @@ chown -R root:root .
 # 20181201 bkw: Urchlay's personal template:
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
-
-# 20181130 bkw: the new xavix code in 0.204 is missing this include.
-# Add future versions to the first case, as needed.
-case "$VERSION" in
-  0.204) sed -i '1i#include <cmath>' src/mame/video/xavix.cpp ;;
-  *)     ;;
-esac
 
 # OK, building modern mame is a bit of a PITA. It uses genie (written
 # in lua, a fork of premake), but you don't get to run genie directly,
@@ -122,7 +129,10 @@ case "$VERSION" in
     sed -i '1i#include <cmath>' \
            src/devices/cpu/mips/ps2vif1.cpp \
            src/devices/cpu/mips/mips3.cpp
-  ;;
+           ;;
+  0.204)
+    sed -i '1i#include <cmath>' src/mame/video/xavix.cpp
+    ;;
   *) ;;
 esac
 
@@ -172,9 +182,19 @@ if [ -e "$GROOVYDIFF" ]; then
   echo "GROOVYVER $GROOVYVER"
 fi
 
+# Build option notes:
 
 # Having ARCH set in the env will break the build, hence ARCH="".
+
 # Using ld.gold is *much* faster, and I see no disadvantage to it.
+
+# The static libstdc++ and libgcc args allow building a version of mame
+# that requires gcc9 (README_gcc9.txt), then running it on a system that
+# doesn't have gcc9 installed. This does make the binary slightly larger,
+# but it's already around 250MB so it's not going to matter much.
+
+# The point of the OVERRIDE_CC and friends is to make the build use $PATH
+# to find gcc (so ccache will be found if it's using the symlink method).
 
 make USE_QTDEBUG=$QTOPT \
      USE_SYSTEM_LIB_EXPAT=1 \
@@ -183,9 +203,11 @@ make USE_QTDEBUG=$QTOPT \
      USE_SYSTEM_LIB_FLAC=1 \
      PYTHON_EXECUTABLE="/usr/bin/python -S" \
      OPT_FLAGS="$SLKCFLAGS" \
-	  LDOPTS="-fuse-ld=gold" \
+     LDOPTS="-fuse-ld=gold -static-libstdc++ -static-libgcc" \
      OVERRIDE_CC="$( which gcc )" \
      OVERRIDE_CXX="$( which g++ )" \
+     CC="$( which gcc )" \
+     CXX="$( which g++ )" \
      ARCH="" \
      VERBOSE=1 \
      NOWERROR=1 \
