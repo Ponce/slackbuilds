@@ -1,14 +1,14 @@
 #######################################################################
 # elinks by default generates its own search query form when it sees
-# a type 7 index entity. The problem is that it didn't read the
+# a type 7 index entity.  The problem is that it didn't read the
 # served results page and instead generated another search page after
-# you had entered the first. This patch fixes that and in my tests it
-# seems to work so far.
-# dave@dawoodfall.net
+# you had entered the first.  This patch fixes that and in my tests it
+# seems to work so far.  I've also added a primitive debug log.
+# dave@slackbuilds.org
 #######################################################################
 diff -Naur a/src/protocol/gopher/gopher.c b/src/protocol/gopher/gopher.c
---- a/src/protocol/gopher/gopher.c	2017-11-24 19:12:52.495714437 +0000
-+++ b/src/protocol/gopher/gopher.c	2017-11-30 12:56:38.872336516 +0000
+--- a/src/protocol/gopher/gopher.c	2020-01-08 05:37:57.443382095 +0000
++++ b/src/protocol/gopher/gopher.c	2020-01-08 05:36:42.849199857 +0000
 @@ -43,6 +43,34 @@
  #include "util/memory.h"
  #include "util/string.h"
@@ -44,14 +44,14 @@ diff -Naur a/src/protocol/gopher/gopher.c b/src/protocol/gopher/gopher.c
  struct module gopher_protocol_module = struct_module(
  	/* name: */		N_("Gopher"),
  	/* options: */		NULL,
-@@ -219,23 +247,31 @@
+@@ -219,11 +247,13 @@
  		if (query) selectorlen -= 1;
  		query = NULL;
  		querylen = 0;
 -	} else {
 -		query += 1;
 +	} else if (entity == GOPHER_INDEX) {
-+        /* fix query size to not include the seach= part */
++        /* fix query size to not include the search= part */
 +		query += 8;
  		querylen = selector + selectorlen - query;
  		/* Exclude '?' */
@@ -61,13 +61,7 @@ diff -Naur a/src/protocol/gopher/gopher.c b/src/protocol/gopher/gopher.c
  		if (querylen >= 7 && !c_strncasecmp(query, "search=", 7)) {
  			query	 += 7;
  			querylen -= 7;
- 		}
-+		debug_log("selector:", 1);
-+		debug_log(selector, 1);
-+		debug_log("query:", 1);
-+		debug_log(query, 1);
- 	}
- 
+@@ -233,9 +263,11 @@
  	switch (entity) {
  	case GOPHER_INDEX:
  		/* No search required? */
@@ -80,18 +74,14 @@ diff -Naur a/src/protocol/gopher/gopher.c b/src/protocol/gopher/gopher.c
  		}
  
  		add_uri_decoded(command, selector, selectorlen, 0);
-@@ -343,6 +379,10 @@
- 	gopher->entity = entity_info;
- 	gopher->commandlen = command.length;
- 
-+debug_log("439 gopher->entity:", 1);
-+debug_log(gopher->entity, 1);
-+debug_log("437 command.source:", 1);
-+debug_log(command.source, 1);
- 	memcpy(gopher->command, command.source, command.length);
- 	done_string(&command);
- 
-@@ -377,7 +417,7 @@
+@@ -371,13 +403,14 @@
+ add_gopher_search_field(struct string *buffer, const unsigned char *text,
+ 		const unsigned char *addr)
+ {
++	/* Not *every* query is a search */
+ 	add_format_to_string(buffer,
+ 		"<form action=\"%s\">"
+ 		"<table>"
  		"<td>            </td>"
  		"<td>%s:</td>"
  		"<td><input maxlength=\"256\" name=\"search\" value=\"\"></td>"
@@ -100,21 +90,3 @@ diff -Naur a/src/protocol/gopher/gopher.c b/src/protocol/gopher/gopher.c
  		"</table>"
  		"</form>",
  		addr, text);
-@@ -726,7 +766,8 @@
- 	/* Now read the data from the socket */
- 	switch (gopher->entity->type) {
- 	case GOPHER_DIRECTORY:
--	case GOPHER_INDEX:
-+/* Don't do directory list for cgi output (7)
-+	case GOPHER_INDEX: */
- 		state = read_gopher_directory_data(conn, rb);
- 		break;
- 
-@@ -738,6 +779,7 @@
- 		state = connection_state(S_GOPHER_CSO_ERROR);
- 		break;
- 
-+	case GOPHER_INDEX:
- 	case GOPHER_SOUND:
- 	case GOPHER_PLUS_SOUND:
- 	case GOPHER_PLUS_MOVIE:
