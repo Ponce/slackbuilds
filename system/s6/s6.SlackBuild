@@ -3,6 +3,7 @@
 # Slackware build script for s6
 
 # Copyright 2019 Sean MacLennan Ottawa, Canada
+# Copyright 2020 Muhammad Mahendra Subrata Depok, Indonesia
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,7 +24,7 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=s6
-VERSION=${VERSION:-2.7.2.2}
+VERSION=${VERSION:-2.9.0.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -54,6 +55,29 @@ else
   LIBDIRSUFFIX=""
 fi
 
+# By default, only static libraries are built. If you need to build the shared libraries, just pass
+# BUILD_SHARED=yes to this script
+BUILD_STATIC=${BUILD_STATIC:-yes}
+BUILD_SHARED=${BUILD_SHARED:-no}
+
+if [ "$BUILD_STATIC" = "no" ]; then
+		LIBS_CONF="--disable-static"
+fi
+
+if [ "$BUILD_SHARED" = "yes" ]; then
+		LIBS_CONF="--enable-shared $LIBS_CONF"
+fi
+
+# By default, all binaries are linked against the static versions of the skarnet.org libraries
+# Pass LINK_SHARED=yes to link the binaries against the shared versions of the skarnet.org libraries
+# Also, if you only built the shared versions of the skarnet.org libraries, the binaries will be
+# linked against shared libraries automatically, as though LINK_SHARED=yes is passed to this script
+LINK_SHARED=${LINK_SHARED:-no}
+
+if [ "$LINK_SHARED" = "yes" ]; then
+		LIBS_CONF="--disable-allstatic $LIBS_CONF"
+fi
+
 set -e
 
 rm -rf $PKG
@@ -72,23 +96,24 @@ find -L . \
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
-      --bindir=/command \
-      --libdir=/usr/lib${LIBDIRSUFFIX} \
-      --dynlibdir=/usr/lib${LIBDIRSUFFIX} \
-      --build=$ARCH-slackware-linux
+  --dynlibdir=/lib${LIBDIRSUFFIX} \
+  --bindir=/bin \
+  --libexecdir=/usr/libexec \
+  --libdir=/usr/lib${LIBDIRSUFFIX}/s6 \
+  --includedir=/usr/include \
+  --with-sysdeps=/usr/lib${LIBDIRSUFFIX}/skalibs/sysdeps \
+  --with-lib=/usr/lib${LIBDIRSUFFIX}/skalibs \
+  --with-lib=/usr/lib${LIBDIRSUFFIX}/execline \
+  $LIBS_CONF
 
 make
+make strip
 make install DESTDIR=$PKG
 
-# Promote s6-svscanboot to /command since most Slackware users will
-# probably want to run without replacing init
-install examples/s6-svscanboot $PKG/command
-
-# Make this directory so that removepkg will show it as not empty
-mkdir $PKG/service
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# Promote s6-svscanboot to /bin for users that want to use s6
+# alongside the system's default init system
+install examples/s6-svscanboot $PKG/bin
+sed -i 's|command|bin|g' $PKG/bin/s6-svscanboot
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a AUTHORS COPYING INSTALL NEWS README doc examples $PKG/usr/doc/$PRGNAM-$VERSION
