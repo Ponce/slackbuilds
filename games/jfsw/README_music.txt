@@ -52,8 +52,7 @@ For the shareware version, the MIDI data is already present inside the
 sw.grp file. To actually hear it, you'll have to:
 
 1. Build and install fluidsynth. Doesn't matter whether or not
-   optional jack-audio-connection-kit and/or lash are included (jfsw
-   doesn't use them though).
+   optional jack and/or lash are included (jfsw doesn't use them though).
 
 2. Build and install fluid-soundfont.
 
