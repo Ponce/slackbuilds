@@ -22,4 +22,9 @@ config etc/fwupd/remotes.d/vendor-directory.conf.new
 config etc/fwupd/remotes.d/fwupd-tests.conf.new
 config etc/fwupd/daemon.conf.new
 config etc/fwupd/redfish.conf.new
-config etc/fwupd/uefi.conf.new
+
+if [ -e usr/share/icons/hicolor/icon-theme.cache ]; then
+  if [ -x /usr/bin/gtk-update-icon-cache ]; then
+    /usr/bin/gtk-update-icon-cache -f usr/share/icons/hicolor >/dev/null 2>&1
+  fi
+fi
