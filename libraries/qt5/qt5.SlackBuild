@@ -2,8 +2,6 @@
 
 # Slackware build script for qt5
 
-# Update for 5.9.6 by David Woodfall <dave@slackbuilds.org>
-#
 # Copyright 2013-2017 Larry Hajali <larryhaja[at]gmail[dot]com>
 # Copyright 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013  Patrick J. Volkerding, Sebeka, MN, USA
 # All rights reserved.
@@ -47,10 +45,10 @@
 # This is the highly modified version qt.SlackBuild found in Slackware
 # tailored to Qt 5. Modified by Larry Hajali.
 
-# Adapted for Qt 5.9.6 by David Woodfall
+# Adapted for Qt >= 5.9.6 by Dave Woodfall <dave@slackbuilds.org>
 
 PRGNAM=qt5
-VERSION=${VERSION:-5.9.9}
+VERSION=${VERSION:-5.12.6}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -74,6 +72,20 @@ PULSEAUDIO=${PULSEAUDIO:-yes}
 CCACHE=${CCACHE:-no}
 WEBENGINE=${WEBENGINE:-yes}
 
+[ "$EXAMPLES"    =  "no" ] && BUILD_EXAMPLES="-nomake examples"
+[ "$PULSEAUDIO"  =  "no" ] && PULSE="-no-pulseaudio"
+[ "$CCACHE"      = "yes" ] && USE_CCACHE="-ccache"
+
+if [ "$WEBENGINE" = "no" ]; then
+  EXCLUDE="--exclude=qtweb*"
+  PKGVERSION="${VERSION}_nowebengine"
+else
+  PKGVERSION="${VERSION}"
+  if [ "$PROPRIETARY_CODECS" = "yes" ]; then
+    CODECS="-webengine-proprietary-codecs"
+  fi
+fi
+
 printf "\n%s\n\n" "SlackBuild Options:"
 printf "%s\n" "CCACHE:             $CCACHE"
 printf "%s\n" "DOCS:               $DOCS"
@@ -82,36 +94,6 @@ printf "%s\n" "PROPRIETARY_CODECS: $PROPRIETARY_CODECS"
 printf "%s\n" "PULSEAUDIO:         $PULSEAUDIO"
 printf "%s\n" "WEBENGINE:          $WEBENGINE"
 printf "\n"
-
-# Default is no.
-if [ "$EXAMPLES" == "yes" ]; then
-  BUILD_EXAMPLES=""
-else
-  BUILD_EXAMPLES="-nomake examples"
-fi
-
-# Default is yes.
-if [ "$PULSEAUDIO" = "no" ]; then
-  PULSE="-no-pulseaudio"
-fi
-
-# Default is no.
-if [ "$CCACHE" = "yes" ]; then
-  CCACHE="-ccache"
-else
-  unset CCACHE
-fi
-
-if [ "$WEBENGINE" = "no" ]; then
-  EXCLUDE="--exclude=qtweb*"
-  PKGVERSION="${VERSION}_nowebengine"
-else
-  PKGVERSION="${VERSION}"
-  # Note that this changes to -webengine-proprietary-codecs in later versions
-  if [ "$PROPRIETARY_CODECS" = "yes" ]; then
-    CODECS="-proprietary-codecs"
-  fi
-fi
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
@@ -147,9 +129,9 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 echo "Removing any existing source directory. Please wait..."
-rm -rf ${PRGNAM/5/}-everywhere-opensource-src-$VERSION
-tar xvf $CWD/${PRGNAM/5/}-everywhere-opensource-src-$VERSION.tar.xz $EXCLUDE
-cd ${PRGNAM/5/}-everywhere-opensource-src-$VERSION
+rm -rf ${PRGNAM/5/}-everywhere-src-$VERSION
+tar xvf $CWD/${PRGNAM/5/}-everywhere-src-$VERSION.tar.xz $EXCLUDE
+cd ${PRGNAM/5/}-everywhere-src-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -173,13 +155,19 @@ cat $CWD/patches/qt5.mysql.h.diff | patch -p1 --verbose
 sed -e '/CMAKE_NO_PRIVATE_INCLUDES\ \=\ true/d' \
   -i qtbase/mkspecs/features/create_cmake.prf
 
+# Borrowed from alienBOB
 # Use our custom compiler and linker flags:
-sed -i -re "s,-O(2|3),$SLKCFLAGS," qtbase/mkspecs/common/gcc-base.conf
-sed -i -e "/^QMAKE_LFLAGS\s/s,+=,+= $SLKLDFLAGS,g" \
-  qtbase/mkspecs/common/gcc-base.conf
+sed -e "s|^\(QMAKE_CFLAGS_RELEASE.*\)|\1 ${SLKCFLAGS}|" \
+  -i qtbase/mkspecs/common/gcc-base.conf || exit 1
+sed -e "s|^\(QMAKE_LFLAGS_RELEASE.*\)|\1 ${SLKLDFLAGS}|" \
+  -i qtbase/mkspecs/common/g++-unix.conf || exit 1
 
-export CFLAGS="$SLKCFLAGS"
-export CXXFLAGS="$SLKCFLAGS -std=c++11"
+export CXXFLAGS="$SLKCFLAGS -std=c++14"
+export OPENSOURCE_CXXFLAGS="$SLKCFLAGS"
+export QTDIR="${TMP}/qt-everywhere-src-$VERSION"
+export LD_LIBRARY_PATH="${QTDIR}/qtbase/lib:${QTDIR}/qttools/lib:${LD_LIBRARY_PATH}"
+export QT_PLUGIN_PATH="${QTDIR}/qtbase/plugins"
+
 ./configure -v \
   -confirm-license \
   -opensource \
@@ -207,11 +195,12 @@ export CXXFLAGS="$SLKCFLAGS -std=c++11"
   -no-strip \
   -release \
   -no-use-gold-linker \
-  -c++std c++11 \
-  $CCACHE \
+  -c++std c++14 \
+  -examplesdir "/usr/doc/$PRGNAM-$VERSION/examples" \
+  $USE_CCACHE \
   $CODECS \
   $PULSE \
-  $RELOCATIONS \
+  $RELOCAtions \
   $BUILD_EXAMPLES
 
 make
@@ -303,21 +292,6 @@ for i in $CWD/desktop/*.desktop; do
 done
 sed -i "s|@LIBDIR@|$LIBDIRSUFFIX|" $PKG/usr/share/applications/*
 
-# Currently not working for qt version 5.4.0.  Extra layer added to *.ico file
-# freaks out ImageMagick and fails image conversion.
-# Eg.
-#   $ convert assistant.ico -resize 96x96! assistant.png
-#     convert: file format version mismatch `assistant.ico' @ error/xwd.c/ReadXWDImage/241.
-#     convert: no images defined `assistant.png' @ error/convert.c/ConvertImageCommand/3127.
-#for i in $(find . -name "assistant.ico" -o -name "designer.ico" \
-#  -o -name "linguist.ico" -o -name "qdbusviewer.ico"); do
-#  for j in 16 24 32 48 64 96 128; do
-#    convert $i -resize ${j}x${j}! $(basename $i)-$j.png
-#    install -D -m 0644 $(basename $i)-$j-0.png \
-#      $PKG/usr/share/icons/hicolor/${j}x${j}/apps/$(basename $i | sed 's|.ico||')-$PRGNAM.png
-#  done
-#done
-
 install -D -m 0644 qttools/src/assistant/assistant/images/assistant-128.png \
   $PKG/usr/share/icons/hicolor/128x128/apps/assistant-qt5.png
 install -D -m 0644 qttools/src/designer/src/designer/images/designer.png \
@@ -334,7 +308,7 @@ find $PKG \( -name "*.qml" -o -name "*.app" \) -perm 755 -exec chmod 644 '{}' \;
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  README qtbase/{header*,LGPL_EXCEPTION.txt,LICENSE.*L} \
+  README qtbase/{header*,LICENSE*} \
   $CWD/README.benchmarks $CWD/README.ccache \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
@@ -345,5 +319,3 @@ cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$PKGVERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
-
-# vim: expandtab
