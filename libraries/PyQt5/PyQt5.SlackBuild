@@ -35,7 +35,7 @@
 # Updated for Qt5-5.9.6 by David Woodfall <dave@slackbuilds.org>
 
 PRGNAM=PyQt5
-VERSION=${VERSION:-5.9.2}
+VERSION=${VERSION:-5.13.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -71,9 +71,9 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf ${PRGNAM}_gpl-$VERSION
-tar xvf $CWD/${PRGNAM}_gpl-$VERSION.tar.gz
-cd ${PRGNAM}_gpl-$VERSION
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -81,8 +81,10 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# This is needed or an include from dbus is missed (tnx, Archlinux)
-sed -i '/target_config.dbus_inc_dirs = \[\]/d' configure.py
+# From alienBOB's SlackBuild
+# Remove code that is unneeded if Qt is not bundled and crashes on python2
+# https://www.riverbankcomputing.com/pipermail/pyqt/2019-July/041896.html
+cat $CWD/patches/pyqt5-python2-crash.patch | patch -p1 --verbose
 
 export QTDIR=/usr/lib${LIBDIRSUFFIX}/qt5
 export QT5DIR=/usr/lib${LIBDIRSUFFIX}/qt5
@@ -93,16 +95,24 @@ export CXXFLAGS="$SLKCFLAGS"
 
 python configure.py \
   --confirm-license \
+  --qsci-api \
   --verbose \
   --sip=/usr/bin/python2-sip \
   --sip-incdir="/usr/include/python$PYTHONVER/python2-sip" \
   -q /usr/bin/qmake-qt5
 
 make
-make install DESTDIR=$PKG INSTALL_ROOT=$PKG
+make -j1 install DESTDIR=$PKG INSTALL_ROOT=$PKG
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Remove rpaths (from alienBOB's SlackBuild):
+for file in $(find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF | cut -f 1 -d : 2> /dev/null); do
+  if [ ! "$(patchelf --print-rpath $file 2> /dev/null)" = "" ]; then
+    patchelf --remove-rpath $file
+  fi
+done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a ChangeLog LICENSE NEWS README $PKG/usr/doc/$PRGNAM-$VERSION
