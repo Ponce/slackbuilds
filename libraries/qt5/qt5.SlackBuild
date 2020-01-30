@@ -46,10 +46,12 @@
 # tailored to Qt 5. Modified by Larry Hajali.
 
 # Adapted for Qt >= 5.9.6 by Dave Woodfall <dave@slackbuilds.org>
+# Some parts thanks to alienBOB's qt5 SlackBuild.
 
 PRGNAM=qt5
+SRCNAM=${PRGNAM%%[[:digit:]]*}
 VERSION=${VERSION:-5.12.6}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -71,10 +73,12 @@ PROPRIETARY_CODECS=${PROPRIETARY_CODECS:-no}
 PULSEAUDIO=${PULSEAUDIO:-yes}
 CCACHE=${CCACHE:-no}
 WEBENGINE=${WEBENGINE:-yes}
+LDGOLD=${LDGOLD:-no}
 
 [ "$EXAMPLES"    =  "no" ] && BUILD_EXAMPLES="-nomake examples"
 [ "$PULSEAUDIO"  =  "no" ] && PULSE="-no-pulseaudio"
 [ "$CCACHE"      = "yes" ] && USE_CCACHE="-ccache"
+[ "$LDGOLD"      =  "no" ] && USE_LDGOLD="-no-use-gold-linker"
 
 if [ "$WEBENGINE" = "no" ]; then
   EXCLUDE="--exclude=qtweb*"
@@ -93,6 +97,7 @@ printf "%s\n" "EXAMPLES:           $EXAMPLES"
 printf "%s\n" "PROPRIETARY_CODECS: $PROPRIETARY_CODECS"
 printf "%s\n" "PULSEAUDIO:         $PULSEAUDIO"
 printf "%s\n" "WEBENGINE:          $WEBENGINE"
+printf "%s\n" "LDGOLD:             $LDGOLD"
 printf "\n"
 
 if [ "$ARCH" = "i586" ]; then
@@ -129,9 +134,9 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 echo "Removing any existing source directory. Please wait..."
-rm -rf ${PRGNAM/5/}-everywhere-src-$VERSION
-tar xvf $CWD/${PRGNAM/5/}-everywhere-src-$VERSION.tar.xz $EXCLUDE
-cd ${PRGNAM/5/}-everywhere-src-$VERSION
+rm -rf $SRCNAM-everywhere-src-$VERSION
+tar xvf $CWD/$SRCNAM-everywhere-src-$VERSION.tar.xz $EXCLUDE
+cd $SRCNAM-everywhere-src-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -147,21 +152,41 @@ else
   RELOCATIONS=""
 fi
 
-# Borrowed a few things from alienBOB:
 # Fix path to mysql header:
 cat $CWD/patches/qt5.mysql.h.diff | patch -p1 --verbose
+
+# CMake generates wrong -isystem /usr/include compilations flags with Qt5::Gui
+# and for it breaks KWin compilation with:
+# /usr/include/c++/9.1.0/cstdlib:75:15: fatal error: stdlib.h: No such file or directory
+# See also https://bugzilla.redhat.com/1704474
+cd qtbase
+  cat $CWD/patches/qt5.qtbase_cmake_isystem_includes.patch \
+    | patch -p1 --verbose || exit 1
+cd - 1>/dev/null
+
+# CVE-2020-0569 (fixed in 5.14.0):
+cd qtbase
+  cat $CWD/patches/qt5.cve-2020-0569.patch \
+    | patch -p1 --verbose || exit 1
+cd - 1>/dev/null
+
+# CVE-2020-0570 (fixed in 5.14.1):
+cd qtbase
+  cat $CWD/patches/qt5.cve-2020-0570.patch \
+    | patch -p1 --verbose || exit 1
+cd - 1>/dev/null
 
 # Fix missing private includes: QTBUG-37417
 sed -e '/CMAKE_NO_PRIVATE_INCLUDES\ \=\ true/d' \
   -i qtbase/mkspecs/features/create_cmake.prf
 
-# Borrowed from alienBOB
 # Use our custom compiler and linker flags:
 sed -e "s|^\(QMAKE_CFLAGS_RELEASE.*\)|\1 ${SLKCFLAGS}|" \
   -i qtbase/mkspecs/common/gcc-base.conf || exit 1
 sed -e "s|^\(QMAKE_LFLAGS_RELEASE.*\)|\1 ${SLKLDFLAGS}|" \
   -i qtbase/mkspecs/common/g++-unix.conf || exit 1
 
+export CFLAGS="$SLKCFLAGS"
 export CXXFLAGS="$SLKCFLAGS -std=c++14"
 export OPENSOURCE_CXXFLAGS="$SLKCFLAGS"
 export QTDIR="${TMP}/qt-everywhere-src-$VERSION"
@@ -176,6 +201,7 @@ export QT_PLUGIN_PATH="${QTDIR}/qtbase/plugins"
   -headerdir "/usr/include/$PRGNAM" \
   -libdir "/usr/lib${LIBDIRSUFFIX}" \
   -docdir "/usr/doc/$PRGNAM-$VERSION" \
+  -examplesdir "/usr/doc/$PRGNAM-$VERSION/examples" \
   -system-libpng \
   -system-libjpeg \
   -system-zlib \
@@ -194,24 +220,23 @@ export QT_PLUGIN_PATH="${QTDIR}/qtbase/plugins"
   -no-rpath \
   -no-strip \
   -release \
-  -no-use-gold-linker \
   -c++std c++14 \
-  -examplesdir "/usr/doc/$PRGNAM-$VERSION/examples" \
   $USE_CCACHE \
   $CODECS \
   $PULSE \
   $RELOCATIONS \
-  $BUILD_EXAMPLES
+  $BUILD_EXAMPLES \
+  $USE_LDGOLD
 
-make
+make || make -j1
 make install INSTALL_ROOT=$PKG
 
 # Install documentation. Default is not to install documentation.
-if [ "$DOCS" == "yes" ]; then
+if [ "$DOCS" = "yes" ]; then
   # Recreate Makefiles in order to use the just compiled qdoc.
-  for doc in $(find . -name "Makefile*" | xargs egrep "^\s/usr/lib${LIBDIRSUFFIX}/qt5/bin/" \
-    | cut -d':' -f1 | uniq)
-  do
+  for doc in $(find . -name "Makefile*" \
+    | xargs egrep "^\s/usr/lib${LIBDIRSUFFIX}/qt5/bin/" | cut -d':' -f1 \
+    | uniq); do
     rm -fv $doc
   done
   make docs
@@ -221,7 +246,12 @@ fi
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-ln -s $PRGNAM $PKG/usr/lib${LIBDIRSUFFIX}/qt-$VERSION
+# Remove rpaths:
+for file in $(find . | xargs file | grep -e "executable" -e "shared object" | grep ELF | cut -f1 -d: 2>/dev/null); do
+  if [ ! "$(patchelf --print-rpath $file 2> /dev/null)" = "" ]; then
+    patchelf --remove-rpath $file
+  fi
+done
 
 mkdir -p $PKG/usr/bin
 for BIN in $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/bin/*; do
@@ -267,25 +297,21 @@ Description: Qt5 Configuration
 Version: $VERSION
 EOF
 
+# Fix internal linking for Qt5WebEngineCore.pc.
 if [ "$WEBENGINE" = "yes" ]; then
-  # Fix internal linking for Qt5WebEngineCore.pc.
   sed -i \
     -e 's|-Wl,--start-group.* -Wl,--end-group||' \
     -e "s|-L${PWD}/qtwebengine/src/core/api/Release||" \
     $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/Qt5WebEngineCore.pc
 fi
 
-# While we are at it, there isn't any reason to keep references to $PKG in the *.prl files.
-for PRL in $(find $PKG -name "*\.prl"); do
-  sed -i '/^QMAKE_PRL_BUILD_DIR/d' $PRL
-done
+# Fix the path in prl files:
+find "$PKG/usr/lib${LIBDIRSUFFIX}" -type f -name '*.prl' \
+  -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d;s/\(QMAKE_PRL_LIBS =\).*/\1/' {} \;
 
 # One more for the road.
 sed -i "s|$PWD/qtbase|/usr/lib${LIBDIRSUFFIX}/$PRGNAM|" \
   $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/mkspecs/modules/qt_lib_bootstrap_private.pri
-
-#sed -i "s|-L${PWD}/\w*/lib ||g" \
-#  $PKG/usr/lib${LIBDIRSUFFIX}/libqgsttools_p.prl
 
 for i in $CWD/desktop/*.desktop; do
   install -D -m 0644 $i $PKG/usr/share/applications/$(basename $i)
@@ -305,6 +331,10 @@ done
 
 # Remove executable bits from files.
 find $PKG \( -name "*.qml" -o -name "*.app" \) -perm 755 -exec chmod 644 '{}' \;
+
+# Add missing verions info
+sed -i "s,set(PACKAGE_VERSION ),set(PACKAGE_VERSION $VERSION)," \
+   $PKG/usr/lib$LIBDIRSUFFIX/cmake/Qt5/Qt5ConfigVersion.cmake
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
