@@ -2,17 +2,19 @@
 
 # Slackware build script for Artistic Style
 
-# Copyright 2017,2018 Nate Bargmann <n0nb@arrl.net>
+# Copyright 2020 B. Watson <yalhcru@gmail.com>
 
-# Ryan P.C. McQuen | Everett, WA | ryanpcmcquen@member.fsf.org
+# Copyright 2017,2018 Nate Bargmann <email removed>
 
-# Maintained by Daniel Jordan, daniel.budd.j@gmail.com
+# Ryan P.C. McQuen | Everett, WA | <email removed>
+
+# Formerly maintained by Daniel Jordan <email removed>
 #    - updated version number
 #    - added default variable options
 #    - auto detect ARCH
-#    - build and install shared libraries
+#    - build and install shared libraries [bkw: say what?]
 #
-# Originally by Dugan Chen (dugan_c@fastmail.fm)
+# Originally by Dugan Chen <email removed>
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -32,12 +34,24 @@
 # along with this program (most likely, a file named COPYING). If
 # not, see <http://www.gnu.org/licenses/>.
 
+# 20200113 bkw:
+# - Take over maintenance.
+# - Add man page and privacy patch, BUILD=2.
+# - Get rid of "shared" from make command. We weren't installing the
+#   shared library anyway, despite the comment above from Daniel
+#   Jordan. The only thing that lists astyle as a dependency is ebe,
+#   and that's a runtime dep (it executes the astyle command, doesn't
+#   link the shared lib). If someone needs the shared lib, I can add
+#   it to the build, but for now I'm leaving it alone because the
+#   .so isn't versioned (upgrades may cause breakage).
+# - Simplify and tweak the script.
+
 PRGNAM=astyle
 VERSION=${VERSION:-3.1}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
-SRCPK=astyle_$VERSION\_linux.tar.gz
+TARBALL="astyle_${VERSION}_linux.tar.gz"
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -72,40 +86,39 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM
-tar -xzvf $CWD/$SRCPK
+tar xvf $CWD/$TARBALL
 cd $PRGNAM
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-cd build/gcc
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-make release shared
+# Don't change this back to template please. Every file in the tarball
+# is +x, and *none* of them need to be.
+find -L .  -type d -a -exec chmod 755 {} \+ -o \
+           -type f -a -exec chmod 644 {} \+
 
-inst_pfx=$PKG/usr
-make install prefix=$inst_pfx SYSCONF_PATH=$inst_pfx/doc/$PRGNAM-$VERSION
+DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# This patch (from Debian) prevents the user's browser from trying to
+# load images from sourceforge, when viewing the *local* HTML docs in
+# a browser.
+patch -p1 < $CWD/privacy.patch
 
-cd $TMP/$PRGNAM
-for file in *.md
-do
-    cat $file > $PKG/usr/doc/$PRGNAM-$VERSION/$file
-done
+CFLAGS="$SLKCFLAGS -Wl,-s" \
+CXXFLAGS="$SLKCFLAGS -Wl,-s" \
+  make -C build/gcc release
+  make -C build/gcc install prefix=$PKG/usr SYSCONF_PATH=$DOCDIR
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/file
-cd $TMP/$PRGNAM/file
-for file in *.ini
-do
-    fromdos < $file > $PKG/usr/doc/$PRGNAM-$VERSION/file/$file
-done
+# Man page borrowed from Debian. It's kind of a placeholder, will
+# expand it someday.
+mkdir -p $PKG/usr/man/man1
+sed -e "s|@VERSION@|$VERSION|" \
+    -e "s|@DATE@|$( date +"%B %e, %Y" )|" \
+    $CWD/$PRGNAM.1 | \
+    gzip -9c > $PKG/usr/man/man1/$PRGNAM.1.gz
 
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cp -a *.md file $DOCDIR
+sed -i 's,\r,,' $DOCDIR/file/*
+
+cat $CWD/$PRGNAM.SlackBuild > $DOCDIR/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
