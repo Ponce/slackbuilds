@@ -4,7 +4,7 @@ if [ -x usr/share/texmf/bin/texhash ]; then
 fi
 
 # run sage at least once as root after moving it to a new location
-echo "exit" | SAGEROOT/sage
+#echo "exit" | SAGEROOT/sage
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
