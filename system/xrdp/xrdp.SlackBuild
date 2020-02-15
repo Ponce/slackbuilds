@@ -2,9 +2,10 @@
 
 # Slackware build script for xrdp
 # Written by Phillip Warner <pc_warner@yahoo.com>
+# Amended by David Allen <david.a58@optusnet.com.au>
 
 PRGNAM=xrdp
-VERSION=${VERSION:-0.9.4}
+VERSION=${VERSION:-0.9.12}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -24,6 +25,10 @@ OUTPUT=${OUTPUT:-/tmp}
 # If you have PAM installed and wish to install /etc/pam.d/sesman,
 # then run this script as: "USE_PAM=YES ./xrdp.SlackBuild"
 USE_PAM=${USE_PAM:-NO}
+
+# If you want drive redirection and shared clipboard support,
+# then run this script as: "USE_GVFS=YES ./xrdp.SlackBuild"
+USE_GVFS=${USE_GVFS:-NO}
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
@@ -63,9 +68,12 @@ else
     NOPAM_OPT=""
 fi
 
-# Optional config options if built with FreeRDP:
-#  --enable-freerdp        Build freerdp module (default: no)
-#  --enable-freerdp1       Build freerdp1 module (default: no)
+if [ "$USE_GVFS" = "NO" ]; then
+    NOGVFS_OPT="--disable-fuse"
+else
+    NOGVFS_OPT="--enable-fuse"
+fi
+
 CFLAGS="$SLKCFLAGS" \
 CPPFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -78,16 +86,21 @@ CPPFLAGS="$SLKCFLAGS" \
   --build=$ARCH-slackware-linux \
   --disable-painter \
   --disable-rfxcodec \
+  --disable-static \
+  $NOGVFS_OPT \
   $NOPAM_OPT
 
-# Fix path in what will become the init script
-sed -i "s/SBINDIR=\/usr\/local\/sbin/SBINDIR=\/usr\/sbin/" instfiles/xrdp.sh
-
-# Change xinit script name to xrdp-xinitrc
-sed -i "s/startwm.sh/xrdp-xinitrc/" instfiles/xrdp.sh
-
-# Build fails if a copy of config.{c,h} is not in sesman/tools/
-cp -v sesman/config.{c,h} sesman/tools/
+## Use sed rather than patch as line locations change between versions
+# Change LogLevel to INFO instead of DEBUG
+sed -i "s/LogLevel=DEBUG/LogLevel=INFO/" xrdp/xrdp.ini
+sed -i "s/SyslogLevel=DEBUG/SyslogLevel=INFO/" xrdp/xrdp.ini
+sed -i "s/LogLevel=DEBUG/LogLevel=INFO/" sesman/sesman.ini
+sed -i "s/SyslogLevel=DEBUG/SyslogLevel=INFO/" sesman/sesman.ini
+# Disable Root logins by default
+sed -i "s/AllowRootLogin=true/AllowRootLogin=false/" sesman/sesman.ini
+# Set default RDP session xinit script to /etc/xrdp/xrdp-xinitrc
+sed -i "s/UserWindowManager=startwm.sh/UserWindowManager=.xrdp-xinitrc/" sesman/sesman.ini
+sed -i "s/DefaultWindowManager=startwm.sh/DefaultWindowManager=xrdp-xinitrc/" sesman/sesman.ini
 
 make
 make install DESTDIR=$PKG
@@ -95,24 +108,35 @@ make install DESTDIR=$PKG
 # Make sure log directory is there
 mkdir -p $PKG/var/log
 
-# Let's make the xrdp_control.sh script the init script
-mkdir -p $PKG/etc/rc.d
-mv $PKG/etc/$PRGNAM/xrdp.sh $PKG/etc/rc.d/rc.$PRGNAM.new
-
 # Change startwm.sh name for more consistency with previous SlackBuild
 # and corresponding user file name
 mv $PKG/etc/$PRGNAM/startwm.sh  $PKG/etc/$PRGNAM/xrdp-xinitrc.new
+
+# Install the xrdp-xwmconfig utility
+install -D -m 0755 -o root -g root $CWD/xrdp-xwmconfig \
+  $PKG/usr/bin/xrdp-xwmconfig
 
 # Let's not clobber existing configs
 ( cd $PKG/etc/$PRGNAM
   mv rsakeys.ini rsakeys.ini.new
   mv sesman.ini sesman.ini.new
   mv xrdp.ini xrdp.ini.new
+  mv xrdp_keyboard.ini xrdp_keyboard.ini.new
+  mv reconnectwm.sh reconnectwm.sh.new
+  rename ini ini.new  km-????????.ini
 )
 
-# Install the xrdp-xwmconfig utility
-install -D -m 0755 $CWD/xrdp-xwmconfig \
-  $PKG/usr/bin/xrdp-xwmconfig
+# Used to make the init script from instfiles/xrdp.sh,
+#  but it was removed from xrdp-0.9.12,
+#  so it is included in the SlackBuild files
+install -D -m 0755 -o root -g root $CWD/rc.xrdp \
+  $PKG/etc/rc.d/rc.xrdp.new
+
+# Install logrotate scripts
+install -D -m 0644 -o root -g root $CWD/xrdp \
+  $PKG/etc/logrotate.d/xrdp.new
+install -D -m 0644 -o root -g root $CWD/xrdp-sesman \
+  $PKG/etc/logrotate.d/xrdp-sesman.new
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -121,7 +145,6 @@ find $PKG/usr/man -type f -exec gzip -9 {} \;
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a COPYING design.txt install.txt README.md faq-*.txt $PKG/usr/doc/$PRGNAM-$VERSION
-
 # Keep a backup copy of startwm.sh in the docs
 cat sesman/startwm.sh > $PKG/usr/doc/$PRGNAM-$VERSION/startwm.sh-example
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
