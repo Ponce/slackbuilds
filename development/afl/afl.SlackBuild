@@ -6,11 +6,15 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-# 20180709 bkw: updated for v2.49b.
+# 20200217 bkw: BUILD=2.
+# - fix afl-clang-fast
+# - include README.llvm and optional README.qemu in doc dir
+# - update README slightly
+# 20180709 bkw: updated for v2.52b.
 
 PRGNAM=afl
 VERSION=${VERSION:-2.52b}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -49,15 +53,14 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tgz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \+ -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 # apply slack cflags, tell gcc to create stripped binaries
-sed -i "/^CFLAGS/s|-O3.*|$SLKCFLAGS -Wl,-s|" Makefile
+sed -i "/^CFLAGS/s|-O3.*|$SLKCFLAGS -Wl,-s|" Makefile llvm_mode/Makefile
 sed -i "/^CFLAGS/s|-O3|$SLKCFLAGS|" qemu_mode/build_qemu_support.sh
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
 
 make \
   DESTDIR=$PKG \
@@ -69,9 +72,30 @@ make \
 
 # llvm fast mode looks useful, include it.
 # comment this out if you're building on slack 14.1, its llvm is too old.
-make -C llvm_mode
+make -C llvm_mode \
+  PREFIX=/usr \
+  HELPER_PATH=/usr/lib$LIBDIRSUFFIX/$PRGNAM
+
+# no 'make install' support, manual install.
 install -s -m0755 -oroot -groot afl-clang-fast $PKG/usr/bin
 ln -s afl-clang-fast $PKG/usr/bin/afl-clang-fast++
+
+# 20200217 bkw: clang fast mode support libraries. Thanks to mity for
+# a very detailed bug report.
+CLANGLIB=$PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM
+install -s -m0755 -oroot -groot afl-llvm-pass.so $CLANGLIB
+# no -s here, stripping this would be bad:
+install -m0644 -oroot -groot afl-llvm-rt*.o $CLANGLIB
+
+# replace identical .o files with symlinks
+baseobj=$CLANGLIB/afl-llvm-rt.o
+for bits in 32 64; do
+  bitobj=$CLANGLIB/afl-llvm-rt-$bits.o
+  if [ -e $bitobj ] && cmp $bitobj $baseobj; then
+    rm -f $bitobj
+	 ln -s afl-llvm-rt.o $bitobj
+  fi
+done
 
 WITHQEMU="without"
 
@@ -90,6 +114,7 @@ if [ -e "$CWD/$QEMU_SRC" ]; then
 
   cd qemu_mode
     sh build_qemu_support.sh
+    cp -a README.qemu $PKGDOC
   cd -
 
   install -s -m0755 -oroot -groot afl-qemu-trace $PKG/usr/bin
@@ -102,8 +127,9 @@ fi
 
 # 'make install' already put the docs where they belong.
 # the experimental/ stuff is sample source code, include in docs.
-cp -a experimental $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# since llvm_mode has no 'make install', we install its doc here.
+cp -a llvm_mode/README.llvm experimental $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 sed "s,@WITHQEMU@,$WITHQEMU," $CWD/slack-desc > $PKG/install/slack-desc
