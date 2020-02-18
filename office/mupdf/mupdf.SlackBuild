@@ -7,6 +7,7 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20200217 bkw: update for 1.16.1.
 # 20180623 bkw: BUILD=2, add patch for dynamic linking. Thanks
 #               to Thomas Morper for pointing me in the right direction.
 # 20180615 bkw: update for 1.13.0, move old change comments to ChangeLog.old
@@ -16,8 +17,8 @@
 # 20170122 bkw: update for 1.10a.
 
 PRGNAM=mupdf
-VERSION=${VERSION:-1.13.0}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.16.1}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -52,44 +53,13 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION-source
-tar xvf $CWD/$PRGNAM-$VERSION-source.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION-source.tar.?z
 cd $PRGNAM-$VERSION-source
 
-# don't find/chown/chmod until after the thirdparty junk is removed.
-
-# Build against system libs instead of bundled ones. If we didn't do this,
-# libmupdf would be useless for building anything else.
-
-# Everything removed from thirdparty/ has to be installed systemwide, and must
-# either be a Slackware core pkg, or mentioned in REQUIRES= in the .info
-# file... except mujs, which is mupdf's javascript support lib. If missing,
-# we end up with a mupdf with no JS support, which is probably a good idea
-# for the default build. If you want javascript, MUJS=yes in the env.
-
-MUJS="${MUJS:-no}"
-
-if [ "$MUJS" = "yes" ]; then
-  mv thirdparty/mujs .keep
-  rm -rf thirdparty/*
-  mv .keep thirdparty/mujs
-  WITH=with
-else
-  rm -rf thirdparty/*
-  sed -i 's,murun\.o,,' Makefile
-  sed -i 's,pdf_drop_js.*,;,' source/pdf/pdf-xref.c
-  sed -i '/murun_main/d' source/tools/mutool.c
-  WITH=without
-fi
-
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \+ -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \+
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# ref https://bugs.ghostscript.com/show_bug.cgi?id=697175
-sed -i '/#define *OPJ_STATIC/d' source/fitz/load-jpx.c
 
 # Hard-code the version number so it'll stop trying to use git to retrieve
 # it and spewing harmless but scary 'fatal: Not a git repository' errors.
@@ -107,39 +77,29 @@ else
   LIBTYPE=static
 fi
 
+# Build against system libs instead of bundled ones. If we didn't do this,
+# libmupdf would be useless for building anything else.
 make verbose=yes \
   XCFLAGS="$SLKCFLAGS -DJBIG_NO_MEMENTO" \
-  HAVE_MUJS="$MUJS" \
+  USE_SYSTEM_LIBS=yes \
   build=release \
   prefix=/usr \
   libdir=/usr/lib$LIBDIRSUFFIX \
   mandir=/usr/man \
   docdir=/usr/doc/$PRGNAM-$VERSION \
   DESTDIR=$PKG \
-  all extra-apps install
-
-# 1.12.0 used to install this stuff with 'make install', 1.13.0 doesn't:
-for i in mjsgen muraster mupdf-x11-curl; do
-  [ -e build/release/$i ] && install -s -m0755 build/release/$i $PKG/usr/bin
-done
+  all install
 
 strip $PKG/usr/bin/*
-
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+gzip -9 $PKG/usr/man/man1/*.1
 
 # Compatibility symlinks. Older versions, the binary is just "mupdf".
 # Separate -curl binary exists in 1.5 but not 1.4.
 ln -s $PRGNAM-x11 $PKG/usr/bin/$PRGNAM
-ln -s $PRGNAM.1.gz $PKG/usr/man/man1/$PRGNAM-x11.1.gz
-[ -e $PKG/usr/bin/$PRGNAM-x11-curl ] && \
-  ln -s $PRGNAM.1.gz $PKG/usr/man/man1/$PRGNAM-x11-curl.1.gz
-
-# mujstest is useless if we don't have JS support. Also libmupdfthird.a
-# ends up 8 bytes long & has no object code in it.
-[ "$MUJS" = "yes" ] || \
-  rm -f $PKG/usr/bin/mujstest \
-        $PKG/usr/lib$LIBDIRSUFFIX/libmupdfthird.a
+for i in x11 x11-curl gl; do
+  [ -e $PKG/usr/bin/$PRGNAM-$i ] && \
+    ln -s $PRGNAM.1.gz $PKG/usr/man/man1/$PRGNAM-$i.1.gz
+done
 
 # Installed permissions are atrocious (everything 755).
 find $PKG -type f | xargs chmod 644
@@ -160,7 +120,7 @@ cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
 
 # .pc file taken from debian and parameterized.
 PCLIBS="-l$PRGNAM -lfreetype -lharfbuzz -ljbig2dec -ljpeg -lcrypto -lopenjp2 -lz -lm"
-[ "$MUJS" = "yes" ] && PCLIBS="$PCLIBS -lmupdfthird"
+PCLIBS="$PCLIBS -lmupdfthird"
 
 mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/pkgconfig/
 sed -e "s,@LIB@,lib$LIBDIRSUFFIX,g" \
@@ -175,8 +135,7 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 # slack-desc will conveniently say whether javascript is built in,
 # and whether libs are shared or static.
 mkdir -p $PKG/install
-sed -e "s,@WITH@,$WITH," \
-    -e "s,@LIBTYPE@,$LIBTYPE," \
+sed -e "s,@LIBTYPE@,$LIBTYPE," \
     $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
