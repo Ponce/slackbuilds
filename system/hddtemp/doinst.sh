@@ -12,4 +12,5 @@ config() {
 }
 
 config etc/hddtemp/hddtemp.db.new
+config etc/rc.d/rc.hddtemp.new
 
