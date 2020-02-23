@@ -1,0 +1,173 @@
+#!/bin/sh
+
+# Slackware build script for squirrelmail
+
+# Copyright 2020 Jan F. Chadima <jfch@jagda.eu>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=squirrelmail
+VERSION=${VERSION:-1.4.22}
+LOCALEVERSION=${LOCALEVERSION:-1.4.18-20090526}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+SRCNAM="squirrelmail-webmail"
+
+ARCH=noarch
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $PKG/usr/share $OUTPUT
+cd $PKG/usr/share
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+mv $SRCNAM* $PRGNAM
+cd $PRGNAM
+
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+mkdir -p $PKG/usr/doc/
+mv doc $PKG/usr/doc/$PRGNAM-$VERSION
+mv plugins/README.plugins $PKG/usr/doc/$PRGNAM-$VERSION
+mv locale/README.locales $PKG/usr/doc/$PRGNAM-$VERSION
+mv themes/README.themes $PKG/usr/doc/$PRGNAM-$VERSION
+rm -f $PKG/usr/doc/$PRGNAM-$VERSION/.htaccess
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/etc/httpd/extra
+cat $CWD/squirrelmail.conf > $PKG/etc/httpd/extra/squirrelmail.conf
+
+rm -rf $TMP/squireelmail-locales
+mkdir $TMP/squireelmail-locales
+cd $TMP/squireelmail-locales
+tar xf $CWD/locales-$LOCALEVERSION-src.tar.gz
+
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+#use utf-8 by default
+for LOCALE in $(ls locale/) ; do
+	SKIPINVALID=
+	case $LOCALE in
+		ja_JP)
+			CHARSET=euc-jp
+			;;
+		ko_KR)
+			SKIPINVALID=-c
+			CHARSET=$(grep CHARSET locale/$LOCALE/setup.php | \
+				cut -f6 -d\')
+			;;
+		*)
+			CHARSET=$(grep CHARSET locale/$LOCALE/setup.php | \
+				cut -f6 -d\')
+			;;
+	esac
+
+	grep LOCALE locale/$LOCALE/setup.php | grep -vi $CHARSET  || true
+
+	if [ "$CHARSET" != utf-8 -a "$CHARSET" != UTF-8 ] ; then
+		for a in $(ls help/$LOCALE/ 2>/dev/null) ; do
+			if [ "$LOCALE" == "ja_JP" ] ; then continue ; fi
+			iconv $SKIPINVALID -f $CHARSET -t utf-8 \
+				help/$LOCALE/$a > $a.new && \
+				mv $a.new help/$LOCALE/$a
+		done
+		sed -e "s/CHARSET..[ ]*= [^;]*;/CHARSET'] = 'utf-8';/" \
+		    -e "s/LOCALE..[ ]*= [^;]*;/LOCALE'] = '$LOCALE.UTF-8';/" \
+			locale/$LOCALE/setup.php  > \
+			setup.php.new && \
+			mv setup.php.new locale/$LOCALE/setup.php
+	fi
+done
+
+for POFILE in $(find locale -name \*.po) ; do
+	CHARSET=$(grep charset= $POFILE | cut -f2 -d= | cut -f1 -d\\)
+	if [ "$CHARSET" != utf-8 -a "$CHARSET" != UTF-8 ]; then
+		sed s/charset=$CHARSET/charset=utf-8/ $POFILE | \
+			iconv -f $CHARSET -t utf-8 > $POFILE.new && \
+			mv $POFILE.new $POFILE
+	fi
+done
+
+for POFILE in $(find . -name \*.po) ; do
+    msgfmt $POFILE -c -o $(echo $POFILE | sed s/\.po\$/.mo/)
+done
+
+find locale -name \*.mo | cpio -pduv $PKG/usr/share/squirrelmail/
+cp -r images/* $PKG/usr/share/squirrelmail/images/
+cp -r help/* $PKG/usr/share/squirrelmail/help/
+
+cd $PKG/usr/share/squirrelmail
+
+sed -i 's/^ *\($default_charset *=\).*$/'"\1 'utf-8';/" \
+	config/config_default.php
+
+sed -i functions/i18n.php \
+	-e "s/^\(\$languages\['\([^']*\)'\]\['CHARSET'].*= '\)\([^']*\)';/\1utf-8';/" \
+	-e "s/^\(\$languages\['\([^']*\)'\]\['LOCALE'].*=\).*/\1 '\2.UTF-8';/" 
+
+rm -f  plugins/make_archive.pl
+
+mkdir -p $PKG/etc/squirrelmail
+
+cp $CWD/config.php $PKG/etc/squirrelmail/config.php
+ln -sf /etc/squirrelmail/config.php config/config.php
+
+cp $CWD/config_local.php $PKG/etc/squirrelmail/config_local.php
+ln -sf /etc/squirrelmail/config_local.php config/config_local.php
+
+mv plugins/squirrelspell/sqspell_config.php \
+	$PKG/etc/squirrelmail/sqspell_config.php
+ln -sf /etc/squirrelmail/sqspell_config.php \
+	plugins/squirrelspell/sqspell_config.php
+
+mv data/default_pref $PKG/etc/squirrelmail/default_pref
+mkdir -p $PKG/var/lib/squirrelmail/prefs
+ln -sf /etc/squirrelmail/default_pref \
+	$PKG/var/lib/squirrelmail/prefs/default_pref
+
+mkdir -p $PKG/var/spool/squirrelmail/attach
+
+mkdir -p $PKG/etc/cron.daily
+cp $CWD/squirrelmail.cron $PKG/etc/cron.daily/squirrelmail
+chmod +x $PKG/etc/cron.daily/squirrelmail
+
+rm -rf contrib data po README configure plugins/demo
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
