@@ -1,0 +1,137 @@
+#!/bin/sh
+
+# Copyright 2020  Ciprian Stingu <ciprian dot stingu at gmail dot com>
+# Repackage of AUR : opencl-amd.git for Slackware
+#
+# Original credits of AUR : opencl-amd.git
+# Maintainer: Christopher Snowhill <kode54 at gmail dot com>
+# Contributor: ipha <ipha00 at gmail dot com>
+# Contributor: johnnybash <georgpfahler at wachenzell dot org>
+# Contributor: grmat <grmat at sub dot red>
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+PKGNAM="opencl-amd"
+VERSION=${VERSION:-19.50}
+MINVER="967956"
+AMDVER="2.4.99"
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+SRCNAM="amdgpu-pro-${VERSION}-${MINVER}-ubuntu-18.04"
+CLINFO_SHARED="opt/amdgpu-pro/bin"
+OPENCL_SHARED="opt/amdgpu-pro/lib/x86_64-linux-gnu"
+LIBDRM_SHARED="opt/amdgpu/lib/x86_64-linux-gnu"
+
+# Allow $ARCH to be preset before running the script.  This is useful in the
+# case where someone is running a 32-bit chroot environment under an x86_64
+# kernel:
+ARCH=${ARCH:-$(uname -m)}
+
+case "$ARCH" in
+  x86_64) DEBARCH="amd64" ; LIBDIRSUFFIX="64" ; ARCH=x86_64 ;;
+  *) echo "Package for $(uname -m) architecture is not available." ; exit 1 ;;
+esac
+
+if [ ! $UID = 0 ]; then
+  cat << EOF
+
+This script must be run as root.
+
+EOF
+  exit 1
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp}
+PKG="${TMP}/package-${PKGNAM}"
+SRCDIR="${TMP}/${SRCNAM}"
+OUTPUT=${OUTPUT:-/tmp}
+
+rm -rf "${PKG}"
+mkdir -p "${TMP}" "${PKG}" "${OUTPUT}"
+cd "${TMP}"
+
+rm -rf ${SRCDIR}
+tar -xf "${CWD}/${SRCNAM}.tar.xz"
+
+rm -rf "${TMP}/opencl"
+rm -rf "${TMP}/libdrm"
+
+#start AUR : opencl-amd.git
+mkdir -p "${TMP}/opencl"
+cd "${TMP}/opencl"
+# clinfo
+ar x "${SRCDIR}/clinfo-amdgpu-pro_${VERSION}-${MINVER}_${DEBARCH}.deb"
+tar xJf "data.tar.xz"
+# pal
+ar x "${SRCDIR}/opencl-amdgpu-pro-icd_${VERSION}-${MINVER}_${DEBARCH}.deb"
+tar xJf "data.tar.xz"
+ar x "${SRCDIR}/opencl-amdgpu-pro-comgr_${VERSION}-${MINVER}_${DEBARCH}.deb"
+tar xJf "data.tar.xz"
+# orca
+ar x "${SRCDIR}/opencl-orca-amdgpu-pro-icd_${VERSION}-${MINVER}_${DEBARCH}.deb"
+tar xJf "data.tar.xz"
+cd "${OPENCL_SHARED}"
+sed -i "s|libdrm_amdgpu|libdrm_amdgpo|g" libamdocl-orca64.so
+# libdrm
+mkdir -p "${TMP}/libdrm"
+cd "${TMP}/libdrm"
+ar x "${SRCDIR}/libdrm-amdgpu-amdgpu1_${AMDVER}-${MINVER}_${DEBARCH}.deb"
+tar xJf "data.tar.xz"
+cd "${LIBDRM_SHARED}"
+rm "libdrm_amdgpu.so.1"
+mv "libdrm_amdgpu.so.1.0.0" "libdrm_amdgpo.so.1.0.0"
+ln -s "libdrm_amdgpo.so.1.0.0" "libdrm_amdgpo.so.1"
+
+mv "${TMP}/opencl/etc" "${PKG}/"
+mkdir -p "${PKG}/usr/lib${LIBDIRSUFFIX}"
+mkdir -p "${PKG}/usr/bin"
+# clinfo
+mv "${TMP}/opencl/${CLINFO_SHARED}/clinfo" "${PKG}/usr/bin/"
+# pal
+mv "${TMP}/opencl/${OPENCL_SHARED}/libamdocl64.so" "${PKG}/usr/lib${LIBDIRSUFFIX}/"
+mv "${TMP}/opencl/${OPENCL_SHARED}/libamd_comgr.so" "${PKG}/usr/lib${LIBDIRSUFFIX}/"
+# orca
+mv "${TMP}/opencl/${OPENCL_SHARED}/libamdocl-orca64.so" "${PKG}/usr/lib${LIBDIRSUFFIX}/"
+mv "${TMP}/opencl/${OPENCL_SHARED}/libamdocl12cl64.so" "${PKG}/usr/lib${LIBDIRSUFFIX}/"
+# libdrm
+mv "${TMP}/libdrm/${LIBDRM_SHARED}/libdrm_amdgpo.so.1.0.0" "${PKG}/usr/lib${LIBDIRSUFFIX}/"
+mv "${TMP}/libdrm/${LIBDRM_SHARED}/libdrm_amdgpo.so.1" "${PKG}/usr/lib${LIBDIRSUFFIX}/"
+
+mkdir -p "${PKG}/opt/amdgpu/share/libdrm"
+cd "${PKG}/opt/amdgpu/share/libdrm"
+ln -s "/usr/share/libdrm/amdgpu.ids" "amdgpu.ids"
+
+rm -rf "${TMP}/opencl"
+rm -rf "${TMP}/libdrm"
+#end AUR : opencl-amd.git
+
+mkdir -p "${PKG}/install"
+cat "${CWD}/slack-desc" > "${PKG}/install/slack-desc"
+
+cd ${PKG}
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+/sbin/makepkg -l y -c n "${OUTPUT}/${PKGNAM}-${VERSION}-${MINVER}-${ARCH}-${BUILD}${TAG}.${PKGTYPE:-tgz}"
