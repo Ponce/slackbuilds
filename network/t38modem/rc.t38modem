@@ -1,0 +1,152 @@
+#!/bin/sh
+
+#############################
+# READ T38MODEM CONFIG FILE #
+#############################
+
+# Get the configuration information from /etc/rc.d/rc.t38modem.conf:
+. /etc/rc.d/rc.t38modem.conf
+
+###########
+# LOGGING #
+###########
+
+# If possible, log events in /var/log/messages:
+if [ -f /var/run/syslogd.pid -a -x /usr/bin/logger ]; then
+  LOGGER=/usr/bin/logger
+else # output to stdout/stderr:
+  LOGGER=/bin/cat
+fi
+
+MAXMODEMS=6
+
+# Function to return PID of modem instance:
+modem_pid() {
+  PID=$(ps -C t38modem -o pid,cmd | grep ${1} | grep -v grep | awk '{print $1}')
+  echo "$PID"
+}
+
+# Function to start modem interface:
+modem_up() {
+  i=0
+  while [ $i -lt $MAXMODEMS ]; do
+    if [ "${MODEMNAME[$i]}" = "${1}" ]; then
+      PID=$(modem_pid "${1}")
+      if [ -n "$PID" ]; then
+        echo "Modem "${1}" already up..."
+      else
+        echo "Starting t38modem on ${1}..."
+        # Build PTTY name
+        PTTY=${PTTY[$i]}
+        if [ -z "${PTTY}" ]; then
+          PTTY="+/dev/${MODEMNAME[$i]}"
+        fi
+        # Start t38modem
+        nohup \
+          /usr/bin/t38modem \
+          --no-h323 \
+          --sip-t38-udptl-redundancy ${T38_REDUNDANCY[$i]} \
+          --sip-listen udp\$*:${LISTEN_PORT[$i]} \
+          --sip-register ${SIP_ACCOUNT[$i]}@${SIP_SERVER[$i]},${SIP_PASSWORD[$i]} \
+          --ptty ${PTTY} \
+          --force-fax-mode \
+          --route "modem:.*=sip:<dn>@${SIP_SERVER[$i]}" \
+          --route "sip:.*=modem:<dn>" \
+          > /dev/null 2>&1 &
+      fi
+      break
+    fi
+    i=$(($i+1))
+  done
+}
+
+# Function to stop modem interface:
+modem_down() {
+  PID=$(modem_pid "${1}")
+  if [ -n "$PID" ]; then
+    echo "Stopping t38modem for modem ${1}..."
+    kill $PID
+  fi
+}
+
+# Function to report status on modem interface:
+modem_status() {
+  PID=$(modem_pid "${1}")
+  echo -n "Modem ${1}: "
+  if [ -n "$PID" ]; then
+    echo "up"
+  else
+    echo "down"
+  fi
+}
+
+# Function to bring modems up:
+start() {
+  for i in ${MODEMNAME[@]} ; do
+    modem_up $i
+  done
+}
+
+# Function to take modems down:
+stop() {
+  for i in ${MODEMNAME[@]} ; do
+    modem_down $i
+  done
+}
+
+# Function to query modem states:
+status() {
+  for i in ${MODEMNAME[@]} ; do
+    modem_status $i
+  done
+}
+
+############
+### MAIN ###
+############
+
+case "$1" in
+'start')
+  start
+  ;;
+'stop')
+  stop
+  ;;
+'restart')
+  stop
+  sleep 5
+  start
+  ;;
+'status')
+  status
+  ;;
+*_start)
+  MODEM=$(echo $1 | /bin/cut -d '_' -f 1)
+  modem_up $MODEM
+  ;;
+*_stop)
+  MODEM=$(echo $1 | /bin/cut -d '_' -f 1)
+  modem_down $MODEM
+  ;;
+*_restart)
+  MODEM=$(echo $1 | /bin/cut -d '_' -f 1)
+  modem_down $MODEM
+  sleep 5
+  modem_up $MODEM
+  ;;
+*_status)
+  MODEM=$(echo $1 | /bin/cut -d '_' -f 1)
+  modem_status $MODEM
+  ;;
+*_up)
+  MODEM=$(echo $1 | /bin/cut -d '_' -f 1)
+  modem_up $MODEM
+  ;;
+*_down)
+  MODEM=$(echo $1 | /bin/cut -d '_' -f 1)
+  modem_down $MODEM
+  ;;
+*)
+  echo "usage: $0 start|stop|restart|status"
+esac
+
