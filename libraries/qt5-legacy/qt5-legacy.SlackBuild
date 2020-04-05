@@ -2,7 +2,8 @@
 
 # Slackware build script for qt5-legacy
 
-# Maintained 2018- by Dave Woodfall <dave@slackbuilds.org>
+# Update for 5.9.6-5.9.9 by David Woodfall <dave@slackbuilds.org>
+#
 # Copyright 2013-2017 Larry Hajali <larryhaja[at]gmail[dot]com>
 # Copyright 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013  Patrick J. Volkerding, Sebeka, MN, USA
 # All rights reserved.
@@ -46,10 +47,12 @@
 # This is the highly modified version qt.SlackBuild found in Slackware
 # tailored to Qt 5. Modified by Larry Hajali.
 
+# Adapted for Qt 5.9.6 by David Woodfall
+
 PRGNAM=qt5-legacy
-LIBNAM=qt5
-SRCNAM=qt-everywhere-opensource-src
-VERSION=${VERSION:-5.7.1}
+LIBNAM=${PRGNAM%%-*}
+SRCNAM=${PRGNAM%%5*}
+VERSION=${VERSION:-5.9.9}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -66,6 +69,52 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
+EXAMPLES=${EXAMPLES:-no}
+DOCS=${DOCS:-no}
+PROPRIETARY_CODECS=${PROPRIETARY_CODECS:-no}
+PULSEAUDIO=${PULSEAUDIO:-yes}
+CCACHE=${CCACHE:-no}
+WEBENGINE=${WEBENGINE:-yes}
+
+printf "\n%s\n\n" "SlackBuild Options:"
+printf "%s\n" "CCACHE:             $CCACHE"
+printf "%s\n" "DOCS:               $DOCS"
+printf "%s\n" "EXAMPLES:           $EXAMPLES"
+printf "%s\n" "PROPRIETARY_CODECS: $PROPRIETARY_CODECS"
+printf "%s\n" "PULSEAUDIO:         $PULSEAUDIO"
+printf "%s\n" "WEBENGINE:          $WEBENGINE"
+printf "\n"
+
+# Default is no.
+if [ "$EXAMPLES" == "yes" ]; then
+  BUILD_EXAMPLES=""
+else
+  BUILD_EXAMPLES="-nomake examples"
+fi
+
+# Default is yes.
+if [ "$PULSEAUDIO" = "no" ]; then
+  PULSE="-no-pulseaudio"
+fi
+
+# Default is no.
+if [ "$CCACHE" = "yes" ]; then
+  CCACHE="-ccache"
+else
+  unset CCACHE
+fi
+
+if [ "$WEBENGINE" = "no" ]; then
+  EXCLUDE="--exclude=qtweb*"
+  PKGVERSION="${VERSION}_nowebengine"
+else
+  PKGVERSION="${VERSION}"
+  # Note that this changes to -webengine-proprietary-codecs in later versions
+  if [ "$PROPRIETARY_CODECS" = "yes" ]; then
+    CODECS="-proprietary-codecs"
+  fi
+fi
+
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
@@ -75,6 +124,7 @@ elif [ "$ARCH" = "i686" ]; then
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
+  SLKLDFLAGS="-L/usr/lib64"
 elif [ "$ARCH" = "armv7hl" ]; then
   # To prevent "qatomic_armv6.h error: output number 2 not directly addressable"
   # More permanent solution is to patch gcc:
@@ -86,30 +136,21 @@ else
   LIBDIRSUFFIX=""
 fi
 
-# http://doc.qt.io/qt-5/qtwebengine-platform-notes.html#audio-and-video-codec-support
-PRCOD=""
-[ "$PROPRIETARY_CODECS" = "yes" ] && PRCOD="WEBENGINE_CONFIG += use_proprietary_codecs"
-
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $SRCNAM-$VERSION
-tar xvf $CWD/$SRCNAM-$VERSION.tar.xz
-cd $SRCNAM-$VERSION
+echo "Removing any existing source directory. Please wait..."
+rm -rf ${SRCNAM}-everywhere-opensource-src-$VERSION
+tar xvf $CWD/${SRCNAM}-everywhere-opensource-src-$VERSION.tar.xz $EXCLUDE
+cd ${SRCNAM}-everywhere-opensource-src-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
-
-# Slackware patch to build against MySQL/MariaDB.
-patch -p1 < $CWD/patches/qt5.mysql.h.diff
-
-# Patch for the newer mozilla-nss
-patch -p1 < $CWD/patches/nss-update-sslv3-nonce.patch
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
 # Limit -reduce-relocations to ix86 and x86_64.
 # https://bugreports.qt-project.org/browse/QTBUG-36129
@@ -119,19 +160,25 @@ else
   RELOCATIONS=""
 fi
 
-sed -i "s|-O2|$SLKCFLAGS|" qtbase/mkspecs/common/gcc-base.conf
+# Borrowed a few things from alienBOB:
+# Fix path to mysql header:
+cat $CWD/patches/qt5.mysql.h.diff | patch -p1 --verbose
 
-# Build examples. Default is no.
-if [ "${EXAMPLES:-no}" == "yes" ]; then
-  BUILD_EXAMPLES=""
-else
-  BUILD_EXAMPLES="-nomake examples"
+# Fix missing private includes: QTBUG-37417
+sed -e '/CMAKE_NO_PRIVATE_INCLUDES\ \=\ true/d' \
+  -i qtbase/mkspecs/features/create_cmake.prf
+
+# Use our custom compiler and linker flags:
+sed -i -re "s,-O(2|3),$SLKCFLAGS," qtbase/mkspecs/common/gcc-base.conf
+
+if [ "$ARCH" = "x86_64" ]; then
+  sed -i -e "/^QMAKE_LFLAGS\s/s,+=,+= $SLKLDFLAGS,g" \
+    qtbase/mkspecs/common/gcc-base.conf
+  export LDFLAGS="$SLKLDFLAGS"
 fi
 
-echo "$PRCOD" >> qtwebengine/.qmake.conf
-
 export CFLAGS="$SLKCFLAGS"
-export CXXFLAGS="$SLKCFLAGS"
+export CXXFLAGS="$SLKCFLAGS -std=c++11"
 ./configure -v \
   -confirm-license \
   -opensource \
@@ -144,12 +191,10 @@ export CXXFLAGS="$SLKCFLAGS"
   -system-libjpeg \
   -system-zlib \
   -system-sqlite \
-  -system-pcre \
   -plugin-sql-sqlite \
   -icu \
-  -openssl \
+  -openssl-linked \
   -verbose \
-  -optimized-qmake \
   -dbus-linked \
   -qpa xcb \
   -xcb \
@@ -161,7 +206,10 @@ export CXXFLAGS="$SLKCFLAGS"
   -no-strip \
   -release \
   -no-use-gold-linker \
-  -pulseaudio \
+  -c++std c++11 \
+  $CCACHE \
+  $CODECS \
+  $PULSE \
   $RELOCATIONS \
   $BUILD_EXAMPLES
 
@@ -169,7 +217,7 @@ make
 make install INSTALL_ROOT=$PKG
 
 # Install documentation. Default is not to install documentation.
-if [ "${DOCS:-no}" == "yes" ]; then
+if [ "$DOCS" == "yes" ]; then
   # Recreate Makefiles in order to use the just compiled qdoc.
   for doc in $(find . -name "Makefile*" | xargs egrep "^\s/usr/lib${LIBDIRSUFFIX}/qt5/bin/" \
     | cut -d':' -f1 | uniq)
@@ -183,17 +231,15 @@ fi
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-ln -s $LIBNAM $PKG/usr/lib${LIBDIRSUFFIX}/qt-$VERSION
-
 mkdir -p $PKG/usr/bin
 for BIN in $PKG/usr/lib${LIBDIRSUFFIX}/$LIBNAM/bin/*; do
   TMP_FILE=$(echo $BIN | sed -e "s|$PKG||")
   case $(basename $BIN) in
     syncqt.pl|fixqt4headers.pl)
-      ln -s $TMP_FILE $PKG/usr/bin/$(basename $BIN)
+      ln -vs $TMP_FILE $PKG/usr/bin/$(basename $BIN)
       ;;
     *)
-      ln -s $TMP_FILE $PKG/usr/bin/$(basename $BIN)-$LIBNAM
+      ln -vs $TMP_FILE $PKG/usr/bin/$(basename $BIN)-$LIBNAM
       ;;
   esac
 done
@@ -229,11 +275,13 @@ Description: Qt5 Configuration
 Version: $VERSION
 EOF
 
-# Fix internal linking for Qt5WebEngineCore.pc.
-sed -i \
-  -e 's|-Wl,--start-group.* -Wl,--end-group||' \
-  -e "s|-L${PWD}/qtwebengine/src/core/api/Release||" \
-  $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/Qt5WebEngineCore.pc
+if [ "$WEBENGINE" = "yes" ]; then
+  # Fix internal linking for Qt5WebEngineCore.pc.
+  sed -i \
+    -e 's|-Wl,--start-group.* -Wl,--end-group||' \
+    -e "s|-L${PWD}/qtwebengine/src/core/api/Release||" \
+    $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/Qt5WebEngineCore.pc
+fi
 
 # While we are at it, there isn't any reason to keep references to $PKG in the *.prl files.
 for PRL in $(find $PKG -name "*\.prl"); do
@@ -269,6 +317,7 @@ find $PKG \( -name "*.qml" -o -name "*.app" \) -perm 755 -exec chmod 644 '{}' \;
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
   README qtbase/{header*,LGPL_EXCEPTION.txt,LICENSE.*L} \
+  $CWD/README.benchmarks $CWD/README.ccache \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
@@ -277,4 +326,6 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$PKGVERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+
+# vim: expandtab
