@@ -2,7 +2,9 @@
 
 # Slackware build script for nvidia-driver
 
-# Copyright 2012-2019 Edward W. Koenig, Vancouver, WA, USA
+# Copyright 2012-2019 Edward W. Koenig, Vancouver, WA, US
+# Copyright 2020 Lenard Spencer, Orlando, FL, USA
+#
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -26,7 +28,7 @@
 
 PRGNAM=nvidia-driver
 VERSION=${VERSION:-440.64}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 CURRENT=${CURRENT:-no}
@@ -54,6 +56,14 @@ if [ "$ARCH" = "x86_64" ]; then
   COMPAT32=${COMPAT32:-no}
 else
   echo "$ARCH is not supported."
+  exit 1
+fi
+
+# There are a couple of unresolved issues with nvidia-installer, so we
+# abort if an Nvidia driver is still installed:
+if [ -x /usr/bin/nvidia-installer ]; then
+  echo -e "\n A previous Nvidia installation has been detected!"
+  echo -e " Please remove the installed driver and rerun this script.\n"
   exit 1
 fi
 
@@ -120,16 +130,12 @@ cd -
 mv -f $PKG/usr/bin/nvidia-installer $TMP/$SRCNAM
 mv -f $PKG/usr/man/man1/nvidia-installer.1.gz $TMP/$SRCNAM
 
-if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
+if [ "${COMPAT32}" = "yes" ]; then
     COMP32="--install-compat32-libs --compat32-prefix=$PKG/usr"
-    MULTI="_multi"
+    MULTI="_multilib"
 else
-    if [ ! "$ARCH" = "x86_64" ]; then
-        COMP32=""
-    else
-        COMP32="--no-install-compat32-libs"
-	MULTI=""
-    fi
+    COMP32="--no-install-compat32-libs"
+    MULTI=""
 fi
 
 # Install the binary libs using nvidia-installer compiled above
@@ -150,68 +156,55 @@ cd $TMP/$SRCNAM
   --log-file-name=$PKG/var/log/nvidia-installer.log \
   --egl-external-platform-config-path=$PKG/usr/share/egl/egl_external_platform.d \
   --no-nvidia-modprobe \
-  --install-libglvnd \
   $COMP32
 
-# Clean-up: we really do not need this:
-rm -rf $PKG/var/log/nvidia
-# If running current (15.0) remove duplicate libglvnd files and symlinks
+  # Move ICDs to $PKG and cleanup (no switch option in installer?)
+mv /etc/OpenCL/vendors/nvidia.icd $PKG/etc/OpenCL/vendors/nvidia.icd
+mv /etc/vulkan/icd.d/nvidia_icd.json $PKG/etc/vulkan/icd.d/nvidia_icd.json
+mv /etc/vulkan/implicit_layer.d/nvidia_layers.json $PKG/etc/vulkan/implicit_layer.d/nvidia_layers.json
+rm -rf /etc/vulkan
+# In current, mesa now puts an entry into this directory, so we
+# leave it alone if it is not empty
+if [ -z "$(ls -A /etc/OpenCL/vendors)" ]; then
+  rm -rf /etc/OpenCL
+fi
+
 if [ "$CURRENT" = "yes" ]; then
-    rm -f $PKG/usr/lib$LIBDIRSUFFIX/libEGL.so{,.1,.1.1.0}
-    rm -f $PKG/usr/lib$LIBDIRSUFFIX/libGL.so{,.1,.1.7.0}
-    rm -f $PKG/usr/lib$LIBDIRSUFFIX/libGLESv1_CM.so{,.1,.1.2.0}
-    rm -f $PKG/usr/lib$LIBDIRSUFFIX/libGLESv2.so{,.2,.2.1.0}
-    rm -f $PKG/usr/lib$LIBDIRSUFFIX/libGLX.so{,.0}
-    rm -f $PKG/usr/lib$LIBDIRSUFFIX/libGLdispatch.so.0
-    rm -f $PKG/usr/lib$LIBDIRSUFFIX/libOpenGL.so{,.0} 
-    if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
-        rm -f $PKG/usr/lib/libEGL.so{,.1,.1.1.0}
-        rm -f $PKG/usr/lib/libGL.so{,.1,.1.7.0}
-        rm -f $PKG/usr/lib/libGLESv1_CM.so{,.1,.1.2.0}
-        rm -f $PKG/usr/lib/libGLESv2.so{,.2,.2.1.0}
-        rm -f $PKG/usr/lib/libGLX.so{,.0}
-        rm -f $PKG/usr/lib/libGLdispatch.so.0
-        rm -f $PKG/usr/lib/libOpenGL.so{,.0}
-    fi
-# Don't ship .la files:
+# Don't ship .la files.  Also, libOpenCL.so is now included
+# in current (in ocl-icd), so we don't need this one.
     rm -f $PKG/usr/lib${LIBDIRSUFFIX}/*.la
-    if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
+    rm -f $PKG/usr/lib${LIBDIRSUFFIX}/libOpenCL.so.1.0.0
+    if [ "${COMPAT32}" = "yes" ]; then
         rm -f $PKG/usr/lib/*.la
+        rm -f $PKG/usr/lib/libOpenCL.so.1.0.0
     fi
 else
+# Correct wrong paths in /usr/lib{,64}/libGL.la
+    sed -i "s|$PKG||" $PKG/usr/lib${LIBDIRSUFFIX}/libGL.la
+    if [ "${COMPAT32}" = "yes" ]; then
+# This one points to /usr/ instead of /usr/lib/, so we need to fix it anyway
+        sed -i "s|$PKG/usr|/usr/lib|" $PKG/usr/lib/libGL.la
+    fi
 # save libGL.la for 14.2
     cd $PKG/usr/lib$LIBDIRSUFFIX
     mv libGL.la libGL.la-nvidia
     cd -
-    if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
+    if [ "${COMPAT32}" = "yes" ]; then
         cd $PKG/usr/lib
 	mv libGL.la libGL.la-nvidia
         cd -
     fi
-# Bash script to cleanly install (in doinst.sh) and uninstall the nvidia files
-# so we don't stomp on the overlapping xorg files.
+# Bash script to cleanly install (in doinst.sh) and uninstall the nvidia
+# files so we don't stomp on the overlapping xorg files.
 # Note: switching can be problematic ;-)
     install -m 0755 $CWD/nvidia-switch $PKG/usr/sbin/
     sed -i s/PKGVERSION/$VERSION/g $PKG/usr/sbin/nvidia-switch
     sed -i s/LIBDIRSUFFIX/$LIBDIRSUFFIX/g $PKG/usr/sbin/nvidia-switch
-    if [ "$GLVND" = "yes" ]; then
-        sed -i s/GLVNDFLAG/yes/g $PKG/usr/sbin/nvidia-switch
-    else
-        sed -i s/GLVNDFLAG/no/g $PKG/usr/sbin/nvidia-switch
-    fi
     if [ ${COMPAT32} = "yes" ]; then
         sed -i s/LIB32FLAG/yes/g $PKG/usr/sbin/nvidia-switch
     else
         sed -i s/LIB32FLAG/no/g $PKG/usr/sbin/nvidia-switch
     fi
-fi
-
-# add tls
-if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
-    install -m 755 32/libnvidia-tls.so.$VERSION $PKG/usr/lib/tls/libnvidia-tls.so.$VERSION
-    cd $PKG/usr/lib
-        ln -sf tls/libnvidia-tls.so.$VERSION libnvidia-tls.so.$VERSION
-    cd -
 fi
 
 # Compile utilites from source, replacing the precompiled versions
@@ -273,8 +266,8 @@ cd -
       -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
     CFLAGS="$SLKCFLAGS" make
-
-    install -m 755 _out/Linux_$TARGET/nvidia-modprobe $PKG/usr/bin/
+# must be installed suid root for nvidia-persistenced to work properly
+    install -m 4755 _out/Linux_$TARGET/nvidia-modprobe $PKG/usr/bin/
     install -m 644 _out/Linux_$TARGET/nvidia-modprobe.1.gz $PKG/usr/man/man1/
   cd -
 
@@ -288,24 +281,16 @@ cd -
       -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
     CFLAGS="$SLKCFLAGS" make
-#FIXME: need rc.nvidia-persistenced script; see doc
     install -m 755 _out/Linux_$TARGET/nvidia-persistenced $PKG/usr/bin/
     install -m 644 _out/Linux_$TARGET/nvidia-persistenced.1.gz $PKG/usr/man/man1/
   cd -
 
-# These update or correct wrong paths
+# These update the paths in nvidia-settings.desktop
 sed -i "s|__UTILS_PATH__|/usr/bin|" $PKG/usr/share/applications/nvidia-settings.desktop
 sed -i "s|__PIXMAP_PATH__|/usr/share/pixmaps|" $PKG/usr/share/applications/nvidia-settings.desktop
 sed -i "s|__NVIDIA_SETTINGS_DESKTOP_CATEGORIES__|Application;Settings;|" $PKG/usr/share/applications/nvidia-settings.desktop
 
-# Move ICDs to $PKG and cleanup (no switch option in installer?)
-mv /etc/OpenCL/vendors/nvidia.icd $PKG/etc/OpenCL/vendors/nvidia.icd
-mv /etc/vulkan/icd.d/nvidia_icd.json $PKG/etc/vulkan/icd.d/nvidia_icd.json
-mv /etc/vulkan/implicit_layer.d/nvidia_layers.json $PKG/etc/vulkan/implicit_layer.d/nvidia_layers.json
-rm -rf /etc/OpenCL
-rm -rf /etc/vulkan
-
-# Remove xorg conf file since we take care of that in nvidia-driver
+# Remove xorg conf file since we handle that in nvidia-kernel
 rm -rf $PKG/etc/X11/xorg.conf.d
 
 cd $TMP/$SRCNAM
@@ -319,7 +304,25 @@ cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.Slackware
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 sed "s/PKGVERSION/$VERSION/g" $CWD/slack-desc > $PKG/install/slack-desc
+if [ "$COMPAT32" = "yes" ]; then
+   sed -i "s|@MULTILIB@| This package includes the 32-bit libraries.|" $PKG/install/slack-desc
+else
+   sed -i "s|@MULTILIB@||" $PKG/install/slack-desc
+fi
+
+# Add rc.nvidia-persistenced:
+mkdir -p $PKG/var/run/nvidia-persistenced
+chown nvidia:nvidia $PKG/var/run/nvidia-persistenced
+mkdir -p $PKG/etc/rc.d
+cat $CWD/rc.nvidia-persistenced > $PKG/etc/rc.d/rc.nvidia-persistenced
+sed -i "s|__USER__|nvidia|" $PKG/etc/rc.d/rc.nvidia-persistenced
+
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+# 14.2 needs nvidia-switch, -current does not
+if [ "$CURRENT" = "no" ]; then
+  echo -e "./usr/sbin/nvidia-switch --install\n" >> $PKG/install/doinst.sh
+fi
 
 # Flag install as multlib as needed and build package.
 cd $PKG
