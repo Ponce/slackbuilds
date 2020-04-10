@@ -19,7 +19,7 @@ if [ -e etc/rc.d/rc.plexmediaserver ]; then
 fi
 
 config etc/rc.d/rc.plexmediaserver.new
-config etc/default/plexmediaserver
+config etc/default/plexmediaserver.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
