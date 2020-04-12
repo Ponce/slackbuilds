@@ -23,8 +23,11 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20200411 bkw: not taking this over, but I'm upgrading it to the latest
+# release as part of the migration to fluidsynth-2.x.
+
 PRGNAM=mpd
-VERSION=${VERSION:-0.20.18}
+VERSION=${VERSION:-0.21.22}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -57,11 +60,11 @@ fi
 
 set -e
 
-# zziplib support
-if [ "${ZZIPLIB:-no}" != "no" ]; then
-    zziplib="enable"
+# undocumented, but allow disabling pulseaudio
+if [ "${PULSE:-yes}" = "yes" ]; then
+    PULSE="enabled"
 else
-    zziplib="disable"
+    PULSE="disabled"
 fi
 
 rm -rf $PKG
@@ -71,40 +74,44 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-#adding LDFLAGS="-lnsl" for libwrap, part of tcp_wrappers package
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-LDFLAGS="-L/usr/lib${LIBDIRSUFFIX} -lnsl" \
-./configure \
-  --prefix=/usr \
-  --sysconfdir=/etc \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --mandir=/usr/man \
-  --enable-documentation \
-  --enable-database \
-  --enable-pulse \
-  --enable-iso9660 \
-  --${zziplib}-zzip \
-  --enable-cdio-paranoia \
-  --disable-dependency-tracking \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --build=$ARCH-slackware-linux
-make
-make install DESTDIR=$PKG
+cd build
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  LDFLAGS="-L/usr/lib${LIBDIRSUFFIX} -lnsl" \
+  meson .. \
+    -Dsystemd=disabled \
+    -Dpulse=$PULSE \
+    --buildtype=release \
+    --infodir=/usr/info \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --prefix=/usr \
+    --sysconfdir=/etc
+  ${NINJA:-ninja}
+  DESTDIR=$PKG ninja install
+cd ..
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+strip $PKG/usr/bin/$PRGNAM
+
+# 20200411 bkw: meson doesn't support --docdir
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+mv $PKG/usr/share/doc/* $PKG/usr/doc/$PRGNAM-$VERSION
+rm -rf $PKG/usr/share/doc
 
 # Use sample config, without overwriting
 install -D -m 644 doc/mpdconf.example $PKG/etc/mpd.conf.new
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
+# 20200411 bkw: after the switch to meson, man pages aren't installed
+# automatically for some reason.
+for SECT in 1 5; do
+  mkdir -p $PKG/usr/man/man$SECT
+  cp doc/*.$SECT $PKG/usr/man/man$SECT
+  gzip -9 $PKG/usr/man/man$SECT/*.$SECT
+done
 
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
