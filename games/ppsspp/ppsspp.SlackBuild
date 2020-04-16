@@ -3,6 +3,7 @@
 # Slackware build script for ppsspp
 
 # Copyright 2016  Hunter Sezen California, USA
+# Copyright 2019-2020  Ruoh-Shoei LIN
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,7 +24,7 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=ppsspp
-VERSION=${VERSION:-1.6.3}
+VERSION=${VERSION:-1.9.4}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -65,13 +66,20 @@ cd $PRGNAM-$VERSION
 
 # The submodules are in a separate archive. This is equivalent to
 # git submodule update --init --recursive
-tar xvf $CWD/${PRGNAM}_submodules-${VERSION}.tar.xz
-mv ${PRGNAM}_submodules-${VERSION}/ext/* ext
-rmdir ${PRGNAM}_submodules-${VERSION}/ext
-mv ${PRGNAM}_submodules-${VERSION}/assets/* assets
-rmdir ${PRGNAM}_submodules-${VERSION}/assets
-mv ${PRGNAM}_submodules-${VERSION}/* .
-rmdir ${PRGNAM}_submodules-${VERSION}
+tar -xvf $CWD/hrydgard-glslang-2.3.r2575.gf9d08a25.tar.gz \
+    -C ext/glslang --strip-components=1
+tar -xvf $CWD/hrydgard-ppsspp-lang-a95fd4974c436a1a07455c5beef4a12f9f47b811.tar.gz \
+    -C assets/lang --strip-components=1
+tar -xvf $CWD/KhronosGroup-SPIRV-Cross-2019.05.20.r60.ga1f7c8dc.tar.gz \
+    -C ext/SPIRV-Cross --strip-components=1
+tar -xvf $CWD/Kingcom-armips-v0.9.r134.g7885552.tar.gz \
+    -C ext/armips --strip-components=1
+tar -xvf $CWD/hrydgard-ppsspp-ffmpeg-90701640c7f458461310b54e7d4041230e2d5d5a.tar.gz \
+    --exclude '*/Windows*' --exclude '*/android' \
+    --exclude '*/ios' --exclude '*/blackberry'\
+    --exclude '*/macosx' --exclude '*/wiiu' \
+    --exclude '*/symbian' \
+    -C ffmpeg --strip-components=1
 
 chown -R root:root .
 find -L . \
@@ -86,35 +94,61 @@ sed -i 's/VERSION 3.6/VERSION 3.5.2/' CMakeLists.txt
 # Don't force explicit ccache invocation.
 sed -i -e '/include(ccache)/d' CMakeLists.txt
 
-mkdir -p build
-cd build
+# Make build glue accept libpng 1.6.x and don't hardcode suffix
+patch --forward --strip=1 \
+      --input=$CWD/patch-system-libpng16.patch
+
+mkdir -p build-qt build-sdl
+
+QT=${QT:-off}
+if [ "$QT" = "on" ]; then
+    cd build-qt
+    cmake \
+	-DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+	-DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+	-DCMAKE_INSTALL_PREFIX=/usr \
+	-DCMAKE_SKIP_RPATH=TRUE \
+	-Wno-dev \
+	-DUSING_QT_UI=ON \
+	-DLIBRETRO=ON \
+	-DUSE_SYSTEM_LIBZIP=ON \
+	-DUSE_DISCORD=OFF \
+	-DCMAKE_BUILD_TYPE=Release ..
+    make
+    cd ..
+    install -Dm755 build-qt/PPSSPPQt $PKG/usr/games/ppsspp-qt
+    install -Dm644 $CWD/ppsspp-qt.desktop $PKG/usr/share/applications/ppsspp-qt.desktop
+fi
+
+cd build-sdl
 cmake \
   -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
   -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
   -DCMAKE_INSTALL_PREFIX=/usr \
   -DCMAKE_SKIP_RPATH=TRUE \
   -Wno-dev \
-  -DUSING_QT_UI=ON \
+  -DUSING_QT_UI=OFF \
+  -DHEADLESS='ON' \
   -DLIBRETRO=ON \
+  -DUSE_SYSTEM_LIBZIP=ON \
+  -DUSE_DISCORD=OFF \
   -DCMAKE_BUILD_TYPE=Release ..
 make
 cd ..
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+install -Dm755 build-sdl/PPSSPPHeadless $PKG/usr/games/ppsspp
 
 mkdir -p $PKG/usr/{games,share/{applications,icons/hicolor,pixmaps,ppsspp}}
-cp $CWD/ppsspp.desktop $PKG/usr/share/applications
+install -Dm644 $CWD/ppsspp.desktop $PKG/usr/share/applications/ppsspp.desktop
 cp -r assets $PKG/usr/share/ppsspp
 cp -r icons/hicolor/* $PKG/usr/share/icons/hicolor
 cp icons/icon-512.svg $PKG/usr/share/pixmaps/ppsspp.svg
 
-cp build/PPSSPPQt $PKG/usr/games/ppsspp-qt
-cp $CWD/ppsspp-qt.desktop $PKG/usr/share/applications
-
 mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/libretro/info
-cp build/lib/ppsspp_libretro.so $PKG/usr/lib${LIBDIRSUFFIX}/libretro
+cp build-sdl/lib/ppsspp_libretro.so $PKG/usr/lib${LIBDIRSUFFIX}/libretro
 cp $CWD/ppsspp_libretro.info $PKG/usr/lib${LIBDIRSUFFIX}/libretro/info
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a LICENSE.TXT README.md korean.txt chinese.txt $PKG/usr/doc/$PRGNAM-$VERSION
