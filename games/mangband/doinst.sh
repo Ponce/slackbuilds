@@ -12,7 +12,6 @@ config() {
   fi
 }
 
-config usr/share/games/mangband/lib/data/scores.raw.new
 config usr/share/games/mangband/lib/edit/artifact.txt.new
 config usr/share/games/mangband/lib/edit/ego_item.txt.new
 config usr/share/games/mangband/lib/edit/flavor.txt.new
