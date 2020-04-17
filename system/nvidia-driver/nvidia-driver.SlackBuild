@@ -27,8 +27,8 @@
 # see changelog.txt
 
 PRGNAM=nvidia-driver
-VERSION=${VERSION:-440.64}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-440.82}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 CURRENT=${CURRENT:-no}
@@ -167,6 +167,10 @@ rm -rf /etc/vulkan
 # leave it alone if it is not empty
 if [ -z "$(ls -A /etc/OpenCL/vendors)" ]; then
   rm -rf /etc/OpenCL
+fi
+# just in case any other programs make an entry here
+if [ -z "$(ls -A /etc/vulkan)" ]; then
+  rm -rf /etc/vulkan
 fi
 
 if [ "$CURRENT" = "yes" ]; then
@@ -311,11 +315,21 @@ else
 fi
 
 # Add rc.nvidia-persistenced:
-mkdir -p $PKG/var/run/nvidia-persistenced
-chown nvidia:nvidia $PKG/var/run/nvidia-persistenced
-mkdir -p $PKG/etc/rc.d
-cat $CWD/rc.nvidia-persistenced > $PKG/etc/rc.d/rc.nvidia-persistenced
-sed -i "s|__USER__|nvidia|" $PKG/etc/rc.d/rc.nvidia-persistenced
+if [ "${PERSISTENCED:-no}" = "yes" ]; then
+  if ! getent group nvidia > /dev/null 2>&1; then
+    echo "Creating the group nvidia:"
+    groupadd -g 365 nvidia || exit 1
+  fi
+  if ! getent passwd nvidia > /dev/null 2>&1; then
+    echo "Creating the user nvidia:"
+    useradd -u 365 -g 365 -c "Nvidia" -d /dev/null -s /bin/false nvidia || exit 1
+  fi
+  mkdir -p $PKG/var/run/nvidia-persistenced
+  chown nvidia:nvidia $PKG/var/run/nvidia-persistenced
+  mkdir -p $PKG/etc/rc.d
+  install -m 755 $CWD/rc.nvidia-persistenced $PKG/etc/rc.d/rc.nvidia-persistenced
+  sed -i "s|__USER__|nvidia|" $PKG/etc/rc.d/rc.nvidia-persistenced
+fi
 
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
@@ -324,6 +338,6 @@ if [ "$CURRENT" = "no" ]; then
   echo -e "./usr/sbin/nvidia-switch --install\n" >> $PKG/install/doinst.sh
 fi
 
-# Flag install as multlib as needed and build package.
+# Flag multlib as needed and build package.
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION$MULTI-$TARGET-$BUILD$TAG.${PKGTYPE:-tgz}
