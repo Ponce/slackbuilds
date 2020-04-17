@@ -173,11 +173,14 @@ cd $TMP/$SRCNAM
 # Move ICDs to $PKG and cleanup (no switch option in installer?)
 mv /etc/OpenCL/vendors/nvidia.icd $PKG/etc/OpenCL/vendors/nvidia.icd
 mv /etc/vulkan/icd.d/nvidia_icd.json $PKG/etc/vulkan/icd.d/nvidia_icd.json
-rm -rf /etc/vulkan
 # In current, mesa now puts an entry into this directory, so we
 # leave it alone if it is not empty
 if [ -z "$(ls -A /etc/OpenCL/vendors)" ]; then
   rm -rf /etc/OpenCL
+fi
+# just in case any other programs make an entry here
+if [ -z "$(ls -A /etc/vulkan)" ]; then
+  rm -rf /etc/vulkan
 fi
 
 # Compile utilites from source, replacing the precompiled versions
@@ -371,14 +374,24 @@ else
 fi
 
 # Add rc.nvidia-persistenced:
-mkdir -p $PKG/var/run/nvidia-persistenced
-chown nvidia:nvidia $PKG/var/run/nvidia-persistenced
-mkdir -p $PKG/etc/rc.d
-cat $CWD/rc.nvidia-persistenced > $PKG/etc/rc.d/rc.nvidia-persistenced
-sed -i "s|__USER__|nvidia|" $PKG/etc/rc.d/rc.nvidia-persistenced
+if [ "${PERSISTENCED:-no}" = "yes" ]; then
+  if ! getent group nvidia > /dev/null 2>&1; then
+    echo "Creating the group nvidia:"
+    groupadd -g 365 nvidia || exit 1
+  fi
+  if ! getent passwd nvidia > /dev/null 2>&1; then
+    echo "Creating the user nvidia:"
+    useradd -u 365 -g 365 -c "Nvidia" -d /dev/null -s /bin/false nvidia || exit 1
+  fi
+  mkdir -p $PKG/var/run/nvidia-persistenced
+  chown nvidia:nvidia $PKG/var/run/nvidia-persistenced
+  mkdir -p $PKG/etc/rc.d
+  install -m 755 $CWD/rc.nvidia-persistenced $PKG/etc/rc.d/rc.nvidia-persistenced
+  sed -i "s|__USER__|nvidia|" $PKG/etc/rc.d/rc.nvidia-persistenced
+fi
 
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
-# Flag install as multlib as needed and build package.
+# Flag multlib as needed and build package.
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION$MULTI-$TARGET-$BUILD$TAG.${PKGTYPE:-tgz}
