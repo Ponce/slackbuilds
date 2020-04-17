@@ -1,0 +1,142 @@
+#!/bin/sh
+
+# Slackware build script for coturn
+
+# Copyright 2020 Thomas Bourdon <thomas dot bourdon at halpanet dot org>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Special thanks to Thomas Morper for some configuration adjustments tips
+# Modified by slackbuilds.org 2020-04-17 16:08:20 +0100
+
+PRGNAM=coturn
+VERSION=${VERSION:-4.5.1.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+TURN_USER=${TURN_USER:-turnserver}
+TURN_GROUP=${TURN_GROUP:-turnserver}
+
+if ! grep -q ^$TURN_GROUP: /etc/group 2>/dev/null ; then
+        echo "    Error: TURN group ($TURN_GROUP) doesn't exist."
+        echo "    Try creating one with: groupadd -g 366 $TURN_GROUP"
+        exit 1
+fi
+
+if ! grep -q ^$TURN_USER: /etc/passwd 2>/dev/null ; then
+        echo "    Error: TURN user ($TURN_USER) doesn't exist."
+        echo "    Try creating one with: useradd -u 366 -g $TURN_GROUP -d /var/lib/turn -s /bin/bash $TURN_USER"
+        exit 1
+fi
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+   LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+   LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+   SLKCFLAGS="-O2 -fPIC"
+   LIBDIRSUFFIX="64"
+else
+   SLKCFLAGS=""
+   LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.?z*
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --examplesdir=/usr/share/turnserver/examples \
+  --disable-rpath \
+  --build=$ARCH-slackware-linux || exit 1
+
+make
+make install DESTDIR=$PKG
+
+sed 's%/usr/local%/usr/share/turnserver/examples%' $PKG/etc/turnserver.conf.default > $PKG/etc/turnserver.conf.new
+rm -f $PKG/etc/turnserver.conf.default
+
+mkdir -p $PKG/etc/{rc.d,logrotate.d}
+cat $CWD/rc.turnserver > $PKG/etc/rc.d/rc.turnserver.new
+cat $CWD/logrotate.turnserver > $PKG/etc/logrotate.d/turnserver.new
+
+mkdir -p $PKG/var/log/turnserver
+chown $TURN_USER:$TURN_GROUP $PKG/var/log/turnserver
+
+# Populating /etc/default/turnserver.new
+mkdir -p $PKG/etc/default
+cat << EOF > $PKG/etc/default/turnserver.new
+TURN_USER=$TURN_USER
+TURN_GROUP=$TURN_GROUP
+TURN_PID_PATH=/var/run/turnserver
+EOF
+
+rm -rf $PKG/usr/lib${LIBDIRSUFFIX}
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS ChangeLog LICENSE* README* \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+find $PKG/{usr/doc,usr/share,usr/include,etc,var} -type f -exec chmod -x {} +
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
