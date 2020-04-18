@@ -2,7 +2,7 @@
 
 # Slackware build script for k9copy-reloaded
 
-# Copyright 2016 by Lenard Spencer (lspencer31-at-cfl-rr-com)
+# Copyright 2018 by Lenard Spencer (lspencer31@cfl.rr.com)
 # All rights reserved.
 #
 # ffmpeg static library section borrowed (stolen?) from xine-lib.SlackBuild
@@ -29,7 +29,7 @@
 PRGNAM=k9copy-reloaded
 SRCNAM=k9copy
 VERSION=${VERSION:-3.0.3}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 FFMPEG_VERSION=${FFMPEG_VERSION:-2.8.15}
 TAG=${TAG:-_SBo}
 
@@ -66,28 +66,50 @@ else
   FFARCHOPTS=""
 fi
 
+CURRENT=${CURRENT:-no}
+
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
+
+if [ "$CURRENT" = "yes" ]; then
+  # check for gcc5 and abort if not found:
+  if ! [ -x /usr/bin/gcc-5 ]; then
+    echo "Cannot find the gcc5 package.  Please install the gcc5 package"
+    echo "and rerun the SlackBuild script."
+    exit 1
+  fi
+  # Set gcc-5 vars to make it build with gcc5:
+  # cmake will use these settings to build k9copy-reloaded
+  source /etc/profile.d/gcc5.sh
+  # Options for ffmpeg:
+  GCC5OPTS="--cc=gcc-5 --cxx=g++-5 --ar=gcc-ar-5 --nm=gcc-nm-5 --ranlib=gcc-ranlib-5 --dep-cc=gcc-5"
+else
+  GCC5OPTS=""
+fi
+
 rm -rf ffmpeg*
-tar xvf $CWD/ffmpeg-$FFMPEG_VERSION.tar.?z*
-cd ffmpeg*
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
-echo "Building static ffmpeg libs ..."
+tar xvf $CWD/ffmpeg-$FFMPEG_VERSION.tar.?z* || exit 1
+cd ffmpeg* || exit 1
 
-FFMPEGDIR=/$TMP/ff-$(mcookie)
+  chown -R root:root .
+  find . \
+   \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+   -exec chmod 755 {} \; -o \
+   \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+   -exec chmod 644 {} \;
 
-CFLAGS="$SLKCFLAGS -fvisibility=hidden -I/usr/include/openmj2-2.1" \
-CXXFLAGS="$SLKCFLAGS -fvisibility=hidden -I/usr/include/openmj2-2.1" \
-./configure \
+  echo "Building static ffmpeg libs ..."
+
+  FFMPEGDIR=/$TMP/ffmpeg-temp
+
+  CFLAGS="$SLKCFLAGS -fvisibility=hidden -I/usr/include/openmj2-2.1" \
+  CXXFLAGS="$SLKCFLAGS -fvisibility=hidden -I/usr/include/openmj2-2.1" \
+  ./configure \
     --prefix=$FFMPEGDIR/usr \
+    $GCC5OPTS \
     --libdir=$FFMPEGDIR/usr/lib${LIBDIRSUFFIX} \
     --shlibdir=$FFMPEGDIR/usr/lib${LIBDIRSUFFIX} \
     --enable-gpl \
@@ -120,15 +142,18 @@ rm -rf $SRCNAM
 tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
 cd $SRCNAM
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \;
 
 # patches from upstream and community:
 patch -p1 < $CWD/patches/k9copy-mimetype.patch
 patch -p0 < $CWD/patches/k9copy-tempdir.patch
+
+# Fix internal dvdnav to link against internal dvdread
+patch -p1 < $CWD/patches/k9copy-dvdnav.patch
 
 # Needed to link with the ffmpeg static libs we just built:
 export PKG_CONFIG_PATH="${FFMPEGDIR}/usr/lib${LIBDIRSUFFIX}/pkgconfig"
@@ -152,7 +177,9 @@ find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | gr
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a COPYING README $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  COPYING README \
+  $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
