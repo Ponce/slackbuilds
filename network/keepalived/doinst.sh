@@ -17,7 +17,7 @@ if [ -e etc/rc.d/rc.keepalived ]; then
   mv etc/rc.d/rc.keepalived.new.incoming etc/rc.d/rc.keepalived.new
 fi
 
-config etc/keepalived/keepalived.new
+config etc/default/keepalived.new
 config etc/keepalived/keepalived.conf.new
 config etc/rc.d/rc.keepalived.new
 
