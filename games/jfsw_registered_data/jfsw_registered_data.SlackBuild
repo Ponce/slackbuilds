@@ -6,13 +6,25 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-# This game is offered as a free download on both Steam and GoG.
-# It's also been available from www.oldpcgaming.net since 2014.
+# This game is offered as a free download on both Steam and GoG. It also
+# was available from www.oldpcgaming.net from 2014 to late 2019, and
+# has been available on archive.org since late 2018.
+
+# 20200428 bkw: the old .7z from oldpcgaming.net has vanished along
+# with the site. Switched to a CD image from archive.org, in bin/cue
+# format. More work for this script to do, but as a nice bonus, we get
+# the CD audio tracks installed too.
 
 PRGNAM=jfsw_registered_data
 VERSION=${VERSION:-1.2}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+
+# Depending on what was used to do the download, the %XX hex escapes
+# might get interpreted or not, handle either name.
+SRCNAM="Shadow Warrior (USA)"
+ZIPNAME1="$SRCNAM.zip"
+ZIPNAME2="Shadow%20Warrior%20%28USA%29.zip"
 
 ARCH=noarch
 CWD=$(pwd)
@@ -28,26 +40,47 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 mkdir -p $PRGNAM-$VERSION
 cd $PRGNAM-$VERSION
-7za x $CWD/shadow.7z '*/*.GRP' '*/*.TXT' '*/*.ICO'
-cd shadow
+
+[ -e "$CWD/$ZIPNAME1" ] && ZIPNAME="$ZIPNAME1" || ZIPNAME="$ZIPNAME2"
+unzip "$CWD/$ZIPNAME"
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \+ -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
+chmod 644 *
 
+# The "source" file is a bin/cue cdrom image with multiple .bin files.
+# It took some effort to get bchunk to extract this correctly, and I've
+# moved the code into a separate script so that users of other distros
+# can possibly make use of it. In fact it's been tested on MacOSX :)
+sh $CWD/extract-shadow-warrior.sh "$SRCNAM.cue"
+
+# Loop mount the iso to extract the stuff we need from it.
+# N.B. sandbox wrappers like sbrun or slackrepo might complain that
+# /etc/mtab has been modified. We could prevent this by using the
+# --no-mtab option with the mount and umount commands below, but
+# if something makes the script die before it's finished, we would
+# have left behind an invisible mount that could cause confusion and
+# irritation later...
+MNTPNT="$( mktemp -d cdmount.XXXXXX )"
+mount -o loop track01.iso $MNTPNT
+
+cd $MNTPNT/swinst
+  mkdir -p $PKG/usr/share/games/jfsw
+  install -m0644 SW.GRP $PKG/usr/share/games/jfsw/sw_registered.grp
+
+  mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+  for i in CREDITS.TXT license.txt; do
+    sed 's,\r,,' < $i > $PKG/usr/doc/$PRGNAM-$VERSION/$( echo $i | tr A-Z a-z )
+  done
+cd -
+
+cat $MNTPNT/sw.ico > $PKG/usr/doc/$PRGNAM-$VERSION/sw.ico
+umount $MNTPNT
+rmdir $MNTPNT
+
+# Done with the iso, now for the audio tracks (which have already been
+# converted to ogg).
 mkdir -p $PKG/usr/share/games/jfsw
-install -m0644 SW.GRP $PKG/usr/share/games/jfsw/sw_registered.grp
+cp track??.ogg $PKG/usr/share/games/jfsw
 
-# This stuff's not very relevant to a source port.
-rm -f INSTALL.TXT ORDERFRM.TXT
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-for i in *.TXT; do
-  sed 's,\r,,' < $i > $PKG/usr/doc/$PRGNAM-$VERSION/$( echo $i | tr A-Z a-z )
-done
-cat SW.ICO > $PKG/usr/doc/$PRGNAM-$VERSION/sw.ico
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
