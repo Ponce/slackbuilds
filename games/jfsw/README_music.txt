@@ -16,17 +16,11 @@ Full (Registered) Version, Wanton Destruction expansion
 
 For these versions, jfsw doesn't actually support CD audio from a
 physical CD [*]. It does, however, support .ogg files made from the CD.
-You can use CD ripping software to rip these from the original CD,
-or download them (for free, account creation required) from:
 
-https://www.gog.com/game/shadow_warrior_complete
-
-...or download it from Steam (also for free). The same files are available
-there, under the name "Shadow Warrior Classic".
-
-The .ogg files should be named "track02.ogg" through "track14.ogg", all
-lowercase (there is NO "track01.ogg"!), and placed in either ~/.jfsw/
-or /usr/share/games/jfsw/
+As of April 2020, the jfsw_registered_data build includes the .ogg files,
+so there's no need to rip them from CD or download them separately. If
+you're playing Wanton Destruction, install both jfsw_registered_data
+and jfsw_wanton_destruction.
 
 Run the game, and the music should play. If not, use the in-game menus
 (Options, Sound Menu) to enable the music and turn up the volume.
