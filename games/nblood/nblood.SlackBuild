@@ -1,0 +1,120 @@
+#!/bin/sh
+
+# Slackware build script for nblood
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Note: if you go digging into the source, you'll see that there are lots
+# of commented-out game variations, including shareware duke nukem, the
+# non-atomic full version, even redneck rampage. I tried uncommenting a
+# couple of them, but they don't work. So for now, rednukem can't play
+# the shareware version from eduke32_shareware_data. I expect upstream
+# will finish the support for these at a later date...
+
+PRGNAM=nblood
+VERSION=${VERSION:-1.01+20200428_069c52b26}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# 20200430 bkw: upstream includes a lot of fancy optimization flags that
+# are presumably well-tested, so I'm not using SLKCFLAGS. Also, nothing
+# here needs LIBDIRSUFFIX.
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-v$VERSION
+tar xvf $CWD/$PRGNAM-v$VERSION.tar.xz
+cd $PRGNAM-v$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# Where do we find the game data?
+
+# rednukem already looks in /usr/share/games/eduke32/, though it
+# hates the shareware .grp file from eduke32_shareware_data. It'll
+# play the atomic edition of the full game.
+
+# nblood looks in /usr/share/games/nblood/, which is fine.
+
+# pcexhumed doesn't look in /usr anywhere, so I'll make up a dir name
+# for it to use.
+sed -i \
+  '/^ *addsearchpath(cwd);/aaddsearchpath("/usr/share/games/pcexhumed");' \
+  source/exhumed/src/exhumed.cpp
+
+# The engine wants to write a log file in the current directory where
+# it gets run... and segfaults if it can't. The log file is just a copy
+# of the process's stderr it looks like, so let's disable it.
+sed -i.bak \
+  's|OSD_SetLogFile(APPBASENAME ".log");|OSD_SetLogFile("/dev/null");|' \
+  source/blood/src/blood.cpp \
+  source/rr/src/game.cpp \
+  source/exhumed/src/exhumed.cpp
+
+make
+
+mkdir -p $PKG/usr/games $PKG/usr/share/applications
+for game in $PRGNAM $PRGNAM-cryptic pcexhumed rednukem; do
+  [ -e $game ] && install -s -m0755 $game $PKG/usr/games
+  cat $CWD/desktop/$game.desktop > $PKG/usr/share/applications/$game.desktop
+done
+
+# Wrapper script for Cryptic Passage, since the game doesn't let you
+# choose it from the GUI.
+install -oroot -groot -m0755 $CWD/$PRGNAM-cryptic $PKG/usr/games
+
+# The .pk3 file has to be in the game data dir.
+GAMEDIR=$PKG/usr/share/games/$PRGNAM
+mkdir -p $GAMEDIR
+install -oroot -groot -m0644 $PRGNAM.pk3 $GAMEDIR
+
+# Extract/copy the Blood gamedata. Automated here because a description of
+# the process amounts to a shell script anyway. It's a standalone script
+# so non-Slackware users might be able to use it.
+cd $CWD
+  WITHDATA="does not include"
+  TMP="$TMP" \
+    sh $CWD/extract-blood-data.sh $GAMEDIR && \
+    WITHDATA="includes"
+cd -
+
+# Icons extracted from source/blood/rsrc/game_icon.ico with icotool.
+for icon in $CWD/icons/*.png; do
+  size="$( basename $icon .png )"
+  idir=$PKG/usr/share/icons/hicolor/${size}x${size}/apps
+  mkdir -p $idir
+  cat $icon > $idir/$PRGNAM.png
+done
+
+mkdir -p $PKG/usr/share/pixmaps
+cat $CWD/icons/64.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a *.md source/blood/gpl-2.0.txt $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+sed "s,@WITHDATA@,$WITHDATA," $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
