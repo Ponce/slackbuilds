@@ -1,0 +1,126 @@
+#!/bin/sh
+
+# Slackware build script for adoptopenjdk
+
+# Copyright 2018 Sukma Wardana <sukma.wardana@mail.com>
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+# and associated documentation files (the "Software"), to deal in the Software without restriction,
+# including without limitation the rights to use, copy, modify, merge, publish, distribute,
+# sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all copies or
+# substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+# PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+# FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+# ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+PRGNAM=adoptopenjdk-openj9
+SRCNAM=jdk
+VERSION=${VERSION:-14.0.1+7}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+MAINVER=${VERSION%%.*}
+MAJORVER=${VERSION%+*}
+MINORVER=${VERSION#*+}
+J9VER=0.20.0
+
+TARNAM=OpenJDK${MAINVER}U-jdk_x64_linux_openj9_${MAJORVER}_${MINORVER}_openj9-${J9VER}.tar.gz
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=${TMP}/package-${PRGNAM}
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) export ARCH=i586 ;;
+    arm*) export ARCH=arm ;;
+       *) export ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ "$ARCH" = "x86_64" ]; then
+  LIBDIRSUFFIX="64"
+else
+  echo "$ARCH port is not supported"
+  exit -1
+fi
+
+JDK_HOME=/usr/lib${LIBDIRSUFFIX}/${SRCNAM}-${VERSION}
+
+set -e
+
+rm -rf ${PKG}
+mkdir -p ${TMP} ${PKG} ${OUTPUT}
+
+mkdir -p $PKG/$JDK_HOME $PKG/usr/{bin,man}
+# Extract start from sub-directory 1 level beneath
+cd $PKG/$JDK_HOME
+tar -xvzf ${CWD}/${TARNAM} --strip-components=1
+cp -a man/man1/ $PKG/usr/man/man1
+
+chown -R root:root .
+find -L . \
+  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+    -o -perm 511 \) -exec chmod 755 {} \; -o \
+  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+    -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Define whether or not a symlink to libjvm.so library must
+# be created into /usr/lib${LIBDIRSUFFIX}. Can be set to "yes"
+# or "no". Default to "yes".
+if [ "${CREATE_LIBJVM_SYMLINK:-yes}" = "yes" ]; then
+  # Important Note:
+  # --------------
+  # This will create symlink under /usr/lib${LIBDIRSUFFIX}
+  cd ${PKG}/usr/lib${LIBDIRSUFFIX}
+    ln -sf $JDK_HOME/lib/libjawt.so
+    ln -sf $JDK_HOME/lib/server/libjvm.so
+    ln -sf $JDK_HOME/lib/libjava.so
+    ln -sf $JDK_HOME/lib/libawt.so
+    ln -sf $JDK_HOME/lib/libawt_xawt.so
+    ln -sf $JDK_HOME/lib/libverify.so
+  cd -
+fi
+
+# Add profile scripts.
+mkdir -p $PKG/etc/profile.d
+for script in $(ls "${CWD}/profile.d/${PRGNAM}"*) ; do
+  # Modifying the LIBDIRSUFFIX and VERSION using Stream Editor (sed)
+  sed -e "s;lib/${SRCNAM};lib${LIBDIRSUFFIX}/${SRCNAM};" -e "s;@VERSION@;${VERSION};" \
+    < $script \
+    > ${PKG}/etc/profile.d/$(basename ${script})
+  chmod 755 ${PKG}/etc/profile.d/*
+done
+
+mkdir -p $PKG/usr/doc/$SRCNAM-$VERSION
+cp -a release legal/ $PKG/usr/doc/$SRCNAM-$VERSION || true
+cat $CWD/$(basename $0) > $PKG/usr/doc/$SRCNAM-$VERSION/$PRGNAM.SlackBuild
+chown -R root:root $PKG/usr/doc/$SRCNAM-$VERSION
+find $PKG/usr/doc -type f -exec chmod 644 {} \;
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+rm -rf $PKG/usr/lib64/jdk-14.0.1+7/{man,legal}
+
+mkdir -p ${PKG}/install
+cat ${CWD}/slack-desc > ${PKG}/install/slack-desc
+
+(
+  cd $PKG
+    find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | \
+      xargs strip --strip-unneeded 2> /dev/null
+    find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | \
+      xargs strip --strip-unneeded 2> /dev/null
+)
+
+cd ${PKG}
+/sbin/makepkg -l y -c n ${OUTPUT}/${PRGNAM}-${VERSION}-${ARCH}-${BUILD}${TAG}.${PKGTYPE:-tgz}
