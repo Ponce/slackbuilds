@@ -3,6 +3,7 @@
 # Slackware build script for fop
 
 # Copyright 2015 Thorn Inurcide USA
+# Copyright 2020 Lenard Spencer, Orlando, Florida, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,7 +24,7 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=fop
-VERSION=${VERSION:-2.4}
+VERSION=${VERSION:-2.5}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -69,23 +70,40 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Fix an Issue with Java 8 (thanks LFS):
-sed -i '\@</javad@i\
-<arg value="-Xdoclint:none"/>\
-<arg value="--allow-script-in-comments"/>' fop/build.xml
+if [ "${JDK11:-no}" = "yes" ]; then
+# Fix an Issue with Java 11 and newer:
+  sed -i '\@</javad@i\
+  <arg value="-Xdoclint:none"/>\
+  <arg value="--allow-script-in-comments"/>\
+  <arg value="--ignore-source-errors"/>' \
+    fop/build.xml
+# With jdk11 and newer, the minimum source version is 1.7, while
+# the fop build system has 1.6.  Change it here:
+  sed -e 's/1\.6/1.7/' \
+    -i fop/build.xml
+else
+  # Fix an Issue with Java 8 and older:
+  sed -i '\@</javad@i\
+  <arg value="--allow-script-in-comments"/>' fop/build.xml
+fi
 
-# Increase hyphenation stacksize from 512k to 1M (thanks LFS):
+# Increase hyphenation stacksize from 512k to 1M:
 sed -e '/hyph\.stack/s/512k/1M/' -i fop/build.xml
 
-# Compiles with apache-ant:
-ant -f fop/build.xml compile
-ant -f fop/build.xml jar-main
-ant -f fop/build.xml javadocs
+# Copy updated {pdf,font}box files:
+rm fop/lib/fontbox-2.0.*.jar || true
+cp $CWD/{font,pdf}box-2.0.19.jar fop/lib
 
+# Copy hyphenation tables:
+unzip $CWD/offo-hyphenation.zip
+cp offo-hyphenation/hyph/* fop/hyph
+rm -rf offo-hyphenation
+
+# Compiles with apache-ant:
+( cd fop
+ant all javadocs
 mkdir -p $PKG/opt/$PRGNAM-$VERSION
 install -v -d -m755 $PKG/opt/$PRGNAM-$VERSION/
-
-( cd fop
 mv build/javadocs .
 cp -va build conf examples javadocs fop* lib \
  $PKG/opt/$PRGNAM-$VERSION )
