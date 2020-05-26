@@ -3,6 +3,7 @@
 # Slackware build script for transmission-remote-gtk
 
 # Copyright 2012-2016  Chris Walker Copperas Cove, TX
+# Copyright 2020 B. Watson <yalhcru@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -31,8 +32,19 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20200526 bkw:
+# - take over maintenance
+# - update for v1.4.1
+# - add NOTIFY=no to build --without-libnotify
+# - add README note and slack-desc support for optional deps
+# - fix homepage and typo in slack-desc
+# - build tweaks
+# - get rid of the list of translation languages in README, it's
+#   no longer accurate (several more added) and I can't be bothered
+#   to keep it up-to-date.
+
 PRGNAM=transmission-remote-gtk
-VERSION=${VERSION:-1.2}
+VERSION=${VERSION:-1.4.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -69,40 +81,43 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.?z
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+[ "${NOTIFY:-yes}" = "no" ] && NOTIFYOPT="--without-libnotify"
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
+  $NOTIFYOPT \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --mandir=/usr/man \
   --build=$ARCH-slackware-linux
 
 make V=1
-make install DESTDIR=$PKG
+make install-strip DESTDIR=$PKG
+gzip -9 $PKG/usr/man/man1/$PRGNAM.1
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# 20200526 bkw: lots of optional deps, let the slack-desc keep track of them
+ldd $PKG/usr/bin/$PRGNAM > ldd.tmp
+for i in libnotify libappindicator3 libmrss GeoIP; do
+  opts+="$i:"
+  grep -q $i ldd.tmp && opts+="yes " || opts+="no "
+done
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+# 20200526 bkw: this doesn't belong in a package
+rm -f $PKG/usr/share/applications/mimeinfo.cache
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  AUTHORS COPYING ChangeLog \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS COPYING ChangeLog README.md $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@opts@,$opts," $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
