@@ -1,8 +1,8 @@
 #!/bin/sh
 # Slackware build script for transmission
 
-# Copyright 2007 Vasilis Papavasileiou <el03020 at mail dot ntua dot gr>
-# Copyright 2008-2011 Iskar Enev <iskar.enev[@]gmail.com>
+# Copyright 2007 Vasilis Papavasileiou <email removed>
+# Copyright 2008-2011 Iskar Enev <email removed>
 # Copyright 2011-2013 Niels Horn, Rio de Janeiro, Brazil
 # Copyright 2015 B. Watson <yalhcru@gmail.com>
 # All rights reserved.
@@ -24,23 +24,22 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# 20180207 bkw: update for v2.93
-
+# 20200525 bkw: update for v3.00.
+#               Drop Qt GUI and QT=yes, due to 14.2's old gcc/libstdc++.
+#               It will come back when 15.0 releases.
+# 20180611 bkw: update for v2.94.
+# 20180207 bkw: update for v2.93.
 # 20180116 bkw: security fix, BUILD=2. See:
 #               https://github.com/transmission/transmission/pull/468
 #               Thanks to Freenode user lord_ for pointing this out.
-
-# 20180611 bkw: update for v2.94
-
 # 20170621 bkw: fix build on -current.
-
 # 20150204 bkw: allow user to disable the various components.
 # By default, all are enabled. We can disable transmission-gtk,
 # transmission-qt, transmission-cli, and/or transmission-daemon.
 # But disabling them all is no good.
 
 PRGNAM=transmission
-VERSION=${VERSION:-2.94}
+VERSION=${VERSION:-3.00}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -57,7 +56,7 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-DOCUMENTATION="AUTHORS COPYING INSTALL NEWS README"
+DOCS="AUTHORS COPYING NEWS.md README.md"
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
@@ -75,15 +74,34 @@ fi
 
 set -e
 
+# 20200525 bkw: I had to drop the Qt client, let's make sure the user
+# knows that.
+if [ -n "$QT" ]; then
+  cat <<EOF 1>&2
+
+**********************************************************************
+The Qt GUI in this version of transmission can't be built on Slackware
+14.2. If you don't mind using an older version of transmission, you
+can install transmission-qt4 to get a Qt GUI.
+**********************************************************************
+
+EOF
+  exit 1
+fi
+
 GTK="${GTK:-yes}"
-QT="${QT:-yes}"
+#QT="${QT:-yes}"
 CLI="${CLI:-yes}"
 DAEMON="${DAEMON:-yes}"
 
-if [ "$GTK" != "yes" -a "$QT" != "yes" -a "$CLI" != "yes" -a "$DAEMON" != "yes" ]; then
+if [ "$GTK" != "yes" -a "$CLI" != "yes" -a "$DAEMON" != "yes" ]; then
   cat <<EOF 1>&2
+
+******************************************************************
 Can't build transmission with everything disabled, at least one of
-GTK QT CLI DAEMON must be 'yes'.
+GTK CLI DAEMON must be 'yes'.
+******************************************************************
+
 EOF
   exit 1
 fi
@@ -101,16 +119,8 @@ mkdir -p $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
-
-# Fix CVE-2018-5702 for transmission-2.92. Patch came from:
-# https://github.com/transmission/transmission/files/1624507/transmission-fix-dns-rebinding-vuln.patch.txt
-#patch -p1 < $CWD/transmission-fix-dns-rebinding-vuln.diff
-# Not needed for >= 2.93
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 sed -i -e 's%-g -O3 -funroll-loops %%g' configure.ac
 sed -i -e 's%-ggdb3 %%g' configure.ac
@@ -139,11 +149,17 @@ CXXFLAGS="$SLKCFLAGS" \
   --build=$ARCH-slackware-linux \
   --host=$ARCH-slackware-linux
 
-# build daemon, GTK and cli client (unless disabled)
+# Build daemon, GTK and cli client (unless disabled). This also builds
+# the tools (transmission-create and friends).
 make
-make install DESTDIR=$PKG
+make install-strip DESTDIR=$PKG
 
-if [ "$QT" = "yes" ]; then
+if false; then
+# As of 3.0.0, transmission-qt can't be built on Slackware 14.2.
+# Needs a newer g++ and libstdc++ than we have.
+# Left here for reference when 15.0 comes out.
+#if [ "$QT" = "yes" ]; then
+
   # build the Qt client (transmission-qt) unless disabled
   # Fix hard-coded path of man file of Qt client
   sed -i "s|share/man/|man/|" qt/qtr.pro
@@ -153,7 +169,7 @@ if [ "$QT" = "yes" ]; then
   echo "QMAKE_CXXFLAGS += -std=c++11" >> qt/qtr.pro
 
   cd $TMP/$PRGNAM-$VERSION/qt
-    qmake \
+    qmake-qt5 \
       QMAKE_CXXFLAGS+="$SLKCFLAGS" \
       QMAKE_CFLAGS+="$SLKCFLAGS" \
       qtr.pro
@@ -167,18 +183,15 @@ if [ "$QT" = "yes" ]; then
   cd -
 fi
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+gzip -9 $PKG/usr/man/man?/*
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a $DOCUMENTATION $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-sed "s,@opts@,GTK=$GTK QT=$QT CLI=$CLI DAEMON=$DAEMON," $CWD/slack-desc > $PKG/install/slack-desc
+#sed "s,@opts@,GTK=$GTK QT=$QT CLI=$CLI DAEMON=$DAEMON," $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@opts@,GTK=$GTK CLI=$CLI DAEMON=$DAEMON," $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
