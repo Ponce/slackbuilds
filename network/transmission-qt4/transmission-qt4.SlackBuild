@@ -1,0 +1,147 @@
+#!/bin/sh
+# Slackware build script for transmission
+
+# Copyright 2007 Vasilis Papavasileiou <email removed>
+# Copyright 2008-2011 Iskar Enev <email removed>
+# Copyright 2011-2013 Niels Horn, Rio de Janeiro, Brazil
+# Copyright 2015 B. Watson <yalhcru@gmail.com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# 20200525 bkw: new build, forked from the previous
+# transmission.SlackBuild. This will go away when Slack 15 releases.
+
+PRGNAM=transmission-qt4
+VERSION=${VERSION:-2.94}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+SRCNAM=transmission
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+DOCS="AUTHORS COPYING INSTALL NEWS README"
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+mkdir -p $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.xz
+cd $SRCNAM-$VERSION
+chown -R root:root .
+
+sed -i -e 's%-g -O3 -funroll-loops %%g' configure.ac
+sed -i -e 's%-ggdb3 %%g' configure.ac
+
+# fix for -current (does no harm on stable). ref:
+# https://gitweb.gentoo.org/repo/gentoo.git/commit/?id=c13b5e88c6e9c7bd2698d844cb5ed127ed809f7e
+rm -f m4/glib-gettext.m4
+
+# Thanks Larry Hajali
+autoreconf -ivf
+
+CC=gcc CXX=g++ \
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --disable-static \
+  --verbose \
+  --with-gtk=no \
+  --disable-cli \
+  --disable-daemon \
+  --build=$ARCH-slackware-linux \
+  --host=$ARCH-slackware-linux
+
+# build libraries (but don't install them). this also wastefully builds
+# the tools, which we aren't going to install.
+make
+
+# build and install the Qt client
+# Fix hard-coded path of man file of Qt client
+sed -i "s|share/man/|man/|" qt/qtr.pro
+
+# Needed when using Qt4
+# https://trac.transmissionbt.com/ticket/5700#comment:2
+echo "QMAKE_CXXFLAGS += -std=c++11" >> qt/qtr.pro
+
+cd qt
+  qmake \
+    QMAKE_CXXFLAGS+="$SLKCFLAGS" \
+    QMAKE_CFLAGS+="$SLKCFLAGS" \
+    qtr.pro
+  sed -i -e 's% -g % %g' Makefile
+  make
+
+  make install \
+    INSTALL_ROOT=$PKG/usr \
+    INSTALL_PROGRAM="install -m0755 -p -s"
+  gzip -9 $PKG/usr/man/man1/*.1
+
+  mkdir -p $PKG/usr/share/applications $PKG/usr/share/pixmaps
+
+  # thanks to b1101 for catching this:
+  sed -i '/^Icon/s|transmission$|&-qt|' transmission-qt.desktop
+
+  install -m644 transmission-qt.desktop $PKG/usr/share/applications/transmission-qt.desktop
+  install -m644 icons/transmission.png  $PKG/usr/share/pixmaps/transmission-qt.png
+cd -
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
