@@ -2,7 +2,7 @@
 
 # Slackware build script for xiphos
 
-# Copyright 2015-2018 Tim Dickson, email: dickson.tim@googlemail.com
+# Copyright 2015-2020 Tim Dickson, email: dickson.tim@googlemail.com
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,12 +23,10 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=xiphos
-VERSION=${VERSION:-4.1.0}
+VERSION=${VERSION:-4.2.1}
+CMVERSION=${CMVERSION:-3.17.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
-
-#if WK2 is yes use webkit2. this requires webkit2gtk and gtkhtml (v4) instead of webkitgtk3
-WK2=${WK2:-no}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -65,44 +63,78 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
+
+#we need a private copy of a newer version of cmake (at least 3.11)
+tar xvf $CWD/cmake-$CMVERSION.tar.gz
+
+#sane permissions for everything
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
   -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
-
-./waf distclean
+#
+#now do private cmake stuff - note capital C
+cd CMake-$CMVERSION
+mkdir cmake-build
+cd cmake-build
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+  ../configure \
+  --prefix=$TMP/$PRGNAM-$VERSION/tmpcmake \
+  --docdir=/doc \
+  --no-qt-gui \
+  --system-curl \
+  --system-expat \
+  --no-system-jsoncpp \
+  --system-zlib \
+  --system-bzip2 \
+  --system-libarchive
+#we don't care about the docs really as this is a temp install.
+make
+make install
+#hopefully that has installed our tmp cmake in the right place
+#in $TMP/$PRGNAM-$VERSION/tmpcmake/bin
+#lets make it available to the xiphos build
+OLDPATH=$PATH
+export PATH=$TMP/$PRGNAM-$VERSION/tmpcmake/bin:$PATH
+#move back to the right directory
+cd ../../
 
 # patch navbar_versekey.gtkbuilder to work with gtk shipped with slackware 14.2
 # patch won't be needed for slackware 15
 sed -i "s/3.20/3.14/g" ui/navbar_versekey.gtkbuilder
 
-if [ "x$WK2" = "xyes" ]; then
-  CFLAGS="$SLKCFLAGS" \
-  CXXFLAGS="$SLKCFLAGS" \
-  ./waf configure \
-    --prefix=/usr \
-    --enable-webkit2 \
-    --gtk=3
-  # --disable-dbus
-  #  --gtk=2   doesn't work with webkitgtk as gtk2 is disabled
-else
-  CFLAGS="$SLKCFLAGS" \
-  CXXFLAGS="$SLKCFLAGS" \
-  ./waf configure \
-    --prefix=/usr \
-    --enable-webkit-editor \
-    --gtk=3
-  #  --disable-dbus
-  #  --gtk=2   doesn't work with webkitgtk as gtk2 is disabled
-fi
+mkdir -p build
+cd build
+cmake -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+  -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+  -DCMAKE_INSTALL_PREFIX=/usr \
+  -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+  -DMAN_INSTALL_DIR=/usr/man \
+  -DHTMLHELP=ON \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DDBUS=OFF -DSTRIP=ON -DPOSTINST=OFF -DGTKHTML=ON ..
 
-./waf build
-./waf install --destdir=$PKG
+#unfortunately  this CMakeLists.txt ignores MAN_INSTALL_DIR so we fix it later
+#cmake should have created make file so restore PATH
+export PATH=$OLDPATH
+make
+make install DESTDIR=$PKG
+cd ..
 
+#output should be stripped but we just make sure..
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+#compress man pages. first, stick them in the right place..
+mkdir -p $PKG/usr/man/man1
+cp $PKG/usr/share/man/man1/$PRGNAM.1 $PKG/usr/man/man1/$PRGNAM.1
+rm -rf $PKG/usr/share/man
+#now to compress them
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 mv $PKG/usr/share/doc/$PRGNAM/* $PKG/usr/doc/$PRGNAM-$VERSION
