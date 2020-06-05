@@ -11,14 +11,18 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-# Keep same perms on rc.plexmediaserver.new:
-if [ -e etc/rc.d/rc.plexmediaserver ]; then
-  cp -a etc/rc.d/rc.plexmediaserver etc/rc.d/rc.plexmediaserver.new.incoming
-  cat etc/rc.d/rc.plexmediaserver.new > etc/rc.d/rc.plexmediaserver.new.incoming
-  mv etc/rc.d/rc.plexmediaserver.new.incoming etc/rc.d/rc.plexmediaserver.new
-fi
+preserve_perms() {
+  NEW="$1"
+  OLD="$(dirname $NEW)/$(basename $NEW .new)"
+  if [ -e $OLD ]; then
+    cp -a $OLD ${NEW}.incoming
+    cat $NEW > ${NEW}.incoming
+    mv ${NEW}.incoming $NEW
+  fi
+  config $NEW
+}
 
-config etc/rc.d/rc.plexmediaserver.new
+preserve_perms etc/rc.d/rc.plexmediaserver.new
 config etc/default/plexmediaserver.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
