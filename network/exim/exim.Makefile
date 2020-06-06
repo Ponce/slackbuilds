@@ -13,12 +13,11 @@
 
 # Things that depend on the operating system have default settings in
 # OS/Makefile-Default, but these are overridden for some OS by files
-# called called OS/Makefile-<osname>. You can further override these by
-# creating files called Local/Makefile-<osname>, and
-# Local/Makefile-<buildname> (where "<osname>" stands for the name of
-# your operating system - look at the names in the OS directory to see
-# which names are recognized, and "<buildname>" is derived from the
-# environment variable "build")
+# called OS/Makefile-<osname>. You can further override these settings by
+# creating files Local/Makefile-<osname>, and Local/Makefile-<build>.
+# The suffix "<osname>" stands for the name of your operating system - look
+# at the names in the OS directory to see which names are recognized,
+# and "<build>" is the content of the environment variable "build".
 
 # However, if you are building Exim for a single OS only, you don't need to
 # worry about setting up Local/Makefile-<osname>. Any build-time configuration
@@ -604,6 +603,10 @@ DISABLE_MAL_MKS=yes
 # CFLAGS  += -I/usr/local/include
 # LDFLAGS += -lsrs_alt
 
+# Uncomment the following lines to add SRS (Sender rewriting scheme) support
+# using only native facilities.
+# EXPERIMENTAL_SRS_NATIVE=yes
+
 # Uncomment the following line to add DMARC checking capability, implemented
 # using libopendmarc libraries. You must have SPF and DKIM support enabled also.
 # SUPPORT_DMARC=yes
@@ -641,6 +644,9 @@ DISABLE_MAL_MKS=yes
 
 # Uncomment the following line to include support for TLS Resumption
 # EXPERIMENTAL_TLS_RESUME=yes
+
+# Uncomment the following to include the fast-ramp two-phase-queue-run support
+# EXPERIMENTAL_QUEUE_RAMP=yes
 
 ###############################################################################
 #                 THESE ARE THINGS YOU MIGHT WANT TO SPECIFY                  #
@@ -793,6 +799,9 @@ AUTH_TLS=yes
 AUTH_LIBS=-lsasl2
 # AUTH_LIBS=-lgsasl
 # AUTH_LIBS=-lgssapi -lheimntlm -lkrb5 -lhx509 -lcom_err -lhcrypto -lasn1 -lwind -lroken -lcrypt
+
+# If using AUTH_GSASL with SCRAM methods, you should also be defining
+# SUPPORT_I18N to get standards-conformant support of utf8 normalization.
 
 
 #------------------------------------------------------------------------------
