@@ -1,5 +1,3 @@
-( cd usr/bin ; ln -sf /opt/zoom-linux/ZoomLauncher zoom-linux )
-
 if [ -x /usr/bin/xdg-mime ]; then
     /usr/bin/xdg-mime install /usr/share/mime/packages/zoom-linux.xml
 fi
