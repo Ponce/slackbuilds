@@ -1,6 +1,8 @@
 #!/bin/bash
 
-# texmf_get.sh (c) 2016 - 2019 Johannes Schoepfer, Germany, slackbuilds[at]schoepfer[dot]info
+# texmf_get.sh
+#
+# Copyright 2016 - 2020  Johannes Schoepfer, Germany, slackbuilds@schoepfer.info
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -20,7 +22,7 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-#  V 15.0.3
+#  V 15.0.4
 #
 #  Prepare xz-compressed tarballs of texlive-texmf-trees based on texlive.tlpdb
 #  This script takes care of dependencies(as far as these are present in texlive.tlpdb)
@@ -31,51 +33,44 @@
 # -docs: -base documentation only, no manpages/GNU infofiles
 # -extra: remaining stuff and corresponding docs
 #
-#  texlive netarchive policy: Every package is included as dependency
+#  texlive netarchive policy: Every package is included as dependency 
 #  in exactly one collection. A package may have dependencies on other
 #  packages from any collection.
 
-# package source: http://mirror.ctan.org/systems/texlive/tlnet/archive/
-
 #set -e
-MAJORVERSION=2019
+MAJORVERSION=2020
 mirror="http://mirror.ctan.org/systems/texlive/tlnet/"
-TMP=$PWD/tmp
+TMP=${TMP:-$PWD/tmp}	
 
 # Globally excluded packages, which are/contain
 # -useless without tlmgr-installer
-# -non-linux
+# -non-linux, e.g. texworks
 # -covered by an external package, e.g. asymptote on SBo
 # -obsolete, e.g. omega
-# -java dependend packages
 # -binaries provided already by texlive.Slackbuild
-# -binaries provided already other system packages, e.g. texlive-scripts.ARCH
-# -only sources, or hyphen directives, e.g. metatype1, patch, ...
-# -only hyphen directives, e.g. hyphen-farsi ...
+# -binaries which texlive upstream recommends to build natively, e.g. dvisvgm on SBo
+# -only sources, e.g. metatype1, patch, ...
 
 global_exclude="
+  00texlive.config
+  00texlive.image
+  00texlive.installation
+  00texlive.installer
   aleph
   antomega
   asymptote
   bibtexu
   cslatex
   dviout.win32
-  hyphen-arabic
-  hyphen-farsi
   lambda
-  metatype1
   ocherokee
   oinuit
   omega
   omegaware
   otibet
-  patch
   texlive-common
   texlive-docindex
   texlive-msg-translations
-  texlive-scripts
-  texlive.infra
-  texliveonfly
   texosquery
   texworks
   tlcockpit
@@ -104,43 +99,45 @@ special_packages="
 #Todo: split type1 fonts, or keep subset of type1 fonts in base
 #  cm-super
 
-# keep precompiled binaries, list binary, not package name
+# keep precompiled binaries, list binary, not package name 
 keep_precompiled="
   biber
   "
 
 texmf_editions () {
-
+  
   # "excludes from -base", also dependencies are excluded
   PACKAGES="
     cm-super
     biber
     bib2gls
     knitting
-    pgfornament
-    pgfplots
     pst-cox
     pst-poker
     pst-vectorian
     pst-geo
     bclogo
-    $(grep ^"name .*biblatex" $db | cut -d' ' -f2 )
+    texplate
+    texliveonfly
+    kerkis
     " texmfget extra || exit 1
  
     # packages/collections and their dependencies for -base
   PACKAGES="
-    $(cat $corepackages)
+    $(grep ^"name hyphen-.*" $db | cut -d' ' -f2 )
+    $special_packages
     etoolbox
-    xcolor
     memoir
-    velthuis
-    wasy
     ptex
     platex
     revtex
-    uptex
-    uplatex
     ucs
+    uplatex
+    uptex
+    velthuis
+    wasy
+    xcolor
+    xypic
     collection-basic
     collection-latex
     collection-metapost
@@ -152,17 +149,23 @@ texmf_editions () {
     collection-langeuropean
     collection-langenglish
     collection-langfrench
+    collection-langgreek
     collection-langitalian
     collection-langpolish
     collection-langportuguese
     collection-langspanish
     collection-latexrecommended
-    $(collection_by_size fontsextra 70000 || exit 1)
-    $(collection_by_size publishers 10000 || exit 1)
+    $(collection_by_size fontsextra   70000 || exit 1)
+    $(collection_by_size latexextra    1000 || exit 1)
+    $(collection_by_size langchinese   5000 || exit 1)
+    $(collection_by_size langcjk       3000 || exit 1)
+    $(collection_by_size pictures    100000 || exit 1)
+    $(collection_by_size publishers   10000 || exit 1)
     " texmfget base
 
     # packages/collections and their dependencies for -extra
   PACKAGES="
+    $(grep ^"name .*biblatex" $db | cut -d' ' -f2 )
     amiri
     arabi
     arabi-add
@@ -177,12 +180,12 @@ texmf_editions () {
     beebe
     bhcexam
     bxtexlogo
-    churchslavonic
     collection-fontsextra
     collection-langchinese
     collection-langcjk
     collection-langjapanese
     collection-langkorean
+    collection-pictures
     collection-publishers
     collection-texworks
     collection-wintools
@@ -218,7 +221,7 @@ texmf_editions () {
     pdfwin
     pdfx
     powerdot-tuliplab
-    powerdot-FUBerlin
+    powerdot-fuberlin
     quran
     quran-de
     realhats
@@ -231,30 +234,28 @@ texmf_editions () {
     skaknew
     stellenbosch
     suanpan
+    texdoctk
     tudscr
     uantwerpendocs
-    ucs
     udesoftec
     universalis
     uowthesis
-    wasy2-ps
+    wasy-type1
     xduthesis
-    xetexko
+    xetexko 
     xq
     " texmfget extra || exit 1
-
-   # What's left, for base again
+ 
+   # What's left, for base again 
   PACKAGES="
     collection-fontsrecommended
     collection-xetex
     collection-langcyrillic
     collection-langarabic
     collection-langgerman
-    collection-langgreek
     collection-langother
     collection-humanities
     collection-mathscience
-    collection-pictures
     collection-pstricks
     collection-music
     collection-games
@@ -279,9 +280,9 @@ usage () {
   echo "-extra: remaining texfiles and docs"
   echo "[lint]: compare filename contents of all generated editions,"
   echo " to detect overlapping files"
-  echo
+  echo 
   echo "Only new/updated/missing tex packages are downloaded."
-  echo "The first run takes \"long\", tex packages(about 2500Mb)"
+  echo "The first run takes \"long\", tex packages(about 3Gb)"
   echo "need to be downloaded."
   echo "To check out a new version/release, delete"
   echo "$db"
@@ -294,7 +295,7 @@ usage () {
 }
 
 collection_by_size () {
-  # from collection $1, pull packages smaller $2 bytes
+  # from collection $1, pull packages smaller $2 bytes 
   start_n="$(grep -n ^"name collection-$1"$ $db | cut -d':' -f1)"
   # find end of package/collection
   for emptyline in $emptylines
@@ -306,7 +307,7 @@ collection_by_size () {
     fi
   done
   extrapackages="$(sed "${start_n},${end_n}!d" $db | grep ^"depend " | grep -v ^"depend collection" | sed "s/^depend//g" )"
-
+  
   # add if smaller than ...
   for checksize in $extrapackages
   do
@@ -333,53 +334,48 @@ package_meta () {
       fi
     done
     # Don't handle collections as dependency of other collections
-    sed "${start_n},${end_n}!d;/^depend collection/d" $db > $texmf/$1.meta
+    sed "${start_n},${end_n}!d;/^depend collection/d" $db > $texmf/$1.meta 
   fi
 }
 
 download () {
   # Download packages, if not already available. Not every packages has a corresponding .doc package.
-  # Try three times if package isn't present, with -t1 to get another mirror the second time
-  cd $texmf
-  if [ ! -s "${1}${flavour}.tar.xz" ]
-  then
-    for run in {1..10}
-    do
-      wget -q --show-progress -t1 -c ${mirror}archive/${1}${flavour}.tar.xz
-      [ -s "${1}${flavour}.tar.xz" ] && break
-    done
-  fi
-  # If no success by downloading, write error log
-  [ ! -s ${1}${flavour}.tar.xz ] && echo "Downloading ${1}${flavour}.tar.xz did not work, writing to $errorlog" && echo "$VERSION" >> $errorlog && echo "Error downloading ${1}${flavour}.tar.xz" >> $errorlog && exit 1
-
-  # check sha512, give three tries for downloading again(diffrent mirrors are used automatically)
+  # Try multiple times if package isn't present or checksum fails
+  
+  unset checksum_ok
   if [ "$flavour" = ".doc" ]
   then
     sha512="$(grep ^doccontainerchecksum $texmf/$1.meta | cut -d' ' -f2 )"
   else
     sha512="$(grep ^containerchecksum $texmf/$1.meta | cut -d' ' -f2 )"
   fi
-
-  for run in {1..10}
+  
+  cd $texmf
+ 
+  for run in {1..8}
   do
+    [ ! -s "${1}${flavour}.tar.xz" ] && \
+      wget -q --show-progress -t1 -c ${mirror}archive/${1}${flavour}.tar.xz
+    [ ! -s "${1}${flavour}.tar.xz" ] && continue
     if [ "$(sha512sum ${1}${flavour}.tar.xz | cut -d' ' -f1 )" != "$sha512" ]
     then
-      # Download (hopefully) newer file
+      echo "sha512sum of ${1}${flavour}.tar.xz doesn't match $texmf/$1.meta"
+      echo "deleting ${1}${flavour}.tar.xz"
       rm ${1}${flavour}.tar.xz
-      wget -q --show-progress -t1 -c ${mirror}archive/${1}${flavour}.tar.xz
     else
+      checksum_ok=yes
       break
     fi
   done
-  # check sha512 again, exit if it fails
-  if [ "$(sha512sum ${1}${flavour}.tar.xz | cut -d' ' -f1 )" != "$sha512" ]
+  
+  # If no success by downloading, write error log
+  if [ -z "$checksum_ok" ]
   then
-    echo "sha512sum $(sha512sum ${1}${flavour}.tar.xz | cut -d' ' -f1 ) of"
-    echo "${package}${flavour}.tar.xz doesn't match with $db"
-    # delete metafile on failure to get generated again on next run, where new $db may be in use
-    rm $texmf/$1.meta
-    echo "sha512sum $sha512"
-    echo "Delete ${db}* to be current again, and try again."
+    echo "Downloading ${1}${flavour}.tar.xz or sh512sum check was not successful,\\
+    writing to $errorlog" 
+    echo "Delete ${db}* and try again."
+    echo "$VERSION" >> $errorlog
+    echo "Error downloading ${1}${flavour}.tar.xz" >> $errorlog
     exit 1
   fi
 }
@@ -390,7 +386,7 @@ untar () {
   then
     while read package
     do
-      echo "untar $package"
+      echo "untar $package$flavour"
       # untar all packages, check for relocation, "relocate 1" -> untar in texmf-dist
       download $package || exit 1
       # untar package, relocate to texmf-dist if necessary, binary packages always need relocation
@@ -401,7 +397,9 @@ untar () {
       then
         tar xf ${package}${flavour}.tar.xz --exclude tlpkg -C $relocated || exit 1
       else
-        tar vxf ${package}${flavour}.tar.xz --exclude tlpkg -C $relocated | grep -E '\.sty$|\.bbx$|\.cls$' > $texmf/$package.deps
+        tar vxf ${package}${flavour}.tar.xz \
+	  --exclude tlpkg/tlpobj \
+	  -C $relocated | grep -E '\.sty$|\.bbx$|\.cls$' > $texmf/$package.deps
         if [ -n "$texmf/$package.deps" ]
         then
           unset provide
@@ -433,58 +431,87 @@ untar () {
       fi
 
       # Delete binaries, these are provided
-      # by texlive.Slackbuild, keep symlinks and scripts
-
+      # by the buildscript, keep symlinks and scripts
+      
       for arch in $platforms
       do
         if [ -d $texmf/texmf-dist/bin/$arch ]
         then
-          [ ! -d $texmf/texmf-dist/linked_scripts ] \
-            && mkdir $texmf/texmf-dist/linked_scripts
-          # rewrite link target to fit systemwide installation
+          [ ! -d $texmf/texmf-dist/linked_scripts ] && \
+            mkdir $texmf/texmf-dist/linked_scripts
+	  # remove the unfortunate "man" link
+	  [ -L "$texmf/texmf-dist/bin/$arch/man" ] && \
+	    rm $texmf/texmf-dist/bin/$arch/man 
           for link in $(find $texmf/texmf-dist/bin/$arch -type l)
           do
-            ln -sf $(readlink $link | sed "s/^..\/..\(.*\)/..\/share\1/" ) $link || exit 1
+	    link_valid_dest=$texmf/texmf-dist/linked_scripts/${link##*/}
+            # move symlink to linked_scripts
+            mv $link $link_valid_dest
+            # some links have to dangle, because target binaries are coming from the buildscript
+            # fix SELFAUTOPARENT in some scripts
+            if [ -e "$link_valid_dest" ]
+            then
+              sed -i "s/kpsewhich -var-value=SELFAUTOPARENT/kpsewhich -var-value=TEXMFROOT/g" \
+                $link_valid_dest || exit 1
+            fi
           done
-          # move symlinks to linked_scripts
-          find $texmf/texmf-dist/bin/$arch -type l -exec mv '{}' $texmf/texmf-dist/linked_scripts/ \;
-
+           
           # keep only binaries of special packages
           # remove xindy.mem(gzip compresses data) to prevent overwriting
           for bin in $(find $texmf/texmf-dist/bin/$arch -type f -exec file '{}' + | \
-            grep -e "executable" -e "shared object" -e "gzip compressed data" | \
-            grep -e ELF -e "gzip compressed data" | cut -f 1 -d : )
+            grep -e "executable" -e "shared object" -e ELF -e "gzip compressed data" | cut -f 1 -d : ) 
           do
             for binary in $keep_precompiled
             do
               if [ "$(echo $bin | rev | cut -d'/' -f1 | rev)" != "$binary" ]
               then
                 rm $bin
+                echo -n "$package:" >> $binary_removed.$edition
                 echo $bin | rev | cut -d'/' -f1 | rev >> $binary_removed.$edition
               fi
             done
           done
           # move scripts to linked-scripts
-          scripts="$(find $texmf/texmf-dist/bin/$arch -type f -exec file '{}' + | grep -wv ELF | cut -f 1 -d : )"
-          for script in $scripts
+          for script in \
+	    $(find $texmf/texmf-dist/bin/$arch -type f -exec file '{}' + |\
+	    grep -wv ELF | cut -f 1 -d : )
           do
+            echo "Moving script/bin $script to $texmf/texmf-dist/linked_scripts/"
             mv $script $texmf/texmf-dist/linked_scripts/
           done
+        fi
+      done
+     
+      for tlpkg_dir in $texmf/tlpkg $texmf/texmf-dist/tlpkg
+      do
+        if [ -d $tlpkg_dir ]
+        then
+          for bin in $(find $tlpkg_dir -type f -exec file '{}' + | \
+            grep -e "executable" -e "shared object" -e ELF -e "gzip compressed data" | cut -f 1 -d : ) 
+          do
+            echo "Deleting binary $bin found in $tlpkg_dir"
+            rm $bin
+            echo -n "$package:" >> $binary_removed.$edition
+            echo $bin | rev | cut -d'/' -f1 | rev >> $binary_removed.$edition
+          done
+          [ -d $tlpkg_dir/TeXLive ] && \
+            mkdir -p $texmf/texmf-dist/scripts/texlive && \
+            mv $tlpkg_dir/TeXLive $texmf/texmf-dist/scripts/texlive
         fi
       done
 
       if [ "$flavour" = ".doc" ]
       then
-        size=$(grep ^doccontainersize $texmf/$package.meta | cut -d' ' -f2)
+        size=$(grep ^doccontainersize $texmf/$package.meta | cut -d' ' -f2) 
       else
         size=$(grep ^containersize $texmf/$package.meta | cut -d' ' -f2)
 	# add maps to updmap.cfg, don't add special_packages map files to -base
-	add_map=yes
+	add_map=yes 
 	if [ $edition = base ]
 	then
 	  for no_map in $special_packages
 	  do
-	    [ $no_map = $package ] && add_map=no && break
+	    [ $no_map = $package ] && add_map=no && break 
           done
 	fi
 	[ $add_map = yes ] && grep ^'execute ' $texmf/$package.meta | grep Map | cut -d' ' -f2- | sed "s/^add//g" >> $updmap.$edition
@@ -495,12 +522,18 @@ untar () {
       echo "$(xz -l --verbose ${package}${flavour}.tar.xz | grep "Uncompressed size" | \
         cut -d'(' -f2 | cut -d' ' -f1 ) byte, $package$flavour: $shortdesc" >> $output.meta.uncompressed
     done < $1
-
-    # copy packages index to texmf-dist, so included packages are known in later installation
+    
+    # add a path to updmap
+    if [ -s "$texmf/texmf-dist/linked_scripts/updmap" ]
+    then
+      sed -i '/unshift.*@INC.*/a unshift(@INC, "$TEXMFROOT/texmf-dist/scripts/texlive");' $texmf/texmf-dist/linked_scripts/updmap || exit 1
+    fi
+    
+    # copy packages index to texmf-dist, to have a list of included packages in the final installation
     # don't list binary packages, as the binaries itself are not contained, only the symlinks.
     cat $output.meta | grep -v '\-linux:'  >> $output.$edition.meta
     cat $output.meta.uncompressed | grep -v '\-linux:' >> $output.$edition.meta.uncompressed
-
+    
     # cleanup
     [ -f $output.meta ] && rm $output.meta
     [ -f $output.meta.uncompressed ] && rm $output.meta.uncompressed
@@ -508,27 +541,25 @@ untar () {
 }
 
 remove_cruft () {
-  # Remove m$-stuff, ConTeXt single-user-system stuff, source leftovers and pdf-versions of manpages
-  rm -rf texmf-dist/source
-  rm -rf texmf-dist/scripts/context/stubs/source/
-  find texmf-dist/ -type d -name 'win32'         -exec rm -rf {} +
-  find texmf-dist/ -type d -name 'win64'         -exec rm -rf {} +
-  find texmf-dist/ -type d -name 'mswin'         -exec rm -rf {} +
-  find texmf-dist/ -type d -name 'win'           -exec rm -rf {} +
-  find texmf-dist/ -type d -name 'setup'         -exec rm -rf {} +
-  find texmf-dist/ -type d -name 'install'       -exec rm -rf {} +
-  find texmf-dist/ -type f -name 'uninstall*.sh' -delete
-  find texmf-dist/ -type f -name '*.bat'         -delete
-  find texmf-dist/ -type f -name '*.bat.w95'     -delete
-  find texmf-dist/ -type f -name '*win32*'       -delete
-  find texmf-dist/ -type f -name 'winansi*'      -delete
-  find texmf-dist/ -type f -name '*man1.pdf'     -delete
-  find texmf-dist/ -type f -name '*man5.pdf'     -delete
-  # Remove zero-length files, as these appear e.g. in hyph-utf8 tex-package.
-  # find texmf-dist/ -type f -size 0c -delete
-  find texmf-dist/ -type f -empty -delete
-  # Remove empty directories recursively
-    find texmf-dist/ -type d -empty -delete
+  # Remove m$-stuff, ConTeXt single-user-system stuff, empty files/directories and pdf-manpages
+  rm -rf $texmf/texmf-dist/source
+  rm -rf $texmf/texmf-dist/scripts/context/stubs/source/
+  find $texmf/texmf-dist/ -type d -name 'win32'         -exec rm -rf {} +
+  find $texmf/texmf-dist/ -type d -name 'win64'         -exec rm -rf {} +
+  find $texmf/texmf-dist/ -type d -name 'mswin'         -exec rm -rf {} +
+  find $texmf/texmf-dist/ -type d -name 'win'           -exec rm -rf {} +
+  find $texmf/texmf-dist/ -type d -name 'setup'         -exec rm -rf {} +
+  find $texmf/texmf-dist/ -type d -name 'install'       -exec rm -rf {} +
+  find $texmf/texmf-dist/ -type f -name 'uninstall*.sh' -delete
+  find $texmf/texmf-dist/ -type f -name '*.bat'         -delete
+  find $texmf/texmf-dist/ -type f -name '*.bat.w95'     -delete
+  find $texmf/texmf-dist/ -type f -name '*.vbs'         -delete
+  find $texmf/texmf-dist/ -type f -name '*win32*'       -delete
+  find $texmf/texmf-dist/ -type f -name 'winansi*'      -delete
+  find $texmf/texmf-dist/ -type f -name '*man1.pdf'     -delete
+  find $texmf/texmf-dist/ -type f -name '*man5.pdf'     -delete
+  find $texmf/texmf-dist/ -type f -empty -delete
+  find $texmf/texmf-dist/ -type d -empty -delete
 }
 
 texmfget () {
@@ -538,12 +569,12 @@ texmfget () {
   # Remove outputfile if already present
   >$output
   >$output_doc
-
+  
   # Only do something if $collection wasn't already done before
   while [ -s $collections_tobedone ]
   do
     collection=$(tail -n1 $collections_tobedone)
-
+  
     # continue with next collection if collection was already done
     if [ -s "$collections_done" ]
     then
@@ -559,40 +590,51 @@ texmfget () {
         continue
       fi
     fi
-
+    
     package_meta $collection || exit 1
-
+ 
     # If $collection is a singel package(not a collection-), add it here
     if [ -n "$(head -n1 $texmf/$collection.meta | grep -v "name collection" )" ]
     then
-      addpackage=no
-      # if package contains docs, add to docpackages
+      unset addpackage 
+      # if package contains docs, add to docs-packages
       if [ -n "$(grep ^docfiles $texmf/$collection.meta)" ]
       then
         echo "$collection" >> $output_doc
         echo "$collection added to docs $1" >> $logfile
-        addpackage=yes
+        addpackage=yes 
       fi
-      if [ -n "$(grep ^runfiles $texmf/$collection.meta)" -o -n "$(grep ^binfiles $texmf/$collection.meta)" ]
+      # if package contains runfiles, binfiles or depend, add to edition
+      if [ \
+	   -n "$(grep ^runfiles $texmf/$collection.meta)" -o \
+           -n "$(grep ^binfiles $texmf/$collection.meta)" -o \
+           -n "$(grep ^depend $texmf/$collection.meta)" \
+	 ]
       then
         echo "$collection" >> $output
         echo "$collection added to -$1" >> $logfile
+        addpackage=yes 
+      fi
+      # if package contains only srcfiles, don't add to a edition
+      if [ -n "$(grep ^srcfiles $texmf/$collection.meta)" -a -z "$addpackage" ]
+      then
+        echo "$collection only contains srcfiles, added nowhere" >> $logfile
         addpackage=yes
       fi
-      # every package should be added to one dedicated edition, abort if that didn't work
-      if [ $addpackage = no ]
+      # abort if package seems broken
+      if [ -z "$addpackage" ]
       then
-        echo "$collection doesn't contain any docfiles/runfiles/binfiles"
+        echo "$collection doesn't contain any docfiles/runfiles/binfiles/depends or srcfiles"
         echo "Please exclude package/report to upstream mailinglist tex-live@tug.org, bye."
         exit 1
       fi
     fi
 
     # Don't handle collections as dependency of other collections, as this destroys control over what packages to be added
-    # add dependend packages, but no binary(ARCH) and no packages conataining a '.'. Packges with dot indicate binary/texlive-manager/windows packages
-
+    # add dependend packages, but no binary(ARCH) and no packages containing a '.'. Packges with dot indicate binary/texlive-manager/windows packages
+    
     grep ^"depend " $texmf/$collection.meta | cut -d' ' -f2- > $dependencies
-
+    
     if [ -s "$dependencies" ]
     then
       # check for .ARCH packages which may be binaries, scripts or links
@@ -600,7 +642,7 @@ texmfget () {
       for dependency in $(cat $dependencies)
       do
         echo $dependency | grep '\.ARCH'$ &>/dev/null
-        if [ $? = 0 ]
+        if [ $? = 0 ] 
         then
           for arch in $platforms
           do
@@ -643,7 +685,7 @@ texmfget () {
       cat $dependencies >> $collections_tobedone
       echo "----------------" >> $logfile
     fi
-
+    
     sed -i "/^${collection}$/d" $collections_tobedone
     echo "$collection" >> $collections_done
   done
@@ -659,9 +701,11 @@ texmfget () {
     # Cleanup tar-directory
     [ -d $texmf/texmf-dist ] && rm -rf $texmf/texmf-dist
     mkdir $texmf/texmf-dist
-
-    # Make tarball/checksum reproducible by setting mtime(clamp-mtime), owner, group and sort content
-    # --clamp-mtime --mtime doesn't work with tar 1.13, when makepkg creates the tarball:
+    
+    # Make tarball/checksum reproducible by setting mtime(clamp-mtime),
+    # owner, group and sort content.
+    # --clamp-mtime --mtime doesn't work with tar 1.13,
+    # when makepkg creates the tarball:
     # tar-1.13: time_t value 9223372036854775808 too large (max=68719476735)
     echo "Adding files to $( echo $tarball | rev | cut -d'/' -f1 | rev ) ..."
     case $edition in
@@ -689,7 +733,7 @@ texmfget () {
       then
         untar $output_doc || exit 1
         remove_cruft || exit 1
-      #tar vrf $tarball --clamp-mtime --mtime --owner=0 --group=0 --sort=name texmf-dist || exit 1
+        #tar vrf $tarball --clamp-mtime --mtime --owner=0 --group=0 --sort=name texmf-dist || exit 1
         tar rf $tarball --owner=0 --group=0 --sort=name texmf-dist || exit 1
         rm -rf texmf-dist
       fi
@@ -700,7 +744,7 @@ texmfget () {
 
 lint () {
 
-echo "Comparing content of all editions, this may take a while ..."
+echo "Comparing content of all editions, this may take a while ..." 
 cd $TMP
 # check if all editions of same VERSION are there, take -base as reference
 lint_version=$( ls texlive-base-*tar.xz | head -n1 | cut -d'.' -f2 || exit 1)
@@ -750,7 +794,6 @@ db=$TMP/texlive.tlpdb
 tmpfile=$TMP/tmpfile
 collections_done=$TMP/done
 collections_tobedone=$TMP/tobedone
-corepackages=$TMP/corepackages
 allcollections=$TMP/allcollections
 binary_removed=$TMP/binaries.removed
 manpages=$TMP/manpages
@@ -777,22 +820,23 @@ echo "Building $edition tarball ..."
 if [ ! -s ${db}.orig -o ! -s $db -o ! -s VERSION ]
 then
   echo $MAJORVERSION.$(date +%y%m%d) > VERSION
-  wget -q --show-progress -c -O ${db}.orig ${mirror}tlpkg/texlive.tlpdb 
+  #wget -q --show-progress -c -O ${db}.orig ${mirror}tlpkg/texlive.tlpdb 
+  wget -q --show-progress -c -O ${db}.orig.xz ${mirror}tlpkg/texlive.tlpdb.xz
+  unxz ${db}.orig.xz 
+   
   # remove most content from $db to be faster on later processing. 
   # keep dependencies/manpages/binfiles/shortdesc/sizes
   grep -E \
     '^\S|^ RELOC/doc/man|^ texmf-dist/doc/man/man|^ RELOC/doc/info/|^ texmf-dist/doc/info/|^ bin|^$' \
     ${db}.orig | grep -v ^longdesc > $db
   
-  # As $db might be renewed, remove the meta-files to be created again
+  # As $db might be renewed, remove the all package meta-files
+  # to make them be created again based on (new) $db
   rm -rf $texmf/*.meta
 fi
 
 # Get linenumbers of empty lines from $db
 emptylines="$(grep -n ^$ $db | cut -d':' -f1)"
-
-# Provide TLCore packages for -base, as these packages(and their dependencies) should be present in any case. 
-grep -B1 ^'category TLCore' $db | grep -v ^'category TLCore' |  grep -v ^-- | grep -v '\.' | cut -d' ' -f2 > $corepackages
 
 # Make a list of all collections
 grep ^"name collection-" $db | cut -d' ' -f2 > $allcollections
@@ -809,12 +853,7 @@ do
     global_exclude=${global_exclude/$exclude/}
   fi
 done
-# globally exclude from $corepackages
-for exclude in $global_exclude
-do
-  sed -i "/^${exclude}$/d" $corepackages
-done 
-  
+ 
 VERSION=$(cat $TMP/VERSION)
 tarball=$TMP/texlive-$edition-$VERSION.tar
 # set logfile
@@ -855,7 +894,6 @@ done < $allcollections
 
 # cleanup 
 rm $allcollections
-rm $corepackages
 rm $collections_done
 rm $collections_tobedone
 rm $output
@@ -940,7 +978,8 @@ do
     # put map files from splitted packages in -extra
     mkdir meta_tmp
     tar xf $texmf/${package}.tar.xz -C meta_tmp tlpkg/tlpobj/$package.tlpobj
-    grep ^'execute ' meta_tmp/tlpkg/tlpobj/$package.tlpobj | grep Map | cut -d' ' -f2- | sed "s/^add//g" >> $updmap.$edition
+    grep ^'execute ' meta_tmp/tlpkg/tlpobj/$package.tlpobj | \
+      grep Map | cut -d' ' -f2- | sed "s/^add//g" >> $updmap.$edition
     rm -rf meta_tmp
   fi
  
@@ -962,6 +1001,7 @@ done
 
 # cleanup
 rm $files_split.tmp
+
 # fix relocation in index for splitted packages
 sed -i \
   -e "s|^doc|texmf-dist\/doc|g" \
