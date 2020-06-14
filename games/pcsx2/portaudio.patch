@@ -1,0 +1,320 @@
+From 84d090e2fde50c66b965b84c73abd9f04a1770dd Mon Sep 17 00:00:00 2001
+From: orbea <orbea@riseup.net>
+Date: Thu, 7 May 2020 15:31:48 +0000
+Subject: [PATCH] spu2-x: Make portaudio an optional dependency. (#3110)
+
+* spu2-x: Make portaudio an optional dependency.
+
+v2: Fix crash in the audio settings with SDL1 and without portaudio.
+
+* cmake: Add PORTAUDIO_API to disable portaudio support.
+---
+ build.sh                            |  4 +++-
+ cmake/BuildParameters.cmake         |  1 +
+ cmake/SearchForStuff.cmake          |  6 ++++--
+ cmake/SelectPcsx2Plugins.cmake      | 15 ++++++++-------
+ plugins/spu2-x/src/CMakeLists.txt   | 19 ++++++++++++++++---
+ plugins/spu2-x/src/Linux/Config.cpp | 20 +++++++++++++++++++-
+ plugins/spu2-x/src/SndOut.cpp       |  2 ++
+ plugins/spu2-x/src/SndOut.h         |  2 ++
+ 8 files changed, 55 insertions(+), 14 deletions(-)
+
+diff --git a/build.sh b/build.sh
+index e1bc256475..54b30e404e 100755
+--- a/build.sh
++++ b/build.sh
+@@ -213,6 +213,7 @@ for ARG in "$@"; do
+         --pgo-optimize      ) flags="$flags -DUSE_PGO_OPTIMIZE=TRUE" ;;
+         --pgo-generate      ) flags="$flags -DUSE_PGO_GENERATE=TRUE" ;;
+         --no-dev9ghzdrk     ) flags="$flags -DDISABLE_DEV9GHZDRK=TRUE" ;;
++        --no-portaudio      ) flags="$flags -DPORTAUDIO_API=FALSE" ;;
+         --no-simd           ) flags="$flags -DDISABLE_ADVANCE_SIMD=TRUE" ;;
+         --no-trans          ) flags="$flags -DNO_TRANSLATION=TRUE" ;;
+         --cross-multilib    ) flags="$flags -DCMAKE_TOOLCHAIN_FILE=$toolfile"; useCross=1; ;;
+@@ -244,7 +245,8 @@ for ARG in "$@"; do
+             echo
+             echo "** Distribution Compatibilities **"
+             echo "--sdl12         : Build with SDL1.2 (requires if wx is linked against SDL1.2)"
+-	    echo "--no-dev9ghzdrk : Skip dev9ghzdrk. (Avoids needing escalated privileges to build.)"
++            echo "--no-dev9ghzdrk : Skip dev9ghzdrk. (Avoids needing escalated privileges to build.)"
++            echo "--no-portaudio  : Skip portaudio for spu2x."
+             echo
+             echo "** Expert Developer option **"
+             echo "--gtk3          : replace GTK2 by GTK3"
+diff --git a/cmake/BuildParameters.cmake b/cmake/BuildParameters.cmake
+index 235bdb8e59..83bab90dab 100644
+--- a/cmake/BuildParameters.cmake
++++ b/cmake/BuildParameters.cmake
+@@ -48,6 +48,7 @@ option(DISABLE_CHEATS_ZIP "Disable including the cheats_ws.zip file")
+ option(DISABLE_PCSX2_WRAPPER "Disable including the PCSX2-linux.sh file")
+ option(XDG_STD "Use XDG standard path instead of the standard PCSX2 path")
+ option(EXTRA_PLUGINS "Build various 'extra' plugins")
++option(PORTAUDIO_API "Build portaudio support on spu2x" ON)
+ option(SDL2_API "Use SDL2 on spu2x and onepad (wxWidget mustn't be built with SDL1.2 support" ON)
+ option(GTK3_API "Use GTK3 api (experimental/wxWidget must be built with GTK3 support)")
+ 
+diff --git a/cmake/SearchForStuff.cmake b/cmake/SearchForStuff.cmake
+index a062d457a3..50f8f5f3e8 100644
+--- a/cmake/SearchForStuff.cmake
++++ b/cmake/SearchForStuff.cmake
+@@ -105,7 +105,9 @@ endif()
+ if(OPENCL_API)
+     check_lib(OPENCL OpenCL CL/cl.hpp)
+ endif()
+-check_lib(PORTAUDIO portaudio portaudio.h pa_linux_alsa.h)
++if(PORTAUDIO_API)
++    check_lib(PORTAUDIO portaudio portaudio.h pa_linux_alsa.h)
++endif()
+ check_lib(SOUNDTOUCH SoundTouch soundtouch/SoundTouch.h)
+ 
+ if(SDL2_API)
+@@ -227,4 +229,4 @@ if((GCC_VERSION VERSION_EQUAL "9.0" OR GCC_VERSION VERSION_GREATER "9.0") AND GC
+     https://gitweb.gentoo.org/proj/gcc-patches.git/commit/?id=275ab714637a64672c6630cfd744af2c70957d5a
+     Even with that patch, compiling with LTO may still segfault. Use at your own risk!
+     This text being in a compile log in an open issue may cause it to be closed.")
+-endif()
+\ No newline at end of file
++endif()
+diff --git a/cmake/SelectPcsx2Plugins.cmake b/cmake/SelectPcsx2Plugins.cmake
+index 69d0e07b91..00bf22e6ca 100644
+--- a/cmake/SelectPcsx2Plugins.cmake
++++ b/cmake/SelectPcsx2Plugins.cmake
+@@ -7,7 +7,7 @@ set(msg_dep_cdvdgiga    "check these libraries -> gtk2, libudev")
+ set(msg_dep_zerogs      "check these libraries -> glew, opengl, X11, nvidia-cg-toolkit (>=2.1)")
+ set(msg_dep_gsdx        "check these libraries -> opengl, png (>=1.2), zlib (>=1.2.4), X11, liblzma")
+ set(msg_dep_onepad      "check these libraries -> sdl2, X11, gtk2")
+-set(msg_dep_spu2x       "check these libraries -> soundtouch (>=1.5), alsa, portaudio (>=1.9), sdl (>=1.2) pcsx2 common libs")
++set(msg_dep_spu2x       "check these libraries -> soundtouch (>=1.5), alsa, portaudio (optional, >=1.9), sdl (>=1.2), pcsx2 common libs")
+ set(msg_dep_zerospu2    "check these libraries -> soundtouch (>=1.5), alsa")
+ set(msg_dep_dev         "check these libraries -> gtk2, pcap, libxml2")
+ if(GLSL_API)
+@@ -267,12 +267,13 @@ endif()
+ #			spu2-x
+ #---------------------------------------
+ # requires: -SoundTouch
+-#			-ALSA
+-#           -Portaudio
++#           -ALSA
+ #           -SDL
+ #           -common_libs
++#
++# optional: -Portaudio
+ #---------------------------------------
+-if((PORTAUDIO_FOUND AND SOUNDTOUCH_FOUND AND SDLn_FOUND AND common_libs)
++if((SOUNDTOUCH_FOUND AND SDLn_FOUND AND common_libs)
+ 	AND ((Linux AND ALSA_FOUND) OR (UNIX AND NOT Linux)))
+ 	set(spu2-x TRUE)
+ elseif(NOT EXISTS "${CMAKE_SOURCE_DIR}/plugins/spu2-x")
+@@ -287,8 +288,8 @@ endif()
+ #			zerospu2
+ #---------------------------------------
+ # requires: -SoundTouch
+-#			-ALSA
+-#			-PortAudio
++#           -ALSA
++#           -PortAudio
+ #---------------------------------------
+ if(EXTRA_PLUGINS)
+     if(EXISTS "${CMAKE_SOURCE_DIR}/plugins/zerospu2" AND SOUNDTOUCH_FOUND AND ALSA_FOUND)
+@@ -312,4 +313,4 @@ if(GTKn_FOUND)
+     set(USBnull TRUE)
+ endif()
+ #---------------------------------------
+-#-------------------------------------------------------------------------------
+\ No newline at end of file
++#-------------------------------------------------------------------------------
+diff --git a/plugins/spu2-x/src/CMakeLists.txt b/plugins/spu2-x/src/CMakeLists.txt
+index e4c7141287..d17538e33e 100644
+--- a/plugins/spu2-x/src/CMakeLists.txt
++++ b/plugins/spu2-x/src/CMakeLists.txt
+@@ -45,7 +45,6 @@ set(spu2xSources
+     RegTable.cpp
+     Reverb.cpp
+     SndOut.cpp
+-    SndOut_Portaudio.cpp
+     SndOut_SDL.cpp
+     spu2freeze.cpp
+     Spu2replay.cpp
+@@ -111,7 +110,6 @@ else()
+     include_directories(Linux)
+ endif()
+ 
+-
+ set(spu2xFinalSources
+     ${spu2xSources}
+     ${spu2xHeaders}
+@@ -121,11 +119,26 @@ set(spu2xFinalSources
+ set(spu2xFinalLibs
+     Utilities_NO_TLS
+     ${ALSA_LIBRARIES}
+-    ${PORTAUDIO_LIBRARIES}
+     ${GTK2_LIBRARIES}
+     ${SOUNDTOUCH_LIBRARIES}
+ )
+ 
++if (PORTAUDIO_FOUND)
++    set(spu2xFinalFlags
++        ${spu2xFinalFlags}
++        "-DSPU2X_PORTAUDIO"
++    )
++
++    LIST(APPEND spu2xFinalSources
++         SndOut_Portaudio.cpp
++    )
++
++    set(spu2xFinalLibs
++        ${spu2xFinalLibs}
++        ${PORTAUDIO_LIBRARIES}
++    )
++endif()
++
+ if (SDL2_API)
+     set(spu2xFinalLibs
+         ${spu2xFinalLibs}
+diff --git a/plugins/spu2-x/src/Linux/Config.cpp b/plugins/spu2-x/src/Linux/Config.cpp
+index 998f9bd25a..96a9e7bc8b 100644
+--- a/plugins/spu2-x/src/Linux/Config.cpp
++++ b/plugins/spu2-x/src/Linux/Config.cpp
+@@ -76,7 +76,9 @@ bool _visual_debug_enabled = false; // windows only feature
+ u32 OutputModule = 0;
+ int SndOutLatencyMS = 300;
+ int SynchMode = 0; // Time Stretch, Async or Disabled
++#ifdef SPU2X_PORTAUDIO
+ static u32 OutputAPI = 0;
++#endif
+ static u32 SdlOutputAPI = 0;
+ 
+ int numSpeakers = 0;
+@@ -122,7 +124,7 @@ void ReadSettings()
+ 
+     wxString temp;
+ 
+-#if SDL_MAJOR_VERSION >= 2
++#if SDL_MAJOR_VERSION >= 2 || !defined(SPU2X_PORTAUDIO)
+     CfgReadStr(L"OUTPUT", L"Output_Module", temp, SDLOut->GetIdent());
+ #else
+     CfgReadStr(L"OUTPUT", L"Output_Module", temp, PortaudioOut->GetIdent());
+@@ -130,6 +132,7 @@ void ReadSettings()
+     OutputModule = FindOutputModuleById(temp.c_str()); // find the driver index of this module
+ 
+ // find current API
++#ifdef SPU2X_PORTAUDIO
+ #ifdef __linux__
+     CfgReadStr(L"PORTAUDIO", L"HostApi", temp, L"ALSA");
+     if (temp == L"OSS")
+@@ -142,6 +145,7 @@ void ReadSettings()
+     CfgReadStr(L"PORTAUDIO", L"HostApi", temp, L"OSS");
+     OutputAPI = 0; // L"OSS"
+ #endif
++#endif
+ 
+ #ifdef __unix__
+     CfgReadStr(L"SDL", L"HostApi", temp, L"pulseaudio");
+@@ -158,7 +162,9 @@ void ReadSettings()
+     SndOutLatencyMS = CfgReadInt(L"OUTPUT", L"Latency", 300);
+     SynchMode = CfgReadInt(L"OUTPUT", L"Synch_Mode", 0);
+ 
++#ifdef SPU2X_PORTAUDIO
+     PortaudioOut->ReadSettings();
++#endif
+ #ifdef __unix__
+     SDLOut->ReadSettings();
+ #endif
+@@ -209,7 +215,9 @@ void WriteSettings()
+     CfgWriteInt(L"OUTPUT", L"Synch_Mode", SynchMode);
+     CfgWriteInt(L"DEBUG", L"DelayCycles", delayCycles);
+ 
++#ifdef SPU2X_PORTAUDIO
+     PortaudioOut->WriteSettings();
++#endif
+ #ifdef __unix__
+     SDLOut->WriteSettings();
+ #endif
+@@ -273,7 +281,9 @@ void DisplayDialog()
+ 
+     GtkWidget *output_frame, *output_box;
+     GtkWidget *mod_label, *mod_box;
++#ifdef SPU2X_PORTAUDIO
+     GtkWidget *api_label, *api_box;
++#endif
+ #if SDL_MAJOR_VERSION >= 2
+     GtkWidget *sdl_api_label, *sdl_api_box;
+ #endif
+@@ -309,11 +319,14 @@ void DisplayDialog()
+     mod_label = gtk_label_new("Module:");
+     mod_box = gtk_combo_box_text_new();
+     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(mod_box), "0 - No Sound (Emulate SPU2 only)");
++#ifdef SPU2X_PORTAUDIO
+     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(mod_box), "1 - PortAudio (Cross-platform)");
++#endif
+     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(mod_box), "2 - SDL Audio (Recommended for PulseAudio)");
+     //gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(mod_box), "3 - Alsa (probably doesn't work)");
+     gtk_combo_box_set_active(GTK_COMBO_BOX(mod_box), OutputModule);
+ 
++#ifdef SPU2X_PORTAUDIO
+     api_label = gtk_label_new("PortAudio API:");
+     api_box = gtk_combo_box_text_new();
+ #ifdef __linux__
+@@ -325,6 +338,7 @@ void DisplayDialog()
+     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(api_box), "OSS");
+ #endif
+     gtk_combo_box_set_active(GTK_COMBO_BOX(api_box), OutputAPI);
++#endif
+ 
+ #if SDL_MAJOR_VERSION >= 2
+     sdl_api_label = gtk_label_new("SDL API:");
+@@ -383,8 +397,10 @@ void DisplayDialog()
+ 
+     gtk_container_add(GTK_CONTAINER(output_box), mod_label);
+     gtk_container_add(GTK_CONTAINER(output_box), mod_box);
++#ifdef SPU2X_PORTAUDIO
+     gtk_container_add(GTK_CONTAINER(output_box), api_label);
+     gtk_container_add(GTK_CONTAINER(output_box), api_box);
++#endif
+ #if SDL_MAJOR_VERSION >= 2
+     gtk_container_add(GTK_CONTAINER(output_box), sdl_api_label);
+     gtk_container_add(GTK_CONTAINER(output_box), sdl_api_box);
+@@ -430,6 +446,7 @@ void DisplayDialog()
+         if (gtk_combo_box_get_active(GTK_COMBO_BOX(mod_box)) != -1)
+             OutputModule = gtk_combo_box_get_active(GTK_COMBO_BOX(mod_box));
+ 
++#ifdef SPU2X_PORTAUDIO
+         if (gtk_combo_box_get_active(GTK_COMBO_BOX(api_box)) != -1) {
+             OutputAPI = gtk_combo_box_get_active(GTK_COMBO_BOX(api_box));
+ #ifdef __linux__
+@@ -456,6 +473,7 @@ void DisplayDialog()
+             }
+ #endif
+         }
++#endif
+ 
+ #if SDL_MAJOR_VERSION >= 2
+         if (gtk_combo_box_get_active(GTK_COMBO_BOX(sdl_api_box)) != -1) {
+diff --git a/plugins/spu2-x/src/SndOut.cpp b/plugins/spu2-x/src/SndOut.cpp
+index 7963b12b75..6d9d58c2b3 100644
+--- a/plugins/spu2-x/src/SndOut.cpp
++++ b/plugins/spu2-x/src/SndOut.cpp
+@@ -88,7 +88,9 @@ SndOutModule *mods[] =
+         DSoundOut,
+         WaveOut,
+ #endif
++#if defined(_WIN32) || defined(SPU2X_PORTAUDIO)
+         PortaudioOut,
++#endif
+ #if defined(SPU2X_SDL) || defined(SPU2X_SDL2)
+         SDLOut,
+ #endif
+diff --git a/plugins/spu2-x/src/SndOut.h b/plugins/spu2-x/src/SndOut.h
+index ba84075aec..918d9d08ff 100644
+--- a/plugins/spu2-x/src/SndOut.h
++++ b/plugins/spu2-x/src/SndOut.h
+@@ -673,7 +673,9 @@ extern SndOutModule *DSoundOut;
+ extern SndOutModule *XAudio2_27_Out;
+ extern SndOutModule *XAudio2Out;
+ #endif
++#if defined(_WIN32) || defined(SPU2X_PORTAUDIO)
+ extern SndOutModule *PortaudioOut;
++#endif
+ #if defined(SPU2X_SDL) || defined(SPU2X_SDL2)
+ extern SndOutModule *const SDLOut;
+ #endif
