@@ -1,0 +1,158 @@
+#!/bin/sh
+
+# Slackware build script for ft2demos
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# This thing requires first building (but not installing) freetype2,
+# hence all the downloads.
+
+# This script is heavily based on Pat Volkerding's freetype.SlackBuild:
+# https://slackware.uk/slackware/slackware-14.2/patches/source/freetype/
+# ...and Arch Linux's freetype2-demos PKGBUILD:
+# https://git.archlinux.org/svntogit/packages.git/tree/trunk?h=packages/freetype2
+
+# Note to self: keep VERSION in sync with Pat's patches/freetype.
+
+PRGNAM=ft2demos
+VERSION=${VERSION:-2.6.3}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+LIBNAM=freetype
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-build
+mkdir -p $PRGNAM-build
+cd $PRGNAM-build
+tar xvf $CWD/$LIBNAM-$VERSION.tar.xz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# Build process wants this symlink.
+ln -s $LIBNAM-$VERSION ${LIBNAM}2
+
+### First, build FreeType, since ft2demos needs the whole source tree.
+cd $LIBNAM-$VERSION
+
+# Apply Pat's patches
+zcat $CWD/freetype.illadvisederror.diff.gz | patch -p1
+zcat $CWD/freetype.CVE-2017-8287.diff.gz | patch -p1
+
+# Enable the validators needed by the ftvalid command. Part 1 of a
+# DIRTY_HACK to make ftvalid work.
+sed -i '/^# *AUX_MODULES.*valid/s|^# *||' modules.cfg
+
+# Use Pat's build command (but no make install!)
+CFLAGS="$SLKCFLAGS" \
+  make setup \
+  CFG="--prefix=/usr --libdir=/usr/lib${LIBDIRSUFFIX} --build=$ARCH-slackware-linux"
+make
+
+### Now, build ft2demos. These will end up dynamically linked to the
+#   system libfreetype.so after package installation, *except* for
+#   ftvalid, which won't work with Slackware's libfreetype.so, so it
+#   gets statically linked with the libfreetype.a we just built. See
+#   DIRTY_HACK, parts 1 and 2.
+cd $TMP/$PRGNAM-build/$PRGNAM-$VERSION
+
+# Build the extra executables
+sed -i '/^  *# *EXES/s|# *||' Makefile
+
+# Don't try to build ftvalid yet. If we do, the resulting binary is
+# useless, complains that none of its validation methods are compiled in,
+# and suggests rebuilding FreeType.
+sed -i '/EXES *+= *ftvalid/d' Makefile
+
+# Don't include RPATH in binaries (borrowed from Arch)
+sed -i '/X11_LIB:%=-R%/d' graph/x11/rules.mk
+
+# Don't have to specify CFLAGS here, it'll pick them up from the freetype
+# build we just did.
+make
+
+# DIRTY_HACK, part 2. Get the link command libtool generated for ftvalid,
+# and replace freetype.so with freetype.a (the static lib). This is me
+# working around libtool's "helpful" automation. Die, libtool!
+echo "=== Prepare for dirty hack, put on your goggles now"
+make EXES=ftvalid | tee make.out
+
+echo "=== ftvalid.build.cmd:"
+grep '^libtool: link:' make.out | \
+  cut -d: -f3- | \
+  sed 's|/usr/lib[^/]*/libfreetype.so||' | \
+  sed 's|\([^ *]\.libs/libfreetype.\)so|\1a|' | \
+  tee ftvalid.build.cmd
+
+# Now run the abomination we've created. If it fails, don't let set -e
+# kill the whole script (we'll just make a package without ftvalid).
+sh ./ftvalid.build.cmd || echo "!!! Attempt to build ftvalid failed"
+
+# The semi-static ftvalid is big, but still under 1MB. Also, if you
+# run ldd on it, you'll see libfreetype.so is required... this is because
+# of a circular dependency with harfbuzz. It doesn't seem to cause a
+# problem for ftvalid.
+echo "=== Stand down from dirty hack alert, you may now remove your goggles"
+
+# There is no 'make install', this bit was borrowed from Arch.
+mkdir -p $PKG/usr/bin
+for i in bin/{f,t}t*; do
+  libtool --mode=install install $i $PKG/usr/bin
+done
+strip $PKG/usr/bin/*
+
+# For whatever reason, the Arch and Debian packages don't install the
+# man pages.
+mkdir -p $PKG/usr/man/man1
+for i in src/*.1; do
+  gzip -9c < $i > $PKG/usr/man/man1/$( basename $i).gz
+done
+
+# The README is build instructions, don't bother. Instead, include our
+# own README which at least lists the tools and their short descriptions.
+# The ChangeLog goes back to 2000, don't need the whole damn thing.
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+head -n1000 ChangeLog > $PKG/usr/doc/$PRGNAM-$VERSION/ChangeLog
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README_SBo.txt
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
