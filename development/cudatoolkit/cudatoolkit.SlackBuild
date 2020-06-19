@@ -2,7 +2,7 @@
 
 # Slackware build script for CUDA Toolkit
 
-# Copyright 2017 Giorgio Peron <giorgio.peron@gmail.com>, Belluno, Italy
+# Copyright 2020 Giorgio Peron <giorgio.peron@gmail.com>, Belluno, Italy
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -24,7 +24,8 @@
 
 PRGNAM=cudatoolkit
 FILENAME=cuda
-VERSION=${VERSION:-8.0.61}
+VERSION=${VERSION:-10.2.89}
+DRIVER=${DRIVER:-440.33.01}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -55,51 +56,90 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 mkdir -p $PRGNAM-$VERSION
 
-chmod +x $CWD/$FILENAME\_$VERSION\_375.26\_linux-run
-$CWD/$FILENAME\_$VERSION\_375.26\_linux-run -extract=$TMP
-$TMP/$FILENAME-linux64*-$VERSION-*.run -noprompt -nosymlink -prefix=$TMP/$PRGNAM-$VERSION
+chmod +x $CWD/$FILENAME\_$VERSION\_$DRIVER\_linux.run
+sh $CWD/$FILENAME\_$VERSION\_$DRIVER\_linux.run --target $PRGNAM-$VERSION --noexec
 
-cd $PRGNAM-$VERSION
-chown -R root:root .
+mkdir -p $PKG/usr/share
+cd $PRGNAM-$VERSION/builds
+cp -r cuda-toolkit "$PKG/usr/share/cuda"
+cp -r cublas/include/* "$PKG/usr/share/cuda/include/"
+mkdir -p $PKG/usr/lib64
+cp -r cublas/lib64/* "$PKG/usr/lib$LIBDIRSUFFIX/"
+cp -r cuda-samples "$PKG/usr/share/cuda/samples"
 
-# Move the docs to our standard location first
-mkdir -p $PKG/usr/man
-mv doc/man $PKG/usr/
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-mv doc/* $PKG/usr/doc/$PRGNAM-$VERSION
-rm -rf doc
+# Define compilers for CUDA to use.
+# This allows us to use older versions of GCC if we have to.
+# ln -s /usr/bin/gcc-8 "${PKG}/usr/share/cuda/bin/gcc"
+# ln -s /usr/bin/g++-8 "${PKG}/usr/share/cuda/bin/g++"
 
+# Put man in the standard place
+mv $PKG/usr/share/cuda/doc/man $PKG/usr/
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-# Now move everything else
-mkdir -p $PKG/usr/share/cuda
-mv * $PKG/usr/share/cuda/
+# Put doc in the standard place
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+mv $PKG/usr/share/cuda/doc/* $PKG/usr/doc/$PRGNAM-$VERSION/
+rm -rf $PKG/usr/share/cuda/doc
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Create soname links.
+find cuda-toolkit/targets -type f -name '*.so*' ! -path '*stubs/*' -print0 | while read -rd $'\0' _lib; do
+  _base=${_lib%.so.*}
+  _current_soname=$(basename ${_lib%.*})
+  while [[ $_current_soname != $(basename $_base) ]]; do
+    ln -sf ${_lib##*/} ${PKG}/usr/share/cuda/lib$LIBDIRSUFFIX/$_current_soname
+    _current_soname=${_current_soname%.*}
+  done
+done
+
+# Install profile and ld.so.config files
+install -Dm755 "${CWD}/files/cuda.sh" "${PKG}/etc/profile.d/cuda.sh"
+install -Dm755 "${CWD}/files/cuda.csh" "${PKG}/etc/profile.d/cuda.csh"
+
+# Install pkgconfig files
+mkdir -p "$PKG"/usr/lib${LIBDIRSUFFIX}/pkgconfig
+cp "${CWD}"/files/*.pc "${PKG}"/usr/lib${LIBDIRSUFFIX}/pkgconfig
+
+# Remove included copy of java and link to system java 8
+rm -fr  "${PKG}/usr/share/cuda/jre"
+sed 's|../jre/bin/java|/usr/bin/java|g' \
+  -i "${PKG}/usr/share/cuda/libnsight/nsight.ini" \
+  -i "${PKG}/usr/share/cuda/libnvvp/nvvp.ini"
+
+# Allow newer compilers to work.
+# See https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html#system-requirements
+# for official requirements
+sed -i "/.*unsupported GNU version.*/d" "${PKG}"/usr/share/cuda/targets/x86_64-linux/include/crt/host_config.h
+sed -i "/.*unsupported clang version.*/d" "${PKG}"/usr/share/cuda/targets/x86_64-linux/include/crt/host_config.h
+
+# Fix Makefile paths to CUDA
+for f in $(find "$PKG"/usr/share/cuda -name Makefile); do
+  sed -i "s|/usr/local/cuda|/usr/share/cuda|g" "$f"
+done
 
 # Put libraries in the standard place
 mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}
-mv $PKG/usr/share/cuda/lib${LIBDIRSUFFIX} $PKG/usr
+mv -fn $PKG/usr/share/cuda/targets/x86_64-linux/lib/* $PKG/usr/lib${LIBDIRSUFFIX}/
+rm -rf $PKG/usr/share/cuda/targets/x86_64-linux/lib
 cd $PKG/usr/share/cuda
 ln -sf ../../lib${LIBDIRSUFFIX} lib${LIBDIRSUFFIX}
 
-mkdir -p $PKG/etc/profile.d
-cp $CWD/files/${FILENAME}* $PKG/etc/profile.d
-chmod +x $PKG/etc/profile.d/*
+# Register application  NVVP and NSIGHT 
 mkdir -p $PKG/usr/share/applications
 cp $CWD/files/*.desktop $PKG/usr/share/applications
 
 # Put include in the standard place
-mkdir -p $PKG/usr/include/cuda
-mv $PKG/usr/share/cuda/include/* $PKG/usr/include/cuda
-rm -rf $PKG/usr/share/cuda/include
+mkdir -p $PKG/usr/include
+mv -fn $PKG/usr/share/cuda/targets/x86_64-linux/include/* $PKG/usr/include/
+rm -rf $PKG/usr/share/cuda/targets/x86_64-linux/include
 cd $PKG/usr/share/cuda/
-ln -sf ../../include/cuda include
+ln -sf ../../include include
+
+rm -rf $PKG/usr/share/cuda/targets
 
 # These are already in the nvidia-driver package
 rm -f $PKG/usr/lib${LIBDIRSUFFIX}/libOpenCL.s*
-
-# install samples
-$TMP/$FILENAME-samples*-$VERSION-*.run -noprompt -prefix=$PKG/usr/doc/$PRGNAM-$VERSION/NVIDIA_CUDA-8.0_Samples -cudaprefix=/usr/share/cuda
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
