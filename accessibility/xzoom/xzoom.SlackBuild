@@ -1,0 +1,98 @@
+#!/bin/sh
+
+# Slackware build script for xzoom
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# The _26 is the Debian patchlevel. They've done a lot to this, such as
+# support for >8bpp displays... since it's the future now, everyone's
+# using 24/32bpp, so the Debian maintainers rescued xzoom from the
+# scrap heap. Thanks!
+
+PRGNAM=xzoom
+VERSION=${VERSION:-0.3_26}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+ORIGVER="$( echo $VERSION | cut -d_ -f1 )"
+DEBVER="$(  echo $VERSION | cut -d_ -f2 )"
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$ORIGVER.orig
+tar xvf $CWD/${PRGNAM}_$ORIGVER.orig.tar.gz
+cd $PRGNAM-$ORIGVER.orig
+tar xvf $CWD/${PRGNAM}_$ORIGVER-$DEBVER.debian.tar.xz
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# Apply Debian's patches, since they're our real upstream.
+for i in $( cat debian/patches/series ); do
+  patch -p1 < debian/patches/$i
+done
+
+# Fix a few typo/grammar issues.
+patch -p1 < $CWD/fixmanpage.diff
+
+# Avoid warnings about alarm() and usleep() missing prototypes.
+sed -i '1i#include <unistd.h>' $PRGNAM.c
+
+# Allow turning off the frame at compile time.
+[ "${FRAME:-yes}" = "no" ] && sed -i '/^DEFINES/s,-DFRAME ,,' Imakefile
+
+xmkmf
+make CDEBUGFLAGS="$SLKCFLAGS"
+
+mkdir -p $PKG/usr/bin $PKG/usr/man/man1 $PKG/usr/share/applications
+install -s -m0755 $PRGNAM $PKG/usr/bin
+
+gzip -9c < debian/manpage/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+
+# Not too sure about the icon. It's system-search, which doesn't even
+# exist in the default (hicolor) icon theme on Slackware. Not a huge
+# deal I suppose.
+cat debian/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a debian/changelog README $PRGNAM.lsm $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
