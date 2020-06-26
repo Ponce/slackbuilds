@@ -1,0 +1,114 @@
+#!/bin/sh
+
+# Slackware build script for filerunner
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Upstream's official RPM release claims to be noarch, but it's a dirty
+# lie: it includes libinotify1.4.1.so binaries[*] for various arches. So
+# does the source, but we're not trusting binaries that were probably
+# built on Red Hat. The source for the prebuilt binaries is included,
+# so this script compiles it instead.
+
+# [*] It breaks FHS and Slackware standards by installing arch-dependent
+#     files (shared libs) in /usr/share, too. But I'm going to leave it
+#     that way.
+
+PRGNAM=filerunner
+VERSION=${VERSION:-20.05.02.17}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+SRCNAM=fr
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+# called twice, make it a func
+fixperms() {
+  chown -R root:root .
+  find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+          \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+}
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $PRGNAM
+fixperms
+
+# DO NOT use precompiled binaries!
+rm -rf packages/inotify/*
+
+# Use tcl's idea of our architecture, since that's what fr will use
+# to locate the inotify tcl extension.
+TCLARCH="$( echo 'puts $::tcl_platform(machine)' | tclsh )"
+mkdir -p packages/inotify/$TCLARCH
+
+# Compile the library that prevents this from being a noarch package:
+cd Makefiles
+LIBNAM=tcl-inotify
+LIBVER="$( echo $LIBNAM-*.tar.gz | sed 's,.*-\([0-9.]*\)\.tar.gz,\1,' )"
+tar xvf $LIBNAM-$LIBVER.tar.gz
+fixperms
+
+cd $LIBNAM-$LIBVER
+./configure && make
+
+# Install it where fr INSTALL script expects to find it.
+install -s libinotify$LIBVER.so \
+           $TMP/$PRGNAM/packages/inotify/$TCLARCH
+
+# Now we can install the main package.
+cd -
+DESTDIR=$PKG \
+DOCS=/usr/doc/$PRGNAM-$VERSION \
+  ./INSTALL -nogui
+
+# Make this symlink so fr won't try to do it at runtime (and fail, if
+# not running as root).
+( cd $PKG/usr/share/$PRGNAM/packages/inotify
+  ln -s $TCLARCH/libinotify$LIBVER.so . )
+
+# We have a slight conflict with system/fr, so:
+mv $PKG/usr/bin/$SRCNAM $PKG/usr/bin/$PRGNAM
+sed -i "/^Exec/s|$SRCNAM|$PRGNAM|" $PKG/usr/share/applications/$PRGNAM.desktop
+
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
