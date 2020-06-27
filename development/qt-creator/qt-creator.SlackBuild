@@ -3,7 +3,7 @@
 # Slackware build script for Qt Creator
 
 # Copyright 2016 Andre Barboza, Belo Horizonte - Brazil
-# Copyright 2019 Andrzej Telszewski, Szczecin
+# Copyright 2020 Andrzej Telszewski, Szczecin
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -27,7 +27,7 @@
 # VERSION=4.2.0_rc1 or VERSION=4.2.0_beta1 (note the underscore).
 
 PRGNAM=qt-creator
-VERSION=${VERSION:-4.9.2}
+VERSION=${VERSION:-4.12.3}
 SRCVER=$(echo $VERSION | tr _ -)
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
@@ -64,52 +64,66 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
+
 rm -rf $PRGNAM-$SRCVER
 tar xvf $CWD/$PRGNAM-opensource-src-$SRCVER.tar.gz
 mv $PRGNAM-opensource-src-$SRCVER $PRGNAM-$SRCVER
 cd $PRGNAM-$SRCVER
+
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+chmod -R a-st,u+rwX,go-w+rX .
 
 # Adjust docs location.
-sed -i "s|share/doc/qtcreator|doc/$PRGNAM-$VERSION|g" qtcreator.pri
-sed -i "s|share/doc/qtcreator|doc/$PRGNAM-$VERSION|g" doc/api/qtcreator-documentation.qdoc
-sed -i "s|share/doc/qtcreator|doc/$PRGNAM-$VERSION|g" src/plugins/coreplugin/icore.cpp
+
+sed -i "s|share/doc/qtcreator|doc/$PRGNAM-$VERSION|g"  qtcreator.pri
+sed -i "s|share/doc/qtcreator|doc/$PRGNAM-$VERSION|g"  doc/qtcreatordev/src/qtcreator-documentation.qdoc
+sed -i "s|share/doc/\${IDE_ID}|doc/$PRGNAM-$VERSION|g" cmake/QtCreatorAPI.cmake
 
 # LLVM/Clang can be used to extend Qt Creator functionality.
-if [ "${USE_LLVM:-no}" = yes -o "${CODE_MODEL:-no}" = "yes" ]; then
+
+if [ "${USE_LLVM:-no}" = yes ] || [ "${CODE_MODEL:-no}" = "yes" ]; then
   LLVM_INSTALL_ROOT=/usr/libexec/qtcreator/clang
   QMAKE_LFLAGS=-L${LLVM_INSTALL_ROOT}/lib
+  export QTC_ENABLE_CLANG_LIBTOOLING=1
 
-  if [ ! -x $LLVM_INSTALL_ROOT/bin/clang ]; then
+  if [ ! -x ${LLVM_INSTALL_ROOT}/bin/clang ]; then
     echo "error: You must install \"qt-creator-llvm\" package in order to"
     echo "error: use LLVM/Clang tools integration."
+
     exit 1
   fi
 fi
 
+# -Wunguarded-availability-new is not supported.
+
 patch -p0 < $CWD/remove-w-error-unguarded-availability-new.patch
 
+# Tell DEs that Qt Creator supports some more MIME types.
+
+patch -p0 < $CWD/add-mime-types.patch
+
 # Fix for https://lists.qt-project.org/pipermail/qt-creator/2019-May/008050.html
+
 QMAKE_LFLAGS="$QMAKE_LFLAGS -L/usr/lib$LIBDIRSUFFIX"
 
-qmake-qt5 -r qtcreator.pro \
-  QMAKE_CXXFLAGS="$SLKCFLAGS" \
-  QMAKE_LFLAGS="$QMAKE_LFLAGS" \
-  QTC_PREFIX=/usr \
-  IDE_LIBRARY_BASENAME=lib$LIBDIRSUFFIX \
-  LLVM_INSTALL_DIR=$LLVM_INSTALL_ROOT \
-  QBS_INSTALL_DIR=/usr \
+qmake-qt5 -r qtcreator.pro                 \
+  QMAKE_CXXFLAGS="$SLKCFLAGS"              \
+  QMAKE_LFLAGS="$QMAKE_LFLAGS"             \
+  QTC_PREFIX=/usr                          \
+  IDE_LIBRARY_BASENAME=lib$LIBDIRSUFFIX    \
+  LLVM_INSTALL_DIR=$LLVM_INSTALL_ROOT      \
+  QBS_INSTALL_DIR=/usr                     \
   DEFINES+=QBS_ENABLE_PROJECT_FILE_UPDATES
 
 make
 make install INSTALL_ROOT=$PKG
-make docs
-make install_docs INSTALL_ROOT=$PKG
+
+if which qdoc-qt5 &>/dev/null; then
+  make docs
+  make install_docs INSTALL_ROOT=$PKG
+else
+  echo "qdoc-qt5 not found.  Docs won't be built nor installed."
+fi
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
