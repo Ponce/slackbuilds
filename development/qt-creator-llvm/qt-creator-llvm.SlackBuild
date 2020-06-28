@@ -2,7 +2,7 @@
 
 # Slackware build script for LLVM/Clang tools for Qt Creator
 
-# Copyright 2019 Andrzej Telszewski, Szczecin
+# Copyright 2020 Andrzej Telszewski, Szczecin
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,7 +23,7 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=qt-creator-llvm
-VERSION=${VERSION:-7.0_4a75f114}
+VERSION=${VERSION:-8.0_c47ba33}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -56,79 +56,122 @@ fi
 
 set -e
 
+build_install_cmake_tmp()
+{
+  CMAKE_VERSION=3.17.1
+
+  mkdir cmake-tmp
+  pushd cmake-tmp
+
+  tar xvf $CWD/cmake-${CMAKE_VERSION}.tar.gz
+  cd cmake-${CMAKE_VERSION}
+
+  mkdir build
+  cd build
+
+  CMAKE_INSTALL_ROOT=$(pwd)
+
+  CFLAGS="${SLKCFLAGS}"   \
+  CXXFLAGS="${SLKCFLAGS}" \
+  ../configure            \
+    --prefix=/usr         \
+    --system-curl         \
+    --system-expat        \
+    --no-system-jsoncpp   \
+    --system-zlib         \
+    --system-bzip2        \
+    --system-libarchive
+
+  make || make -j1
+  make install DESTDIR=${CMAKE_INSTALL_ROOT}
+
+  # Favour the CMake version we just built.
+
+  export PATH=${CMAKE_INSTALL_ROOT}/usr/bin:${PATH}
+
+  # Return to caller's working dir.
+
+  popd
+
+  # Clean up the environment.
+
+  unset CMAKE_INSTALL_ROOT
+  unset CMAKE_VERSION
+
+  # Debug info.
+
+  printf "\nPATH: %s\nwhich cmake: %s\n%s\n\n"    \
+         "${PATH}" "$(which cmake)"               \
+         "$($(which cmake) --version | head -n1)"
+}
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
+
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+mv clang-tools-extra clang/tools/extra
+mv clang llvm/tools/clang
 
-# Exceptionally, copy the docs before the build starts.
-# This can save you quite some time in a case of a missing doc file.
+cd llvm
+
+chown -R root:root .
+chmod -R a-st,u+rwX,go-w+rX .
+
+# Exceptionally, copy docs before the build starts.  This can save quite
+# some script development time should one of the files be missing.
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/{clang,clang-tools-extra,clazy}
+mkdir -p $PKG/install
+
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
 cp -a CODE_OWNERS.TXT CREDITS.TXT LICENSE.TXT README.txt RELEASE_TESTERS.TXT \
   $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a tools/clang/{CODE_OWNERS.TXT,LICENSE.TXT,README.txt} \
-  $PKG/usr/doc/$PRGNAM-$VERSION/clang
-cp -a tools/clang/tools/extra/{CODE_OWNERS.TXT,LICENSE.TXT,README.txt} \
-  $PKG/usr/doc/$PRGNAM-$VERSION/clang-tools-extra
-cp -a tools/clang/tools/extra/clazy/{COPYING-LGPL2.txt,Changelog,HOWTO,README.md} \
-  $PKG/usr/doc/$PRGNAM-$VERSION/clazy
+
+( cd tools/clang
+  cp -a CODE_OWNERS.TXT LICENSE.TXT NOTES.txt README.txt                \
+    $PKG/usr/doc/$PRGNAM-$VERSION/clang
+  cp -a tools/extra/{CODE_OWNERS.TXT,LICENSE.TXT,README.txt}            \
+    $PKG/usr/doc/$PRGNAM-$VERSION/clang-tools-extra
+  cp -a tools/extra/clazy/{COPYING-LGPL2.txt,Changelog,HOWTO,README.md} \
+    $PKG/usr/doc/$PRGNAM-$VERSION/clazy
+)
+
+# Newer version of CMake than in Slackware 14.2 is needed to build LLVM/Clang.
+# Build and install that newer version in temp path.
+
+build_install_cmake_tmp
+
+# Build LLVM/Clang proper.
 
 mkdir -p build
 cd build
-  cmake \
-    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+  cmake                                                 \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS"                 \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS"               \
     -DCMAKE_INSTALL_PREFIX=/usr/libexec/qtcreator/clang \
-    -DLLVM_LIBDIR_SUFFIX= \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DLLVM_BUILD_LLVM_DYLIB=ON \
-    -DLLVM_LINK_LLVM_DYLIB=ON \
-    -DLLVM_ENABLE_RTTI=ON \
-    -DLLVM_ENABLE_ASSERTIONS=OFF \
+    -DLLVM_LIBDIR_SUFFIX=                               \
+    -DCMAKE_BUILD_TYPE=Release                          \
+    -DLLVM_BUILD_LLVM_DYLIB=ON                          \
+    -DLLVM_LINK_LLVM_DYLIB=ON                           \
+    -DLLVM_ENABLE_RTTI=ON                               \
+    -DLLVM_ENABLE_ASSERTIONS=OFF                        \
     ..
   make
   make install DESTDIR=$PKG
 cd ..
 
-# Determine "clang" binary version.
-VERSION_CLANG=$( echo $VERSION | cut -f1 -d_ )
+# Remove uneeded components (reduce package size).
 
-if ! [ -x $PKG/usr/libexec/qtcreator/clang/bin/clang-$VERSION_CLANG ]; then
-  VERSION_CLANG=$( echo $VERSION_CLANG | cut -f1 -d. )
-fi
-
-if ! [ -x $PKG/usr/libexec/qtcreator/clang/bin/clang-$VERSION_CLANG ]; then
-  VERSION_CLANG=
-
-  echo "error: Unable to determine \"clang\" binary version."
-  exit 1
-fi
-
-# Remove unnecessary components (reduce package size).
-
-find $PKG/usr/libexec/qtcreator/clang/bin -mindepth 1 -not \( \
-  -name clang -o -name clang-$VERSION_CLANG -o -name llvm-config \) \
+find $PKG/usr/libexec/qtcreator/clang/bin -mindepth 1 -not          \
+  \( -name clang  -o -name clang-[0-9]\*    -o -name clang-tidy -o  \
+     -name clangd -o -name clazy-standalone -o -name llvm-config \) \
   -exec rm {} \;
-
-# FIXME: Find patience to find out which libs are required by Qt Creator
-#        and then remove the unnecessary ones.
-#find $PKG/usr/libexec/qtcreator/clang/lib -name \*.a -not \( \
-#  -name libclangTooling.a -o -name libclangIndex.a -o -name libclangFrontend.a -o \
-#  -name libclangParse.a -o -name libclangSerialization.a -o -name libclangSema.a -o \
-#  -name libclangEdit.a -o -name libclangAnalysis.a -o -name libclangDriver.a -o \
-#  -name libclangDynamicASTMatchers.a -o -name libclangASTMatchers.a -o \
-#  -name libclangToolingCore.a -o -name libclangAST.a -o -name libclangLex.a -o \
-#  -name libclangBasic.a \) \
-#  -exec rm {} \;
 
 rm -rf $PKG/usr/libexec/qtcreator/clang/libexec
 rm -rf $PKG/usr/libexec/qtcreator/clang/share
@@ -136,10 +179,12 @@ rm -rf $PKG/usr/libexec/qtcreator/clang/share
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# _clazy_ has troubles finding _libLLVM-8.so_. Help it.
+# NOTE: Run _patchelf_ only after running _strip_, otherwise stripping breaks
+# the binary. See https://github.com/probonopd/linuxdeployqt/issues/29
 
-mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+patchelf --set-rpath /usr/libexec/qtcreator/clang/lib   \
+  $PKG/usr/libexec/qtcreator/clang/bin/clazy-standalone
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
