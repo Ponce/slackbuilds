@@ -15,7 +15,7 @@ file, and copy the lines below:
 For 1.8.09:
 
 VERSION="1.8.09"
-DOWNLOAD="http://urchlay.naptime.net/~urchlay/src/g1.8.09.tar.gz"
+DOWNLOAD="https://slackware.uk/~urchlay/src/g1.8.09.tar.gz"
 MD5SUM="ddc1dd8aef254312031184be6dec21e6"
 
 Note that SDL2 is not required for 1.8.09 (you can remove it from REQUIRES
