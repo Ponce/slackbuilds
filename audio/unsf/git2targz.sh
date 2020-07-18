@@ -44,7 +44,7 @@ Archive created: $PRGNAM-$VERSION.tar.xz
 Update $PRGNAM.info with:
 
 VERSION="$VERSION"
-DOWNLOAD="http://urchlay.naptime.net/~urchlay/src/$PRGNAM-$VERSION.tar.xz"
+DOWNLOAD="https://slackware.uk/~urchlay/src/$PRGNAM-$VERSION.tar.xz"
 MD5SUM="$( md5sum $PRGNAM-$VERSION.tar.xz | cut -d' ' -f1 )"
 
 Don't forget to upload the new source!
