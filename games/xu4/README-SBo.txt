@@ -48,7 +48,7 @@ you should install the PDF manuals. To do this, download the file
 ultima4_scanned_docs.zip and place it in the SlackBuild directory,
 before running the script.
 
-URL: http://urchlay.naptime.net/slackstuff/src/ultima4_scanned_docs.zip
+URL: https://slackware.uk/~urchlay/src/ultima4_scanned_docs.zip
 md5sum: c6be37b7028d6f7b56843a73517a5c31
 
 The PDF docs aren't listed in the .info file because they're fairly large,
