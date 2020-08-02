@@ -2,7 +2,8 @@
 
 # Slackware build script for VICE
 
-# Copyright 2008 Mauro Giachero (mauro dot giachero at gmail dot com)
+# Copyright 2008 Mauro Giachero (email removed)
+# Copyright 2020 B. Watson (yalhcru@gmail.com)
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,10 +23,21 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# Initialize variables
+# 20200801 bkw:
+# - Take over maintenance
+# - Autodetect ffmpeg
+# - Allow building with SDL 1.x
+# - Allow building without pulseaudio
+# - Get rid of xa dep
+# - Install TTF fonts in correct place, get rid of other formats
+# - install-info in doinst.sh so vice.info shows up in the info dir
+# - Have slack-desc show build options
+# - Re-enable the old x64 emulator
+# - BUILD=3
+
 PRGNAM=vice
 VERSION=${VERSION:-3.4}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -58,14 +70,40 @@ else
   LIBDIRSUFFIX=""
 fi
 
-# The "--enable-shared-ffmpeg" option creates conflicts with external ffmpeg libraries
-# So we use an external ffmpeg from another package if requested.
-if [ "${FFMPEG:-no}" = "yes" ]; then ffmpeg="--enable-external-ffmpeg"; else ffmpeg=""; fi
-
-# Exit if errors encountered
 set -e
 
-# Setup for package creation
+# The "--enable-shared-ffmpeg" option creates conflicts with external
+# ffmpeg libraries, so we don't use it here. Static would be OK, but
+# it won't build, so it's not an option for now either: I don't care
+# enough about it to spend any more time trying to fix it. If you do
+# care, come up with a way to build with --enable-static-ffmpeg, send
+# me a patch, and I'll include it here.
+
+[ -x /usr/bin/ffmpeg ] && ffmpeg="--enable-external-ffmpeg"
+
+SDL="${SDL:-auto}"
+if [ "$SDL" = "auto" ]; then
+  SDL=1
+  pkg-config --exists sdl2 && SDL=2
+fi
+
+case "$SDL" in
+  1)   sdlopt="--enable-sdlui"  ;;
+  2)   sdlopt="--enable-sdlui2" ;;
+  *)   echo -e "$( basename $0 ):" \
+               "invalid SDL option '$SDL'." \
+               "Valid options are:\n  auto 1 2" \
+               1>&2
+       exit 1 ;;
+esac
+
+# Anticipating 15.0's pure-alsa-system
+if [ "${PULSE:-yes}" != "yes" ]; then
+  pulseopt="--without-pulse"
+fi
+
+echo "=== sdlopt '$sdlopt', ffmpeg '$ffmpeg', pulseopt '$pulseopt'"
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
@@ -73,11 +111,8 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.?z
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 # Set proper paths in documentation.
 sed -i "s/\/usr\/local\/lib\//\/usr\/lib${LIBDIRSUFFIX}\//g" \
@@ -87,20 +122,33 @@ sed -i 's/"\/vice_toc\.html"/"\/html\/vice_toc\.html"/g' \
 sed -i "s/\/usr\/local/\/usr/g" doc/vice.* doc/html/*html
 sed -i "s/\/usr\/lib\//\/usr\/lib${LIBDIRSUFFIX}\//g" doc/vice.* doc/html/*html
 
+# Avoid the need for xa. It's only used to generate a small C header
+# file, which we include a prebuilt version of here. There's nothing
+# dynamic about this header, it's just a small chunk of 6502 object
+# code as a C array, and for a given version of vice it'll always be
+# the same code.
+cat $CWD/psiddrv.h.prebuilt.$VERSION > src/c64/psiddrv.h
+
 autoreconf -vif
 
-# Configure the software
+DOCDIR=/usr/doc/$PRGNAM-$VERSION
+PKGDOC=$PKG/$DOCDIR
+
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
+XA=/bin/true \
 ./configure \
+  $sdlopt \
+  $ffmpeg \
+  $pulseopt \
+  --enable-x64 \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --mandir=/usr/man \
   --infodir=/usr/info \
-  $ffmpeg \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --docdir=$DOCDIR \
   --with-x \
   --enable-quicktime \
   --enable-ethernet \
@@ -108,46 +156,59 @@ CXXFLAGS="$SLKCFLAGS" \
   --enable-cpuhistory \
   --build=$ARCH-slackware-linux
 
-# Build the software
 make
-make install DESTDIR=$PKG
-
-# Strip symbols from binaries
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-
-# Compress info files
+make install-strip DESTDIR=$PKG
 rm -f $PKG/usr/info/dir
-gzip -9 $PKG/usr/info/*
+gzip -9 $PKG/usr/man/man?/*.?  $PKG/usr/info/*
 
-# Install icon and menu entries
 mkdir -p $PKG/usr/share/{applications,pixmaps}
 install -D -m 0644 $CWD/config/*.desktop $PKG/usr/share/applications
 install -D -m 0644 $CWD/config/vice.png $PKG/usr/share/pixmaps
 
-# Move the original documentation folder to the usual place
-# and create a link to where vice expect it to be
-mkdir -p $PKG/usr/doc
-mv $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM/doc $PKG/usr/doc/$PRGNAM-$VERSION
-( cd $PKG/usr/doc/$PRGNAM-$VERSION
+# Move the docs to the Slackware standard place, symlink to where vice
+# expects it to be.
+mkdir -p $PKGDOC
+mv $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM/doc/* $PKGDOC
+( cd $PKGDOC
   chmod 644 *
   mkdir html
   mv *.html *.png *.gif *.css html/ )
-( cd $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM ; ln -s /usr/doc/$PRGNAM-$VERSION doc )
+( cd $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM
+  rmdir doc
+  ln -s $DOCDIR doc )
 
-# Copy additional program documentation
-cp -a AUTHORS ChangeLog COPYING FEEDBACK INSTALL NEWS README \
-   $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# 20200728 bkw: when I inherited this build, it was installing the
+# fonts to the doc dir (where they can't be used), but updating
+# the font cache in doinst.sh. I'm not so sure the fonts are
+# really necessary, but in case they are, I've moved them to
+# /usr/share/fonts/TTF (and gotten rid of the non-TTF ones).
+mkdir -p $PKG/usr/share/fonts/TTF
+mv $PKGDOC/*.ttf $PKG/usr/share/fonts/TTF
+rm -f $PKGDOC/Lato-*
 
-# Setup package install directory
+# This would install Commodore font where other software can use it.
+# However, the characters in the font are in PETSCII order, not ASCII
+# or Unicode, so it's not all that useful.
+#ln -s ../../../lib$LIBDIRSUFFIX/$PRGNAM/common/CBM.ttf $PKG/usr/share/fonts/TTF
+
+cp -a AUTHORS ChangeLog COPYING FEEDBACK NEWS README $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+# Make the slack-desc reflect the build options.
+FF=no; SDL=1.2; PA=no
+
+# We can't use ldd to detect whether ffmpeg is built in since it
+# gets loaded with dlopen(). Hence this stuff:
+grep -q '^#define USE_SDLUI2\>'  src/config.h && SDL=2.0
+grep -q '^#define HAVE_FFMPEG\>' src/config.h && FF=yes
+grep -q '^#define USE_PULSE\>'   src/config.h && PA=yes
+
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s,@FF@,$FF," \
+    -e "s,@PA@,$PA," \
+    -e "s,@SDL@,$SDL," \
+ $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
-# Create package
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
