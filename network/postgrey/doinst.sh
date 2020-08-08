@@ -21,5 +21,6 @@ preserve_perms() {
 
 config etc/postfix/postgrey_whitelist_clients.new
 config etc/postfix/postgrey_whitelist_recipients.new
+config etc/postgrey.conf.new
 preserve_perms etc/rc.d/rc.postgrey.new
 
