@@ -1,0 +1,239 @@
+diff -Naur orig/CHANGELOG new/CHANGELOG
+--- orig/CHANGELOG	2020-08-31 18:03:24.000000000 +0300
++++ new/CHANGELOG	2020-09-05 16:09:45.000000000 +0300
+@@ -1,4 +1,7 @@
+ UNRELEASED
++    * Improve log messages
++    * Remove documentation of `smtp-ssl-protocol` as this option was dropped in 2016
++    * Stop forging SMTP and sendmail envelope sender (#134)
+ 
+ v3.12.2 (2020-08-31)
+     * Fix bug `AttributeError: 'NoneType' object has no attribute 'close'` (#126)
+diff -Naur orig/r2e.1 new/r2e.1
+--- orig/r2e.1	2020-08-31 18:03:24.000000000 +0300
++++ new/r2e.1	2020-09-05 16:09:45.000000000 +0300
+@@ -253,8 +253,6 @@
+ SMTP server
+ .IP smtp-ssl
+ Connect to the SMTP server using SSL
+-.IP smtp-ssl-protocol
+-TLS/SSL version to use on STARTTLS when not using 'smtp-ssl'.
+ .RE
+ .SS IMAP configuration
+ .IP imap-auth
+diff -Naur orig/rss2email/__init__.py new/rss2email/__init__.py
+--- orig/rss2email/__init__.py	2020-08-31 18:03:24.000000000 +0300
++++ new/rss2email/__init__.py	2020-09-05 16:09:45.000000000 +0300
+@@ -26,7 +26,7 @@
+ import sys as _sys
+ 
+ 
+-__version__ = '3.12.2'
++__version__ = '3.12.1'
+ __url__ = 'https://github.com/rss2email/rss2email'
+ __author__ = 'The rss2email maintainers'
+ __email__ = 'rss2email@tremily.us'
+diff -Naur orig/rss2email/config.py new/rss2email/config.py
+--- orig/rss2email/config.py	2020-08-31 18:03:24.000000000 +0300
++++ new/rss2email/config.py	2020-09-05 16:09:45.000000000 +0300
+@@ -83,11 +83,11 @@
+         # Transfer-Encoding. For local mailing it is safe and
+         # convenient to use 8bit.
+         ('use-8bit', str(False)),
+-        # True: Only use the 'from' address.
++        # True: Only use the 'from' address. Overrides the use-publisher-email setting.
+         # False: Use the email address specified by the feed, when possible.
+         ('force-from', str(False)),
+-        # True: Use the publisher's email if you can't find the author's.
+-        # False: Just use the 'from' email instead.
++        # True: Use author's email if found, or use publisher's email if found, or use the 'from' setting.
++        # False: Use author's email if found, or use the 'from' setting.
+         ('use-publisher-email', str(False)),
+         # If empty, only use the feed email address rather than
+         # friendly name plus email address.  Available attributes may
+@@ -132,7 +132,7 @@
+         # because the old entries will not be recorded under their new
+         # link-based ids.
+         ('trust-link', str(False)),
+-        # If 'trust-guid' or 'trust-link' is True, this settings allows to receive
++        # If 'trust-guid' or 'trust-link' is True, this setting allows to receive
+         # a new email message in reply to the previous one when the post changes.
+         ('reply-changes', str(False)),
+         # To most correctly encode emails with international
+diff -Naur orig/rss2email/email.py new/rss2email/email.py
+--- orig/rss2email/email.py	2020-08-31 18:03:24.000000000 +0300
++++ new/rss2email/email.py	2020-09-05 16:09:45.000000000 +0300
+@@ -151,7 +151,7 @@
+             message[key] = _Header(value, encoding)
+     return message
+ 
+-def smtp_send(sender, recipient, message, config=None, section='DEFAULT'):
++def smtp_send(recipient, message, config=None, section='DEFAULT'):
+     if config is None:
+         config = _config.CONFIG
+     server = config.get(section, 'smtp-server')
+@@ -190,7 +190,7 @@
+         except Exception as e:
+             raise _error.SMTPAuthenticationError(
+                 server=server, username=username)
+-    smtp.send_message(message, sender, recipient.split(','))
++    smtp.send_message(message, config.get(section, 'from'), recipient.split(','))
+     smtp.quit()
+ 
+ def imap_send(message, config=None, section='DEFAULT'):
+@@ -345,12 +345,12 @@
+     else:
+         return bytesio.getvalue()
+ 
+-def sendmail_send(sender, recipient, message, config=None, section='DEFAULT'):
++def sendmail_send(recipient, message, config=None, section='DEFAULT'):
+     if config is None:
+         config = _config.CONFIG
+     message_bytes = _flatten(message)
+     sendmail = config.get(section, 'sendmail')
+-    sender_name,sender_addr = _parseaddr(sender)
++    sender_name,sender_addr = _parseaddr(config.get(section, 'from'))
+     _LOG.debug(
+         'sending message to {} via {}'.format(recipient, sendmail))
+     try:
+@@ -366,11 +366,11 @@
+     except Exception as e:
+         raise _error.SendmailError() from e
+ 
+-def send(sender, recipient, message, config=None, section='DEFAULT'):
++def send(recipient, message, config=None, section='DEFAULT'):
+     protocol = config.get(section, 'email-protocol')
+     if protocol == 'smtp':
+         smtp_send(
+-            sender=sender, recipient=recipient, message=message,
++            recipient=recipient, message=message,
+             config=config, section=section)
+     elif protocol == 'imap':
+         imap_send(message=message, config=config, section=section)
+@@ -378,5 +378,5 @@
+         maildir_send(message=message, config=config, section=section)
+     else:
+         sendmail_send(
+-            sender=sender, recipient=recipient, message=message,
++            recipient=recipient, message=message,
+             config=config, section=section)
+diff -Naur orig/rss2email/error.py new/rss2email/error.py
+--- orig/rss2email/error.py	2020-08-31 18:03:24.000000000 +0300
++++ new/rss2email/error.py	2020-09-05 16:09:45.000000000 +0300
+@@ -42,15 +42,14 @@
+ 
+ 
+ class TimeoutError (RSS2EmailError):
+-    def __init__(self, time_limited_function, message=None):
+-        if message is None:
+-            if time_limited_function.error is not None:
+-                message = (
+-                    'error while running time limited function: {}'.format(
+-                        time_limited_function.error[1]))
+-            else:
+-                message = '{} second timeout exceeded'.format(
+-                    time_limited_function.timeout)
++    def __init__(self, time_limited_function):
++        if time_limited_function.error is not None:
++            message = (
++                'error while running time limited function in {}: {}'.format(
++                    time_limited_function.name, time_limited_function.error[1]))
++        else:
++            message = '{} second timeout exceeded in {}'.format(
++                time_limited_function.timeout, time_limited_function.name)
+         super(TimeoutError, self).__init__(message=message)
+         self.time_limited_function = time_limited_function
+ 
+@@ -148,8 +147,9 @@
+ class InvalidFeedConfig (FeedError):
+     def __init__(self, setting, feed, message=None, **kwargs):
+         if not message:
+-            message = "invalid feed configuration {}".format(
+-                {setting: getattr(feed, setting)})
++            message = (
++                "invalid feed configuration '{setting}' in {feed}".format(
++                    setting=getattr(feed, setting), feed=feed))
+         super(InvalidFeedConfig, self).__init__(
+             feed=feed, message=message, **kwargs)
+         self.setting = setting
+diff -Naur orig/rss2email/feed.py new/rss2email/feed.py
+--- orig/rss2email/feed.py	2020-08-31 18:03:24.000000000 +0300
++++ new/rss2email/feed.py	2020-09-05 16:09:45.000000000 +0300
+@@ -373,7 +373,7 @@
+         kwargs = {}
+         if proxy:
+             kwargs['handlers'] = [_urllib_request.ProxyHandler({'http':proxy})]
+-        f = _util.TimeLimitedFunction(timeout, _feedparser.parse)
++        f = _util.TimeLimitedFunction('feed {}'.format(self.name), timeout, _feedparser.parse)
+         return f(self.url, self.etag, modified=self.modified, **kwargs)
+ 
+     def _process(self, parsed):
+@@ -773,9 +773,9 @@
+         if entry.get('summary_detail', None):
+             contents.append(entry.summary_detail)
+         if self.html_mail:
+-            types = ['text/html', 'text/plain']
++            types = ['application/xhtml+xml', 'text/html', 'text/plain']
+         else:
+-            types = ['text/plain', 'text/html']
++            types = ['text/plain', 'text/html', 'application/xhtml+xml']
+         for content_type in types:
+             for content in contents:
+                 if content['type'] == content_type:
+@@ -871,7 +871,7 @@
+         section = self.section
+         if section not in self.config:
+             section = 'DEFAULT'
+-        _email.send(sender=sender, recipient=self.to, message=message,
++        _email.send(recipient=self.to, message=message,
+                     config=self.config, section=section)
+ 
+     def run(self, send=True):
+diff -Naur orig/rss2email/feeds.py new/rss2email/feeds.py
+--- orig/rss2email/feeds.py	2020-08-31 18:03:24.000000000 +0300
++++ new/rss2email/feeds.py	2020-09-05 16:09:45.000000000 +0300
+@@ -239,11 +239,10 @@
+     def load(self, require=False):
+         _LOG.debug('load feed configuration from {}'.format(self.configfiles))
+         if self.configfiles:
+-            self.read_configfiles = self.config.read(self.configfiles)
++            read_configfiles = self.config.read(self.configfiles)
+         else:
+-            self.read_configfiles = []
+-        _LOG.debug('loaded configuration from {}'.format(
+-                self.read_configfiles))
++            read_configfiles = []
++        _LOG.debug('loaded configuration from {}'.format(read_configfiles))
+         self._load_feeds(require=require)
+ 
+     def _load_feeds(self, require):
+diff -Naur orig/rss2email/util.py new/rss2email/util.py
+--- orig/rss2email/util.py	2020-08-31 18:03:24.000000000 +0300
++++ new/rss2email/util.py	2020-09-05 16:09:45.000000000 +0300
+@@ -35,19 +35,20 @@
+     >>> def sleeping_return(sleep, x):
+     ...     time.sleep(sleep)
+     ...     return x
+-    >>> TimeLimitedFunction(0.5, sleeping_return)(0.1, 'x')
++    >>> TimeLimitedFunction('sleeping', 0.5, sleeping_return)(0.1, 'x')
+     'x'
+-    >>> TimeLimitedFunction(0.5, sleeping_return)(10, 'y')
++    >>> TimeLimitedFunction('sleeping', 0.5, sleeping_return)(10, 'y')
+     Traceback (most recent call last):
+       ...
+-    rss2email.error.TimeoutError: 0.5 second timeout exceeded
+-    >>> TimeLimitedFunction(0.5, time.sleep)('x')
++    rss2email.error.TimeoutError: 0.5 second timeout exceeded in sleeping
++    >>> TimeLimitedFunction('sleep', 0.5, time.sleep)('x')
+     Traceback (most recent call last):
+       ...
+-    rss2email.error.TimeoutError: error while running time limited function: a float is required
++    rss2email.error.TimeoutError: error while running time limited function in sleep: a float is required
+     """
+-    def __init__(self, timeout, target, **kwargs):
++    def __init__(self, name, timeout, target, **kwargs):
+         super(TimeLimitedFunction, self).__init__(target=target, daemon=True, **kwargs)
++        self.name = name
+         self.timeout = timeout
+         self.result = None
+         self.error = None
