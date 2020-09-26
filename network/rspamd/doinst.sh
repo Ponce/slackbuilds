@@ -22,5 +22,7 @@ preserve_perms() {
   config $NEW
 }
 
-config etc/rspamd/rspamd.conf.new
+find etc/rspamd -type f -name '*.new' \
+ | while read new ; do config $new ; done
+
 preserve_perms etc/rc.d/rc.rspamd.new
