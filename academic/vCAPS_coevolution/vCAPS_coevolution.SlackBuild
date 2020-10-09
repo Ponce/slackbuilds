@@ -1,0 +1,116 @@
+#!/bin/sh
+
+# Slackware build script for vCAPS_coevolution
+
+# Copyright 2020 Petar Petrov slackalaxy@gmail.com
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=vCAPS_coevolution
+VERSION=${VERSION:-2.0_1UN}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+SRCNAM=caps
+SRCVER=2.0
+BINNAM=vCAPS
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+# This is needed for vCAPS to find its libraries at runtime. Thanks Urachlay!
+LIBDIRPATH="-Wl,-rpath,/usr/lib${LIBDIRSUFFIX}/Bpp1.9"
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf ${SRCNAM}${SRCVER}_src
+unzip $CWD/${SRCNAM}2_src.zip
+cd ${SRCNAM}${SRCVER}_src
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# This is needed for gcc in Slackware 14.2
+sed -i "s:CC=g++ -g:CC=g++ -g -std=c++11:" Makefile
+
+# Use our CFLAGS and the custom (legacy) lib path
+sed -i "s:CFLAGS=:CFLAGS=$SLKCFLAGS $LIBDIRPATH:" Makefile
+
+# Find the legacy bpp libraries
+sed -i "s:-lbpp-phyl:-L/usr/lib${LIBDIRSUFFIX}/Bpp1.9 -lbpp-phyl:g" Makefile
+sed -i "s:-lbpp-numcalc:-L/usr/lib64${LIBDIRSUFFIX}/Bpp1.9 -lbpp-numcalc:g" Makefile
+sed -i "s:-lbpp-utils:-L/usr/lib64${LIBDIRSUFFIX}/Bpp1.9 -lbpp-utils:g" Makefile
+sed -i "s:-lbpp-seq:-L/usr/lib64${LIBDIRSUFFIX}/Bpp1.9 -lbpp-seq:g" Makefile
+
+# Rename the produced executable 
+sed -i "s:-o caps:-o $BINNAM:" Makefile
+
+# Use our unofficial patch
+patch -p1 -i $CWD/caps_verbose.patch
+
+make all
+
+# Install the binary produced from our patched source, as "vCAPS"
+install -D -m755 $BINNAM $PKG/usr/bin/$BINNAM
+
+mkdir -p $PKG/usr/share/$PRGNAM
+cp -a sample structures trees TLR1.fa.out $PKG/usr/share/$PRGNAM
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  caps_manual.pdf \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/References > $PKG/usr/doc/$PRGNAM-$VERSION/References
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
