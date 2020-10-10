@@ -1,0 +1,383 @@
+Description: Port to GSettings.
+Bug-Debian: https://bugs.debian.org/885817
+Author: Yavor Doganov <yavor@gnu.org>
+Forwarded: gnomint-devel@lists.sourceforge.net
+Last-Update: 2019-10-15
+---
+
+--- gnomint-1.3.0.orig/configure.ac
++++ gnomint-1.3.0/configure.ac
+@@ -61,7 +61,6 @@
+ GNUTLS_ADVANCED_FEATURES_MINIMUM_VERSION=2.7.4
+ SQLITE_REQUIRED=3.0
+ GLIB_REQUIRED=2.6.0
+-GCONF_REQUIRED=2.0
+ GTK_REQUIRED=2.12.0
+ ISO_CODES_REQUIRED=0.35
+ 
+@@ -84,7 +83,6 @@
+ PKG_CHECK_MODULES(GNOMINT, 
+ 	glib-2.0 >= $GLIB_REQUIRED \
+ 	gthread-2.0 >= $GLIB_REQUIRED \
+-	gconf-2.0 >= $GCONF_REQUIRED \
+ 	gtk+-2.0 >= $GTK_REQUIRED \
+ 	gdk-pixbuf-2.0 \
+ 	gnutls >= $GNUTLS_REQUIRED \
+@@ -111,8 +109,7 @@
+ AC_SUBST(READLINE_LIBS)
+ 
+ PKG_CHECK_MODULES(GNOMINTCLI, 
+-	glib-2.0 >= $GLIB_REQUIRED \
+-	gconf-2.0 >= $GCONF_REQUIRED \
++	gio-2.0 >= $GLIB_REQUIRED \
+ 	gnutls >= $GNUTLS_REQUIRED \
+ )
+ AC_SUBST(GNOMINTCLI_CFLAGS)
+@@ -150,17 +147,7 @@
+ GLIB_GENMARSHAL=`$PKG_CONFIG --variable=glib_genmarshal glib-2.0`
+ AC_SUBST(GLIB_GENMARSHAL)
+ 
+-dnl The following conditional is set in AM_GCONF_SOURCE_2.
+-dnl Because we may skip its execution, we have to set a default here.
+-m4_pattern_allow([^AM_GCONF_SOURCE_2$])
+-AM_CONDITIONAL([GCONF_SCHEMAS_INSTALL], [false])
+-GCONFTOOL=""
+-AC_CHECK_PROG(GCONFTOOL, gconftool-2, gconftool-2)
+-if test x"$GCONFTOOL" = x; then
+-	AC_MSG_ERROR([gconftool-2 executable not found in your path - should be installed with GConf])
+-fi
+-AM_GCONF_SOURCE_2
+-
++GLIB_GSETTINGS
+ 
+ dnl
+ dnl Check if src should be build with the debug mode
+--- gnomint-1.3.0.orig/gconf/Makefile.am
++++ gnomint-1.3.0/gconf/Makefile.am
+@@ -1,21 +1,5 @@
+-schemasdir = @GCONF_SCHEMA_FILE_DIR@
+-schemas_in_files = gnomint.schemas.in
+-schemas_DATA = $(schemas_in_files:.schemas.in=.schemas)
++gsettings_SCHEMAS = net.sf.gnomint.gschema.xml
+ 
+-@INTLTOOL_SCHEMAS_RULE@
++@GSETTINGS_RULES@
+ 
+-EXTRA_DIST = $(schemas_in_files)
+-
+-CLEANFILES = $(schemas_DATA)
+-
+-if GCONF_SCHEMAS_INSTALL
+-# don't do this if we are building in eg. rpm
+-install-data-local: $(schemas_DATA)
+-	if test -z "$(DESTDIR)" ; then \
+-		for p in $(schemas_DATA) ; do \
+-			GCONF_CONFIG_SOURCE=$(GCONF_SCHEMA_CONFIG_SOURCE) $(GCONFTOOL) --makefile-install-rule $$p; \
+-		done \
+-	fi
+-else
+-install-data-local:
+-endif
++EXTRA_DIST = $(gsettings_SCHEMAS)
+--- gnomint-1.3.0.orig/src/preferences-gui.h
++++ gnomint-1.3.0/src/preferences-gui.h
+@@ -20,6 +20,8 @@
+ #ifndef _PREFERENCES_H_
+ #define _PREFERENCES_H_
+ 
++#include <gio/gio.h>
++
+ typedef void (* PreferencesGuiChangeCallback) (gboolean, gboolean);
+ 
+ void preferences_gui_set_csr_visible_callback (PreferencesGuiChangeCallback callback);
+@@ -43,10 +45,8 @@
+ void preferences_deinit (void);
+ 
+ 
+-#include <gconf/gconf-client.h>
+-void preferences_changed_callback(GConfClient* client,
+-                                  guint cnxn_id,
+-                                  GConfEntry *entry,
++void preferences_changed_callback(GSettings* settings,
++                                  gchar *key,
+                                   gpointer user_data);
+ 
+ 
+--- gnomint-1.3.0.orig/src/preferences-gui.c
++++ gnomint-1.3.0/src/preferences-gui.c
+@@ -18,7 +18,6 @@
+ //  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ 
+ #include <string.h>
+-#include <gconf/gconf-client.h>
+ 
+ 
+ #include "preferences-gui.h"
+@@ -26,7 +25,7 @@
+ #include <glib/gi18n.h>
+ 
+ 
+-static GConfClient * preferences_client;
++static GSettings * preferences;
+ 
+ PreferencesGuiChangeCallback csr_visible_callback = NULL;
+ PreferencesGuiChangeCallback revoked_visible_callback = NULL;
+@@ -42,18 +41,19 @@
+ }
+ 
+ 
+-void preferences_changed_callback(GConfClient* client,
+-                                  guint cnxn_id,
+-                                  GConfEntry *entry,
++void preferences_changed_callback(GSettings* settings,
++                                  gchar *key,
+                                   gpointer user_data)
+ {
+ 
+-        gboolean value = gconf_value_get_bool (gconf_entry_get_value(entry));
+-        if (! strcmp (gconf_entry_get_key(entry), "/apps/gnomint/crq_visible") && csr_visible_callback)
+-                csr_visible_callback (value, TRUE);
+-
+-        if (! strcmp (gconf_entry_get_key(entry), "/apps/gnomint/revoked_visible") && revoked_visible_callback)
+-                revoked_visible_callback (value, TRUE);
++        if (! strcmp (key, "crq-visible") && csr_visible_callback)
++                csr_visible_callback (g_settings_get_boolean (settings, key),
++                                      TRUE);
++
++        if (! strcmp (key, "revoked-visible") && revoked_visible_callback)
++                revoked_visible_callback (g_settings_get_boolean
++                                          (settings, key),
++                                          TRUE);
+ 
+ }
+ 
+@@ -61,72 +61,62 @@
+ 
+ void preferences_init (int argc, char ** argv)
+ {
+-        gconf_init(argc, argv, NULL);
+-        
+-        preferences_client = gconf_client_get_default();
+-
+-        gconf_client_add_dir(preferences_client,
+-                             "/apps/gnomint",
+-                             GCONF_CLIENT_PRELOAD_NONE,
+-                             NULL);
+-
+-        gconf_client_notify_add (preferences_client, "/apps/gnomint/revoked_visible",
+-                                 preferences_changed_callback,
+-                                 NULL, NULL, NULL);
+-
+-        gconf_client_notify_add (preferences_client, "/apps/gnomint/crq_visible",
+-                                 preferences_changed_callback,
+-                                 NULL, NULL, NULL);
+-
++        preferences = g_settings_new ("net.sf.gnomint");
+ 
++        g_signal_connect (preferences, "changed",
++                          G_CALLBACK (preferences_changed_callback), NULL);
+ }
+ 
+ 
+ gchar * preferences_get_size ()
+ {
+-        return gconf_client_get_string (preferences_client, "/apps/gnomint/size", NULL);
++        return g_settings_get_string (preferences, "size");
+ }
+ 
+ void preferences_set_size (const gchar *new_value)
+ {
+-        gconf_client_set_string (preferences_client, "/apps/gnomint/size", new_value, NULL);
++        g_settings_set_string (preferences, "size", new_value);
++        /* Make sure the backend manages to write the setting,
++           otherwise the program exits too quickly and a garbage value
++           gets written, leading to a crash on next startup.  */
++        g_settings_sync ();
+ }
+ 
+ 
+ gboolean preferences_get_revoked_visible ()
+ {
+-        return gconf_client_get_bool (preferences_client, "/apps/gnomint/revoked_visible", NULL);
++        return g_settings_get_boolean (preferences, "revoked-visible");
+ }
+ 
+ void preferences_set_revoked_visible (gboolean new_value)
+ {
+-        gconf_client_set_bool (preferences_client, "/apps/gnomint/revoked_visible", new_value, NULL);
++        g_settings_set_boolean (preferences, "revoked-visible", new_value);
+ }
+ 
+ gboolean preferences_get_crq_visible ()
+ {
+-        return gconf_client_get_bool (preferences_client, "/apps/gnomint/crq_visible", NULL);
++        return g_settings_get_boolean (preferences, "crq-visible");
+ }
+ 
+ void preferences_set_crq_visible (gboolean new_value)
+ {
+-        gconf_client_set_bool (preferences_client, "/apps/gnomint/crq_visible", new_value, NULL);
++        g_settings_set_boolean (preferences, "crq-visible", new_value);
+ }
+ 
+ gboolean preferences_get_gnome_keyring_export ()
+ {
+-        return gconf_client_get_bool (preferences_client, "/apps/gnomint/gnome_keyring_export", NULL);
++        return g_settings_get_boolean (preferences, "gnome-keyring-export");
+ }
+ 
+ void preferences_set_gnome_keyring_export (gboolean new_value)
+ {
+-        gconf_client_set_bool (preferences_client, "/apps/gnomint/gnome_keyring_export", new_value, NULL);
++        g_settings_set_boolean (preferences, "gnome-keyring-export", new_value);
+ }
+ 
+ 
+ void preferences_deinit ()
+ {
+-        g_object_unref (preferences_client);
+-        preferences_client = NULL;
++        g_object_unref (preferences);
++        preferences = NULL;
+ }
+ 
+--- gnomint-1.3.0.orig/src/preferences.c
++++ gnomint-1.3.0/src/preferences.c
+@@ -18,36 +18,35 @@
+ //  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ 
+ #include <libintl.h>
+-#include <gconf/gconf-client.h>
++#include <gio/gio.h>
+ 
+ #include <glib/gi18n.h>
+ 
+ #include "preferences.h"
+ 
+ 
+-static GConfEngine * preferences_engine;
++static GSettings * preferences;
+ 
+ void preferences_init (int argc, char **argv)
+ {
+-        gconf_init (argc, argv, NULL);
+-        preferences_engine = gconf_engine_get_default ();
++        preferences = g_settings_new ("net.sf.gnomint");
+ }
+ 
+ 
+ gboolean preferences_get_gnome_keyring_export ()
+ {
+-        return gconf_engine_get_bool (preferences_engine, "/apps/gnomint/gnome_keyring_export", NULL);
++        return g_settings_get_boolean (preferences, "gnome-keyring-export");
+ }
+ 
+ void preferences_set_gnome_keyring_export (gboolean new_value)
+ {
+-        gconf_engine_set_bool (preferences_engine, "/apps/gnomint/gnome_keyring_export", new_value, NULL);
++        g_settings_set_boolean (preferences, "gnome-keyring-export", new_value);
+ }
+ 
+ 
+ void preferences_deinit ()
+ {
+-        gconf_engine_unref (preferences_engine);
+-        preferences_engine = NULL;
++        g_object_unref (preferences);
++        preferences = NULL;
+ }
+ 
+--- gnomint-1.3.0.orig/gconf/gnomint.schemas.in
++++ /dev/null
+@@ -1,58 +0,0 @@
+-<gconfschemafile>
+-  <schemalist>
+-    <schema>
+-      <key>/schemas/apps/gnomint/size</key>
+-      <applyto>/apps/gnomint/size</applyto>
+-      <owner>gnomint</owner>
+-      <type>string</type>
+-      <default>(500,400)</default>
+-      <locale name="C">
+-        <short>Window size</short> <long>The (width,length) size
+-        gnoMint should take when started. This cannot be smaller than
+-        (320,200).
+-        </long>
+-      </locale>
+-    </schema>
+- 
+-    <schema>
+-      <key>/schemas/apps/gnomint/revoked_visible</key>
+-      <applyto>/apps/gnomint/revoked_visible</applyto>
+-      <owner>gnomint</owner>
+-      <type>bool</type>
+-      <default>0</default>
+-      <locale name="C">
+-        <short>Revoked certificates visibility</short>
+-        <long>Whether the revoked certificates should be visible.
+-        </long>
+-      </locale>
+-    </schema>
+-
+-    <schema>
+-      <key>/schemas/apps/gnomint/crq_visible</key>
+-      <applyto>/apps/gnomint/crq_visible</applyto>
+-      <owner>gnomint</owner>
+-      <type>bool</type>
+-      <default>1</default>
+-      <locale name="C">
+-        <short>Certificate requests visibility</short>
+-        <long>Whether the certificate requests should be visible.
+-        </long>
+-      </locale>
+-    </schema>
+-
+-    <schema>
+-      <key>/schemas/apps/gnomint/gnome_keyring_export</key>
+-      <applyto>/apps/gnomint/gnome_keyring_export</applyto>
+-      <owner>gnomint</owner>
+-      <type>bool</type>
+-      <default>1</default>
+-      <locale name="C">
+-        <short>Automatic exporting of certificates for gnome-keyring</short>
+-        <long>Whether the created or imported certificates are
+-        automatically exported to gnome-keyring certificate-store.
+-        </long>
+-      </locale>
+-    </schema>
+-
+-  </schemalist>
+-</gconfschemafile>
+--- /dev/null
++++ gnomint-1.3.0/gconf/net.sf.gnomint.gschema.xml
+@@ -0,0 +1,30 @@
++<schemalist gettext-domain="gnomint">
++  <schema id="net.sf.gnomint" path="/net/sf/gnomint/">
++    <key name="size" type="s">
++      <default>'(500,400)'</default>
++      <summary>Window size</summary>
++      <description>The (width,length) size gnoMint should take when
++      started. This cannot be smaller than (320,200).</description>
++    </key>
++    <key name="revoked-visible" type="b">
++      <default>false</default>
++      <summary>Revoked certificates visibility</summary>
++      <description>Whether the revoked certificates should be
++      visible.</description>
++    </key>
++    <key name="crq-visible" type="b">
++      <default>true</default>
++      <summary>Certificate requests visibility</summary>
++      <description>Whether the certificate requests should be
++      visible.</description>
++    </key>
++    <key name="gnome-keyring-export" type="b">
++      <default>true</default>
++      <summary>Automatic exporting of certificates for
++      gnome-keyring</summary>
++      <description>Whether the created or imported certificates are
++      automatically exported to gnome-keyring
++      certificate-store.</description>
++    </key>
++  </schema>
++</schemalist>
