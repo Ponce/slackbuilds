@@ -23,6 +23,11 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20201019 bkw:
+# - update for v3.2.49, new homepage.
+# - allow for building qt4, qt5, wx UIs.
+# - replace useless/inaccurate man page with our own.
+
 # 20200126 bkw, BUILD=2:
 # - take over maintenance
 # - i486 => i586
@@ -32,14 +37,9 @@
 # - save/load settings (.ini file) to ~/.cr3, not /usr/share/cr3.
 
 PRGNAM=coolreader
-VERSION=${VERSION:-3.0.56}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-3.2.49}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
-
-ORIG_PRGNAM=cr3
-ORIG_VERSION=$VERSION-7
-ORIG_DIRNAME=cr$ORIG_VERSION
-ORIG_FILENAME=${ORIG_PRGNAM}_$VERSION.orig.tar.gz
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -73,48 +73,75 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $ORIG_DIRNAME
-tar xvf $CWD/$ORIG_FILENAME
-cd $ORIG_DIRNAME
-chown -R root:root .
+rm -rf $PRGNAM-cr$VERSION
+tar xvf $CWD/$PRGNAM-cr$VERSION.tar.gz
+cd $PRGNAM-cr$VERSION
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# Fix upstream typo
-sed -i 's,documetn,document,g' cr3qt/src/*.ui cr3qt/src/i18n/*.ts
+# Use bundled libunibreak, ours is too old (3.0).
+# Use bundled fribidi, Pat's is too old (0.19.7).
+sed -i -e '/find_package(libunibreak)/d' \
+       -e '/find_package(FriBidi)/d' \
+       CMakeLists.txt
 
-# Don't try to load/save .ini file from /usr/share
-patch -p1 < $CWD/inifile.diff
+# Install the docs in the right place for Slackware.
+sed -i "s,share/doc/cr3,doc/$PRGNAM-$VERSION," cr3qt/CMakeLists.txt
+
+# The settings patch for qt4 was made by loading cr3qt/src/settings.ui
+# into Qt Designer and saving it again. Needed because upstream's
+# using a different (older?) version of qt4.
+
+GUI=${GUI:-QT}
+GUI="$( echo $GUI | tr a-z A-Z )"
+case "$GUI" in
+  QT)  UI=Qt4
+       patch -p1 < $CWD/qt4_settings_ui.diff ;;
+  QT5) UI=Qt5 ;;
+  WX)  # Either 2.8.x or 3.0.x works, be specific in the slack-desc.
+       UI="wxWidgets $( wx-config --version | cut -d. -f1,2)" ;;
+  *)   echo "*** Unsupported GUI '$GUI', use one of: QT QT5 WX"
+       exit 1 ;;
+esac
+
+echo "=== Building $UI GUI"
 
 mkdir -p build
 cd build
-cmake \
-  -D CMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
-  -D CMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
-  -D CMAKE_INSTALL_PREFIX=/usr \
-  -D LIB_SUFFIX=${LIBDIRSUFFIX} \
-  -D CMAKE_BUILD_TYPE=Release \
-  -D MAX_IMAGE_SCALE_MUL=2 \
-  -D DOC_DATA_COMPRESSION_LEVEL=3 \
-  -D DOC_BUFFER_SIZE=0x1400000 \
-  -D GUI=QT ..
-make VERBOSE=1
-make install DESTDIR=$PKG
+  cmake \
+    -D USE_UNRAR=1 \
+    -D CMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -D CMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -D CMAKE_INSTALL_PREFIX=/usr \
+    -D LIB_SUFFIX=${LIBDIRSUFFIX} \
+    -D CMAKE_BUILD_TYPE=Release \
+    -D MAX_IMAGE_SCALE_MUL=2 \
+    -D DOC_DATA_COMPRESSION_LEVEL=3 \
+    -D DOC_BUFFER_SIZE=0x1400000 \
+    -D GUI=$GUI ..
+  make VERBOSE=1
+  make install/strip DESTDIR=$PKG
 cd ..
 
-strip $PKG/usr/bin/$ORIG_PRGNAM
-
-mkdir -p $PKG/usr/man
-mv $PKG/usr/share/man/* $PKG/usr/man
+# Upstream's man page doesn't document all the options, and incorrectly
+# refers to the (nonexistent) info page. It's also hardcoded to install
+# to /usr/share/man.
 rm -rf $PKG/usr/share/man
+mkdir -p $PKG/usr/man/man1
+gzip -9c < $CWD/cr3.1 > $PKG/usr/man/man1/cr3.1.gz
 
-sed -i '/Icon/s|\.png||' $PKG/usr/share/applications/$ORIG_PRGNAM.desktop
+# Tired of having to remember the binary's called something other than
+# the package and source name.
+ln -s cr3 $PKG/usr/bin/$PRGNAM
+ln -s cr3.1.gz $PKG/usr/man/man1/$PRGNAM.1.gz
 
+# This dir already exists with GUI=QT or QT5, but not WX.
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-mv $PKG/usr/share/doc/$ORIG_PRGNAM/* $PKG/usr/doc/$PRGNAM-$VERSION
-rm -rf $PKG/usr/share/doc
+cp -a README.md cr3gui/COPYING $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@UI@,$UI," $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
