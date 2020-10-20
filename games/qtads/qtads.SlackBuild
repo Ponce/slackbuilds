@@ -6,14 +6,12 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-# Both qt4 and qt5 are supported by upstream, so this script allows for
-# both. Not sure why anyone really cares (I'm pretty much GUI-insensitive,
-# plus I hate waiting for qt5 to build), but eventually Pat will probably
-# replace qt4 with qt5 in Slackware. When that happens, this script will
-# still be usable.
+# 20201020 bkw: updated for v3.0.0. Sadly the qt4 UI is gone in this
+# release, so qt5 is now a hard dep. SDL2_sound is no longer needed, but
+# it's replaced with fluidsynth.
 
 PRGNAM=qtads
-VERSION=${VERSION:-2.1.7}
+VERSION=${VERSION:-3.0.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -30,19 +28,8 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
-fi
+# No SLKCFLAGS: qmake-qt5 uses the CFLAGS qt5 was built with.
+# No need for LIBDIRSUFFIX either, qtads doesn't use /usr/lib(64).
 
 set -e
 
@@ -50,44 +37,35 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
+tar xvf $CWD/$PRGNAM-$VERSION-source.tar.xz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-if [ "${QT5:-no}" = "yes" ]; then
-  [ "$QT5DIR" = "" ] && source /etc/profile.d/qt5.sh
-  # qt5 uses the CFLAGS qt5 was built with.
-  qmake-qt5
-else
-  qmake
-  # qt4 needs CFLAGS forced. easier to do it this way than deal with qmake:
-  sed -i "s,-O2,$SLKCFLAGS," Makefile
-fi
+# In case the user just installed qt5 and hasn't logged out & back in:
+[ "$QT5DIR" = "" ] && source /etc/profile.d/qt5.sh
+
+qmake-qt5 PREFIX=/usr BINDIR=/usr/games DOCDIR=/usr/doc/$PRGNAM-$VERSION
+
+# Hardcoded share/ in man path.
+sed -i 's,/usr/share/man,/usr/man,g' Makefile
 
 # Setting CC/CXX shows the actual compile commands. Using gold speeds
 # up linking enough to be worth the effort.
 make CC=gcc CXX=g++ LINK="g++ -fuse-ld=gold"
-mkdir -p $PKG/usr/games
 
-# No 'make install' target, but things are laid out nicely in the source.
-install -s -m0755 -oroot -groot $PRGNAM $PKG/usr/games/$PRGNAM
-mkdir -p $PKG/usr/share
-mv share/man $PKG/usr
-gzip -9 $PKG/usr/man/man6/$PRGNAM.6
-mv share/* $PKG/usr/share
+# INSTALL_ROOT, *not* DESTDIR here!
+make install INSTALL_ROOT=$PKG
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS COPYING HTML_TADS_LICENSE NEWS README \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+gzip -9 $PKG/usr/man/man?/*.?
+
+# 'make install' doesn't install the GPL.
+cp -a LICENSE.TXT $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
-# for use in the slack-desc:
-ldd $PRGNAM | grep -q Qt5 && QTVER=5 || QTVER=4
-
 mkdir -p $PKG/install
-sed "s,@QTVER@,$QTVER," $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
