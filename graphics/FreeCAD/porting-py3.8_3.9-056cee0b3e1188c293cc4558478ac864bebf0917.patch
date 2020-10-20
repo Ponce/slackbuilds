@@ -1,0 +1,288 @@
+From 056cee0b3e1188c293cc4558478ac864bebf0917 Mon Sep 17 00:00:00 2001
+From: wmayer <wmayer@users.sourceforge.net>
+Date: Mon, 8 Jun 2020 23:17:08 +0200
+Subject: [PATCH] Porting Py3.8/Py3.9: Since Py3.3: 'Py_ssize_t
+ PyUnicode_GetSize(PyObject*)' is deprecated [-Wdeprecated-declarations] Since
+ Py3.9: 'PyObject* PyEval_CallObjectWithKeywords(PyObject*, PyObject*,
+ PyObject*)' is deprecated [-Wdeprecated-declarations] Since Py3.9: 'void
+ PyEval_InitThreads()' is deprecated [-Wdeprecated-declarations]
+
+---
+ src/Base/Interpreter.cpp           |  8 ++++++++
+ src/Base/PyTools.c                 | 12 ++++++++++++
+ src/CXX/Python3/Objects.hxx        | 26 ++++++++++++++++++++++++--
+ src/CXX/Python3/cxx_extensions.cxx |  4 ++--
+ src/Gui/OnlineDocumentation.cpp    |  8 ++++++++
+ src/Gui/PythonConsole.cpp          | 12 ++++++++++++
+ src/Gui/WidgetFactory.cpp          |  4 ++++
+ src/Gui/Widgets.cpp                |  4 ++++
+ src/Mod/Part/App/AppPartPy.cpp     |  4 ++--
+ 9 files changed, 76 insertions(+), 6 deletions(-)
+
+diff --git a/src/Base/Interpreter.cpp b/src/Base/Interpreter.cpp
+index 03b74aee610..338d9b0e484 100644
+--- a/src/Base/Interpreter.cpp
++++ b/src/Base/Interpreter.cpp
+@@ -549,7 +549,11 @@ const char* InterpreterSingleton::init(int argc,char *argv[])
+         // https://bugs.python.org/issue17797#msg197474
+         //
+         Py_Initialize();
++
++#if PY_VERSION_HEX < 0x03090000
+         PyEval_InitThreads();
++#endif
++
+ #if PY_MAJOR_VERSION >= 3
+         size_t size = argc;
+         wchar_t **_argv = new wchar_t*[size];
+@@ -700,7 +704,11 @@ void InterpreterSingleton::runMethod(PyObject *pobject, const char *method,
+         throw TypeError("InterpreterSingleton::RunMethod() wrong arguments");
+     }
+ 
++#if PY_VERSION_HEX < 0x03090000
+     presult = PyEval_CallObject(pmeth, pargs);   /* run interpreter */
++#else
++    presult = PyObject_CallObject(pmeth, pargs);   /* run interpreter */
++#endif
+ 
+     Py_DECREF(pmeth);
+     Py_DECREF(pargs);
+diff --git a/src/Base/PyTools.c b/src/Base/PyTools.c
+index 3dc0a998ebb..71785f9b940 100644
+--- a/src/Base/PyTools.c
++++ b/src/Base/PyTools.c
+@@ -58,7 +58,11 @@ PP_Run_Method(PyObject *pobject,  const char *method,
+     if (PP_DEBUG)                                    /* debug it too? */ 
+         presult = PP_Debug_Function(pmeth, pargs); 
+     else 
++#if PY_VERSION_HEX < 0x03090000
+         presult = PyEval_CallObject(pmeth, pargs);   /* run interpreter */
++#else
++        presult = PyObject_CallObject(pmeth, pargs);   /* run interpreter */
++#endif
+ 
+     Py_DECREF(pmeth);
+     Py_DECREF(pargs);
+@@ -133,7 +137,11 @@ PP_Run_Function(const char *modname, const char *funcname,          /* load from
+     if (PP_DEBUG && strcmp(modname, "pdb") != 0)    /* debug this call? */
+         presult = PP_Debug_Function(func, args);    /* run in pdb; incref'd */
+     else
++#if PY_VERSION_HEX < 0x03090000
+         presult = PyEval_CallObject(func, args);    /* run function; incref'd */
++#else
++        presult = PyObject_CallObject(func, args);    /* run function; incref'd */
++#endif
+ 
+     Py_DECREF(func);
+     Py_DECREF(args);                                    /* result may be None */
+@@ -185,7 +193,11 @@ PP_Run_Known_Callable(PyObject *object,               /* func|class|method */
+     if (PP_DEBUG)                                   /* debug this call? */
+         presult = PP_Debug_Function(object, args);  /* run in pdb; incref'd */
+     else
++#if PY_VERSION_HEX < 0x03090000
+         presult = PyEval_CallObject(object, args);  /* run function; incref'd */
++#else
++        presult = PyObject_CallObject(object, args);  /* run function; incref'd */
++#endif
+ 
+     Py_DECREF(args);                                    /* result may be None */
+     return PP_Convert_Result(presult, resfmt, cresult); /* convert result to C*/
+diff --git a/src/CXX/Python3/Objects.hxx b/src/CXX/Python3/Objects.hxx
+index 490978ec8de..e5b341a0123 100644
+--- a/src/CXX/Python3/Objects.hxx
++++ b/src/CXX/Python3/Objects.hxx
+@@ -3164,14 +3164,36 @@ namespace Py
+         // Call with keywords
+         Object apply( const Tuple &args, const Dict &kw ) const
+         {
++#if PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION >= 9
++            PyObject *result = PyObject_Call( ptr(), args.ptr(), kw.ptr() );
++#else
+             PyObject *result = PyEval_CallObjectWithKeywords( ptr(), args.ptr(), kw.ptr() );
++#endif
+             if( result == NULL )
+             {
+                 throw Exception();
+             }
+             return asObject( result );
+         }
++#if PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION >= 9
++        Object apply() const
++        {
++            PyObject *result = PyObject_CallNoArgs( ptr() );
++            return asObject( result );
++        }
+ 
++        Object apply( PyObject *pargs ) const
++        {
++            if( pargs == 0 )
++            {
++                return apply( Tuple() );
++            }
++            else
++            {
++                return apply( Tuple( pargs ) );
++            }
++        }
++#else
+         Object apply( PyObject *pargs = 0 ) const
+         {
+             if( pargs == 0 )
+@@ -3183,6 +3205,7 @@ namespace Py
+                 return apply( Tuple( pargs ) );
+             }
+         }
++#endif
+     };
+ 
+     class PYCXX_EXPORT Module: public Object
+@@ -3233,8 +3256,7 @@ namespace Py
+     inline Object Object::callMemberFunction( const std::string &function_name ) const
+     {
+         Callable target( getAttr( function_name ) );
+-        Tuple args( (sequence_index_type)0 );
+-        return target.apply( args );
++        return target.apply();
+     }
+ 
+     inline Object Object::callMemberFunction( const std::string &function_name, const Tuple &args ) const
+diff --git a/src/CXX/Python3/cxx_extensions.cxx b/src/CXX/Python3/cxx_extensions.cxx
+index 9ff94612f07..d4e597f5e72 100644
+--- a/src/CXX/Python3/cxx_extensions.cxx
++++ b/src/CXX/Python3/cxx_extensions.cxx
+@@ -222,7 +222,7 @@ extern "C"
+     // All the following functions redirect the call from Python
+     // onto the matching virtual function in PythonExtensionBase
+     //
+-#ifdef PYCXX_PYTHON_2TO3
++#if defined( PYCXX_PYTHON_2TO3 ) && !defined( Py_LIMITED_API ) && PY_MINOR_VERSION <= 7
+     static int print_handler( PyObject *, FILE *, int );
+ #endif
+     static PyObject *getattr_handler( PyObject *, char * );
+@@ -622,7 +622,7 @@ PythonExtensionBase *getPythonExtensionBase( PyObject *self )
+     }
+ }
+ 
+-#ifdef PYCXX_PYTHON_2TO3
++#if defined( PYCXX_PYTHON_2TO3 ) && !defined( Py_LIMITED_API ) && PY_MINOR_VERSION <= 7
+ extern "C" int print_handler( PyObject *self, FILE *fp, int flags )
+ {
+     try
+diff --git a/src/Gui/OnlineDocumentation.cpp b/src/Gui/OnlineDocumentation.cpp
+index f740e1cdce6..5504607948e 100644
+--- a/src/Gui/OnlineDocumentation.cpp
++++ b/src/Gui/OnlineDocumentation.cpp
+@@ -419,7 +419,11 @@ void StdCmdPythonHelp::activated(int iMsg)
+                 char szBuf[201];
+                 snprintf(szBuf, 200, "http://localhost:%d", port);
+                 PyObject* args = Py_BuildValue("(s)", szBuf);
++#if PY_VERSION_HEX < 0x03090000
+                 PyObject* result = PyEval_CallObject(func,args);
++#else
++                PyObject* result = PyObject_CallObject(func,args);
++#endif
+                 if (result)
+                     failed = false;
+         
+@@ -455,7 +459,11 @@ bool Gui::OpenURLInBrowser(const char * URL)
+         PyObject* func = PyDict_GetItemString(dict, "open");
+         if (func) {
+             PyObject* args = Py_BuildValue("(s)", URL);
++#if PY_VERSION_HEX < 0x03090000
+             PyObject* result = PyEval_CallObject(func,args);
++#else
++            PyObject* result = PyObject_CallObject(func,args);
++#endif
+             if (result)
+                 failed = false;
+         
+diff --git a/src/Gui/PythonConsole.cpp b/src/Gui/PythonConsole.cpp
+index 21fc9ce5c40..e866055a76a 100644
+--- a/src/Gui/PythonConsole.cpp
++++ b/src/Gui/PythonConsole.cpp
+@@ -141,7 +141,11 @@ InteractiveInterpreter::InteractiveInterpreter()
+     PyObject* func = PyObject_GetAttrString(module, "InteractiveInterpreter");
+     PyObject* args = Py_BuildValue("()");
+     d = new InteractiveInterpreterP;
++#if PY_VERSION_HEX < 0x03090000
+     d->interpreter = PyEval_CallObject(func,args);
++#else
++    d->interpreter = PyObject_CallObject(func,args);
++#endif
+     Py_DECREF(args);
+     Py_DECREF(func);
+     Py_DECREF(module);
+@@ -195,7 +199,11 @@ PyObject* InteractiveInterpreter::compile(const char* source) const
+     Base::PyGILStateLocker lock;
+     PyObject* func = PyObject_GetAttrString(d->interpreter, "compile");
+     PyObject* args = Py_BuildValue("(s)", source);
++#if PY_VERSION_HEX < 0x03090000
+     PyObject* eval = PyEval_CallObject(func,args);  // must decref later
++#else
++    PyObject* eval = PyObject_CallObject(func,args);  // must decref later
++#endif
+ 
+     Py_DECREF(args);
+     Py_DECREF(func);
+@@ -227,7 +235,11 @@ int InteractiveInterpreter::compileCommand(const char* source) const
+     Base::PyGILStateLocker lock;
+     PyObject* func = PyObject_GetAttrString(d->interpreter, "compile");
+     PyObject* args = Py_BuildValue("(s)", source);
++#if PY_VERSION_HEX < 0x03090000
+     PyObject* eval = PyEval_CallObject(func,args);  // must decref later
++#else
++    PyObject* eval = PyObject_CallObject(func,args);  // must decref later
++#endif
+ 
+     Py_DECREF(args);
+     Py_DECREF(func);
+diff --git a/src/Gui/WidgetFactory.cpp b/src/Gui/WidgetFactory.cpp
+index c47a76ef423..64da98a7262 100644
+--- a/src/Gui/WidgetFactory.cpp
++++ b/src/Gui/WidgetFactory.cpp
+@@ -1677,7 +1677,11 @@ void SignalConnect::onExecute()
+ 
+     /* Time to call the callback */
+     arglist = Py_BuildValue("(O)", myResource);
++#if PY_VERSION_HEX < 0x03090000
+     result = PyEval_CallObject(myCallback, arglist);
++#else
++    result = PyObject_CallObject(myCallback, arglist);
++#endif
+     Py_XDECREF(result);
+     Py_DECREF(arglist);
+ }
+diff --git a/src/Gui/Widgets.cpp b/src/Gui/Widgets.cpp
+index 8b4cd8774fb..158766e2e30 100644
+--- a/src/Gui/Widgets.cpp
++++ b/src/Gui/Widgets.cpp
+@@ -850,7 +850,11 @@ void UrlLabel::mouseReleaseEvent (QMouseEvent *)
+         PyObject* func = PyDict_GetItemString(dict, "open");
+         if (func) {
+             PyObject* args = Py_BuildValue("(s)", (const char*)this->_url.toLatin1());
++#if PY_VERSION_HEX < 0x03090000
+             PyObject* result = PyEval_CallObject(func,args);
++#else
++            PyObject* result = PyObject_CallObject(func,args);
++#endif
+             // decrement the args and module reference
+             Py_XDECREF(result);
+             Py_DECREF(args);
+diff --git a/src/Mod/Part/App/AppPartPy.cpp b/src/Mod/Part/App/AppPartPy.cpp
+index 6bbee793bb3..b4143b1520a 100644
+--- a/src/Mod/Part/App/AppPartPy.cpp
++++ b/src/Mod/Part/App/AppPartPy.cpp
+@@ -1841,11 +1841,11 @@ class Module : public Py::ExtensionModule<Module>
+             if (!p) {
+                 throw Py::TypeError("** makeWireString can't convert PyString.");
+             }
+-            pysize = PyUnicode_GetSize(p);
++            pysize = PyUnicode_GetLength(p);
+             unichars = PyUnicode_AS_UNICODE(p);
+         }
+         else if (PyUnicode_Check(intext)) {
+-            pysize = PyUnicode_GetSize(intext);
++            pysize = PyUnicode_GetLength(intext);
+             unichars = PyUnicode_AS_UNICODE(intext);
+         }
+         else {

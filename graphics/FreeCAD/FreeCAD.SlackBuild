@@ -26,8 +26,10 @@
 
 PRGNAM=FreeCAD
 VERSION=${VERSION:-0.18.4}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PYTHON_VERSION=${PYTHON_VERSION:-3.9}
+PYTHON_SUFFIX=${PYTHON_SUFFIX:-cpython-39-x86_64-linux-gnu}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -74,6 +76,23 @@ find -L . \
 # Patch to fix boost header include according to https://github.com/FreeCAD/FreeCAD/commit/200c7c7e00d569ed9f00e06c9d9751a27fa67c2d#diff-b3a49ec758b2fdfb5ee0069b6c113f656133a89cabc0ae789398b41c3295aa57
 patch -p1 < $CWD/addBoostHeaders-200c7c7.patch
 
+# Patch to add QPainterPath headers to build with QT5.15 from https://forum.freecadweb.org/viewtopic.php?t=47269
+patch -p1 < $CWD/addQPainterPath-b2882c6.patch
+
+# Patch to fix searching for uic and rcc inside PySide2 after they've been moved 
+# to qt5: https://github.com/FreeCAD/FreeCAD/pull/2846
+patch -p1 < $CWD/fixPySide2-CMake-2846.patch
+
+# Porting to python 3.8/3.9
+# from https://forum.freecadweb.org/viewtopic.php?f=10&t=47348
+# and  https://github.com/wwmayer/FreeCAD/tree/fedora_fixes
+# and  https://github.com/FreeCAD/FreeCAD/pull/2632/commits/174011749d836f3b6c6ae2630f53b2f4c1f9d3fc
+patch -p1 < $CWD/porting-py3.8_3.9-ae641dc52.patch
+patch -p1 < $CWD/porting-py3.8_3.9-056cee0b3e1188c293cc4558478ac864bebf0917.patch
+patch -p1 < $CWD/py3.9-missing_initializer-tp_vectorcall-0c5ec0c43b5b5a4159c08e49a817bb922a6a3bb7.patch
+patch -p1 < $CWD/py3.9-missing_initializer-tp_vectorcall-462baba3839ae54075b7f3eb56f02aaee4bbd116.patch
+patch -p1 < $CWD/py3.8-made-operator-private-174011749d836f3b6c6ae2630f53b2f4c1f9d3fc.patch
+
 # SBo's OpenCASCADE 6.9.1 includes were in /opt/OpenCASCADE, but for 7.3.0
 # the includes are in /usr/include/opencascade, so let's accept either :)
 if [ -d /usr/include/opencascade ]; then
@@ -90,8 +109,10 @@ fi
 mkdir build
 cd build
   cmake \
+    -DBUILD_QT5=ON \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DBUILD_ENABLE_CXX_STD=C++14 \
     -DCMAKE_INSTALL_PREFIX=/opt/$PRGNAM \
     -DDOCDIR=/usr/doc/$PRGNAM-$VERSION \
     -DOCC_INCLUDE_DIR:PATH=$occinc \
@@ -99,6 +120,15 @@ cd build
     -DRESOURCEDIR=/opt/$PRGNAM/share/data \
     -DBUILD_FEM=OFF \
     -DOCCT_CMAKE_FALLBACK=ON \
+    -DPYTHON_EXECUTABLE=/usr/bin/python${PYTHON_VERSION} \
+    -DPYTHON_INCLUDE_DIR=/usr/include/python${PYTHON_VERSION} \
+    -DPYTHON_LIBRARY=/usr/lib${LIBDIRSUFFIX}/libpython${PYTHON_VERSION}.so \
+    -DPYTHON_BASENAME=${PYTHON_BASENAME} \
+    -DPYTHON_SUFFIX=${PYTHON_SUFFIX} \
+    -DSHIBOKEN_INCLUDE_DIR=/usr/include/shiboken2 \
+    -DPYSIDE_INCLUDE_DIR=/usr/include/PySide2 \
+    -DSHIBOKEN_LIBRARY=/usr/lib64/libshiboken2.${PYTHON_SUFFIX}.so \
+    -DPYSIDE_LIBRARY=/usr/lib64/libpyside2.${PYTHON_SUFFIX}.so \
     -DCMAKE_BUILD_TYPE=Release ..
   make
   make install DESTDIR=$PKG
