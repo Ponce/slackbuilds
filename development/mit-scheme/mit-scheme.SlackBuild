@@ -2,9 +2,10 @@
 
 # Slackware build script for mit-scheme
 # Originally by Jockey S. Kyd (jockey dot kyd at gmail dot com)
-
+#
 # Ryan P.C. McQuen | Everett, WA | ryanpcmcquen@member.fsf.org
-
+# Copyright (C) 2018,2020 Jason Graham <jgraham@compukix.net>, USA
+#
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation; either version 2 of the License, or
@@ -25,7 +26,7 @@
 
 
 PRGNAM=mit-scheme
-VERSION=${VERSION:-9.2}
+VERSION=${VERSION:-10.1.11}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -59,6 +60,16 @@ else
   exit 1
 fi
 
+X11=${X11:-yes}
+EDWIN=${EDWIN:-yes}
+IMAIL=${IMAIL:-yes}
+DOCS=${DOCS:-no}
+
+# Sanitize build settings and set additional flags
+[ "$X11" != "yes" ] && X11="no" || WITH_X="--with-x"
+[ "$EDWIN" != "yes" ] && EDWIN="no"
+[ "$IMAIL" != "yes" ] && IMAIL="no"
+
 set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -74,43 +85,57 @@ find -L . \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 cd src
-  CFLAGS="$SLKCFLAGS" \
-  CXXFLAGS="$SLKCFLAGS" \
-  ./configure \
-    --prefix=/usr \
-    --libdir=/usr/lib$LIBDIRSUFFIX \
-    --build=$ARCH-slackware-linux
+CFLAGS="$SLKCFLAGS" \
+      CXXFLAGS="$SLKCFLAGS" \
+      ./configure \
+      --prefix=/usr \
+      --libdir=/usr/lib$LIBDIRSUFFIX \
+      --sysconfdir=/etc \
+      --localstatedir=/var \
+      --mandir=/usr/man \
+      --infodir=/usr/info \
+      --docdir=/usr/doc/$PRGNAM-$VERSION \
+      --disable-static \
+      --build=$ARCH-slackware-linux \
+      --enable-default-plugins=no \
+      --enable-x11=${X11} \
+      --enable-edwin=${EDWIN} \
+      --enable-imail=${IMAIL} \
+      $WITH_X
+make
+make install DESTDIR=$PKG
 
-  make
-  make install DESTDIR=$PKG
-cd ..
+cd ../doc
+CFLAGS="$SLKCFLAGS" \
+      CXXFLAGS="$SLKCFLAGS" \
+      ./configure \
+      --prefix=/usr \
+      --libdir=/usr/lib$LIBDIRSUFFIX \
+      --sysconfdir=/etc \
+      --localstatedir=/var \
+      --mandir=/usr/man \
+      --infodir=/usr/info \
+      --docdir=/usr/doc/$PRGNAM-$VERSION \
+      --build=$ARCH-slackware-linux \
+      --htmldir=/usr/doc/$PRGNAM-$VERSION/html \
+      --pdfdir=/usr/doc/$PRGNAM-$VERSION/pdf \
+      --enable-html=${DOCS} \
+      --enable-pdf=${DOCS} \
+      --enable-ps=no
+
+    make install DESTDIR=$PKG
+cd ../
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-mkdir -p $PKG/usr/man/man1
-cp -a doc/scheme.1 $PKG/usr/man/man1/mit-scheme.1
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-# take prebuilt info doc rather than build them by ourselves
-mkdir -p $PKG/usr/info
-tar xvf $CWD/$PRGNAM-$VERSION-doc-info.tar.gz
-install -o root -g root -m 644 $PRGNAM-$VERSION/doc/*.info $PKG/usr/info
+rm -f $PKG/usr/info/dir
 gzip -9 $PKG/usr/info/*.info*
 
-# ditto for html ones
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/html
-tar xvf $CWD/$PRGNAM-$VERSION-doc-html.tar.gz \
-  -C $PKG/usr/doc/$PRGNAM-$VERSION/html \
-  --strip-components=2
-chown -R root:root $PKG/usr/doc/$PRGNAM-$VERSION/html
-
-# ditto for pdf ones
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/pdf
-tar xvf $CWD/$PRGNAM-$VERSION-doc-pdf.tar.gz
-install -o root -g root -m 644 $PRGNAM-$VERSION/doc/*.pdf $PKG/usr/doc/$PRGNAM-$VERSION/pdf
-
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a changelog.txt src/COPYING src/README.txt $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
@@ -119,4 +144,6 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
+for i in usr/info/*.info*; do echo "info_install /$i" >> $PKG/install/doinst.sh; done
+
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
