@@ -1,70 +1,104 @@
-commit b2fa57a00d3b71c9f897bc622937d661f3c227cc
-Author: orbea <orbea@riseup.net>
-Date:   Thu Oct 15 07:23:32 2020 -0700
+From 217edc52822845ad70eb39e95871f90d14d1dac6 Mon Sep 17 00:00:00 2001
+From: Niklas Haas <git@haasn.xyz>
+Date: Wed, 21 Oct 2020 12:55:24 +0200
+Subject: [PATCH] glslang: update for new glslang versioning scheme
 
-    Hack around the newer glslang version scheme.
+This updates our checks to use the new header locations as introduced in
+https://github.com/KhronosGroup/glslang/pull/2277. Fortunately, it seems
+that the new version scheme is backwards compatible with the old one, so
+we don't need any excessively complicated logic updates.
+
+Fixes https://github.com/haasn/libplacebo/issues/83
+---
+ src/glsl/glslang.cc |  9 +++++----
+ src/meson.build     | 19 ++++++++++++++++---
+ 2 files changed, 22 insertions(+), 8 deletions(-)
 
 diff --git a/src/glsl/glslang.cc b/src/glsl/glslang.cc
-index 07cf8f1..4560c77 100644
+index 3b17a4e..01ad0fa 100644
 --- a/src/glsl/glslang.cc
 +++ b/src/glsl/glslang.cc
-@@ -23,7 +23,7 @@ extern "C" {
+@@ -15,6 +15,8 @@
+  * License along with libplacebo. If not, see <http://www.gnu.org/licenses/>.
+  */
+ 
++#include "config_internal.h"
++
+ #include <assert.h>
+ #include <pthread.h>
+ 
+@@ -23,7 +25,6 @@ extern "C" {
  }
  
  #include <glslang/Include/ResourceLimits.h>
 -#include <glslang/Include/revision.h>
-+#include <glslang/build_info.h>
  #include <glslang/Public/ShaderLang.h>
  #include <SPIRV/GlslangToSpv.h>
  
-@@ -36,7 +36,7 @@ static int pl_glslang_refcount;
+@@ -36,7 +37,7 @@ static int pl_glslang_refcount;
  
- int pl_glslang_version()
+ int pl_glslang_version(void)
  {
 -    return GLSLANG_PATCH_LEVEL;
-+    return GLSLANG_VERSION_MAJOR;
++    return GLSLANG_VERSION_PATCH;
  }
  
- bool pl_glslang_init()
-@@ -78,7 +78,7 @@ struct pl_glslang_res *pl_glslang_compile(const char *glsl, uint32_t api_ver,
+ bool pl_glslang_init(void)
+@@ -78,7 +79,7 @@ struct pl_glslang_res *pl_glslang_compile(const char *glsl, uint32_t api_ver,
      if (api_ver >= EShTargetVulkan_1_1)
          spirv_version = EShTargetSpv_1_3;
  
 -#if GLSLANG_PATCH_LEVEL >= 3667
-+#if GLSLANG_VERSION_MAJOR >= 10
++#if GLSLANG_VERSION_PATCH >= 3667
      if (api_ver >= EShTargetVulkan_1_2)
          spirv_version = EShTargetSpv_1_5;
  #endif
-@@ -200,7 +200,7 @@ const TBuiltInResource DefaultTBuiltInResource = {
+@@ -200,7 +201,7 @@ const TBuiltInResource DefaultTBuiltInResource = {
      /* .MaxCullDistances = */ 8,
      /* .MaxCombinedClipAndCullDistances = */ 8,
      /* .MaxSamples = */ 4,
 -#if GLSLANG_PATCH_LEVEL >= 2892
-+#if GLSLANG_VERSION_MAJOR >= 10
++#if GLSLANG_VERSION_PATCH >= 2892
      /* .maxMeshOutputVerticesNV = */ 256,
      /* .maxMeshOutputPrimitivesNV = */ 512,
      /* .maxMeshWorkGroupSizeX_NV = */ 32,
+ 
 diff --git a/src/meson.build b/src/meson.build
-index 5a77cea..60cb646 100644
+index 5a77cea..dcb8137 100644
 --- a/src/meson.build
 +++ b/src/meson.build
-@@ -49,7 +49,7 @@ endif
- 
- # work-arounds for glslang braindeath
- glslang_combined = disabler()
--glslang_min_ver = 2763
-+glslang_min_ver = 10
- glslang_req = get_option('glslang')
- 
- if glslang_req.auto() and shaderc.found()
-@@ -83,8 +83,8 @@ else
+@@ -83,9 +83,20 @@ else
  endif
  
  if glslang_found
 -  glslang_ver = cxx.get_define('GLSLANG_PATCH_LEVEL',
 -      prefix: '#include <glslang/Include/revision.h>'
-+  glslang_ver = cxx.get_define('GLSLANG_VERSION_MAJOR',
-+      prefix: '#include <glslang/build_info.h>'
-   ).to_int()
+-  ).to_int()
++  glslang_header_old = 'glslang/Include/revision.h'
++  glslang_header_new = 'glslang/build_info.h'
++
++  if cc.has_header(glslang_header_new)
++    glslang_ver = cxx.get_define('GLSLANG_VERSION_PATCH',
++        prefix: '#include <' + glslang_header_new + '>'
++    ).to_int()
++  elif cc.has_header(glslang_header_old)
++    glslang_ver = cxx.get_define('GLSLANG_PATCH_LEVEL',
++        prefix: '#include <' + glslang_header_old+ '>'
++    ).to_int()
++  else
++    error('No glslang version header found?')
++  endif
  
    if glslang_ver >= glslang_min_ver
+     # glslang must be linked against pthreads on platforms where pthreads is
+@@ -108,6 +119,8 @@ if glslang_found
+       add_project_arguments('-I' + i, language: 'cpp')
+     endforeach
+ 
++    conf_internal.set('GLSLANG_VERSION_PATCH', glslang_ver)
++
+   else
+     error('glslang revision @0@ too old! Must be at least @1@'
+           .format(glslang_ver, glslang_min_ver))
+-- 
+GitLab
