@@ -7,6 +7,7 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20201020 bkw: update for 1.18.0. See notes, below.
 # 20200217 bkw: update for 1.16.1.
 # 20180623 bkw: BUILD=2, add patch for dynamic linking. Thanks
 #               to Thomas Morper for pointing me in the right direction.
@@ -16,8 +17,42 @@
 # 20170621 bkw: fix build with -current's newer openjpeg, BUILD=2.
 # 20170122 bkw: update for 1.10a.
 
+# Notes for 1.18.0:
+# - This script can no longer build older versions, too many changes.
+# - Upstream *finally* supports building as a shared library, so I and
+#   all other distro packagers can stop patching it... except the
+#   shared lib is unversioned, which means upgrades would cause more
+#   breakage than they should. So there's still some trickery here to
+#   build a versioned solib.
+# - I've got rid of the STATIC=yes option and now only build shared libs.
+#   As a side effect, libmupdf-third is gone, but I've included a
+#   placeholder so stuff that links with it, will work without patching.
+# - gumbo (HTML parser) is now a hard dep. The source is bundled, so
+#   there's no need to create a new gumbo SlackBuild, but it does mean
+#   the mupdf shared lib has grown in size.
+# - mupdf-gl uses freeglut. The version we have in 14.2 is new enough to
+#   build with, but old enough that you can't copy text from mupdf-gl.
+#   So we build the bundled version here.
+# - API docs are now included in the package.
+# - Now using upstream's icons, including scalable SVG.
+# - Add missing doinst.sh
+# - There's now the option to build with tesseract and leptonica,
+#   but it's disabled in this script. I have yet to get it to
+#   actually *do* anything other than fail to build (when using
+#   upstream's tesseract/leptonica forks) or complain about being
+#   unable to load eng.traineddata (using SBo tesseract/leptonica,
+#   and yes eng.traineddata is fine). Until I work out what's wrong,
+#   or upstream releases a new version, this script doesn't support
+#   building with tesseract. Don't contact me about this before March
+#   1, 2021, unless you actually have a patch that fixes it. After
+#   that, if this message is still here, feel free to remind me to
+#   revisit it.
+# - Slackware 14.2's libcrypto (from openssl) is too old for mupdf,
+#   and there's no bundled souce for it. So currently mupdf is being
+#   built without libcrypto. Hope that's OK.
+
 PRGNAM=mupdf
-VERSION=${VERSION:-1.16.1}
+VERSION=${VERSION:-1.18.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -49,6 +84,22 @@ else
 fi
 set -e
 
+# Tesseract code left here for future reference. At some point upstream
+# (or maybe I) will fix it.
+if [ "${TESSERACT:-no}" = "yes" ]; then
+  TESSARGS="USE_SYSTEM_LEPTONICA=yes USE_SYSTEM_TESSERACT=yes"
+  cat <<EOF
+***
+*** 20201023 bkw: Tesseract support in mupdf is currently broken. If
+*** you want to forcibly build with it, edit the SlackBuild. Aborting.
+***
+EOF
+  exit 1
+else
+  TESSARGS="HAVE_LEPTONICA=no HAVE_TESSERACT=no"
+fi
+
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
@@ -60,28 +111,37 @@ chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-
 # Hard-code the version number so it'll stop trying to use git to retrieve
 # it and spewing harmless but scary 'fatal: Not a git repository' errors.
 sed -i "/^VERSION/s,=.*,= $VERSION," Makefile
 
-# 20180623 bkw: Finally, dynamic linking again. Patch is based on
-# http://www.linuxfromscratch.org/patches/blfs/svn/mupdf-1.13.0-shared_libs-1.patch
-# but I added versioned sonames. See README_shared.txt for the gory details.
-STATIC=${STATIC:-no}
+# As of 1.18.0, we don't actually have to patch the Makefile
+# to do a versioned shared lib, but we do have to override some
+# variables. SOMAJOR is the mupdf major and zero-padded minor version
+# jammed together (e.g. 113 for 1.13.0, 203 for 2.3.0). SOMINOR is the
+# mupdf micro version (e.g. 0 for 1.13.0).
+SOMAJOR=$(echo $VERSION | cut -d. -f1-2 | sed -e 's,\.[0-9]$,0&,' -e 's,\.,,g')
+SOMINOR=$(echo $VERSION | cut -d. -f3-  | sed 's,\.,,g' )
+SOVER=$SOMAJOR.$SOMINOR
 
-if [ "$STATIC" != "yes" ]; then
-  patch -p1 < $CWD/shared_libs.diff
-  LIBTYPE=shared
-else
-  LIBTYPE=static
-fi
+# Shared libraries should be installed executable.
+sed -i '/install.*644.*INSTALL_LIBS/s,644,755,' Makefile
 
-# Build against system libs instead of bundled ones. If we didn't do this,
-# libmupdf would be useless for building anything else.
+# tesseract autodetection is mildly broken:
+sed -i 's,tesseract-ocr,tesseract,' Makerules
+
+# Build against system libs instead of bundled ones, where possible.
+# C++ (XCXXFLAGS) is only actually used if building with tesseract.
 make verbose=yes \
+  shared=yes \
+  LIB_LDFLAGS="-shared -Wl,-soname -Wl,libmupdf.so.$SOMAJOR" \
+  SO="so.$SOVER" \
   XCFLAGS="$SLKCFLAGS -DJBIG_NO_MEMENTO" \
+  XCXXFLAGS="-std=c++11 -fpermissive" \
   USE_SYSTEM_LIBS=yes \
+  USE_SYSTEM_GUMBO=no \
+  USE_SYSTEM_GLUT=no \
+  $TESSARGS \
   build=release \
   prefix=/usr \
   libdir=/usr/lib$LIBDIRSUFFIX \
@@ -90,8 +150,23 @@ make verbose=yes \
   DESTDIR=$PKG \
   all install
 
-strip $PKG/usr/bin/*
+# bins and libs are already stripped.
 gzip -9 $PKG/usr/man/man1/*.1
+
+# ldconfig will create the libmupdf.so.$SOVER link, but the libmupdf.so
+# one has to be part of the package.
+ln -s lib$PRGNAM.so.$SOMAJOR.$SOMINOR $PKG/usr/lib$LIBDIRSUFFIX/lib$PRGNAM.so
+
+# Historically, mupdf has included two libraries: libmupdf itself,
+# and libmupdf-third, containing all the bundled third party code
+# included with the source. In version 1.18.0, when building a
+# shared lib, no libmupdf-third gets created (all the code ends up in
+# libmupdf.so). However, most projects that link with libmupdf expect
+# this library to exist. This will probably change in the future as
+# those projects get updated for the changes in mupdf, but for now,
+# to be compatible with older mupdf versions, we include an empty
+# libmupdf-third for stuff to link with.
+ar crs $PKG/usr/lib$LIBDIRSUFFIX/libmupdf-third.a
 
 # Compatibility symlinks. Older versions, the binary is just "mupdf".
 # Separate -curl binary exists in 1.5 but not 1.4.
@@ -101,26 +176,20 @@ for i in x11 x11-curl gl; do
     ln -s $PRGNAM.1.gz $PKG/usr/man/man1/$PRGNAM-$i.1.gz
 done
 
-# Installed permissions are atrocious (everything 755).
-find $PKG -type f | xargs chmod 644
-chmod 755 $PKG/usr/bin/*
-if [ "$STATIC" != "yes" ]; then
-  chmod 755 $PKG/usr/lib$LIBDIRSUFFIX/lib*.so.*.*
-fi
-
 # .desktop taken from debian and modified:
 # - make it validate.
 # - add mime types for cbz and xps.
 mkdir -p $PKG/usr/share/applications
 cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
 
-# Icon converted from platform/x11/mupdf.ico, with icotool.
-mkdir -p $PKG/usr/share/pixmaps
-cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+# Use shipped PNG and SVG icons.
+mkdir -p $PKG/usr/share/pixmaps $PKG/usr/share/icons/hicolor/scalable/apps
+cat docs/logo/mupdf-icon.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+cat docs/logo/mupdf-logo.svg > $PKG/usr/share/icons/hicolor/scalable/apps/$PRGNAM.svg
 
 # .pc file taken from debian and parameterized.
-PCLIBS="-l$PRGNAM -lfreetype -lharfbuzz -ljbig2dec -ljpeg -lcrypto -lopenjp2 -lz -lm"
-PCLIBS="$PCLIBS -lmupdfthird"
+# -lcrypto used to be in this list, will be again someday.
+PCLIBS="-l$PRGNAM -lfreetype -lharfbuzz -ljbig2dec -ljpeg -lopenjp2 -lz -lm"
 
 mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/pkgconfig/
 sed -e "s,@LIB@,lib$LIBDIRSUFFIX,g" \
@@ -129,14 +198,12 @@ sed -e "s,@LIB@,lib$LIBDIRSUFFIX,g" \
     $CWD/$PRGNAM.pc > $PKG/usr/lib$LIBDIRSUFFIX/pkgconfig/$PRGNAM.pc
 
 # 'make install' already installed most of the docs.
-cp -a CONTRIBUTORS $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CONTRIBUTORS docs/api $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
-# slack-desc will conveniently say whether javascript is built in,
-# and whether libs are shared or static.
 mkdir -p $PKG/install
-sed -e "s,@LIBTYPE@,$LIBTYPE," \
-    $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
