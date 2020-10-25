@@ -6,6 +6,13 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20201025 bkw:
+# - update for 0.36.2
+# - the SDL 1.x UI is gone. One or the other of SDL2, gtkglext is
+#   required. Actually not really: you can build without either one,
+#   in which case you get an xroar that has no display at all! Added
+#   code to the script to prevent this from happening.
+
 # 20191130 bkw:
 # - update for 0.35.4
 # - restore the SDL1 build, now that it builds again
@@ -31,7 +38,7 @@
 # 20170122 bkw: update for 0.34.7
 
 PRGNAM=xroar
-VERSION=${VERSION:-0.35.4}
+VERSION=${VERSION:-0.36.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -64,6 +71,39 @@ fi
 
 set -e
 
+### Build options
+# Lots of these. Check them immediately (don't bother to extract the
+# source if there's a problem).
+
+# Most users will want to leave OSS and PULSE alone.
+[ "${OSS:-no}"    = "yes" ] ||   OSSOPT="--without-oss"
+[ "${PULSE:-yes}" = "yes" ] || PULSEOPT="--without-pulse"
+
+# Not sure why anyone would need this, but it's easy to support.
+JACKOPT="--without-jack"
+[ "${JACK:-no}" = "yes" ] && JACKOPT="--with-jack"
+
+SDL2=${SDL2:-yes}
+GTKGLEXT=${GTKGLEXT:-yes}
+
+if [ "$SDL2" = "yes" ]; then
+  pkg-config --exists sdl2 || SDL2=no
+fi
+
+if [ "$GTKGLEXT" = "yes" ]; then
+  pkg-config --exists gtkglext-1.0 || GTKGLEXT=no
+fi
+
+echo "=== SDL2=$SDL2, GTKGLEXT=$GTKGLEXT"
+if [ "$SDL2" != "yes" ] && [ "$GTKGLEXT" != "yes" ]; then
+  echo "*** Fatal error: cannot build without at least one of SDL2 or gtkglext" 1>&2
+  exit 1
+fi
+
+[ "${SDL2:-yes}"     != "yes" ] && SDL2OPT="--without-sdl2"
+[ "${GTKGLEXT:-yes}" != "yes" ] && GTKGLOPT="--without-gtkgl"
+### End of build options.
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
@@ -74,30 +114,7 @@ chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# Most users will want to leave OSS and PULSE alone.
-
-# Can't check ldd output to see if OSS is built-in, so take
-# some care to leave the value of OSS presentable for use in
-# the slack-desc.
-OSS="${OSS:-no}"
-case "$OSS" in
-  y*|Y*) OSS=yes ;;
-  *)     OSS=no  ;;
-esac
-
-[ "$OSS"          = "yes" ] ||   OSSOPT="--without-oss"
-[ "${PULSE:-yes}" = "yes" ] || PULSEOPT="--without-pulse"
-
-# Not sure why anyone would need this, but it's easy to support.
-JACKOPT="--without-jack"
-[ "${JACK:-no}" = "yes" ] && JACKOPT="--with-jack"
-
-[ "${SDL2:-yes}" = "no" ] && SDL2OPT="--without-sdl2"
-
-[ "${GTKGLEXT:-yes}" = "no" ] && GTKGLOPT="--without-gtkgl"
-
 # fix underlinking via LDFLAGS instead of a .diff
-
 LDFLAGS="-lm" \
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -116,16 +133,16 @@ make
 make install DESTDIR=$PKG
 strip $PKG/usr/games/$PRGNAM
 
-# set these for use in the slack-desc
-SDLVER=1.2
-JACK=no
-GTKGLEXT=no
-PULSE=no
+# reset these for use in the slack-desc
+SDL2=no; JACK=no; GTKGLEXT=no; PULSE=no; OSS=no
+
+# actually examine the binary to figure out build options.
 ldd $PKG/usr/games/$PRGNAM > ldd.tmp
-grep -q libSDL2 ldd.tmp     && SDLVER=2.0
+grep -q libSDL2 ldd.tmp     && SDL2=yes
 grep -q libjack ldd.tmp     && JACK=yes
 grep -q libgtkglext ldd.tmp && GTKGLEXT=yes
 grep -q libpulse.so ldd.tmp && PULSE=yes
+strings $PKG/usr/games/$PRGNAM | grep -q /dev/dsp && OSS=yes
 
 # man page needs to be in section 6, since this is in games/
 mkdir -p $PKG/usr/man/man6
@@ -165,10 +182,11 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 sed -e "s,@JACK@,$JACK," \
-    -e "s,@SDLVER@,$SDLVER," \
+    -e "s,@SDL2@,$SDL2," \
     -e "s,@GTKGLEXT@,$GTKGLEXT," \
     -e "s,@PULSE@,$PULSE," \
     -e "s,@OSS@,$OSS," \
+    -e "s,: no,& ,g" \
     $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
