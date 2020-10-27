@@ -2,7 +2,7 @@
 
 # Slackware build script for HHVM
 
-# Copyright 2015-2018 Eugene Wissner, Dachau, Germany
+# Copyright 2015-2020 Eugene Wissner, Dachau, Germany
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,9 +23,12 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=hhvm
-VERSION=${VERSION:-4.32.0}
+VERSION=${VERSION:-4.56.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+
+OPAM_STAMP="6ef290f5"
+CARGO_STAMP="1ecc6299db9ec823"
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -57,6 +60,10 @@ rm -rf $PRGNAM-$VERSION
 tar Jxvf $CWD/$PRGNAM-$VERSION.tar.xz
 cd $PRGNAM-$VERSION
 
+mkdir -p hphp/hack/_build/opam hphp/hack/facebook
+tar Jxvf $CWD/hack-switch-$OPAM_STAMP.tar.xz -C hphp/hack/_build/opam
+tar Jxvf $CWD/cargo-home-$CARGO_STAMP.tar.xz -C hphp/hack
+
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -64,14 +71,31 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
+cp $CWD/opam-full-2.0.3.tar.gz third-party/ocaml/
+install -m 0644 -D $CWD/rust-1.43.0-x86_64-unknown-linux-gnu.tar.gz \
+	third-party/rustc/rust-prefix/src/rust-1.43.0-x86_64-unknown-linux-gnu.tar.gz
+install -m 0644 -D $CWD/fmt-6.1.2.zip third-party/fmt/fmt-prefix/src/fmt-6.1.2.zip
+install -m 0644 -D $CWD/libzip-1.6.1.tar.gz third-party/libzip/libzipBuild-prefix/src/libzip-1.6.1.tar.gz
+
+cat << EOF > hphp/hack/facebook/fetch_opam2_repo_hack.sh
+#!/bin/sh
+echo $CWD/index-$OPAM_STAMP
+EOF
+chmod 0755 hphp/hack/facebook/fetch_opam2_repo_hack.sh
+
+patch -p1 -i $CWD/0001-Link-static-libiberty.patch
+
 export CMAKE_PREFIX_PATH=`pwd`
 cmake \
-    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS -lncursesw" \
-    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS -lncursesw -I/usr/kerberos/include" \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS -lncursesw -I/usr/kerberos/include -I/usr/include/libiberty" \
     -DCMAKE_CXX_STANDARD=14 \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_INSTALL_LIBDIR=lib${LIBDIRSUFFIX} \
-    -DENABLE_MCROUTER=true \
+    -DENABLE_MCROUTER=false \
+    -DNON_DISTRIBUTABLE_BUILD=true \
+    -DENABLE_LD_GOLD=true \
+    -DUSE_JEMALLOC=false \
     -DMYSQL_UNIX_SOCK_ADDR=/var/run/mysqld/mysqld.sock \
     -DCMAKE_BUILD_TYPE=Release .
 make
@@ -84,10 +108,11 @@ mkdir -p $PKG/usr/man
 mv hphp/doc/man $PKG/usr/man/man1
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 
-mkdir -p $PKG/etc/{rc.d,hhvm} $PKG/usr/lib64/hhvm/extensions
-install -m 644 $CWD/etc/rc.hhvm $PKG/etc/rc.d/rc.hhvm.new
-install -m 644 $CWD/etc/server.ini $PKG/etc/hhvm/server.ini.new
-install -m 644 $CWD/etc/php.ini $PKG/etc/hhvm/php.ini.new
+install -m 644 -D $CWD/etc/rc.hhvm $PKG/etc/rc.d/rc.hhvm.new
+install -m 644 -D $CWD/etc/server.ini $PKG/etc/hhvm/server.ini.new
+install -m 644 -D $CWD/etc/php.ini $PKG/etc/hhvm/php.ini.new
+
+mkdir -p $PKG/var/log/hhvm $PKG/usr/lib64/hhvm/extensions
 
 # PID
 mkdir -p $PKG/var/run/hhvm
