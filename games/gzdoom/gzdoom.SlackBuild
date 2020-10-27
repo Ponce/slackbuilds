@@ -6,6 +6,11 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20201027 bkw:
+# - Updated for 4.4.2.
+# - Add new zmusic dep.
+# - Use 'make install/strip' now that it's supported.
+# - Use upstream's icon, multiple sizes in /usr/share/icons.
 # 20200302 bkw: Updated for 4.3.3.
 # 20191201 bkw: Updated for 4.2.4.
 # 20181022 bkw: Updated for 3.6.0.
@@ -27,7 +32,7 @@
 #   supported as "gzdoom-legacy" for those that need them.
 
 PRGNAM=gzdoom
-VERSION=${VERSION:-4.3.3}
+VERSION=${VERSION:-4.4.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -64,22 +69,19 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-g$VERSION $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-g$VERSION.tar.gz || \
-  tar xvf $CWD/g$VERSION.tar.gz || \
-  tar xvf $CWD/$PRGNAM-$VERSION.tar.gz || \
-  tar xvf $CWD/$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-g$VERSION.tar.gz
 cd $PRGNAM-g$VERSION || cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# gzdoom in windowed mode wants to display its git tag and hash as part
-# of the window title. For releases this shows up as "<unknown version> 0",
-# which doesn't hurt anything but is ugly.
-# This makes the window title appear as e.g. "GZDOOM 2.1.1 (Aug 3 2016)". The
-# date is the build date.
-patch -p1 < $CWD/window_title_version.diff
-sed -i "/#define *VERSIONSTR/s,GIT_DESCRIPTION,\"$VERSION\"," src/version.h
+# 20201027 bkw: fix the '<unknown version>' in the window title. This
+# used to be done in an uglier way (with a patch that occasionally broke
+# when applied against new gzdooms).
+sed -i '/COMMAND.*UpdateRevision/s,^,# ,' src/CMakeLists.txt
+( echo "#define GIT_DESCRIPTION \"$VERSION\""
+  echo "#define GIT_HASH \"release\""
+  echo "#define GIT_TIME __DATE__" ) > src/gitinfo.h
 
 # This isn't currently used, but was in the past, and will be again I'm sure.
 [ -e $CWD/compilefix.$VERSION.diff ] && \
@@ -99,26 +101,39 @@ cd build
   cmake \
     -DCMAKE_C_FLAGS_RELEASE:STRING="$SLKCFLAGS -DSHARE_DIR=\\\"/usr/share/games/doom\\\"" \
     -DCMAKE_CXX_FLAGS_RELEASE:STRING="$SLKCFLAGS -DSHARE_DIR=\\\"/usr/share/games/doom\\\"" \
+    -DINSTALL_DOCS_PATH=doc/$PRGNAM-$VERSION \
+    -DINSTALL_PATH=games \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DLIB_SUFFIX=${LIBDIRSUFFIX} \
     -DMAN_INSTALL_DIR=/usr/man \
     -DCMAKE_BUILD_TYPE=Release ..
   make VERBOSE=1
-  mkdir -p $PKG/usr/games $PKG/usr/share/games/doom
-  install -m0755 -s $PRGNAM $PKG/usr/games/$PRGNAM
-  install -m0644 *.pk3 $PKG/usr/share/games/doom/
+  make install/strip DESTDIR=$PKG
 cd ..
+
+if fgrep -q '<unknown' src/gitinfo.h; then
+  echo "*** BREAKAGE: gitinfo.h got regenerated with <unknown version>" 1>&2
+  echo "*** Fix it, or get the maintainer to." 1>&2
+  echo "*** Press ^C to abort or wait 5 seconds for the build to continue" 1>&2
+  sleep 5
+fi
 
 # .desktop written for this SlackBuild
 mkdir -p $PKG/usr/share/applications
 cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
 
-# PNG converted from Windows icon
-mkdir -p $PKG/usr/share/pixmaps
-cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+# New-school desktop-ey icons.
+for i in 16 22 32 48 64 128 256; do
+  SIZE=${i}x${i}
+  DIR=$PKG/usr/share/icons/hicolor/$SIZE/apps
+  mkdir -p $DIR
+  convert src/posix/zdoom.xpm -resize $SIZE $DIR/$PRGNAM.png
+done
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a docs/* $PKG/usr/doc/$PRGNAM-$VERSION
+# Old-school windowmanagerish icon.
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/64x64/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 cat $CWD/README_SBo.txt > $PKG/usr/doc/$PRGNAM-$VERSION/README_SBo.txt
 
