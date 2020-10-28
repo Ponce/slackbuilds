@@ -9,9 +9,30 @@
 # Heavily based on gzdoom.SlackBuild, since gzdoom and qzdoom are synced
 # up regularly.
 
+# 20201027 bkw: BUILD=2
+# - Updated download URL.
+# - Install .pk3 files somewhere else, so they don't conflict with gzdoom.
+# - Use upstream icon (also scaled versions in /usr/share/icons).
+# - Make fluidsynth MIDI work again.
+# - Fix <unknown version> in the window title.
+# - Remove extraneous article from README & slack-desc ("a most" => "most").
+
+# Note about "new" releases:
+
+# qzdoom now belongs to a different github user, so the URL is
+# updated... but there's still no new release of it. If you check the
+# repo, you'll see the same releases as gzdoom (e.g. g4.4.2). These
+# are *not* qzdoom, they're gzdoom (try downloading the tarballs from
+# the qzdoom and gzdoom repos with the same version number and diffing
+# them). So only releases (tags) that begin with "q" are really
+# qzdoom, and 2.1.0 is still the latest.
+
+# TL;DR: Please don't email me saying there's a new release unless the
+# version number starts with "q".
+
 PRGNAM=qzdoom
 VERSION=${VERSION:-2.1.0}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -43,44 +64,68 @@ fi
 
 set -e
 
+SRCVER=q$VERSION
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-q$VERSION
-tar xvf $CWD/$PRGNAM-q$VERSION.tar.gz
-cd $PRGNAM-q$VERSION
+rm -rf $PRGNAM-$SRCVER
+tar xvf $CWD/$PRGNAM-$SRCVER.tar.gz
+cd $PRGNAM-$SRCVER
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \+ -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# 20201027 bkw: dirty hack to get fluidsynth 2.x to work. qzdoom's
+# fluidsynth support stopped working when fluidsynth got updated
+# to 2.x.
+sed -i '/libfluidsynth\.so/s,\.1,.2,' \
+       src/sound/mididevices/music_fluidsynth_mididevice.cpp
+
+# 20201027 bkw: fix the '<unknown version>' in the window title.
+( echo "#define GIT_DESCRIPTION \"$VERSION\""
+  echo "#define GIT_HASH \"release\""
+  echo "#define GIT_TIME __DATE__" ) > src/gitinfo.h
+
+# 20201027 bkw: change SHARE_DIR to qzdoom, to avoid stepping on or
+# accidentally loading the *.pk3 stuff from gzdoom. This won't stop
+# qzdoom from finding the IWADs in /usr/share/games/doom since this
+# path is also searched.
 
 SLKCFLAGS="$SLKCFLAGS -DNDEBUG -fuse-ld=gold"
-
+SD=/usr/share/games/$PRGNAM
 mkdir -p build
 cd build
   cmake \
-    -DCMAKE_C_FLAGS_RELEASE:STRING="$SLKCFLAGS -DSHARE_DIR=\\\"/usr/share/games/doom\\\"" \
-    -DCMAKE_CXX_FLAGS_RELEASE:STRING="$SLKCFLAGS -DSHARE_DIR=\\\"/usr/share/games/doom\\\"" \
+    -DCMAKE_C_FLAGS_RELEASE="$SLKCFLAGS -DSHARE_DIR=\\\"$SD\\\"" \
+    -DCMAKE_CXX_FLAGS_RELEASE="$SLKCFLAGS -DSHARE_DIR=\\\"$SD\\\"" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DINSTALL_PATH=games \
+    -DINSTALL_DOCS_PATH=doc/$PRGNAM-$VERSION \
     -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+    -DINSTALL_PK3_PATH=$SD \
     -DCMAKE_BUILD_TYPE=Release ..
   make VERBOSE=1
   make install/strip DESTDIR=$PKG VERBOSE=1
 cd ..
 
-# no easy way to coerce the docs to go where they should, so:
-mkdir -p $PKG/usr/doc/
-mv $PKG/usr/share/doc/$PRGNAM $PKG/usr/doc/$PRGNAM-$VERSION
-rm -rf $PKG/usr/share/doc
-
-# icon is the same as gzdoom's, .desktop written by SlackBuild author.
-mkdir -p $PKG/usr/share/applications $PKG/usr/share/pixmaps
+# .desktop written by SlackBuild author.
+mkdir -p $PKG/usr/share/applications
 cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
-cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
 
+# New-school desktop-ey icons.
+for i in 16 22 32 48 64 128 256; do
+  SIZE=${i}x${i}
+  DIR=$PKG/usr/share/icons/hicolor/$SIZE/apps
+  mkdir -p $DIR
+  convert src/posix/zdoom.xpm -resize $SIZE $DIR/$PRGNAM.png
+done
+
+# Old-school windowmanagerish icon.
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/64x64/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# docs already installed.
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
