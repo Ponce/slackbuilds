@@ -6,10 +6,15 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-# VERSION is the date of the last git commit.
+# 20201102 bkw:
+# - updated for v0.2.1.
+# - add mobile-intl to default LAYOUTS
+# - get rid of my man page, upstream now ships one
+# - compile fix: old_fontconfig.diff
+# - actually support custom config.h in SlackBuild dir
 
 PRGNAM=svkbd
-VERSION=${VERSION:-20140130}
+VERSION=${VERSION:-0.2.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -49,33 +54,51 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-sed -i -e "s,\<lib\>,lib$LIBDIRSUFFIX," -e "s,-Os,$SLKCFLAGS," config.mk
+# 20201102 bkw: newer fontconfigs support color fonts, but there is a
+# bug that causes security issues when they're used. svkbd contains
+# code to disable color fonts... which we don't need (and can't use)
+# because our fontconfig in 14.2 is too old to support color anyway.
+patch -p1 < $CWD/old_fontconfig.diff
 
-LAYOUTS="${LAYOUTS:-en}"
+[ -e $CWD/config.h ] && cat $CWD/config.h > config.def.h
+
+LAYOUTS="${LAYOUTS:-en mobile-intl}"
 if [ "$LAYOUTS" = "all" ]; then
   LAYOUTS="$( ls layout.*.h|cut -d. -f2 | xargs echo )"
-  FIRST="en"
+  FIRST=en
 else
   FIRST="$( echo $LAYOUTS | cut -d' ' -f1)"
 fi
 
-mkdir -p $PKG/usr/man/man1
-gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
-
 for i in ${LAYOUTS}; do
   if [ -e layout.$i.h ]; then
-     make install LAYOUT="$i" PREFIX=/usr DESTDIR=$PKG
-     ln -s $PRGNAM.1.gz $PKG/usr/man/man1/$PRGNAM-$i.1.gz
+     make clean
+     make install \
+       CFLAGS="$SLKCFLAGS" \
+       CPPFLAGS="$SLKCFLAGS" \
+       LAYOUT="$i" \
+       PREFIX=/usr \
+       MANPREFIX=/usr/man \
+       X11LIB=/usr/lib$LIBDIRSUFFIX \
+       DESTDIR=$PKG
   else
-    echo "No such layout '$i', read the README."
+    echo "*** $0: No such layout '$i', read the README." 1>&2
     exit 1
   fi
+done
+
+# 20201102 bkw: bit of paranoia here.
+if [ "$(/bin/ls $PKG/usr/bin | wc -l)" == 0 ]; then
+  echo "*** $0: no valid layouts! LAYOUTS is \"$LAYOUTS\"" 1>&2
+  exit 1
+fi
+
+gzip $PKG/usr/man/man1/$PRGNAM.1
+for i in ${LAYOUTS}; do
+  ln -s $PRGNAM.1.gz $PKG/usr/man/man1/$PRGNAM-$i.1.gz
 done
 
 strip $PKG/usr/bin/*
