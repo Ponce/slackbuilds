@@ -6,6 +6,12 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20201103 bkw: update for v1.8.0. qm-dsp source is included now, get
+# rid of separate download and build for it. Also, there's no longer
+# a prebuilt atlas, and the build uses a bundled blas and lapack
+# now. It also uses a bundled vamp-plugin-sdk, so I removed that from
+# REQUIRES.
+
 # 20200123 bkw: found out upstream includes a prebuilt libatlas.a, which
 # the build has been using all along. Remove atlas from REQUIRES since
 # it was never used anyway. Tried to build this with atlas, lapack,
@@ -18,7 +24,7 @@
 # Bump BUILD to 3, make it build against vamp-plugin-sdk 2.5 (whoops)
 
 PRGNAM=qm-vamp-plugins
-VERSION=${VERSION:-1.7.1}
+VERSION=${VERSION:-1.8.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -67,32 +73,15 @@ fix_sse_flags() {
   fi
 }
 
-# Private static lib that's distributed as a separate tarball. Main
-# program links to it, but it doesn't need to be installed system-wide
-# as nothing else uses it. It's assumed that qm-dsp's version number
-# will always match the main one.
-LIBNAM=qm-dsp
-
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION $LIBNAM-$VERSION $LIBNAM
+rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-tar xvf $CWD/$LIBNAM-$VERSION.tar.gz
-
-cd $LIBNAM-$VERSION
+cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
-
-# Why doesn't the include path include the project's own include/ dir?
-# (without this, it can't find its own headers)
-sed -i 's,-I\.,-I. -Iinclude,' build/general/Makefile.inc
-
-# Dirty hack: various qm-dsp headers use size_t without including anything
-# that defines it. Rather than laboriously find & patch them all, we'll
-# use a gcc-specific hack:
-sed -i '/^CFLAGS/s/$/ -include stddef.h/' build/linux/Makefile.linux64
 
 # SSE/SSE2 support:
 case "$SSE" in
@@ -123,39 +112,29 @@ fi
 
 echo "USE_SSE=$USE_SSE and USE_SSE2=$USE_SSE2"
 
-# Note about the Makefiles: Makefile.linux64 works fine on 32-bit. The difference
-# between the .linux and .linux64 Makefiles is that the .linux64 one uses atlas
-# instead of plain unoptimized lapack and blas. There's nothing magically 64-bit
-# about atlas...
-fix_sse_flags build/linux/Makefile.linux64
-make -f build/linux/Makefile.linux64
-cd -
-
-# main makefile looks for ../qm-dsp (no version suffix), so:
-ln -s $LIBNAM-$VERSION $LIBNAM
-
-cd $PRGNAM-$VERSION
-chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+# Makefile.linux64 works fine on 32-bit.
+MAKEFILE=build/linux/Makefile.linux64
 
 # 20150403 bkw: crap. getting rid of vamp-plugin-sdk static libs
 # breaks this. Fix by getting rid of -Wl,-Bstatic and -Wl,-Bdynamic
 # options (so it doesn't insist on a static libvamp-sdk).
-sed -i 's/-Wl,-B[^ ]* //g' build/linux/Makefile.linux64
+sed -i 's/-Wl,-B[^ ]* //g' $MAKEFILE
 
-# 20191202 bkw: this used to be there, have to re-add it:
-sed -i "/^LDFLAGS/s,\$, -L$TMP/qm-dsp," build/linux/Makefile.linux64
+# Apply correct SSE-related flags. also we need c++11 starting with 1.8.0.
+fix_sse_flags $MAKEFILE
+sed -i '/^CXXFLAGS/s,=,= -std=c++11,' $MAKEFILE
 
-fix_sse_flags build/linux/Makefile.linux64
-make -f build/linux/Makefile.linux64
+# It's either 2 separate makes, or use -j1.
+make -f $MAKEFILE lib/qm-dsp
+make -f $MAKEFILE
 
 # no 'make install' target, just cp it.
 mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/vamp
+strip $PRGNAM.so
 cp $PRGNAM.so $PRGNAM.cat $PRGNAM.n3 $PKG/usr/lib$LIBDIRSUFFIX/vamp
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a README.txt COPYING $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README* COPYING $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
