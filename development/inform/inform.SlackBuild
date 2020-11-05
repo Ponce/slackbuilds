@@ -6,6 +6,11 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20201104 bkw: updated for 6.34_6.12.4. In case anyone's wondering
+# why I use a self-hosted URL for the source, it's because upstream
+# moves the old source immediately when a new release is made. Also
+# moved the binary to /usr/games and the man page to section 6.
+
 # 20191216 bkw: updated for 6.34_6.12.2. The secondary version number
 # is the inform6 library version. This script can no longer build the
 # old 6.32.1 version, but it should be fine for future releases.
@@ -17,7 +22,7 @@
 # demand, I'll dig up the old includes and re-add them to the package.
 
 PRGNAM=inform
-VERSION=${VERSION:-6.34_6.12.2}
+VERSION=${VERSION:-6.34_6.12.4_1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -52,8 +57,9 @@ set -e
 
 MANVER="${MANVER:-4}"
 MANUAL=designers_manual_${MANVER}.zip
-TARVER="${VERSION/_/-}"
-DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION
+TARVER="${VERSION//_/-}"
+DOCDIR=/usr/doc/$PRGNAM-$VERSION
+PKGDOC=$PKG/$DOCDIR
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -65,37 +71,74 @@ chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# Upstream got rid of autotools, which I consider a step in the right
-# direction... but they also got rid of DESTDIR support.
+# 20201104 bkw: Since inform is for game purposes, install the binary
+# to /usr/games, and its man page to section 6.
+sed '1s/"1"/"6"/' $PRGNAM.1 > $PRGNAM.6
 
-make OPTS="$SLKCFLAGS" \
-     PREFIX=/usr \
+# 20201105 bkw: Minor fixes to Makefile so parallel builds work.
+patch -p1 < $CWD/parallel_make.diff
 
+# 20201104 bkw: Don't write to real $PREFIX! Just disable the CASETEST
+# stuff, since we're including our own set of symlinks.
+sed -i '/touch.*PREFIX/,+2d' Makefile
+
+# 20201104 bkw: upstream now supports DESTDIR again.
 make install-strip \
-     PREFIX=$PKG/usr \
+     OPTS="$SLKCFLAGS" \
+     BINDIR=/usr/games \
+     MANDIR=/usr/man/man6 \
+     MANPAGE=$PRGNAM.6 \
+     PREFIX=/usr \
      TUTORDIR=$DOCDIR/tutor \
-     DEMODIR=$DOCDIR/demos
+     DEMODIR=$DOCDIR/demos \
+     DESTDIR=$PKG
 
-gzip $PKG/usr/man/man1/*.1
+gzip $PKG/usr/man/man?/*.?
 
-# Inform started life (and is still used primarily) on OSes with
-# case-insensitive filenames. The library include files are
-# duplicated here, with e.g. 3 identical files called verblib.h,
-# Verblib.h, VerbLib.h. Clean up the mess.
+# 20201104 bkw: the binary got moved, be kind and provide a symlink
+mkdir -p $PKG/usr/bin
+ln -s ../games/$PRGNAM $PKG/usr/bin/$PRGNAM
+
+# Inform started life (and is still used primarily) on OSes
+# with case-insensitive filenames, meaning that a lot of inform
+# source refers to e.g. VerbLib or even VERBLIB (with or without
+# the .h at the end, which could also be capitalized as .H). The
+# Makefile can create a few symlinks to support this, but let's
+# be more all-inclusive. We got 8 .h files, and end up with 70+
+# symlinks. There's no kill like overkill!
 ( cd $PKG/usr/share/$PRGNAM/lib
-  for upper in [A-Z]*.h; do
-    lower="$( echo $upper | tr A-Z a-z )"
-    if [ -e "$lower" ]; then
-      rm -f "$upper"
-      ln -s "$lower" "$upper"
-    fi
+  for file in *.h; do
+    name=${file%%.*}
+    #           Name.h     NAME.h
+    for link in ${name^}.h ${name^^}.h; do
+      ln -s $file $link
+    done
+  done
+
+  # MixedCase isn't standardized, these are guesses. Some are pretty
+  # unlikely, but they don't cost much. Better to have and not need,
+  # than to need and not have.
+  for link in VerbLib VerbLIB verbLib verbLIB \
+              InFix InFIX inFix inFIX \
+              InfGlk InfGLK infGlk infGLK \
+              LinkLpa LinkLPA linkLpa linkLPA
+  do
+    ln -s ${link,,}.h $link.h
+  done
+
+  # Any of the above might appear with .H. Use readlink so all the
+  # variant names link to the real file (no symlinks to symlinks).
+  # This might be overcautious: the example code all just says
+  # e.g. 'Include "Parser"', without the .h.
+  for file in *.h; do
+    ln -s $( readlink $file ) ${file%%.*}.H
   done
 )
 
 # Upstream removed the manual for licensing reasons. It belongs in the
 # binary package IMO.
-mkdir -p $DOCDIR/manual
-( cd $DOCDIR/manual
+mkdir -p $PKGDOC/manual
+( cd $PKGDOC/manual
   unzip $CWD/$MANUAL
   # manual has no subdirs
   chmod 644 *
@@ -103,17 +146,17 @@ mkdir -p $DOCDIR/manual
 )
 
 # Inform Beginners' Guide, required reading.
-cat $CWD/IBG.pdf > $DOCDIR/inform_beginners_guide.pdf
+cat $CWD/IBG.pdf > $PKGDOC/inform_beginners_guide.pdf
 
-mkdir -p $DOCDIR/lib
+mkdir -p $PKGDOC/lib
 for i in ChangeLog README.txt voices_and_tenses.txt; do
-  ln -s ../../../share/$PRGNAM/lib/$i $DOCDIR/lib
+  ln -s ../../../share/$PRGNAM/lib/$i $PKGDOC/lib
 done
 
 # ARTISTIC and COPYING are redundant: src/licence.txt includes the
 # full text of both.
-cp -a AUTHORS NEWS README* src/*.txt src/*.html docs/* $DOCDIR
-cat $CWD/$PRGNAM.SlackBuild > $DOCDIR/$PRGNAM.SlackBuild
+cp -a AUTHORS NEWS README* src/*.txt src/*.html docs/* $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
