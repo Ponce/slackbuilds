@@ -1,0 +1,367 @@
+From 7403dfafd8a4b7216343dd9be891e540a5f30240 Mon Sep 17 00:00:00 2001
+From: Ben Clayton <bclayton@google.com>
+Date: Thu, 29 Oct 2020 13:25:26 +0000
+Subject: [PATCH] CMake: Add SPIRV_TOOLS_BUILD_STATIC flag (#3910)
+
+If enabled the following targets will be created:
+
+* `${SPIRV_TOOLS}-static` - `STATIC` library. Has full public symbol visibility.
+* `${SPIRV_TOOLS}-shared` - `SHARED` library. Has default-hidden symbol visibility.
+* `${SPIRV_TOOLS}`        - will alias to one of above, based on BUILD_SHARED_LIBS.
+
+If disabled the following targets will be created:
+
+* `${SPIRV_TOOLS}`        - either `STATIC` or `SHARED` based on the new `SPIRV_TOOLS_LIBRARY_TYPE` flag. Has full public symbol visibility.
+* `${SPIRV_TOOLS}-shared` - `SHARED` library. Has default-hidden symbol visibility.
+
+Defaults to `ON`, matching existing build behavior.
+
+This flag can be used by package maintainers to ensure that all libraries are built as shared objects.
+---
+ CMakeLists.txt               | 40 +++++++++++++++++++++
+ source/CMakeLists.txt        | 70 +++++++++++++++++++-----------------
+ source/fuzz/CMakeLists.txt   |  2 +-
+ source/link/CMakeLists.txt   |  2 +-
+ source/opt/CMakeLists.txt    |  4 +--
+ source/reduce/CMakeLists.txt |  4 +--
+ test/CMakeLists.txt          |  6 ++--
+ test/val/CMakeLists.txt      | 10 +++---
+ tools/CMakeLists.txt         | 16 ++++-----
+ 9 files changed, 100 insertions(+), 54 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 30dde20a44..55f84e6d81 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -132,6 +132,46 @@ if (DEFINED SPIRV_TOOLS_EXTRA_DEFINITIONS)
+   add_definitions(${SPIRV_TOOLS_EXTRA_DEFINITIONS})
+ endif()
+ 
++# Library build setting definitions:
++#
++# * SPIRV_TOOLS_BUILD_STATIC - ON or OFF - Defaults to ON.
++#   If enabled the following targets will be created:
++#     ${SPIRV_TOOLS}-static - STATIC library.
++#                             Has full public symbol visibility.
++#     ${SPIRV_TOOLS}-shared - SHARED library.
++#                             Has default-hidden symbol visibility.
++#     ${SPIRV_TOOLS}        - will alias to one of above, based on BUILD_SHARED_LIBS.
++#   If disabled the following targets will be created:
++#     ${SPIRV_TOOLS}        - either STATIC or SHARED based on SPIRV_TOOLS_LIBRARY_TYPE.
++#                             Has full public symbol visibility.
++#     ${SPIRV_TOOLS}-shared - SHARED library.
++#                             Has default-hidden symbol visibility.
++#
++# * SPIRV_TOOLS_LIBRARY_TYPE - SHARED or STATIC.
++#   Specifies the library type used for building SPIRV-Tools libraries.
++#   Defaults to SHARED when BUILD_SHARED_LIBS=1, otherwise STATIC.
++#
++# * SPIRV_TOOLS_FULL_VISIBILITY - "${SPIRV_TOOLS}-static" or "${SPIRV_TOOLS}"
++#   Evaluates to the SPIRV_TOOLS target library name that has no hidden symbols.
++#   This is used by internal targets for accessing symbols that are non-public.
++#   Note this target provides no API stability guarantees.
++#
++# Ideally, all of these will go away - see https://github.com/KhronosGroup/SPIRV-Tools/issues/3909.
++option(SPIRV_TOOLS_BUILD_STATIC "Build ${SPIRV_TOOLS}-static target. ${SPIRV_TOOLS} will alias to ${SPIRV_TOOLS}-static or ${SPIRV_TOOLS}-shared based on BUILD_SHARED_LIBS" ON)
++if(SPIRV_TOOLS_BUILD_STATIC)
++  set(SPIRV_TOOLS_FULL_VISIBILITY ${SPIRV_TOOLS}-static)
++  set(SPIRV_TOOLS_LIBRARY_TYPE "STATIC")
++else(SPIRV_TOOLS_BUILD_STATIC)
++  set(SPIRV_TOOLS_FULL_VISIBILITY ${SPIRV_TOOLS})
++  if (NOT DEFINED SPIRV_TOOLS_LIBRARY_TYPE)
++      if(BUILD_SHARED_LIBS)
++        set(SPIRV_TOOLS_LIBRARY_TYPE "SHARED")
++      else()
++        set(SPIRV_TOOLS_LIBRARY_TYPE "STATIC")
++      endif()
++  endif()
++endif(SPIRV_TOOLS_BUILD_STATIC)
++
+ function(spvtools_default_compile_options TARGET)
+   target_compile_options(${TARGET} PRIVATE ${SPIRV_WARNINGS})
+ 
+diff --git a/source/CMakeLists.txt b/source/CMakeLists.txt
+index fa900e03e1..65087f2c93 100644
+--- a/source/CMakeLists.txt
++++ b/source/CMakeLists.txt
+@@ -346,58 +346,64 @@ set_source_files_properties(
+ 
+ spvtools_pch(SPIRV_SOURCES pch_source)
+ 
+-add_library(${SPIRV_TOOLS}-static STATIC ${SPIRV_SOURCES})
+-spvtools_default_compile_options(${SPIRV_TOOLS}-static)
+-target_include_directories(${SPIRV_TOOLS}-static
+-  PUBLIC
+-    $<BUILD_INTERFACE:${spirv-tools_SOURCE_DIR}/include>
+-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+-  PRIVATE ${spirv-tools_BINARY_DIR}
+-  PRIVATE ${SPIRV_HEADER_INCLUDE_DIR}
++# spirv_tools_default_target_options() sets the target options that are common
++# for all ${SPIRV_TOOLS} targets.
++function(spirv_tools_default_target_options target)
++  spvtools_default_compile_options(${target})
++  target_include_directories(${target}
++    PUBLIC
++      $<BUILD_INTERFACE:${spirv-tools_SOURCE_DIR}/include>
++      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
++    PRIVATE ${spirv-tools_BINARY_DIR}
++    PRIVATE ${SPIRV_HEADER_INCLUDE_DIR}
+   )
+-set_property(TARGET ${SPIRV_TOOLS}-static PROPERTY FOLDER "SPIRV-Tools libraries")
+-spvtools_check_symbol_exports(${SPIRV_TOOLS}-static)
+-add_dependencies(${SPIRV_TOOLS}-static core_tables enum_string_mapping extinst_tables)
+-
+-# The static target does not have the '-static' suffix.
+-set_target_properties(${SPIRV_TOOLS}-static PROPERTIES OUTPUT_NAME "${SPIRV_TOOLS}")
++  set_property(TARGET ${target} PROPERTY FOLDER "SPIRV-Tools libraries")
++  spvtools_check_symbol_exports(${target})
++  add_dependencies(${target} core_tables enum_string_mapping extinst_tables)
++endfunction()
+ 
++# Always build ${SPIRV_TOOLS}-shared. This is expected distro packages, and
++# unlike the other SPIRV_TOOLS target, defaults to hidden symbol visibility.
+ add_library(${SPIRV_TOOLS}-shared SHARED ${SPIRV_SOURCES})
+-spvtools_default_compile_options(${SPIRV_TOOLS}-shared)
+-target_include_directories(${SPIRV_TOOLS}-shared
+-  PUBLIC
+-    $<BUILD_INTERFACE:${spirv-tools_SOURCE_DIR}/include>
+-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+-  PRIVATE ${spirv-tools_BINARY_DIR}
+-  PRIVATE ${SPIRV_HEADER_INCLUDE_DIR}
+-  )
++spirv_tools_default_target_options(${SPIRV_TOOLS}-shared)
+ set_target_properties(${SPIRV_TOOLS}-shared PROPERTIES CXX_VISIBILITY_PRESET hidden)
+-set_property(TARGET ${SPIRV_TOOLS}-shared PROPERTY FOLDER "SPIRV-Tools libraries")
+-spvtools_check_symbol_exports(${SPIRV_TOOLS}-shared)
+ target_compile_definitions(${SPIRV_TOOLS}-shared
+   PRIVATE SPIRV_TOOLS_IMPLEMENTATION
+   PUBLIC SPIRV_TOOLS_SHAREDLIB
+ )
+-add_dependencies(${SPIRV_TOOLS}-shared core_tables enum_string_mapping extinst_tables)
+ 
+-# Create the "${SPIRV_TOOLS}" target as an alias to either "${SPIRV_TOOLS}-static"
+-# or "${SPIRV_TOOLS}-shared" depending on the value of BUILD_SHARED_LIBS.
+-if(BUILD_SHARED_LIBS)
++if(SPIRV_TOOLS_BUILD_STATIC)
++  add_library(${SPIRV_TOOLS}-static STATIC ${SPIRV_SOURCES})
++  spirv_tools_default_target_options(${SPIRV_TOOLS}-static)
++  # The static target does not have the '-static' suffix.
++  set_target_properties(${SPIRV_TOOLS}-static PROPERTIES OUTPUT_NAME "${SPIRV_TOOLS}")
++
++  # Create the "${SPIRV_TOOLS}" target as an alias to either "${SPIRV_TOOLS}-static"
++  # or "${SPIRV_TOOLS}-shared" depending on the value of BUILD_SHARED_LIBS.
++  if(BUILD_SHARED_LIBS)
+     add_library(${SPIRV_TOOLS} ALIAS ${SPIRV_TOOLS}-shared)
+-else()
++  else()
+     add_library(${SPIRV_TOOLS} ALIAS ${SPIRV_TOOLS}-static)
++  endif()
++
++  set(SPIRV_TOOLS_TARGETS ${SPIRV_TOOLS}-static ${SPIRV_TOOLS}-shared)
++else()
++  add_library(${SPIRV_TOOLS} ${SPIRV_TOOLS_LIBRARY_TYPE} ${SPIRV_SOURCES})
++  spirv_tools_default_target_options(${SPIRV_TOOLS})
++  set(SPIRV_TOOLS_TARGETS ${SPIRV_TOOLS} ${SPIRV_TOOLS}-shared)
+ endif()
+ 
+ if("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
+   find_library(LIBRT rt)
+   if(LIBRT)
+-    target_link_libraries(${SPIRV_TOOLS}-static ${LIBRT})
+-    target_link_libraries(${SPIRV_TOOLS}-shared ${LIBRT})
++    foreach(target ${SPIRV_TOOLS_TARGETS})
++      target_link_libraries(${target} ${LIBRT})
++    endforeach()
+   endif()
+ endif()
+ 
+ if(ENABLE_SPIRV_TOOLS_INSTALL)
+-  install(TARGETS ${SPIRV_TOOLS}-static ${SPIRV_TOOLS}-shared EXPORT ${SPIRV_TOOLS}Targets
++  install(TARGETS ${SPIRV_TOOLS_TARGETS} EXPORT ${SPIRV_TOOLS}Targets
+     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+diff --git a/source/fuzz/CMakeLists.txt b/source/fuzz/CMakeLists.txt
+index 63a6625177..d3aa9f1e03 100644
+--- a/source/fuzz/CMakeLists.txt
++++ b/source/fuzz/CMakeLists.txt
+@@ -447,7 +447,7 @@ if(SPIRV_BUILD_FUZZER)
+ 
+   # The fuzzer reuses a lot of functionality from the SPIRV-Tools library.
+   target_link_libraries(SPIRV-Tools-fuzz
+-        PUBLIC ${SPIRV_TOOLS}-static
++        PUBLIC ${SPIRV_TOOLS_FULL_VISIBILITY}
+         PUBLIC SPIRV-Tools-opt
+         PUBLIC SPIRV-Tools-reduce
+         PUBLIC protobuf::libprotobuf)
+diff --git a/source/link/CMakeLists.txt b/source/link/CMakeLists.txt
+index bb058ea226..c8dd2f7153 100644
+--- a/source/link/CMakeLists.txt
++++ b/source/link/CMakeLists.txt
+@@ -11,7 +11,7 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+-add_library(SPIRV-Tools-link STATIC
++add_library(SPIRV-Tools-link ${SPIRV_TOOLS_LIBRARY_TYPE}
+   linker.cpp
+ )
+ 
+diff --git a/source/opt/CMakeLists.txt b/source/opt/CMakeLists.txt
+index 3630a06051..fa74690882 100644
+--- a/source/opt/CMakeLists.txt
++++ b/source/opt/CMakeLists.txt
+@@ -233,7 +233,7 @@ endif()
+ 
+ spvtools_pch(SPIRV_TOOLS_OPT_SOURCES pch_source_opt)
+ 
+-add_library(SPIRV-Tools-opt STATIC ${SPIRV_TOOLS_OPT_SOURCES})
++add_library(SPIRV-Tools-opt ${SPIRV_TOOLS_LIBRARY_TYPE} ${SPIRV_TOOLS_OPT_SOURCES})
+ 
+ spvtools_default_compile_options(SPIRV-Tools-opt)
+ target_include_directories(SPIRV-Tools-opt
+@@ -245,7 +245,7 @@ target_include_directories(SPIRV-Tools-opt
+ )
+ # We need the assembling and disassembling functionalities in the main library.
+ target_link_libraries(SPIRV-Tools-opt
+-  PUBLIC ${SPIRV_TOOLS}-static)
++  PUBLIC ${SPIRV_TOOLS_FULL_VISIBILITY})
+ 
+ set_property(TARGET SPIRV-Tools-opt PROPERTY FOLDER "SPIRV-Tools libraries")
+ spvtools_check_symbol_exports(SPIRV-Tools-opt)
+diff --git a/source/reduce/CMakeLists.txt b/source/reduce/CMakeLists.txt
+index e113ca2554..a3291c77b2 100644
+--- a/source/reduce/CMakeLists.txt
++++ b/source/reduce/CMakeLists.txt
+@@ -78,7 +78,7 @@ endif()
+ 
+ spvtools_pch(SPIRV_TOOLS_REDUCE_SOURCES pch_source_reduce)
+ 
+-add_library(SPIRV-Tools-reduce STATIC ${SPIRV_TOOLS_REDUCE_SOURCES})
++add_library(SPIRV-Tools-reduce ${SPIRV_TOOLS_LIBRARY_TYPE} ${SPIRV_TOOLS_REDUCE_SOURCES})
+ 
+ spvtools_default_compile_options(SPIRV-Tools-reduce)
+ target_include_directories(SPIRV-Tools-reduce
+@@ -90,7 +90,7 @@ target_include_directories(SPIRV-Tools-reduce
+ )
+ # The reducer reuses a lot of functionality from the SPIRV-Tools library.
+ target_link_libraries(SPIRV-Tools-reduce
+-  PUBLIC ${SPIRV_TOOLS}-static
++  PUBLIC ${SPIRV_TOOLS_FULL_VISIBILITY}
+   PUBLIC SPIRV-Tools-opt)
+ 
+ set_property(TARGET SPIRV-Tools-reduce PROPERTY FOLDER "SPIRV-Tools libraries")
+diff --git a/test/CMakeLists.txt b/test/CMakeLists.txt
+index 5dd4036c2a..8ede58bfa6 100644
+--- a/test/CMakeLists.txt
++++ b/test/CMakeLists.txt
+@@ -159,12 +159,12 @@ spvtools_pch(TEST_SOURCES pch_test)
+ add_spvtools_unittest(
+   TARGET spirv_unit_tests
+   SRCS ${TEST_SOURCES}
+-  LIBS ${SPIRV_TOOLS}-static)
++  LIBS ${SPIRV_TOOLS_FULL_VISIBILITY})
+ 
+ add_spvtools_unittest(
+   TARGET c_interface
+   SRCS c_interface_test.cpp
+-  LIBS ${SPIRV_TOOLS}-static)
++  LIBS ${SPIRV_TOOLS_FULL_VISIBILITY})
+ 
+ add_spvtools_unittest(
+   TARGET c_interface_shared
+@@ -181,7 +181,7 @@ if (${SPIRV_TIMER_ENABLED})
+ add_spvtools_unittest(
+   TARGET timer
+   SRCS timer_test.cpp
+-  LIBS ${SPIRV_TOOLS}-static)
++  LIBS ${SPIRV_TOOLS_FULL_VISIBILITY})
+ endif()
+ 
+ 
+diff --git a/test/val/CMakeLists.txt b/test/val/CMakeLists.txt
+index c458a2f93a..153a91670c 100644
+--- a/test/val/CMakeLists.txt
++++ b/test/val/CMakeLists.txt
+@@ -41,21 +41,21 @@ add_spvtools_unittest(TARGET val_abcde
+        val_extension_spv_khr_terminate_invocation.cpp
+        val_ext_inst_test.cpp
+        ${VAL_TEST_COMMON_SRCS}
+-  LIBS ${SPIRV_TOOLS}-static
++  LIBS ${SPIRV_TOOLS_FULL_VISIBILITY}
+   PCH_FILE pch_test_val
+ )
+ 
+ add_spvtools_unittest(TARGET val_capability
+   SRCS
+        val_capability_test.cpp
+-  LIBS ${SPIRV_TOOLS}-static
++  LIBS ${SPIRV_TOOLS_FULL_VISIBILITY}
+   PCH_FILE pch_test_val
+ )
+ 
+ add_spvtools_unittest(TARGET val_limits
+   SRCS val_limits_test.cpp
+        ${VAL_TEST_COMMON_SRCS}
+-  LIBS ${SPIRV_TOOLS}-static
++  LIBS ${SPIRV_TOOLS_FULL_VISIBILITY}
+   PCH_FILE pch_test_val
+ )
+ 
+@@ -76,7 +76,7 @@ add_spvtools_unittest(TARGET val_fghijklmnop
+        val_opencl_test.cpp
+        val_primitives_test.cpp
+        ${VAL_TEST_COMMON_SRCS}
+-  LIBS ${SPIRV_TOOLS}-static
++  LIBS ${SPIRV_TOOLS_FULL_VISIBILITY}
+   PCH_FILE pch_test_val
+ )
+ 
+@@ -91,6 +91,6 @@ add_spvtools_unittest(TARGET val_stuvw
+        val_version_test.cpp
+        val_webgpu_test.cpp
+        ${VAL_TEST_COMMON_SRCS}
+-  LIBS ${SPIRV_TOOLS}-static
++  LIBS ${SPIRV_TOOLS_FULL_VISIBILITY}
+   PCH_FILE pch_test_val
+ )
+diff --git a/tools/CMakeLists.txt b/tools/CMakeLists.txt
+index 67d606a849..124a33281a 100644
+--- a/tools/CMakeLists.txt
++++ b/tools/CMakeLists.txt
+@@ -40,19 +40,19 @@ function(add_spvtools_tool)
+ endfunction()
+ 
+ if (NOT ${SPIRV_SKIP_EXECUTABLES})
+-  add_spvtools_tool(TARGET spirv-as SRCS as/as.cpp LIBS ${SPIRV_TOOLS}-static)
+-  add_spvtools_tool(TARGET spirv-dis SRCS dis/dis.cpp LIBS ${SPIRV_TOOLS}-static)
+-  add_spvtools_tool(TARGET spirv-val SRCS val/val.cpp util/cli_consumer.cpp LIBS ${SPIRV_TOOLS}-static)
+-  add_spvtools_tool(TARGET spirv-opt SRCS opt/opt.cpp util/cli_consumer.cpp LIBS SPIRV-Tools-opt ${SPIRV_TOOLS}-static)
++  add_spvtools_tool(TARGET spirv-as SRCS as/as.cpp LIBS ${SPIRV_TOOLS_FULL_VISIBILITY})
++  add_spvtools_tool(TARGET spirv-dis SRCS dis/dis.cpp LIBS ${SPIRV_TOOLS_FULL_VISIBILITY})
++  add_spvtools_tool(TARGET spirv-val SRCS val/val.cpp util/cli_consumer.cpp LIBS ${SPIRV_TOOLS_FULL_VISIBILITY})
++  add_spvtools_tool(TARGET spirv-opt SRCS opt/opt.cpp util/cli_consumer.cpp LIBS SPIRV-Tools-opt ${SPIRV_TOOLS_FULL_VISIBILITY})
+   if (NOT DEFINED IOS_PLATFORM) # iOS does not allow std::system calls which spirv-reduce requires
+-    add_spvtools_tool(TARGET spirv-reduce SRCS reduce/reduce.cpp util/cli_consumer.cpp LIBS SPIRV-Tools-reduce ${SPIRV_TOOLS}-static)
++    add_spvtools_tool(TARGET spirv-reduce SRCS reduce/reduce.cpp util/cli_consumer.cpp LIBS SPIRV-Tools-reduce ${SPIRV_TOOLS_FULL_VISIBILITY})
+   endif()
+-  add_spvtools_tool(TARGET spirv-link SRCS link/linker.cpp LIBS SPIRV-Tools-link ${SPIRV_TOOLS}-static)
++  add_spvtools_tool(TARGET spirv-link SRCS link/linker.cpp LIBS SPIRV-Tools-link ${SPIRV_TOOLS_FULL_VISIBILITY})
+   add_spvtools_tool(TARGET spirv-cfg
+                     SRCS cfg/cfg.cpp
+                          cfg/bin_to_dot.h
+                          cfg/bin_to_dot.cpp
+-                    LIBS ${SPIRV_TOOLS}-static)
++                    LIBS ${SPIRV_TOOLS_FULL_VISIBILITY})
+   target_include_directories(spirv-cfg PRIVATE ${spirv-tools_SOURCE_DIR}
+                                                ${SPIRV_HEADER_INCLUDE_DIR})
+   set(SPIRV_INSTALL_TARGETS spirv-as spirv-dis spirv-val spirv-opt
+@@ -62,7 +62,7 @@ if (NOT ${SPIRV_SKIP_EXECUTABLES})
+   endif()
+ 
+   if(SPIRV_BUILD_FUZZER)
+-    add_spvtools_tool(TARGET spirv-fuzz SRCS fuzz/fuzz.cpp util/cli_consumer.cpp LIBS SPIRV-Tools-fuzz ${SPIRV_TOOLS}-static)
++    add_spvtools_tool(TARGET spirv-fuzz SRCS fuzz/fuzz.cpp util/cli_consumer.cpp LIBS SPIRV-Tools-fuzz ${SPIRV_TOOLS_FULL_VISIBILITY})
+     set(SPIRV_INSTALL_TARGETS ${SPIRV_INSTALL_TARGETS} spirv-fuzz)
+   endif(SPIRV_BUILD_FUZZER)
+ 
