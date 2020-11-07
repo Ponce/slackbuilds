@@ -2,7 +2,7 @@
 
 # Slackware build script for mrustc
 
-# Copyright 2017-2019 Andrew Clemons, Wellington New Zealand
+# Copyright 2017-2020 Andrew Clemons, Wellington New Zealand
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,8 +23,9 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=mrustc
-VERSION=${VERSION:-0.8.0}
+VERSION=${VERSION:-0.9}
 RUSTCVERSION=${RUSTCVERSION:-1.19.0}
+MRUSTCTARGETVERSION=${MRUSTCTARGETVERSION:-1.19}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -79,11 +80,15 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 
-patch -p1 < "$CWD/mrustc-0.8.0-fix-variable-length-integer-receiving.patch"
-sed -i '/curl -sS https:/d' Makefile
-sed -i 's/-src.tar.gz/-src.tar.xz/' Makefile
+tar -xf "$CWD/rustc-$RUSTCVERSION-src.tar.xz"
 
-cp "$CWD/rustc-$RUSTCVERSION-src.tar.xz" .
+(
+  cd "rustc-$RUSTCVERSION-src"
+  patch -p0 < ../"rustc-$RUSTCVERSION-src.patch"
+  echo "$RUSTCVERSION" > dl-version
+)
+
+sed -i 's/\(TargetVersion.*TargetVersion.*=.*\)TargetVersion::Rustc1_29/\1TargetVersion::Rustc1_19/' src/main.cpp
 
 chown -R root:root .
 find -L . \
@@ -92,44 +97,70 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-make RUSTCSRC
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+RUSTC_VERSION="$RUSTCVERSION" \
+MRUSTC_TARGET_VER="$MRUSTCTARGETVERSION" \
+OUTDIR_SUF="" \
+CC=gcc \
+CXX=g++ \
+make RUSTC_TARGET="$RUSTC_TARGET"
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
-RUSTC_TARGET="$RUSTC_TARGET" \
+RUSTC_VERSION="$RUSTCVERSION" \
+MRUSTC_TARGET_VER="$MRUSTCTARGETVERSION" \
+OUTDIR_SUF="" \
 CC=gcc \
-make -f minicargo.mk
+CXX=g++ \
+make -f minicargo.mk LIBS RUSTC_TARGET="$RUSTC_TARGET"
 
-WITH_RUSTC=${WITH_RUSTC:-yes}
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+RUSTC_VERSION="$RUSTCVERSION" \
+MRUSTC_TARGET_VER="$MRUSTCTARGETVERSION" \
+OUTDIR_SUF="" \
+CC=gcc \
+CXX=g++ \
+make -C tools/minicargo RUSTC_TARGET="$RUSTC_TARGET"
 
-if [ "$WITH_RUSTC" = "yes" ] ; then
-  CFLAGS="$SLKCFLAGS" \
-  CXXFLAGS="$SLKCFLAGS" \
-  RUSTC_TARGET="$RUSTC_TARGET" \
-  CC=gcc \
-  make -j1 -C run_rustc
-fi
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+RUSTC_VERSION="$RUSTCVERSION" \
+MRUSTC_TARGET_VER="$MRUSTCTARGETVERSION" \
+OUTDIR_SUF="" \
+CC=gcc \
+CXX=g++ \
+make test RUSTC_TARGET="$RUSTC_TARGET"
 
 mkdir -p $PKG/usr/bin
 install -m 0755 bin/mrustc $PKG/usr/bin/mrustc
 install -m 0755 tools/bin/minicargo $PKG/usr/bin/minicargo
 
-mkdir -p $PKG/usr/share/mrustc
-find output -name '*.hir' -maxdepth 1 -exec install -m 0644 {} $PKG/usr/share/mrustc/ \;
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/
+cp -a output $PKG/usr/lib$LIBDIRSUFFIX/mrust
 
-if [ "$WITH_RUSTC" = "yes" ] ; then
-  mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/rustlib/$ARCH-unknown-linux-gnu/lib/
-  cp -a run_rustc/prefix/lib/rustlib/$ARCH-unknown-linux-gnu/lib/* $PKG/usr/lib$LIBDIRSUFFIX/rustlib/$ARCH-unknown-linux-gnu/lib/
+find $PKG/usr/lib$LIBDIRSUFFIX -name '*.txt' -print0 | xargs -0 rm
 
-  find $PKG/usr/lib$LIBDIRSUFFIX -name "*.so" -exec chmod 755 "{}" \;
+mkdir -p $PKG/usr/share/mrustc/run_rustc
 
-  install -m 0755 output/rustc $PKG/usr/bin/rustc
-  install -m 0755 output/cargo $PKG/usr/bin/cargo
-  install -m 0755 output/rustc-build/rustdoc $PKG/usr/bin/rustdoc
-fi
+install -m 0644 run_rustc/Makefile $PKG/usr/share/mrustc/run_rustc/Makefile
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/etc/profile.d
+cat << EOF > $PKG/etc/profile.d/$PRGNAM.csh
+#!/bin/csh
+setenv MRUSTC_PATH=/usr/bin/mrustc
+EOF
+
+cat << EOF > $PKG/etc/profile.d/$PRGNAM.sh
+#!/bin/sh
+export MRUSTC_PATH=/usr/bin/mrustc
+EOF
+
+chmod 0755 $PKG/etc/profile.d/*
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
