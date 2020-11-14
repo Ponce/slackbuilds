@@ -1,0 +1,115 @@
+#!/bin/sh
+
+# Slackware build script for lv
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20201111 bkw: added at v4.51_7. The original upstream for this is
+# long gone (dead website), but the maintainer of the Debian package
+# continues to develop this. So I'm treating Debian as upstream, and
+# the _7 in VERSION is the Debian patchlevel.
+
+PRGNAM=lv
+VERSION=${VERSION:-4.51_7}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# Nothing uses LIBDIRSUFFIX, don't bother with it.
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+else
+  SLKCFLAGS="-O2"
+fi
+
+set -e
+
+SRCVER=${VERSION%_*}  # 1.23_4 => 1.23
+DEBVER=${VERSION#*_}  # 1.23_4 => 4
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$SRCVER.orig
+tar xvf $CWD/${PRGNAM}_$SRCVER.orig.tar.?z
+cd $PRGNAM-$SRCVER.orig
+tar xvf $CWD/${PRGNAM}_$SRCVER-$DEBVER.debian.tar.xz
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# Apply all of debian's patches.
+for i in $( cat debian/patches/series ); do
+  patch -p1 < "debian/patches/$i"
+done
+
+# Local patches (sent upstream, maybe they'll be in the next release).
+for i in $( cat $CWD/patches/series ); do
+  patch -p1 < "$CWD/patches/$i"
+done
+
+# I wish there were --disable-termcap and/or --enable-ncurses options.
+# The configure script is hardcoded: if termcap is found, it uses that
+# and never looks for ncurses. Since termcap is pretty well deprecated
+# here in the 21st century, we'd much rather use ncurses...
+sed -i 's,termcap,ncurses,g' src/configure
+
+# libdir is /usr/share because all that gets installed there is the lv
+# help file (which is just a pre-rendered version of the man page).
+cd build
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+../src/configure \
+  --enable-fastio \
+  --prefix=/usr \
+  --libdir=/usr/share \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --build=$ARCH-slackware-linux
+
+make
+make install DESTDIR=$PKG
+
+# binary already stripped
+gzip -9 $PKG/usr/man/man1/$PRGNAM.1
+ln -s $PRGNAM.1.gz $PKG/usr/man/man1/lgrep.1.gz
+
+cd ..
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README* GPL* hello.* debian/changelog $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Japanese-language sections in the HTML docs are in some kind of
+# non-Unicode encoding. lv autodetects it just fine, but nothing else
+# seems to, so use lv itself to convert them to UTF-8. This is helpful
+# if you're reading the files locally with a browser: there's no HTTP
+# headers to specify the encoding, and UTF-8 is more likely to be
+# autodetected or just guessed at.
+for i in *.html; do
+  $PKG/usr/bin/lv -Ou8 $i > $PKG/usr/doc/$PRGNAM-$VERSION/$i
+done
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
