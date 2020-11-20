@@ -22,13 +22,13 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-PRGNAM=openjdk7
-VERSION=${VERSION:-7u251}
-BUILD=${BUILD:-1}
-TAG=${TAG:-_SBo}
+function createPatchedJdkArchive() {
 
-function createSBoPatch() {
-	cat << EOF > ${ICEDTEA}/patches/boot/optional.patch
+	mkdir -p ${SBO_PATCH_DIR} && cd ${SBO_PATCH_DIR}
+	tar xvf "${CWD}/jdk.tar.bz2"
+	cd jdk-*
+
+	cat << EOF | patch -d ./src/share/classes/sun/security/util Optional.java
 diff -Nru openjdk-boot.orig/jdk/src/share/classes/sun/security/util/Optional.java openjdk-boot/jdk/src/share/classes/sun/security/util/Optional.java
 --- openjdk-boot.orig/jdk/src/share/classes/sun/security/util/Optional.java	2019-10-20 11:57:14.258731932 +0300
 +++ openjdk-boot/jdk/src/share/classes/sun/security/util/Optional.java	2019-10-20 11:59:48.600721516 +0300
@@ -42,47 +42,23 @@ diff -Nru openjdk-boot.orig/jdk/src/share/classes/sun/security/util/Optional.jav
      }
  
 EOF
+
+	cd ..
+	tar -cvjSf jdk.tar.bz2 jdk-*
 }
 
-function activateSBoPatch() {
-	cat << EOF | patch -d ${ICEDTEA} Makefile.in
---- Makefile.in.orig	2019-10-20 12:55:58.715494084 +0300
-+++ Makefile.in.new	2019-10-20 13:05:27.236455717 +0300
-@@ -154,7 +154,8 @@
- @USE_NON_NSS_CURVES_FALSE@am__append_14 = patches/rh1022017.patch
- @DISABLE_BOOTSTRAP_TOOLS_FALSE@am__append_15 = \\
- @DISABLE_BOOTSTRAP_TOOLS_FALSE@	patches/boot/bootstrap-tools.patch \\
--@DISABLE_BOOTSTRAP_TOOLS_FALSE@	patches/boot/ant-javac.patch
-+@DISABLE_BOOTSTRAP_TOOLS_FALSE@	patches/boot/ant-javac.patch \\
-+@DISABLE_BOOTSTRAP_TOOLS_FALSE@	patches/boot/optional.patch
- 
- @LACKS_COM_SUN_MIRROR_TYPE_TYPEMIRROR_TRUE@am__append_16 = \\
- @LACKS_COM_SUN_MIRROR_TYPE_TYPEMIRROR_TRUE@	patches/boot/jaxws-langtools-dependency.patch
-EOF
+function fixJdkArchiveChecksum() {
+	local newChecksum=$(sha256sum "${SBO_PATCH_DIR}/jdk.tar.bz2" | awk '{print $1}')
 
-	cat << EOF | patch -d ${ICEDTEA} Makefile.am
---- Makefile.am.orig	2019-10-20 12:56:24.622492335 +0300
-+++ Makefile.am	2019-10-20 13:18:31.666402780 +0300
-@@ -453,7 +453,8 @@
- if !DISABLE_BOOTSTRAP_TOOLS
- ICEDTEA_BOOT_PATCHES += \\
- 	patches/boot/bootstrap-tools.patch \\
--	patches/boot/ant-javac.patch
-+	patches/boot/ant-javac.patch \\
-+	patches/boot/optional.patch
- endif
- 
- if LACKS_COM_SUN_MIRROR_TYPE_TYPEMIRROR
-EOF
-
-	(
-		cd ${ICEDTEA}
-		aclocal
-	)
+	sed -r -i "s/^(\s*JDK_SHA256SUM\s*=\s*).*$/\1${newChecksum}/" Makefile
 }
 
+PRGNAM=openjdk7
+VERSION=${VERSION:-7u271}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
 DVER=1.7.0_$(printf $VERSION | cut -du -f2)
-ICEDTEA=icedtea-2.6.21
+ICEDTEA=icedtea-2.6.23
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -95,6 +71,7 @@ fi
 CWD="$(pwd)"
 TMP=${TMP:-/tmp/SBo}
 BUILD_DIR=$TMP/$PRGNAM
+SBO_PATCH_DIR="${BUILD_DIR}/jdk-archive-patch"
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
@@ -112,12 +89,12 @@ set -e
 
 rm -rf $BUILD_DIR $PKG
 mkdir -p $TMP $BUILD_DIR $PKG $OUTPUT
+
+(createPatchedJdkArchive)
+
 cd $BUILD_DIR
 
 tar -xvf $CWD/${ICEDTEA}.tar.xz
-
-createSBoPatch
-activateSBoPatch
 
 mkdir icedtea-build
 cd icedtea-build
@@ -144,9 +121,11 @@ $(
     --with-corba-src-zip="$CWD/corba.tar.bz2" \
     --with-jaxp-src-zip="$CWD/jaxp.tar.bz2" \
     --with-jaxws-src-zip="$CWD/jaxws.tar.bz2" \
-    --with-jdk-src-zip="$CWD/jdk.tar.bz2" \
+    --with-jdk-src-zip="${SBO_PATCH_DIR}/jdk.tar.bz2" \
     --with-langtools-src-zip="$CWD/langtools.tar.bz2" \
     --with-hotspot-src-zip="$CWD/hotspot.tar.bz2"
+
+fixJdkArchiveChecksum
 
 JAVA_HOME=${BOOT_JAVA} PATH=${BOOT_JAVA}/bin:$PATH LOG=trace make
 
