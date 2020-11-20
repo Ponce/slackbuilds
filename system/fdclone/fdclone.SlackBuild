@@ -1,0 +1,122 @@
+#!/bin/sh
+
+# Slackware build script for fdclone
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# This build script owes a debt to the Debian fdclone build
+# script. Unlike the Debian build though, I install the binary & man
+# pages as "fdclone", not "fd", because SBo already has an "fd". I
+# also don't see the point of the stub fdsh man page.
+
+PRGNAM=fdclone
+SRCNAM=FD
+VERSION=${VERSION:-3.01j}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# Patches from Debian. Not going to apply the one that stops the
+# Makefile from stripping the binary, since that's what we want.
+patch -p1 < $CWD/01_previous_changes.patch
+patch -p1 < $CWD/30_makefilein_setting.patch
+
+# Set the default pager & editor to things that actually exist on
+# Slackware. The user's EDITOR and PAGER will override these, or they
+# can be set system-wide by the admin, in the config file.
+FDPAGER=${FDPAGER:-less}  ; FDPAGER=$( which $FDPAGER )
+FDEDITOR=${FDEDITOR:-vim} ; FDEDITOR=$( which $FDEDITOR )
+
+sed -i -e "s,/usr/bin/pager,$FDPAGER," \
+       -e "s,/usr/bin/editor,$FDEDITOR," \
+       fd.h
+
+make config
+make CFLAGS="$SLKCFLAGS" \
+     PREFIX=/usr \
+     CONFDIR=/etc/$PRGNAM
+
+# make install fails to create this:
+mkdir -p $PKG/usr/man/man1
+
+make install \
+     PREFIX=$PKG/usr \
+     DATADIR=$PKG/usr/share/$PRGNAM \
+     MANDIR=$PKG/usr/man/man1 \
+     EMANDIR=$PKG/usr/man/man1 \
+     JMANDIR=$PKG/usr/man/ja/man1 \
+     JCATDIR=$PKG/usr/man/ja/man1 \
+     DEFRC=$PKG/etc/$PRGNAM/fd2rc
+
+# Rename to avoid conflict with system/fd
+rename /fd /$PRGNAM \
+  $PKG/usr/bin/fd \
+  $PKG/usr/man/man1/fd.1 \
+  $PKG/usr/man/ja/man1/fd.1
+
+# De-hardlinkify
+rm -f $PKG/usr/bin/fdsh
+ln -s $PRGNAM $PKG/usr/bin/fdsh
+rm -f $PKG/usr/man/man1/fdsh.1 $PKG/usr/man/ja/man1/fdsh.1
+gzip -9 $PKG/usr/man/man1/$PRGNAM.1 $PKG/usr/man/ja/man1/$PRGNAM.1
+ln -s $PRGNAM.1.gz $PKG/usr/man/man1/fdsh.1.gz
+ln -s $PRGNAM.1.gz $PKG/usr/man/ja/man1/fdsh.1.gz
+
+# Don't install fd2rc as a .new config, since it sources
+# fd2rc.siteconfig, which can override anything in fd2rc,
+# and the comments at the top explain this clearly.
+mkdir -p $PKG/etc/$PRGNAM
+cat $CWD/fd2rc > $PKG/etc/$PRGNAM/fd2rc
+echo "# fd2rc.siteconfig - see fd2rc for options you can use here" > \
+  $PKG/etc/$PRGNAM/fd2rc.siteconfig.new
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a FAQ* HISTORY* LICENSES* README* TECHKNOW* $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
