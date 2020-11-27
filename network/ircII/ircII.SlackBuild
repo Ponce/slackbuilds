@@ -1,0 +1,132 @@
+#!/bin/sh
+
+# Slackware build script for ircII
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# I don't know why nobody's already done a SlackBuild for this.
+# Normally I prefer all-lowercase package names, but this just looks
+# *wrong* as "ircii".
+
+PRGNAM=ircII
+VERSION=${VERSION:-20190117_1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+SRCNAM=${PRGNAM,,}
+SRCVER=${VERSION%_*}
+DEBVER=${VERSION#*_}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+DEFSRV="${DEFSRV:-SSLIRC/chat.freenode.org:6697}"
+case "$DEFSRV" in
+  none|NONE) ;;
+  *:*) srvopt="--with-default-server=$DEFSRV" ;;
+  *) echo "$0: invalid DEFSRV, use host:port, SSLIRC/host:port, or 'none'" 1>&2
+     exit 1 ;;
+esac
+
+echo "=== DEFSRV='$DEFSRV', srvopt='$srvopt'"
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$SRCVER
+tar xvf $CWD/$SRCNAM-$SRCVER.tar.gz
+cd $SRCNAM-$SRCVER
+tar xvf $CWD/${SRCNAM}_$SRCVER-$DEBVER.debian.tar.xz
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# apply most of Debian's patches.
+rm -f debian/patches/0004-absolute-path*
+for i in $( cat debian/patches/series ); do
+  [ -e debian/patches/$i ] && patch -p1 < debian/patches/$i
+done
+
+# fix warnings caused by missing includes.
+sed -i -e '1i#include <curses.h>' \
+       -e '1i#include <term.h>' \
+       source/term.c
+
+# do not compile with termcap. there's no --disable-termcap or similar,
+# have to do surgery.
+sed -i -e '/AC_CHECK_LIB(termcap/s,termcap,ncurses,g' \
+       -e 's,termcap\.h ,,' \
+       configure.in
+autoreconf -ifv
+
+# is there a disadvantage to enabling emacs meta keys?
+CFLAGS="$SLKCFLAGS -Wl,-s" \
+CXXFLAGS="$SLKCFLAGS -Wl,-s" \
+./configure \
+  $srvopt \
+  --with-emacs-meta-keys \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --build=$ARCH-slackware-linux
+
+make
+
+# make install doesn't create this dir, and doesn't respect DESTDIR
+# for the man dir.
+mkdir -p $PKG/usr/man/man1
+make install DESTDIR=$PKG mandir=$PKG/usr/man/man1
+
+# package called ircII, so let's have an ircII executable.
+ln -s irc-$VERSION $PKG/usr/bin/$PRGNAM
+
+rm -f $PKG/usr/man/man1/irc.1
+gzip -9 $PKG/usr/man/man1/*.1
+ln -s ircII.1.gz $PKG/usr/man/man1/irc.1.gz
+
+# Debian includes some extra man pages
+for i in debian/*.1; do
+  gzip -9c < $i > $PKG/usr/man/man1/$( basename $i ).gz
+done
+
+rm -f doc/*.1 doc/*.spec*
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a ChangeLog NEWS README doc/* contrib $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
