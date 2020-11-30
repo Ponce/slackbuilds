@@ -26,7 +26,6 @@ preserve_perms() {
 preserve_perms etc/rc.d/rc.avahidaemon.new
 preserve_perms etc/rc.d/rc.avahidnsconfd.new
 preserve_perms etc/avahi/avahi-daemon.conf.new
-preserve_perms etc/dbus-1/system.d/avahi-dbus.conf.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
