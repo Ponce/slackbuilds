@@ -1,0 +1,144 @@
+Description: fixes possible segmentation faults of arpspoof, sshmitm, webmitm and 
+webspy if any non-resolving hostname is passed. Issue was introduced by 
+dsniff-2.4-libnet_11.patch; libnet_name_resolve() was replaced by libnet_name2addr4() 
+while there must be the structure libnet_t passed additionally. And if that structure is not initialized
+using libnet_init() and the passed name can't be resolved (like "192.168.2."), it
+causes a snprintf() to NULL and thus the segmentation fault. Note that macof isn't
+affected as no resolving was involved here ever.
+Author: Robert Scheck <robert@fedoraproject.org>
+Bug-RedHat: https://bugzilla.redhat.com/show_bug.cgi?id=1009879
+Origin: http://pkgs.fedoraproject.org/cgit/rpms/dsniff.git/tree/dsniff-2.4-libnet_name2addr4.patch
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+
+--- a/sshmitm.c
++++ b/sshmitm.c
+@@ -45,6 +45,8 @@
+ struct	 sockaddr_in csin, ssin;
+ int	 sig_pipe[2];
+ 
++static	 libnet_t *l;
++
+ static void
+ usage(void)
+ {
+@@ -364,6 +366,7 @@
+ 	u_long ip;
+ 	u_short lport, rport;
+ 	int c;
++	char libnet_ebuf[LIBNET_ERRBUF_SIZE];
+ 
+ 	lport = rport = 22;
+ 
+@@ -390,12 +393,15 @@
+ 	if (argc < 1)
+ 		usage();
+ 	
+-	if ((ip = libnet_name2addr4(NULL, argv[0], LIBNET_RESOLVE)) == -1)
+-		usage();
+-
+ 	if (argc == 2 && (rport = atoi(argv[1])) == 0)
+ 		usage();
+ 	
++	if ((l = libnet_init(LIBNET_LINK, NULL, libnet_ebuf)) == NULL)
++		errx(1, "%s", libnet_ebuf);
++	
++	if ((ip = libnet_name2addr4(l, argv[0], LIBNET_RESOLVE)) == -1)
++		usage();
++	
+ 	record_init(NULL);
+ 	
+ 	mitm_init(lport, ip, rport);
+--- a/webmitm.c
++++ b/webmitm.c
+@@ -47,6 +47,8 @@
+ int	 do_ssl, sig_pipe[2];
+ in_addr_t	static_host = 0;
+ 
++static	 libnet_t *l;
++
+ extern int decode_http(char *, int, char *, int);
+ 
+ static void
+@@ -242,7 +244,7 @@
+ 			word = buf_tok(&msg, "/", 1);
+ 			vhost = buf_strdup(word);
+ 		}
+-		ssin.sin_addr.s_addr = libnet_name2addr4(NULL, vhost, 1);
++		ssin.sin_addr.s_addr = libnet_name2addr4(l, vhost, LIBNET_RESOLVE);
+ 		free(vhost);
+ 		
+ 		if (ssin.sin_addr.s_addr == ntohl(INADDR_LOOPBACK) ||
+@@ -496,6 +498,7 @@
+ 	extern char *optarg;
+ 	extern int optind;
+ 	int c;
++	char libnet_ebuf[LIBNET_ERRBUF_SIZE];
+ 
+ 	while ((c = getopt(argc, argv, "dh?V")) != -1) {
+ 		switch (c) {
+@@ -509,8 +512,11 @@
+ 	argc -= optind;
+ 	argv += optind;
+ 
++	if ((l = libnet_init(LIBNET_LINK, NULL, libnet_ebuf)) == NULL)
++		errx(1, "%s", libnet_ebuf);
++	
+ 	if (argc == 1) {
+-		if ((static_host = libnet_name2addr4(NULL, argv[0], 1)) == -1)
++		if ((static_host = libnet_name2addr4(l, argv[0], LIBNET_RESOLVE)) == -1)
+ 			usage();
+ 	}
+ 	else if (argc != 0) usage();
+--- a/webspy.c
++++ b/webspy.c
+@@ -33,6 +33,7 @@
+ extern int mozilla_remote_commands (Display *, Window, char **);
+ char	*expected_mozilla_version = "4.7";
+ char	*progname = "webspy";
++static	libnet_t *l;
+ 
+ Display		*dpy;
+ char		 cmd[2048], *cmdtab[2];
+@@ -183,6 +184,7 @@
+ 	extern char *optarg;
+ 	extern int optind;
+ 	int c;
++	char libnet_ebuf[LIBNET_ERRBUF_SIZE];
+ 	
+ 	while ((c = getopt(argc, argv, "i:p:h?V")) != -1) {
+ 		switch (c) {
+@@ -205,7 +207,10 @@
+ 	cmdtab[0] = cmd;
+ 	cmdtab[1] = NULL;
+ 	
+-	if ((host = libnet_name2addr4(NULL, argv[0], 1)) == -1)
++	if ((l = libnet_init(LIBNET_LINK, NULL, libnet_ebuf)) == NULL)
++		errx(1, "%s", libnet_ebuf);
++	
++	if ((host = libnet_name2addr4(l, argv[0], LIBNET_RESOLVE)) == -1)
+ 		errx(1, "unknown host");
+ 	
+ 	if ((dpy = XOpenDisplay(NULL)) == NULL)
+--- a/arpspoof.c
++++ b/arpspoof.c
+@@ -208,6 +208,10 @@
+ 
+ 	/* allocate enough memory for target list */
+ 	targets = calloc( argc+1, sizeof(struct host) );
++    
++	if ((l = libnet_init(LIBNET_LINK, NULL, libnet_ebuf)) == NULL)
++		errx(1, "%s", libnet_ebuf);
++
+ 
+ 	while ((c = getopt(argc, argv, "ri:t:c:h?V")) != -1) {
+ 		switch (c) {
+@@ -265,6 +269,8 @@
+ 	if ((spoof.ip = libnet_name2addr4(l, argv[0], LIBNET_RESOLVE)) == -1)
+ 		usage();
+ 	
++	libnet_destroy(l);
++	
+ 	if (intf == NULL && (intf = pcap_lookupdev(pcap_ebuf)) == NULL)
+ 		errx(1, "%s", pcap_ebuf);
+ 	

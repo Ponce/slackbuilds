@@ -1,0 +1,279 @@
+From c6b72be421ded17e0c156070ba6e90aa6c335ed6 Mon Sep 17 00:00:00 2001
+From: hjl <hjl@138bc75d-0d04-0410-961f-82ee72b054a4>
+Date: Tue, 16 Jan 2018 10:59:42 +0000
+Subject: [PATCH 5/9] x86: Add -mindirect-branch= (documentation)
+
+Add -mindirect-branch= option to convert indirect call and jump to call
+and return thunks.  The default is 'keep', which keeps indirect call and
+jump unmodified.  'thunk' converts indirect call and jump to call and
+return thunk.  'thunk-inline' converts indirect call and jump to inlined
+call and return thunk.  'thunk-extern' converts indirect call and jump to
+external call and return thunk provided in a separate object file.  You
+can control this behavior for a specific function by using the function
+attribute indirect_branch.
+
+2 kinds of thunks are geneated.  Memory thunk where the function address
+is at the top of the stack:
+
+__x86_indirect_thunk:
+	call L2
+L1:
+	pause
+	lfence
+	jmp L1
+L2:
+	lea 8(%rsp), %rsp|lea 4(%esp), %esp
+	ret
+
+Indirect jmp via memory, "jmp mem", is converted to
+
+	push memory
+	jmp __x86_indirect_thunk
+
+Indirect call via memory, "call mem", is converted to
+
+	jmp L2
+L1:
+	push [mem]
+	jmp __x86_indirect_thunk
+L2:
+	call L1
+
+Register thunk where the function address is in a register, reg:
+
+__x86_indirect_thunk_reg:
+	call	L2
+L1:
+	pause
+	lfence
+	jmp	L1
+L2:
+	movq	%reg, (%rsp)|movl    %reg, (%esp)
+	ret
+
+where reg is one of (r|e)ax, (r|e)dx, (r|e)cx, (r|e)bx, (r|e)si, (r|e)di,
+(r|e)bp, r8, r9, r10, r11, r12, r13, r14 and r15.
+
+Indirect jmp via register, "jmp reg", is converted to
+
+	jmp __x86_indirect_thunk_reg
+
+Indirect call via register, "call reg", is converted to
+
+	call __x86_indirect_thunk_reg
+
+gcc/
+
+	Backport from mainline
+	* config/i386/i386-opts.h (indirect_branch): New.
+	* config/i386/i386-protos.h (ix86_output_indirect_jmp): Likewise.
+	* config/i386/i386.c (ix86_using_red_zone): Disallow red-zone
+	with local indirect jump when converting indirect call and jump.
+	(ix86_set_indirect_branch_type): New.
+	(ix86_set_current_function): Call ix86_set_indirect_branch_type.
+	(indirectlabelno): New.
+	(indirect_thunk_needed): Likewise.
+	(indirect_thunk_bnd_needed): Likewise.
+	(indirect_thunks_used): Likewise.
+	(indirect_thunks_bnd_used): Likewise.
+	(INDIRECT_LABEL): Likewise.
+	(indirect_thunk_name): Likewise.
+	(output_indirect_thunk): Likewise.
+	(output_indirect_thunk_function): Likewise.
+	(ix86_output_indirect_branch_via_reg): Likewise.
+	(ix86_output_indirect_branch_via_push): Likewise.
+	(ix86_output_indirect_branch): Likewise.
+	(ix86_output_indirect_jmp): Likewise.
+	(ix86_code_end): Call output_indirect_thunk_function if needed.
+	(ix86_output_call_insn): Call ix86_output_indirect_branch if
+	needed.
+	(ix86_handle_fndecl_attribute): Handle indirect_branch.
+	(ix86_attribute_table): Add indirect_branch.
+	* config/i386/i386.h (machine_function): Add indirect_branch_type
+	and has_local_indirect_jump.
+	* config/i386/i386.md (indirect_jump): Set has_local_indirect_jump
+	to true.
+	(tablejump): Likewise.
+	(*indirect_jump): Use ix86_output_indirect_jmp.
+	(*tablejump_1): Likewise.
+	(simple_return_indirect_internal): Likewise.
+	* config/i386/i386.opt (mindirect-branch=): New option.
+	(indirect_branch): New.
+	(keep): Likewise.
+	(thunk): Likewise.
+	(thunk-inline): Likewise.
+	(thunk-extern): Likewise.
+	* doc/extend.texi: Document indirect_branch function attribute.
+	* doc/invoke.texi: Document -mindirect-branch= option.
+
+gcc/testsuite/
+
+	Backport from mainline
+	* gcc.target/i386/indirect-thunk-1.c: New test.
+	* gcc.target/i386/indirect-thunk-2.c: Likewise.
+	* gcc.target/i386/indirect-thunk-3.c: Likewise.
+	* gcc.target/i386/indirect-thunk-4.c: Likewise.
+	* gcc.target/i386/indirect-thunk-5.c: Likewise.
+	* gcc.target/i386/indirect-thunk-6.c: Likewise.
+	* gcc.target/i386/indirect-thunk-7.c: Likewise.
+	* gcc.target/i386/indirect-thunk-attr-1.c: Likewise.
+	* gcc.target/i386/indirect-thunk-attr-2.c: Likewise.
+	* gcc.target/i386/indirect-thunk-attr-3.c: Likewise.
+	* gcc.target/i386/indirect-thunk-attr-4.c: Likewise.
+	* gcc.target/i386/indirect-thunk-attr-5.c: Likewise.
+	* gcc.target/i386/indirect-thunk-attr-6.c: Likewise.
+	* gcc.target/i386/indirect-thunk-attr-7.c: Likewise.
+	* gcc.target/i386/indirect-thunk-attr-8.c: Likewise.
+	* gcc.target/i386/indirect-thunk-bnd-1.c: Likewise.
+	* gcc.target/i386/indirect-thunk-bnd-2.c: Likewise.
+	* gcc.target/i386/indirect-thunk-bnd-3.c: Likewise.
+	* gcc.target/i386/indirect-thunk-bnd-4.c: Likewise.
+	* gcc.target/i386/indirect-thunk-extern-1.c: Likewise.
+	* gcc.target/i386/indirect-thunk-extern-2.c: Likewise.
+	* gcc.target/i386/indirect-thunk-extern-3.c: Likewise.
+	* gcc.target/i386/indirect-thunk-extern-4.c: Likewise.
+	* gcc.target/i386/indirect-thunk-extern-5.c: Likewise.
+	* gcc.target/i386/indirect-thunk-extern-6.c: Likewise.
+	* gcc.target/i386/indirect-thunk-extern-7.c: Likewise.
+	* gcc.target/i386/indirect-thunk-inline-1.c: Likewise.
+	* gcc.target/i386/indirect-thunk-inline-2.c: Likewise.
+	* gcc.target/i386/indirect-thunk-inline-3.c: Likewise.
+	* gcc.target/i386/indirect-thunk-inline-4.c: Likewise.
+	* gcc.target/i386/indirect-thunk-inline-5.c: Likewise.
+	* gcc.target/i386/indirect-thunk-inline-6.c: Likewise.
+	* gcc.target/i386/indirect-thunk-inline-7.c: Likewise.
+
+
+git-svn-id: svn+ssh://gcc.gnu.org/svn/gcc/branches/gcc-7-branch@256732 138bc75d-0d04-0410-961f-82ee72b054a4
+
+[UBUNTU NOTES: Updated for gcc-5.4 to include defines for
+ FIRST_INT_REG, LAST_INT_REG, and LEGACY_INT_REGNO_P as defined in
+ https://gcc.gnu.org/viewcvs/gcc?view=revision&revision=222269.
+ Dropped indirect-thunk-5.c, indirect-thunk-6.c,
+ indirect-thunk-bnd-3.c, indirect-thunk-bnd-4.c,
+ indirect-thunk-extern-5.c, indirect-thunk-extern-6.c,
+ indirect-thunk-inline-5.c, and indirect-thunk-inline-6.c tests due
+ to gcc 5.4 and earlier not supporting the -fno-plt option.
+    --sbeattie, tyhicks]
+---
+ src/gcc/config/i386/i386-opts.h                             |   13 
+ src/gcc/config/i386/i386-protos.h                           |    1 
+ src/gcc/config/i386/i386.c                                  |  621 +++++++++++-
+ src/gcc/config/i386/i386.h                                  |   12 
+ src/gcc/config/i386/i386.md                                 |   26 
+ src/gcc/config/i386/i386.opt                                |   20 
+ src/gcc/doc/extend.texi                                     |   10 
+ src/gcc/doc/invoke.texi                                     |   14 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-1.c        |   20 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-2.c        |   20 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-3.c        |   21 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-4.c        |   21 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-7.c        |   44 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-attr-1.c   |   23 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-attr-2.c   |   21 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-attr-3.c   |   23 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-attr-4.c   |   22 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-attr-5.c   |   22 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-attr-6.c   |   21 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-attr-7.c   |   44 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-attr-8.c   |   42 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-bnd-1.c    |   20 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-bnd-2.c    |   21 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-extern-1.c |   19 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-extern-2.c |   19 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-extern-3.c |   20 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-extern-4.c |   20 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-extern-7.c |   43 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-inline-1.c |   20 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-inline-2.c |   20 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-inline-3.c |   21 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-inline-4.c |   21 
+ src/gcc/testsuite/gcc.target/i386/indirect-thunk-inline-7.c |   44 
+ 33 files changed, 1334 insertions(+), 15 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-1.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-2.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-3.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-4.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-5.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-6.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-7.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-attr-1.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-attr-2.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-attr-3.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-attr-4.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-attr-5.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-attr-6.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-attr-7.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-attr-8.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-bnd-1.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-bnd-2.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-bnd-3.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-bnd-4.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-extern-1.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-extern-2.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-extern-3.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-extern-4.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-extern-5.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-extern-6.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-extern-7.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-inline-1.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-inline-2.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-inline-3.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-inline-4.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-inline-5.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-inline-6.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/indirect-thunk-inline-7.c
+
+Index: b/src/gcc/doc/extend.texi
+===================================================================
+--- a/src/gcc/doc/extend.texi
++++ b/src/gcc/doc/extend.texi
+@@ -4119,6 +4119,16 @@ Specify which floating-point unit to use
+ @code{target("fpmath=sse,387")} option must be specified as
+ @code{target("fpmath=sse+387")} because the comma would separate
+ different options.
++
++@item indirect_branch("@var{choice}")
++@cindex @code{indirect_branch} function attribute, x86
++On x86 targets, the @code{indirect_branch} attribute causes the compiler
++to convert indirect call and jump with @var{choice}.  @samp{keep}
++keeps indirect call and jump unmodified.  @samp{thunk} converts indirect
++call and jump to call and return thunk.  @samp{thunk-inline} converts
++indirect call and jump to inlined call and return thunk.
++@samp{thunk-extern} converts indirect call and jump to external call
++and return thunk provided in a separate object file.
+ @end table
+ 
+ On the PowerPC, the following options are allowed:
+Index: b/src/gcc/doc/invoke.texi
+===================================================================
+--- a/src/gcc/doc/invoke.texi
++++ b/src/gcc/doc/invoke.texi
+@@ -1090,7 +1090,8 @@ See RS/6000 and PowerPC Options.
+ -m32 -m64 -mx32 -m16 -mlarge-data-threshold=@var{num} @gol
+ -msse2avx -mfentry -mrecord-mcount -mnop-mcount -m8bit-idiv @gol
+ -mavx256-split-unaligned-load -mavx256-split-unaligned-store @gol
+--malign-data=@var{type} -mstack-protector-guard=@var{guard}}
++-malign-data=@var{type} -mstack-protector-guard=@var{guard} @gol
++-mindirect-branch=@var{choice}}
+ 
+ @emph{x86 Windows Options}
+ @gccoptlist{-mconsole -mcygwin -mno-cygwin -mdll @gol
+@@ -24017,6 +24018,17 @@ The default value of this option is enab
+ of the option is @option{-fno-sync-libcalls}.  This option is used in
+ the implementation of the @file{libatomic} runtime library.
+ 
++@item -mindirect-branch=@var{choice}
++@opindex -mindirect-branch
++Convert indirect call and jump with @var{choice}.  The default is
++@samp{keep}, which keeps indirect call and jump unmodified.
++@samp{thunk} converts indirect call and jump to call and return thunk.
++@samp{thunk-inline} converts indirect call and jump to inlined call
++and return thunk.  @samp{thunk-extern} converts indirect call and jump
++to external call and return thunk provided in a separate object file.
++You can control this behavior for a specific function by using the
++function attribute @code{indirect_branch}.  @xref{Function Attributes}.
++
+ @end table
+ 
+ @c man end
