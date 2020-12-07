@@ -8,11 +8,16 @@
 
 # VERSION taken from the datestamp of the tarball.
 
+# 20201206 bkw: BUILD=3, added OTB font since -current's pango wants it.
+#               Also add PCF (disabled by default). Based on a patch from
+#               Tomasz Bywalec. Update README. Have slack-desc list the
+#               font types included in the package.
+
 # 20191224 bkw: BUILD=2, xset fp rehash in doinst.sh.
 
 PRGNAM=univga-font
 VERSION=${VERSION:-20021031}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
 
 ARCH=noarch
@@ -25,6 +30,7 @@ OUTPUT=${OUTPUT:-/tmp}
 set -e
 
 TARNAME=uni-vga
+FNAME=u_vga16
 DIRNAME=${TARNAME/-/_}
 
 rm -rf $PKG
@@ -37,28 +43,58 @@ chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
+# Defaults:
+PSF="${PSF:-yes}"
+BDF="${BDF:-yes}"
+OTB="${OTB:-yes}"
+PCF="${PCF:-no}"
+
 # modern perl needs a slight change to the bdf2psf.pl script, and modern
 # psfaddtable has different options than whatever this was written for.
 patch -p1 < $CWD/buildfix.diff
 
 # The console fonts. They're very similar to the ones shipped with the kbd
 # package, but not identical.
-make allfonts
-mkdir -p $PKG/usr/share/kbd/consolefonts/
-for i in *.psf; do
-  gzip -9c < $i > $PKG/usr/share/kbd/consolefonts/${i}u.gz
-done
+if [ "$PSF" = "yes" ]; then
+  make allfonts
+  mkdir -p $PKG/usr/share/kbd/consolefonts/
+  for i in *.psf; do
+    gzip -9c < $i > $PKG/usr/share/kbd/consolefonts/${i}u.gz
+  done
+  ok=yes
+fi
 
 # The X font. Use with xterm or such, very nice.
-mkdir -p $PKG/usr/share/fonts/misc
-gzip -9c < u_vga16.bdf > $PKG/usr/share/fonts/misc/u_vga16.bdf.gz
+if [ "$BDF" = "yes" ]; then
+  mkdir -p $PKG/usr/share/fonts/misc
+  gzip -9c < $FNAME.bdf > $PKG/usr/share/fonts/misc/$FNAME.bdf.gz
+  ok=yes
+fi
 
-# thought about using PCF instead, it's a trade-off: the compiled PCF is
-# bigger than the BDF, and after gzipping both, it's still bigger. The
-# BDF supposedly takes longer to load when first accessed, but I doubt
-# anyone's got a slow enough system to notice.
+# If you *really* want the PCF version, you can have it via PCF=yes.
+# It's a trade-off: the compiled PCF is bigger than the BDF, and after
+# gzipping both, it's still bigger. The BDF supposedly takes longer
+# to load when first accessed, but I doubt anyone's got a slow enough
+# system to notice.
+if [ "$PCF" = "yes" ]; then
+  mkdir -p $PKG/usr/share/fonts/misc
+  bdftopcf -t $FNAME.bdf | gzip -9c > $PKG/usr/share/fonts/misc/$FNAME.pcf.gz
+  ok=yes
+fi
 
-#bdftopcf -t u_vga16.bdf | gzip -9c > $PKG/usr/share/fonts/misc/u_vga16.pcf.gz
+# OpenType Bitmap (OTB) fonts, compatible with recent versions of Pango.
+# Necessary for -current and eventually 15.0. Support added by Tomasz Bywalec.
+if [ "$OTB" = "yes" ]; then
+  mkdir -p $PKG/usr/share/fonts/misc
+  fonttosfnt -o "$PKG/usr/share/fonts/misc/$FNAME.otb" $FNAME.bdf
+  ok=yes
+fi
+
+if [ "$ok" != "yes" ]; then
+  echo "*** No fonts selected to be included in the package." 1>&2
+  echo "*** At least one of the PCF BDF PSF OTB environment variables must be 'yes'." 1>&2
+  exit 1
+fi
 
 # include the converter script, someone might find it useful.
 mkdir -p $PKG/usr/bin
@@ -69,7 +105,11 @@ cp -a *.lsm $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s,@PCF@,$PCF," \
+    -e "s,@BDF@,$BDF," \
+    -e "s,@PSF@,$PSF," \
+    -e "s,@OTB@,$OTB," \
+ $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
