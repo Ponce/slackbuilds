@@ -22,9 +22,37 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20201211 bkw: modified by SlackBuilds.org, to build FreeBASIC from source
+# instead of using prebuilt binary packages. There are various reasons for
+# wanting to do this:
+
+# - The prebuilt binaries were built on an OS where the terminfo fuctions
+#   from ncurses were split into a separate library (libtinfo). Using
+#   the binary package on Slackware 14.2 means creating a libtinfo
+#   symlink in /usr/lib64, which can cause problems later (e.g. if
+#   something else links with it, no harm done... until you removepkg
+#   FreeBASIC). Also, there are reports on the mailing list of fbc
+#   being unable to compile FreeBASIC code that uses curses, even with
+#   the symlink in place. Building it on our OS prevents this issue.
+#   The folks on the mailing list "solved" this problem by reverting to
+#   the FreeBASIC version from the 14.0 repo, which is what prompted
+#   me to fix this build...
+
+# - In the same vein, the prebuilt binaries have /usr/lib/freebasic hardcoded,
+#   so there had to be a symlink to lib64 on Slackware64.
+
+# - General paranoia about trusting prebuilt binaries.
+
+# - If we build it, we get FreeBASIC bindings for various libraries that
+#   are installed, e.g. mysql and libart_lgpl.
+
+# - I was hoping that compiling from source would fix a couple other
+#   problems. The sdl2-hello example segfaults with both the prebuilt
+#   and built-from-source fbc :(
+
 PRGNAM=FreeBASIC
 VERSION=${VERSION:-1.07.1}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -56,53 +84,61 @@ fi
 
 set -e
 
-if [ "$ARCH" = "x86_64" ]; then
-    SRCVER=$(echo $VERSION-linux-x86_64)
-else
-    SRCVER=$(echo $VERSION-linux-x86)
-fi
+SRCVER=$VERSION-source-bootstrap
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$SRCVER
-tar xvf $CWD/$PRGNAM-$SRCVER.tar.gz
+tar xvf $CWD/$PRGNAM-$SRCVER.tar.xz
 cd $PRGNAM-$SRCVER
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-mkdir -p $PKG/usr/bin $PKG/usr/include/${PRGNAM,,} $PKG/usr/lib/${PRGNAM,,} \
-    $PKG/usr/lib${LIBDIRSUFFIX}/${PRGNAM,,} $PKG/usr/man/man1
+[ "$LIBDIRSUFFIX" = "64" ] && extra="ENABLE_LIB64=1"
 
-install -D -m0755 bin/fbc $PKG/usr/bin/fbc
-cp -rf include/${PRGNAM,,}/* $PKG/usr/include/${PRGNAM,,}
-cp -rf lib/${PRGNAM,,}/* $PKG/usr/lib${LIBDIRSUFFIX}/${PRGNAM,,}
+# This is interesting: we have "precompiled sources", which means
+# FreeBASIC source that was 'compiled' to C source. So to bootstrap
+# fbc, we first build the precompiled C to make a minimal fbc binary,
+# then use that to build the real fbc from the FreeBASIC sources.
+make bootstrap
 
-# fix linking library for x86_64 arch
-if [ "$ARCH" = "x86_64" ]; then
-  ln -sf \
-  /usr/lib${LIBDIRSUFFIX}/${PRGNAM,,}/linux-x86_64 \
-  $PKG/usr/lib/${PRGNAM,,}
-fi
+FBC="$( pwd )/bootstrap/fbc -i $( pwd )/inc"
 
-# fix linking with libtinfo over libncurses
-ln -sf \
-  /usr/lib${LIBDIRSUFFIX}/libncurses.so.5 \
-  $PKG/usr/lib${LIBDIRSUFFIX}/libtinfo.so.5
-ln -sf \
-  /usr/lib${LIBDIRSUFFIX}/libtinfo.so.5 \
-  $PKG/usr/lib${LIBDIRSUFFIX}/libtinfo.so
+make \
+  V=1 \
+  FBC=$FBC \
+  prefix=/usr \
+  ENABLE_STRIPALL=1 \
+  $extra
 
-# gzip man page
-gzip -c doc/fbc.1 > $PKG/usr/man/man1/fbc.1.gz
+make \
+  V=1 \
+  prefix=/usr \
+  ENABLE_STRIPALL=1 \
+  DESTDIR=$PKG \
+  INSTALL_PROGRAM="install -s" \
+  $extra \
+  install
+
+mkdir -p $PKG/usr/man/man1
+gzip -9c < doc/fbc.1 > $PKG/usr/man/man1/fbc.1.gz
+
+# Build and install the manual.
+make -C doc/libfbdoc FBC="$FBC"
+make -C doc/fbdoc FBC="$FBC"
+make -C doc/manual html/DocToc.html txt/fbdoc.txt
+
+# zero length files...
+find examples/ -name deleteme.txt -exec rm {} +
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a doc/*.txt $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a doc/*.txt doc/manual/txt/ doc/manual/html/ examples/ \
+      $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+ln -s DocToc.html $PKG/usr/doc/$PRGNAM-$VERSION/html/index.html
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
