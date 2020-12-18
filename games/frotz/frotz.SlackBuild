@@ -2,16 +2,29 @@
 #
 # Slackware build script for frotz
 
-# Written by Beej Jorgensen <beej@beej.us>
+# Originally written for Slackware 12.2 by Beej Jorgensen <email
+# removed>, heavily modified by B. Watson <yalhcru@gmail.com> since
+# then.
 
-# Modified by B. Watson <yalhcru@gmail.com>
-# - updated for Slackware 14 and frotz 2.43d
-# - include dumb terminal frotz in build
+# Original had no license. This modified version is released under the
+# WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-# 20150904 bkw: updated for frotz 2.44
+# 20201212 bkw: too many changes, can't build older versions.
+# - updated for v2.52.
+# - new homepage.
+# - include sfrotz if sdl2 and SDL2_mixer are installed.
+# - fix man page typos.
+# - patch to prevent sfrotz crashes with long pathnames.
+# - add desktop stuff.
+
+# 20150904 bkw: updated for frotz 2.44.
+
+# 20121216 bkw:
+# - updated for Slackware 14 and frotz 2.43d.
+# - include dumb terminal frotz in build.
 
 PRGNAM=frotz
-VERSION=${VERSION:-2.44}
+VERSION=${VERSION:-2.52}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -45,37 +58,91 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.?z*
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-make OPTS="$SLKCFLAGS" PREFIX=/usr CONFIG_DIR=/etc
-strip $PRGNAM
-make PREFIX=$PKG/usr CONFIG_DIR=/etc install
+# Fix typos:
+sed -i "s/\\(Unlike it\\)'s/\1s/" doc/dfrotz.6
+sed -i 's,forground,foreground,'  doc/frotz.6
+sed -i -e 's,invocatio$,&n.,' \
+       -e 's,intead,instead,' \
+       -e 's,chunck,chunk,' \
+          doc/sfrotz.6
 
-# include dumb terminal version (it's small and maybe useful).
-sed -i 's/getline/dumb_getline/g' src/dumb/dumb_input.c
-make OPTS="$SLKCFLAGS" PREFIX=/usr CONFIG_DIR=/etc dfrotz
-install -s -m0755 dfrotz $PKG/usr/bin
-cat doc/dfrotz.6 > $PKG/usr/man/man6/dfrotz.6
+# Document location of config file:
+sed -i 's,frotz\.conf,/etc/&,' doc/$PRGNAM.6
 
-gzip $PKG/usr/man/man?/*.?
+# sfrotz aborts with a "malloc(): memory corruption" error when given
+# a long pathname on the command line. Example:
+
+# $ sfrotz "/export/home/urchlay/interactive_fiction/infocom_collection/The Hitchhikers Guide To The Galaxy (1985)/The Hitchhiker's Guide To The Galaxy R31-871119.z5"
+
+# With a somewhat shorter pathname, the program might not abort, but
+# it will end up with gibberish at the end of f_setup.script_name,
+# which would prevent it from auto-loading scripts (if present).
+
+# I don't fully understand why, but the new_basename() and
+# new_dirname() fuctions in sf_util.c are the culprits. They look OK
+# to me, but getting rid of the calls to free() causes the aborts to
+# go away. Since each function gets called only once (at startup),
+# this doesn't constitute a memory leak worth worrying about.
+
+patch -p1 < $CWD/sfrotz.memcorrupt.diff
+
+run_make() {
+  make \
+    PREFIX=/usr \
+    SYSCONFDIR=/etc \
+    MANDIR=/usr/man \
+    MAN_PREFIX=/usr \
+    BINDIR=/usr/games \
+    DESTDIR=$PKG \
+    $1
+}
+
+# No autodetection for SDL2, help it out.
+pkg-config --exists sdl2 SDL2_mixer && extra="clean sdl install_sdl"
+
+sed -i "s,-O3.*,$SLKCFLAGS," Makefile
+for target in $PRGNAM install clean dumb install_dumb $extra; do
+  run_make $target
+done
+
+strip $PKG/usr/games/*
+gzip -9 $PKG/usr/man/man?/*.*
+
+# desktop files by SlackBuild author. The icons came from WinFrotz. They're
+# only available in 32x32 size, sorry.
+mkdir -p $PKG/usr/share/applications \
+         $PKG/usr/share/pixmaps \
+         $PKG/usr/share/icons/hicolor/32x32/apps
+install -m0644 -oroot -groot $CWD/*.desktop $PKG/usr/share/applications
+cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+ln -s ../../../../pixmaps/$PRGNAM.png \
+      $PKG/usr/share/icons/hicolor/32x32/apps/$PRGNAM.png
+mkdir -p $PKG/usr/share/icons/hicolor/32x32/mimetypes
+cat $CWD/frotz-infocom.png > \
+    $PKG/usr/share/icons/hicolor/32x32/mimetypes/frotz-infocom.png
+
+# MIME stuff for desktops. Causes KDE and XFCE to display story
+# files with an Infocom icon, and they double-click open with either
+# terminal or SDL frotz.
+mkdir -p $PKG/usr/share/mime/packages
+cat $CWD/$PRGNAM.xml > $PKG/usr/share/mime/packages/$PRGNAM.xml
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  AUTHORS BUGS COPYING ChangeLog DUMB HOW_TO_PLAY INSTALL \
-  PACKAGING PORTING README README.1st SPEECH TODO \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a doc/frotz.conf-{big,small} $PKG/usr/doc/$PRGNAM-$VERSION
+rm -f README.1st # don't need this in the package.
+cp -a AUTHORS CO* ChangeLog DUMB HOW_TO_PLAY README* TODO *.lsm \
+      doc/$PRGNAM.conf* doc/$PRGNAM.txt \
+      $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
