@@ -22,6 +22,9 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20201224 bkw: BUILD=3, fixed, for real this time. I think. BUILD=2
+# version worked only if fbc was already installed :(
+
 # 20201211 bkw: modified by SlackBuilds.org, to build FreeBASIC from source
 # instead of using prebuilt binary packages. There are various reasons for
 # wanting to do this:
@@ -52,7 +55,7 @@
 
 PRGNAM=FreeBASIC
 VERSION=${VERSION:-1.07.1}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -104,31 +107,38 @@ find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
 # then use that to build the real fbc from the FreeBASIC sources.
 make bootstrap
 
-FBC="$( pwd )/bootstrap/fbc -i $( pwd )/inc"
+FBC="$( pwd )/bootstrap/fbc"
+FBFLAGS="-i $( pwd )/inc"
 
-make \
-  V=1 \
-  FBC=$FBC \
-  prefix=/usr \
-  ENABLE_STRIPALL=1 \
-  $extra
+# fbdoc needs its own FBFLAGS. Loosely based on a patch from ponce.
+sed -i -e 's,\<FBFLAGS\>,XFBFLAGS,g' \
+       -e 's,\$(XFBFLAGS),$(FBFLAGS) &,' \
+    doc/fbdoc/makefile
 
-make \
-  V=1 \
-  prefix=/usr \
-  ENABLE_STRIPALL=1 \
-  DESTDIR=$PKG \
-  INSTALL_PROGRAM="install -s" \
-  $extra \
-  install
+# multiple make commands, with mostly the same args
+run_make() {
+  make \
+    V=1 \
+    FBC="$FBC" \
+    FBFLAGS="$FBFLAGS" \
+    prefix=/usr \
+    ENABLE_STRIPALL=1 \
+    INSTALL_PROGRAM="install -s" \
+    DESTDIR=$PKG \
+    $extra \
+    "$@"
+}
+
+run_make
+run_make install
+
+# Build and install the manual.
+run_make -C doc/libfbdoc
+run_make -C doc/fbdoc
+run_make -C doc/manual html/DocToc.html txt/fbdoc.txt
 
 mkdir -p $PKG/usr/man/man1
 gzip -9c < doc/fbc.1 > $PKG/usr/man/man1/fbc.1.gz
-
-# Build and install the manual.
-make -C doc/libfbdoc FBC="$FBC"
-make -C doc/fbdoc FBC="$FBC"
-make -C doc/manual html/DocToc.html txt/fbdoc.txt
 
 # zero length files...
 find examples/ -name deleteme.txt -exec rm {} +
