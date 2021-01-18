@@ -11,7 +11,8 @@ too old, here's how to use this:
 
    mkdir -p build
    cd build
-     /opt/cmake-202x/bin/cmake \
+     export "PATH=/opt/cmake-202x/bin:$PATH"
+     cmake \
        -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
        -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
    ...etc, etc.
