@@ -22,8 +22,15 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20210202 bkw: Modified by SlackBuilds.org, autodetect the kernel
+# version and allow the user to override it. Avoids having this build
+# break every time Pat releases a new kernel in patches/.
+
 PRGNAM=perf
+
+# This VERSION is actually a dummy. Use KERNEL to set the version.
 VERSION=${VERSION:-4.4.227}
+
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -56,7 +63,44 @@ fi
 
 set -e
 
-SRCDIR="/usr/src/linux-$VERSION/tools/perf"
+die() {
+  echo "$0: fatal: $@" 1>&2
+  cat 1>&2 <<EOF
+
+Please make sure the correct version of the kernel source is
+installed, and/or set the KERNEL environment variable to one of:
+
+- The full path to the kernel source, e.g. KERNEL="/usr/src/linux-4.4.227"
+- Or, the kernel version e.g. KERNEL="4.4.227"
+EOF
+  exit 1
+}
+
+case "$KERNEL" in
+  # if unset, use the running kernel:
+  "") SRCDIR="/usr/src/linux-$( uname -r )" ;;
+  # if it's an absolute path, use it as-is:
+  /*) SRCDIR="$KERNEL" ;;
+  # otherwise assume it's a version number:
+  *)  SRCDIR="/usr/src/linux-$KERNEL" ;;
+esac
+
+[ -f "$SRCDIR/Makefile" ] || die "Can't find kernel source in \"$SRCDIR\""
+
+# get the kernel version number from the top-level Makefile. This
+# allows cases where the kernel source directory isn't named after the
+# version number. It also verifies that the Makefile actually exists
+# (because after upgrading/removing a kernel-source package, the
+# directory might still exist, with the .config and other generated
+# files, but no kernel source!)
+cd $SRCDIR
+VERSION="$( make kernelversion | tail -1 )"
+[ -z "$VERSION" ] && die "Can't get kernel version (source corrupted?)"
+echo "=== VERSION=\"$VERSION\""
+
+SRCDIR="$SRCDIR/tools/perf"
+[ -d "$SRCDIR" ] || die "Kernel source missing tools/perf directory"
+
 BUILDDIR=$TMP/$PRGNAM-$VERSION
 
 rm -rf $PKG $BUILDDIR
