@@ -23,7 +23,8 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=inkscape
-VERSION=${VERSION:-0.92.4}
+VERSION=${VERSION:-1.0.2}
+EXTRAVER=${EXTRAVER:-2021-01-15_e86c870879}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -59,9 +60,9 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
+rm -rf ${PRGNAM}-${VERSION}_${EXTRAVER}
 tar xvf $CWD/$PRGNAM-$VERSION.tar.?z*
-cd $PRGNAM-$VERSION
+cd ${PRGNAM}-${VERSION}_${EXTRAVER}
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -69,31 +70,49 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-./autogen.sh
+# strip invalid tag
+sed -i /url/d org.inkscape.Inkscape.appdata.xml.in
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS -std=c++11" \
-./configure \
-  --enable-strict-build=no \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --build=$ARCH-slackware-linux
+# https://bugs.launchpad.net/inkscape/+bug/314381
+# a couple of files have executable bits set,
+# despite not being executable
+find . -name '*.cpp' | xargs chmod -x
+find . -name '*.h' | xargs chmod -x
+# Fix end of line encodings
+dos2unix -k -q share/extensions/*.py
 
-make
-make install DESTDIR=$PKG
+# Fix man page location:
+sed -i CMakeScripts/Pod2man.cmake -e "s/SHARE_INSTALL/CMAKE_INSTALL_PREFIX/g"
+
+mkdir -p build
+cd build
+  # imagemagick >= 7.x is unsupported yet, so use GraphicsMagick
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_C_FLAGS_RELEASE:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS_RELEASE:STRING="$SLKCFLAGS" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=/usr/lib${LIBDIRSUFFIX} \
+    -DCMAKE_INSTALL_MANDIR=/usr/man \
+    -DCMAKE_INSTALL_SYSCONFDIR=/etc \
+    -DINKSCAPE_INSTALL_LIBDIR=/usr/lib${LIBDIRSUFFIX} \
+    -DBUILD_SHARED_LIBS=ON \
+    -DWITH_DBUS=ON \
+    -DWITH_GRAPHICS_MAGICK=ON \
+    -DWITH_IMAGE_MAGICK=OFF \
+    ..
+  make
+  make install DESTDIR=$PKG
+cd ..
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  AUTHORS COPYING* INSTALL NEWS README TRANSLATORS doc/* \
+  AUTHORS COPYING* README* TRANSLATORS LICENSES *.md doc/* \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 find $PKG/usr/doc -name "Makefile*" -exec rm {} \;
