@@ -1,0 +1,326 @@
+--- oiio-Release-2.0.13/src/libOpenImageIO/exif.cpp	2019-12-03 23:28:14.000000000 +0100
++++ oiio-Release-2.0.13/src/libOpenImageIO/exif.cpp	2021-02-02 02:54:55.000000000 +0100
+@@ -554,40 +528,44 @@
+ 
+ 
+ 
++// libtiff > 4.1.0 defines these in tiff.h. For older libtiff, let's define
++// them ourselves.
++#ifndef GPSTAG_VERSIONID
+ enum GPSTag {
+-    GPSTAG_VERSIONID         = 0,
+-    GPSTAG_LATITUDEREF       = 1,
+-    GPSTAG_LATITUDE          = 2,
+-    GPSTAG_LONGITUDEREF      = 3,
+-    GPSTAG_LONGITUDE         = 4,
+-    GPSTAG_ALTITUDEREF       = 5,
+-    GPSTAG_ALTITUDE          = 6,
+-    GPSTAG_TIMESTAMP         = 7,
+-    GPSTAG_SATELLITES        = 8,
+-    GPSTAG_STATUS            = 9,
+-    GPSTAG_MEASUREMODE       = 10,
+-    GPSTAG_DOP               = 11,
+-    GPSTAG_SPEEDREF          = 12,
+-    GPSTAG_SPEED             = 13,
+-    GPSTAG_TRACKREF          = 14,
+-    GPSTAG_TRACK             = 15,
+-    GPSTAG_IMGDIRECTIONREF   = 16,
+-    GPSTAG_IMGDIRECTION      = 17,
+-    GPSTAG_MAPDATUM          = 18,
+-    GPSTAG_DESTLATITUDEREF   = 19,
+-    GPSTAG_DESTLATITUDE      = 20,
+-    GPSTAG_DESTLONGITUDEREF  = 21,
+-    GPSTAG_DESTLONGITUDE     = 22,
+-    GPSTAG_DESTBEARINGREF    = 23,
+-    GPSTAG_DESTBEARING       = 24,
+-    GPSTAG_DESTDISTANCEREF   = 25,
+-    GPSTAG_DESTDISTANCE      = 26,
+-    GPSTAG_PROCESSINGMETHOD  = 27,
+-    GPSTAG_AREAINFORMATION   = 28,
+-    GPSTAG_DATESTAMP         = 29,
+-    GPSTAG_DIFFERENTIAL      = 30,
+-    GPSTAG_HPOSITIONINGERROR = 31
++    GPSTAG_VERSIONID            = 0,
++    GPSTAG_LATITUDEREF          = 1,
++    GPSTAG_LATITUDE             = 2,
++    GPSTAG_LONGITUDEREF         = 3,
++    GPSTAG_LONGITUDE            = 4,
++    GPSTAG_ALTITUDEREF          = 5,
++    GPSTAG_ALTITUDE             = 6,
++    GPSTAG_TIMESTAMP            = 7,
++    GPSTAG_SATELLITES           = 8,
++    GPSTAG_STATUS               = 9,
++    GPSTAG_MEASUREMODE          = 10,
++    GPSTAG_DOP                  = 11,
++    GPSTAG_SPEEDREF             = 12,
++    GPSTAG_SPEED                = 13,
++    GPSTAG_TRACKREF             = 14,
++    GPSTAG_TRACK                = 15,
++    GPSTAG_IMGDIRECTIONREF      = 16,
++    GPSTAG_IMGDIRECTION         = 17,
++    GPSTAG_MAPDATUM             = 18,
++    GPSTAG_DESTLATITUDEREF      = 19,
++    GPSTAG_DESTLATITUDE         = 20,
++    GPSTAG_DESTLONGITUDEREF     = 21,
++    GPSTAG_DESTLONGITUDE        = 22,
++    GPSTAG_DESTBEARINGREF       = 23,
++    GPSTAG_DESTBEARING          = 24,
++    GPSTAG_DESTDISTANCEREF      = 25,
++    GPSTAG_DESTDISTANCE         = 26,
++    GPSTAG_PROCESSINGMETHOD     = 27,
++    GPSTAG_AREAINFORMATION      = 28,
++    GPSTAG_DATESTAMP            = 29,
++    GPSTAG_DIFFERENTIAL         = 30,
++    GPSTAG_GPSHPOSITIONINGERROR = 31
+ };
++#endif
+ 
+ static const TagInfo gps_tag_table[] = {
+     // clang-format off
+@@ -622,7 +600,7 @@
+     { GPSTAG_AREAINFORMATION,	"GPS:AreaInformation",	TIFF_UNDEFINED, 1 },
+     { GPSTAG_DATESTAMP,		"GPS:DateStamp",	TIFF_ASCII, 0 },
+     { GPSTAG_DIFFERENTIAL,	"GPS:Differential",	TIFF_SHORT, 1 },
+-    { GPSTAG_HPOSITIONINGERROR,	"GPS:HPositioningError",TIFF_RATIONAL, 1 }
++    { GPSTAG_GPSHPOSITIONINGERROR,	"GPS:HPositioningError",TIFF_RATIONAL, 1 }
+     // clang-format on
+ };
+ 
+@@ -685,7 +663,7 @@
+     }
+     if (dirp->tdir_type == TIFF_RATIONAL) {
+         int n    = dirp->tdir_count;  // How many
+-        float* f = (float*)alloca(n * sizeof(float));
++        float* f = OIIO_ALLOCA(float, n);
+         for (int i = 0; i < n; ++i) {
+             unsigned int num, den;
+             num = ((const unsigned int*)dataptr)[2 * i + 0];
+@@ -704,7 +682,7 @@
+     }
+     if (dirp->tdir_type == TIFF_SRATIONAL) {
+         int n    = dirp->tdir_count;  // How many
+-        float* f = (float*)alloca(n * sizeof(float));
++        float* f = OIIO_ALLOCA(float, n);
+         for (int i = 0; i < n; ++i) {
+             int num, den;
+             num = ((const int*)dataptr)[2 * i + 0];
+@@ -799,7 +777,7 @@
+ 
+ #if DEBUG_EXIF_READ
+     std::cerr << "Read " << tagmap.mapname() << " ";
+-    print_dir_entry(tagmap, dir, buf, offset_adjustment);
++    print_dir_entry(std::cerr, tagmap, dir, buf, offset_adjustment);
+ #endif
+ 
+     if (dir.tdir_tag == TIFFTAG_EXIFIFD || dir.tdir_tag == TIFFTAG_GPSIFD) {
+@@ -808,7 +786,7 @@
+         unsigned int offset = dirp->tdir_offset;  // int stored in offset itself
+         if (swab)
+             swap_endian(&offset);
+-        if (offset >= buf.size()) {
++        if (offset >= size_t(buf.size())) {
+ #if DEBUG_EXIF_READ
+             unsigned int off2 = offset;
+             swap_endian(&off2);
+@@ -863,6 +841,16 @@
+         unsigned int offset = dirp->tdir_offset;  // int stored in offset itself
+         if (swab)
+             swap_endian(&offset);
++        if (offset >= size_t(buf.size())) {
++#if DEBUG_EXIF_READ
++            unsigned int off2 = offset;
++            swap_endian(&off2);
++            std::cerr << "Bad Exif block? ExifIFD has offset " << offset
++                      << " inexplicably greater than exif buffer length "
++                      << buf.size() << " (byte swapped = " << off2 << ")\n";
++#endif
++            return;
++        }
+         // Don't recurse if we've already visited this IFD
+         if (ifd_offsets_seen.find(offset) != ifd_offsets_seen.end())
+             return;
+ 
+@@ -964,49 +946,46 @@
+             const char* s = *(const char**)p.data();
+             int len       = strlen(s) + 1;
+             append_tiff_dir_entry(dirs, data, tag, type, len, s,
+-                                  offset_correction);
++                                  offset_correction, 0, endianreq);
+             return;
+         }
+         break;
+     case TIFF_RATIONAL:
+         if (element == TypeDesc::FLOAT) {
+-            unsigned int* rat = (unsigned int*)alloca(2 * count
+-                                                      * sizeof(unsigned int));
++            unsigned int* rat = OIIO_ALLOCA(unsigned int, 2 * count);
+             const float* f    = (const float*)p.data();
+             for (size_t i = 0; i < count; ++i)
+                 float_to_rational(f[i], rat[2 * i], rat[2 * i + 1]);
+             append_tiff_dir_entry(dirs, data, tag, type, count, rat,
+-                                  offset_correction);
++                                  offset_correction, 0, endianreq);
+             return;
+         }
+         break;
+     case TIFF_SRATIONAL:
+         if (element == TypeDesc::FLOAT) {
+-            int* rat       = (int*)alloca(2 * count * sizeof(int));
++            int* rat       = OIIO_ALLOCA(int, 2 * count);
+             const float* f = (const float*)p.data();
+             for (size_t i = 0; i < count; ++i)
+                 float_to_rational(f[i], rat[2 * i], rat[2 * i + 1]);
+             append_tiff_dir_entry(dirs, data, tag, type, count, rat,
+-                                  offset_correction);
++                                  offset_correction, 0, endianreq);
+             return;
+         }
+         break;
+     case TIFF_SHORT:
+-        if (append_tiff_dir_entry_integer<unsigned short>(p, dirs, data, tag,
+-                                                          type,
+-                                                          offset_correction))
++        if (append_tiff_dir_entry_integer<unsigned short>(
++                p, dirs, data, tag, type, offset_correction, endianreq))
+             return;
+         break;
+     case TIFF_LONG:
+         if (append_tiff_dir_entry_integer<unsigned int>(p, dirs, data, tag,
+-                                                        type,
+-                                                        offset_correction))
++                                                        type, offset_correction,
++                                                        endianreq))
+             return;
+         break;
+     case TIFF_BYTE:
+-        if (append_tiff_dir_entry_integer<unsigned char>(p, dirs, data, tag,
+-                                                         type,
+-                                                         offset_correction))
++        if (append_tiff_dir_entry_integer<unsigned char>(
++                p, dirs, data, tag, type, offset_correction, endianreq))
+             return;
+         break;
+     default: break;
+@@ -1091,14 +1097,24 @@
+ bool
+ decode_exif(cspan<uint8_t> exif, ImageSpec& spec)
+ {
++    // Sometimes an exif blob starts with "Exif". Skip it.
++    if (exif.size() >= 6 && exif[0] == 'E' && exif[1] == 'x' && exif[2] == 'i'
++        && exif[3] == 'f' && exif[4] == 0 && exif[5] == 0) {
++        exif = exif.subspan(6);
++    }
++
+ #if DEBUG_EXIF_READ
+     std::cerr << "Exif dump:\n";
+-    for (size_t i = 0; i < exif.size(); ++i) {
++    for (size_t i = 0; i < std::min(200L, exif.size()); ++i) {
++        if ((i % 16) == 0)
++            std::cerr << "[" << i << "] ";
+         if (exif[i] >= ' ')
+             std::cerr << (char)exif[i] << ' ';
+         std::cerr << "(" << (int)exif[i] << ") ";
++        if ((i % 16) == 15)
++            std::cerr << "\n";
+     }
+-    std::cerr << "\n";
++    std::cerr << std::endl;
+ #endif
+ 
+     // The first item should be a standard TIFF header.  Note that HERE,
+@@ -1176,8 +1192,10 @@
+ 
+ template<class T>
+ inline void
+-append(std::vector<char>& blob, const T& v)
++append(std::vector<char>& blob, T v, endian endianreq = endian::native)
+ {
++    if (endianreq != endian::native)
++        swap_endian(&v);
+     blob.insert(blob.end(), (const char*)&v, (const char*)&v + sizeof(T));
+ }
+ 
+@@ -1191,10 +1209,20 @@
+ 
+ 
+ 
++// DEPRECATED(2.1)
++void
++encode_exif(const ImageSpec& spec, std::vector<char>& blob)
++{
++    encode_exif(spec, blob, endian::native);
++}
++
++
++
+ // Construct an Exif data block from the ImageSpec, appending the Exif
+ // data as a big blob to the char vector.
+ void
+-encode_exif(const ImageSpec& spec, std::vector<char>& blob)
++encode_exif(const ImageSpec& spec, std::vector<char>& blob,
++            OIIO::endian endianreq)
+ {
+     const TagMap& exif_tagmap(exif_tagmap_ref());
+     const TagMap& gps_tagmap(gps_tagmap_ref());
+@@ -1243,9 +1271,9 @@
+     // Put a TIFF header
+     size_t tiffstart = blob.size();  // store initial size
+     TIFFHeader head;
+-    head.tiff_magic   = littleendian() ? 0x4949 : 0x4d4d;
++    head.tiff_magic   = (endianreq == endian::little) ? 0x4949 : 0x4d4d;
+     head.tiff_version = 42;
+-    // head.tiff_diroff -- fix below, once we know the sizes
++    // N.B. need to swap_endian head.tiff_diroff  below, once we know the sizes
+     append(blob, head);
+ 
+     // Accumulate separate tag directories for TIFF, Exif, GPS, and Interop.
+@@ -1259,7 +1287,8 @@
+         if (Strutil::starts_with(p.name(), "GPS:")) {
+             int tag = gps_tagmap.tag(p.name());
+             if (tag >= 0)
+-                encode_exif_entry(p, tag, gpsdirs, blob, gps_tagmap, tiffstart);
++                encode_exif_entry(p, tag, gpsdirs, blob, gps_tagmap, tiffstart,
++                                  endianreq);
+         } else {
+             // Not GPS
+             int tag = exif_tagmap.tag(p.name());
+@@ -1267,10 +1296,10 @@
+                 // This range of Exif tags go in the main TIFF directories,
+                 // not the Exif IFD. Whatever.
+                 encode_exif_entry(p, tag, tiffdirs, blob, exif_tagmap,
+-                                  tiffstart);
++                                  tiffstart, endianreq);
+             } else {
+                 encode_exif_entry(p, tag, exifdirs, blob, exif_tagmap,
+-                                  tiffstart);
++                                  tiffstart, endianreq);
+             }
+         }
+     }
+@@ -1293,12 +1322,14 @@
+     if (exifdirs.size() || makerdirs.size()) {
+         // Add some required Exif tags that wouldn't be in the spec
+         append_tiff_dir_entry(exifdirs, blob, EXIF_EXIFVERSION, TIFF_UNDEFINED,
+-                              4, "0230", tiffstart);
++                              4, "0230", tiffstart, 0, endianreq);
+         append_tiff_dir_entry(exifdirs, blob, EXIF_FLASHPIXVERSION,
+-                              TIFF_UNDEFINED, 4, "0100", tiffstart);
++                              TIFF_UNDEFINED, 4, "0100", tiffstart, 0,
++                              endianreq);
+         static char componentsconfig[] = { 1, 2, 3, 0 };
+         append_tiff_dir_entry(exifdirs, blob, EXIF_COMPONENTSCONFIGURATION,
+-                              TIFF_UNDEFINED, 4, componentsconfig, tiffstart);
++                              TIFF_UNDEFINED, 4, componentsconfig, tiffstart, 0,
++                              endianreq);
+     }
+ 
+     // If any GPS info was found, add a version tag to the GPS fields.
+@@ -1306,7 +1337,7 @@
+         // Add some required Exif tags that wouldn't be in the spec
+         static char ver[] = { 2, 2, 0, 0 };
+         append_tiff_dir_entry(gpsdirs, blob, GPSTAG_VERSIONID, TIFF_BYTE, 4,
+-                              &ver, tiffstart);
++                              &ver, tiffstart, 0, endianreq);
+     }
+ 
+     // Compute offsets:
