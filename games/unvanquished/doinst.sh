@@ -2,6 +2,8 @@ if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
 fi
 
+[ -x /sbin/sysctl ] && /sbin/sysctl -p etc/sysctl.d/90-mmap_min_addr.conf >/dev/null 2>&1
+
 config() {
   NEW="$1"
   OLD="$(dirname $NEW)/$(basename $NEW .new)"
