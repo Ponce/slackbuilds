@@ -7,6 +7,14 @@
 # Original had no license. Modified version released under the WTFPL. See
 # http://www.wtfpl.net/txt/copying/ for details.
 
+# 20210223 bkw: update for v2.6um. Upstream switched to cmake,
+# so we can't build previous versions any more. A note to myself:
+# SDL2 really is required. SDL2_(net|mixer|image) are technically
+# optional. But I'm keeping them listed as requirements because users
+# will get annoyed if they accidentally build a Doom engine that's
+# incapable of playing music, or joining multiplayer games, or using
+# HQ textures.
+
 # 20200416 bkw:
 # - take over maintenance
 # - i486 => i586
@@ -16,7 +24,7 @@
 # - game binaries in /usr/games
 
 PRGNAM=prboom-plus
-VERSION=${VERSION:-2.5.1.7um}
+VERSION=${VERSION:-2.6um}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -49,6 +57,17 @@ fi
 
 set -e
 
+# If modern cmake is missing, the error message from the old 14.2 cmake
+# doesn't really make it clear why it fails, so add this check to avoid
+# receiving "why won't this build?" emails. This stanza can go away after
+# 15.0 is released.
+if ! [ -x /opt/cmake-202x/bin/cmake ]; then
+  echo "*** Missing required dependency: cmame-202x. Aborting." 1>&2
+  exit 1
+fi
+
+export PATH=/opt/cmake-202x/bin:$PATH
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
@@ -60,28 +79,25 @@ find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 [ -d prboom2 ] && cd prboom2
-[ -x configure ] || sh bootstrap
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --bindir=/usr/games \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --build=$ARCH-slackware-linux \
-  --datarootdir=/usr \
-  --enable-gl
+# upstream hardcoded paths, can't override on cmake command line.
+sed -i '/install/s,/bin,/games,' src/CMakeLists.txt
+sed -i '/^set(CMAKE_INSTALL_DOCDIR/d' CMakeLists.txt
 
-make
-make install-strip DESTDIR=$PKG
-
-# Configure script insists on putting docs in /usr/share/doc, even when told not to.
-# Also, the version number in the doc dir is wrong...
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-mv $PKG/usr/share/doc/$PRGNAM-*/* $PKG/usr/doc/$PRGNAM-$VERSION
-rm -rf $PKG/usr/share/doc
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+    -DCMAKE_INSTALL_BINDIR=games \
+    -DCMAKE_INSTALL_MANDIR=/usr/man \
+    -DCMAKE_INSTALL_DOCDIR=/usr/doc/$PRGNAM-$VERSION \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install/strip DESTDIR=$PKG
+cd ..
 
 gzip $PKG/usr/man/man?/*.?
 
@@ -93,8 +109,7 @@ cp ICONS/$PRGNAM.desktop $PKG/usr/share/applications
 cp ICONS/$PRGNAM.svg $PKG/usr/share/icons/hicolor/scalable/apps
 cp ICONS/$PRGNAM.bash $PKG/usr/share/bash-completion/completions/$PRGNAM
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a TODO $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS COPYING README NEWS $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
