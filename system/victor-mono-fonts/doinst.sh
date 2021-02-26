@@ -1,10 +1,10 @@
 # Update the X font indexes:
 if [ -x /usr/bin/mkfontdir ]; then
-  ( cd /usr/share/fonts/TTF
+  ( cd usr/share/fonts/TTF
     /usr/bin/mkfontscale .
     /usr/bin/mkfontdir .
   )
-  ( cd /usr/share/fonts/OTF
+  ( cd usr/share/fonts/OTF
     /usr/bin/mkfontscale .
     /usr/bin/mkfontdir .
   )
