@@ -1,9 +1,9 @@
 #!/usr/bin/python
 
 __author__      = "Sander Granneman"
-__copyright__   = "Copyright 2019"
-__version__     = "1.4.6"
-__credits__     = ["Sander Granneman","Hywell Dunn Davies"]
+__copyright__   = "Copyright 2020"
+__version__     = "1.5.0"
+__credits__     = ["Sander Granneman","Grzegorz Kudla","Hywell Dunn Davies"]
 __maintainer__  = ["Sander Granneman","Rob van Nues via SlackBuilds.org"]
 __email__       = ["sgrannem@staffmail.ed.ac.uk", "sborg63@disroot.org"]
 __status__      = "Production"
@@ -55,9 +55,8 @@ setup(name='pyCRAC',
 					'pyCRAC/scripts/pyGTF2bedGraph.py',
 					'pyCRAC/scripts/pyFilterGTF.py',
 					'pyCRAC/scripts/pyNormalizeIntervalLengths.py',
-					'pyCRAC/kinetic_crac_pipeline/CRAC_pipeline_PE.py',
-					'pyCRAC/kinetic_crac_pipeline/CRAC_pipeline_PeakFinder.py',
-					'pyCRAC/kinetic_crac_pipeline/CRAC_pipeline_SE.py',
+					'pyCRAC/crac_pipelines/CRAC_pipeline_PE.py',
+					'pyCRAC/crac_pipelines/CRAC_pipeline_SE.py',
 				],
 	classifiers=[   'Development Status :: 5 - Production/Stable',
 					'Environment :: Console',
@@ -92,6 +91,3 @@ setup(name='pyCRAC',
 					'tests/genes.list'])
 				]
 			  )
-
-
-
