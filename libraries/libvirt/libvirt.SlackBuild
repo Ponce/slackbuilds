@@ -5,8 +5,8 @@
 # Maintained by Robby Workman <rworkman@slackbuilds.org>
 
 PRGNAM=libvirt
-VERSION=${VERSION:-4.5.0}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-7.0.0}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -51,37 +51,49 @@ find -L . \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 # we have sysctld files in /etc/sysctl.d
-sed -i "s|(prefix)/lib/sysctl|(sysconfdir)/sysctl|" src/Makefile.in
+sed -i "s|prefix / 'lib' / 'sysctl.d'|sysconfdir / 'sysctl.d'|" src/remote/meson.build
 
 patch -p1 < $CWD/use-virtgroup-in-polkit-rules.diff
 sed -i -e "s,@VIRTGROUP@,$VIRTGROUP,g" src/remote/libvirtd.rules
 
-CFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --bindir=/usr/sbin \
-  --sbindir=/usr/sbin \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --enable-static=no \
-  --enable-shared=yes \
-  --with-yajl \
-  --with-qemu-group=$VIRTGROUP \
-  --with-init-script=none
-
-make \
-  HTML_DIR=/usr/doc/$PRGNAM-$VERSION \
-  EXAMPLE_DIR=/usr/doc/$PRGNAM-$VERSION/examples
-make \
-  HTML_DIR=/usr/doc/$PRGNAM-$VERSION \
-  EXAMPLE_DIR=/usr/doc/$PRGNAM-$VERSION/examples \
-  install-strip DESTDIR=$PKG
+# Since 5.10: "configure: error: Build directory must be different from source directory"
+mkdir -p build
+cd build
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  meson .. \
+    --buildtype=release \
+    --infodir=/usr/info \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    -Dqemu_group=$VIRTGROUP \
+    -Dopenwsman=disabled \
+    -Dapparmor=disabled \
+    -Dselinux=disabled \
+    -Dwireshark_dissector=disabled \
+    -Ddriver_bhyve=disabled \
+    -Ddriver_hyperv=disabled \
+    -Ddriver_libxl=disabled \
+    -Ddriver_vz=disabled \
+    -Dsecdriver_apparmor=disabled \
+    -Dsecdriver_selinux=disabled \
+    -Dstorage_sheepdog=disabled \
+    -Dstorage_vstorage=disabled \
+    -Ddtrace=disabled \
+    -Dnumad=disabled \
+    -Dinit_script=none
+  ninja
+  DESTDIR=$PKG ninja install
+cd ..
 
 # we don't have augeas
 rm -fr $PKG/usr/share/augeas
+
+# this tree is recreated when starting the daemon
+rm -fR $PKG/var/run
 
 # add an rc.libvirt to start/stop/restart the daemon
 install -D -m 0755 $CWD/rc.libvirt $PKG/etc/rc.d/rc.libvirt.new
@@ -109,8 +121,10 @@ find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+mv $PKG/usr/share/doc/$PRGNAM/* $PKG/usr/doc/$PRGNAM-$VERSION/
+rm -fR $PKG/usr/share/doc
 cp -a \
-  AUTHORS ChangeLog COPYING* INSTALL README NEWS examples/polkit/* \
+  *.rst COPYING* examples/polkit/* \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
