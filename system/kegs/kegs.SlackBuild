@@ -6,6 +6,15 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20210225 bkw: update for v1.05. lots of changes:
+# - include the ROM image in the package (add it to DOWNLOAD)
+# - allow_sound_open_fail.diff no longer required
+# - rework allow_window_close.diff for v1.05
+# - .desktop file no longer needs Terminal=true
+# - upstream now supports pulseaudio, so build with it by default. add
+#   AUDIO variable to build the old OSS sound support or ALSA via aoss
+#   instead.
+
 # 20170305 bkw:
 # - fix building under installwatch, caused by a symlink in the
 #   tarball being listed before its target Why does this choke
@@ -19,8 +28,8 @@
 # - "Exec=aoss xkegs" in .desktop file
 
 PRGNAM=kegs
-VERSION=${VERSION:-0.91}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.05}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -48,45 +57,48 @@ fi
 
 set -e
 
+AUDIO=${AUDIO:-pulse}
+VARS=$CWD/makevars/vars.$AUDIO
+
+if [ ! -e $VARS ]; then
+  echo -n "*** AUDIO=\"$AUDIO\" not supported. Use one of: " 1>&2
+  list="$( ls -1 $CWD/makevars/vars.* | cut -d. -f2 )"
+  echo $list 1>&2
+  exit 1
+fi
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM.$VERSION
-tar xvf $CWD/$PRGNAM.$VERSION.tar.gz --exclude vars
+tar xvf $CWD/$PRGNAM.$VERSION.tar.gz \
+  --exclude '*/KEGSMAC.app' \
+  --exclude xkegs
 cd $PRGNAM.$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# device name for joysticks has changed for the 21st century.
+sed -i 's,/dev/js,/dev/input/js,' src/joystick_driver.c
 
 # xkegs refuses to close (close button greyed-out by window manager).
 # Small patch by SlackBuild author fixes this large annoyance (which is
 # extra-annoying because there's also no Quit option in the kegs menu).
 # I've sent this upstream, maybe it'll get integrated in future versions.
+# 20210225 bkw: Years later. Patch had to change for 1.05. The README
+# for kegs *actually says* you can close the main KEGS window to quit,
+# *and you can't fucking close it* without this patch. Apologies if I
+# sound a bit strident, but...
 patch -p1 < $CWD/allow_window_close.diff
-
-# Matthew Miller pointed out this patch to me. Since kegs uses OSS for
-# audio, and modern Slackware has ALSA OSS emulation disabled by default,
-# sound won't work unless xkegs is run via aoss, or OSS modules are
-# loaded. This patch allows the emulator to start with sound disabled if
-# it can't open the OSS audio device (instead of it being a fatal error).
-# I've also updated the README to explain how to get audio to work.
-patch -p1 < $CWD/allow_sound_open_fail.diff
 
 cd src
 rm -f vars
-ln -s vars_x86linux vars
-make CCOPTS="$SLKCFLAGS" x$PRGNAM to_pro partls
+cat $VARS > vars
+make SLKCFLAGS="$SLKCFLAGS" x$PRGNAM to_pro partls
 cd -
 
 # No install target, just stick it all where it goes.
-# The icon was converted from the Mac OSX icon with icns2png.
-# The .desktop has 'Terminal=true' because xkegs *really* wants
-# to be started from a terminal (the debugger uses stdio, and
-# is too easy to accidentally enter by center-clicking the window).
-
 mkdir -p \
   $PKG/usr/bin \
   $PKG/usr/libexec \
@@ -97,12 +109,26 @@ mkdir -p \
 install -s -m0755 x$PRGNAM $PKG/usr/libexec/
 install -s -m0755 src/to_pro src/partls $PKG/usr/bin/
 install -m0755 $CWD/x$PRGNAM.sh $PKG/usr/bin/x$PRGNAM
-install -m0644 $CWD/$PRGNAM.png $PKG/usr/share/pixmaps/
 install -m0644 $CWD/$PRGNAM.desktop $PKG/usr/share/applications/
+install -m0644 $CWD/config.$PRGNAM.default $PKG/usr/share/$PRGNAM
+
+# The icons were converted from the Mac OSX icon with icns2png.
+for i in 16 32 48 128; do
+  idir=$PKG/usr/share/icons/hicolor/${i}x${i}/apps
+  mkdir -p $idir
+  cat $CWD/icons/$i.png > $idir/$PRGNAM.png
+done
+
+# old-style icon (e.g. windowmaker, fvwm2)
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# Include the ROM image in the package. It's been available on the
+# asimov site for at least 20 years now, Apple has never complained.
+unzip -p $CWD/gsrom03.zip > $PKG/usr/share/$PRGNAM/rom03
 
 # Man pages are specific to the SlackBuild, though I've sent
 # them upstream for consideration.
-for file in $CWD/*.1; do
+for file in $CWD/man/*.1; do
   sed "s/@VERSION@/$VERSION/g" $file \
   | gzip -9c \
   > $PKG/usr/man/man1/$( basename $file ).gz
@@ -113,34 +139,12 @@ done
 ln -s x$PRGNAM.1.gz $PKG/usr/man/man1/$PRGNAM.1.gz
 ln -s x$PRGNAM $PKG/usr/bin/$PRGNAM
 
-# Handle the ROM image, if we find it. Filenames are listed in
-# reverse order of preference.
-for file in ROM01 rom01 ROM03 rom03; do
-  if [ -e "$CWD/$file" ]; then
-    ROMFILE="$CWD/$file"
-  fi
-done
-
-if [ -e "$ROMFILE" ]; then
-  ROMNAME="$( basename "$ROMFILE" )"
-  install -m0644 "$ROMFILE" $PKG/usr/share/$PRGNAM
-else
-  # We don't have a ROM, so we don't include one in the package, but we
-  # do still set the path to /usr/share/kegs/rom03 in the config file,
-  # so all the user has to do is copy the ROM there later.
-  ROMNAME=rom03
-fi
-
-sed "s,@ROM@,/usr/share/$PRGNAM/$ROMNAME," \
-  < $CWD/config.$PRGNAM.default \
-  > $PKG/usr/share/$PRGNAM/config.$PRGNAM.default
-
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 install -m0644 *.txt $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@AUDIO@,$AUDIO," $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
