@@ -1,33 +1,41 @@
 #!/bin/sh
 
 # Slackware build script for apulse
-# Copyright 2019 Capi X. <capi_x@haibane.org>
-# All rights reserved.
-#
-# Redistribution and use of this script, with or without modification, is
-# permitted provided that the following conditions are met:
-#
-# 1. Redistributions of this script must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-#
-#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
-#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
-#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# 20191029 cpx:
-# - Initial version
+# Originally written by: Ryan P.C. McQuen | Everett, WA | <email removed>
+# Heavily modified and now maintained by B. Watson <yalhcru@gmail.com>
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20210301 bkw:
+# - Take over maintenance.
+# - Replace Capi X's version (submitted in 2019) with Ryan's (removed
+#   in 2016), since it supports multilib and by default doesn't stomp
+#   on the system pulseaudio libs. Add the ability to install the
+#   headers and .pc files, like Capi's build did, but disable it by
+#   default (SYSTEM variable).
+# - Relicense as WTFPL, with permission from original author (Ryan).
+# - i486 => i586.
+# - Rewrite README to document the new stuffs.
+# - Simplify the script a bit.
+# - Actually use SLKCFLAGS.
+# - Upstream ships a man page now, install it to /usr/man.
 
 PRGNAM=apulse
-VERSION=${VERSION:-0.1.12}
+VERSION=${VERSION:-0.1.13}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+
+SYSTEM=${SYSTEM:-no}
+[ "$SYSTEM" = "devel" ] && HEADERS=yes
+case "$SYSTEM" in
+  yes|devel) AP_SUBDIR=${AP_SUBDIR:-/}      
+             COEXIST="CONFLICTS" ;;
+  no)        AP_SUBDIR=${AP_SUBDIR:-/apulse}
+             COEXIST="can safely coexist" ;;
+  *) echo "*** Invalid SYSTEM setting '$SYSTEM', use one of: no yes devel" 1>&2
+     exit 1 ;;
+esac
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -51,6 +59,8 @@ elif [ "$ARCH" = "i686" ]; then
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
+  # automatically detect multilib, can override with COMPAT32=no
+  [ -e /lib/libc.so.6 ] && COMPAT32="${COMPAT32:-yes}"
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
@@ -58,44 +68,65 @@ fi
 
 set -e
 
+buildit() {
+  rm -rf build
+  mkdir -p build
+  cd build
+    cmake \
+      -DAPULSEPATH=/usr/lib$2${AP_SUBDIR} \
+      -DAPULSE_SEARCH_PATHS=/usr/lib${AP_SUBDIR}:/usr/lib${LIBDIRSUFFIX}${AP_SUBDIR} \
+      -DCMAKE_INSTALL_PREFIX=/usr \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_CXX_FLAGS_RELEASE="$SLKCFLAGS $1 -DNDEBUG" \
+      -DCMAKE_C_FLAGS_RELEASE="$SLKCFLAGS $1 -DNDEBUG" \
+      ..
+    make VERBOSE=1
+    make install/strip DESTDIR=$PKG
+  cd -
+}
+
+install_pc() {
+  mkdir -p $PKG/usr/lib$1/pkgconfig
+  for i in $CWD/pc/*.pc; do
+    sed "s,@64@,$1,g" $i > $PKG/usr/lib$1/pkgconfig/$( basename $i )
+  done
+}
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-mkdir $PRGNAM-$VERSION
-cd $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-mkdir -p build
-cd build
-cmake ..
-make
+# hardcoded, can't override on cmake command line.
+sed -i 's,share/man/,man/,' CMakeLists.txt
 
-mkdir -p $PKG/usr/include
-cp -fra  ../3rdparty/pulseaudio-headers/pulse $PKG/usr/include
+# for compat32, we assume x86_64 CPUs handle i686 instructions. also,
+# unlike normal 32-bit packages, this one gets -fPIC (which won't hurt).
+[ "$COMPAT32" = "yes" ] && buildit "-m32 -march=i686 -mtune=i686" ""
 
-mkdir -p $PKG/usr/bin
-install  -m755 apulse $PKG/usr/bin
+# either way, build the normal libraries with normal cflags.
+buildit "" "$LIBDIRSUFFIX"
 
-mkdir -p $PKG/usr/lib$LIBDIRSUFFIX
-cp -a    libpulse*so* $PKG/usr/lib$LIBDIRSUFFIX
+gzip -9 $PKG/usr/man/*/*
 
-mkdir -p $PKG/usr/share/pkgconfig
-install  -m644 $CWD/libpulse$LIBDIRSUFFIX.pc $PKG/usr/share/pkgconfig/libpulse.pc
+if [ "$HEADERS" = "yes" ]; then
+  mkdir -p $PKG/usr/include
+  cp -a 3rdparty/pulseaudio-headers/pulse $PKG/usr/include
+  install_pc "$LIBDIRSUFFIX"
+  [ "$COMPAT32" = "yes" ] && install_pc ""
+fi
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a $CWD/README $PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/
+cp -a LICENSE.MIT README.md $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@COEXIST@,$COEXIST," $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
