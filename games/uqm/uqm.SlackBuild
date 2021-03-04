@@ -6,13 +6,18 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20210304 bkw: update for v0.8.0. script changed a good bit, can't
+# build older versions. Note to self: don't mix engine and content
+# versions without testing thoroughly! 0.7.0 engine seemed to work
+# with 0.8.0 content, but crashed when trying to enter the setup menu!
+
 # 20201025 bkw: update build for new content pack 0.8.0. This mostly
 # has fixes for typos in the in-game text strings. The game engine
 # hasn't changed, so VERSION now has both versions. Also, moved
 # the binary to /usr/games where it belongs.
 
 PRGNAM=uqm
-VERSION=${VERSION:-0.7.0+0.8.0}
+VERSION=${VERSION:-0.8.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -51,57 +56,81 @@ fi
 
 set -e
 
+# Starting with 0.8.0, we have options to use SDL2 and
+# OpenAL. Upstream made SDL2 the default, so we'll use it if
+# available (autodetect). However, OpenAL is labelled 'experimental'
+# and disabled by default, so we'll require OPENAL=yes to enable it
+# (if present).
+
+if pkg-config --exists sdl2; then
+  SDL2DEF=yes
+else
+  SDL2DEF=no
+fi
+
+SDL2=${SDL2:-$SDL2DEF}
+OPENGL=${OPENGL:-yes}
+
+case "$SDL2-$OPENGL" in
+  yes-*)  GFX=sdl2   ;; # SDL2 builds always support OpenGL
+  no-no)  GFX=pure   ;;
+  no-yes) GFX=opengl ;;
+  *) echo "*** Invalid SDL2 and/or OPENGL values, use only 'yes' or 'no'" 1>&2
+     exit 1 ;;
+esac
+
+case "${OPENAL:-no}" in
+  yes) SND=openal ;;
+  no)  SND=mixsdl ;;
+  *) echo "*** Invalid OPENAL value $OPENAL, use only 'yes' or 'no'" 1>&2
+     exit 1 ;;
+esac
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$SRCVER
-tar xvf $CWD/$PRGNAM-$SRCVER-source.tgz
+tar xvf $CWD/$PRGNAM-$SRCVER-src.tgz
 cd $PRGNAM-$SRCVER
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# uqm uses a custom build.sh to configure and build the source.
-# It's not a bad system, but it's interactive only, meaning I have
-# to script answers to the build.sh prompts, hence build_config().
-
+# Previously this script ran the interactive config, piping responses to it.
+# This is a cleaner way to do it.
 # WARNING: If you're updating this SlackBuild for a new version of
-# uqm, check and make sure the build.sh options haven't changed!
+# uqm, check and make sure the config.state options haven't changed!
+sed -e "s,@GFX@,$GFX," \
+    -e "s,@SND@,$SND," \
+       $CWD/config.state.in \
+       > config.state
 
+# reprocess_config creates build.vars based on choices in config.state
+sh build.sh uqm reprocess_config
+
+# For the other options in config.state, we take the defaults.
 # It'd be more efficient to require a system-wide libmikmod instead of
 # using the included (statically linked) one, but it's not that big
 # a library, and this way we don't have any external dependencies.
 
-build_config() {
-   echo 1     # Top-level menu option 1: Build type...
-   echo 1     # type 1 = release
-   echo 2     # Top-level menu option 2: OpenGL support...
-   echo 2     # 1 = Don't include, 2 = Include OpenGL graphics support
-   echo 4     # Top-level menu option 4: Tracker music support
-   echo 1     # 1 = included libmikmod, 2 = system libmikmod
-   echo 11    # Top-level menu option 11: Installation paths...
-              # (N.B. option 11 was option 10 in uqm 0.6.2)
-   echo 1     # Option 1 = Installation prefix
-   echo /usr  # New value:
-   echo 3     # Option 3 = Location for non-sharable data
-              # New value:
-   echo \$prefix/libexec
-   echo       # ENTER; back to top-level menu
-   echo       # ENTER at top-level menu = done
-}
+# Use our flags.
+sed -i "s/-O3/$SLKCFLAGS/" build.vars
 
-build_config | sh build.sh uqm config
-sed -i -e "s/-O3/$SLKCFLAGS/" -e '/LDFLAGS/s,-lz,-lz -lm,' build.vars
+# Actually compile the thing.
 sh build.sh uqm
 
-strip $PRGNAM
+# "sh build.sh uqm install" would install it, but it doesn't look like
+# DESTDIR works (?). Manual install does.
+
+# Real game binary lives in libexec.
 mkdir -p $PKG/usr/libexec/$PRGNAM
-cp -a $PRGNAM $PKG/usr/libexec/$PRGNAM
+install -s -m0755 -oroot -groot $PRGNAM $PKG/usr/libexec/$PRGNAM
 
+# Shell script wrapper tells the real binary where to find the content.
 mkdir -p $PKG/usr/games
-cat $PRGNAM-wrapper > $PKG/usr/games/$PRGNAM
-chmod 0755 $PKG/usr/games/$PRGNAM
+install -oroot -groot -m0755 $PRGNAM-wrapper $PKG/usr/games/$PRGNAM
 
+# Include (mostly) empty content and addons dirs in the package.
 mkdir -p $PKG/usr/share/$PRGNAM/content/{addons,packages}
 cp content/version $PKG/usr/share/$PRGNAM/content
 
@@ -109,15 +138,42 @@ cp content/version $PKG/usr/share/$PRGNAM/content
 cat $CWD/$PRGNAM-$CONTVER-content.uqm > \
     $PKG/usr/share/$PRGNAM/content/packages/$PRGNAM-$CONTVER-content.uqm
 
-# Man page created for SBo (it's basically the README + roff markup)
-mkdir -p $PKG/usr/man/man1
-gzip -9c $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+# Use upstream's man page (used to ship our own).
+mkdir -p $PKG/usr/man/man6
+gzip -9c doc/users/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
 
-# .desktop and icon borrowed from Debian
+# .desktop borrowed from Debian
 mkdir -p $PKG/usr/share/applications
 cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+# icons converted from "src/res/darwin/The Ur-Quan Masters.icns",
+# with icns2png.
+for i in $CWD/icons/*.png; do
+  size="$( basename $i .png )"
+  dir="$PKG/usr/share/icons/hicolor/${size}x${size}/apps"
+  mkdir -p "$dir"
+  cat $i > $dir/$PRGNAM.png
+done
+
+# old-style icon
 mkdir -p $PKG/usr/share/pixmaps
-cat $CWD/$PRGNAM.xpm > $PKG/usr/share/pixmaps/$PRGNAM.xpm
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# dynamic slack-desc (for my own sanity!)
+ldd $PKG/usr/libexec/$PRGNAM/$PRGNAM > ldd.out
+if grep -q libSDL2 ldd.out; then
+  RENDER="SDL-2.0"
+elif grep -q libGL ldd.out; then
+  RENDER="SDL-1.2 (OpenGL)"
+else
+  RENDER="SDL-1.2 (software rendering)"
+fi
+
+if grep -q "libopenal" ldd.out; then
+  AUDIO="OpenAL"
+else
+  AUDIO="SDL"
+fi
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp $PRGNAM.lsm AUTHORS BUGS COPYING ChangeLog Contributing README WhatsNew \
@@ -125,7 +181,10 @@ cp $PRGNAM.lsm AUTHORS BUGS COPYING ChangeLog Contributing README WhatsNew \
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-sed "s,@CONTVER@,$CONTVER," $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s,@CONTVER@,$CONTVER," \
+    -e "s,@RENDER@,$RENDER," \
+    -e "s,@AUDIO@,$AUDIO," \
+    $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
