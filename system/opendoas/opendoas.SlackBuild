@@ -1,0 +1,136 @@
+#!/bin/sh
+
+# Slackware build script for opendoas
+
+# Copyright 2021 K. Eugene Carlson  Tsukuba, Japan
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=opendoas
+VERSION=${VERSION:-6.8.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+unset TIMESTAMP
+unset SHADOW
+
+# Use PERSIST=yes to enable timestamp-based password persistence. Upstream
+# considers this feature to be "new and potentially dangerous."
+[ ${PERSIST:-no} = yes ] && TIMESTAMP="--with-timestamp"
+
+# Use PAM=no to enable shadow authentication even on systems with PAM
+# installed. If shadow is not set, then doas will compile with PAM support
+# automatically if PAM is installed.
+[ ${PAM:-yes} = no ] && SHADOW="--with-shadow"
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Pass in shadow support if PAM is not installed. OpenDoas defaults to PAM
+# authentication otherwise.
+if [ ! -L /lib${LIBDIRSUFFIX}/libpam.so.? ]; then
+  SHADOW="--with-shadow"
+fi
+
+# No CXXFLAGS
+CFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  $SHADOW \
+  $TIMESTAMP \
+  --mandir=/usr/man
+
+make
+make install DESTDIR=$PKG
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  LICENSE README.md \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+chmod 4711 $PKG/usr/bin/doas
+
+# If PAM support is enabled, rename the package's PAM file to doas.new.
+if [ -f "$PKG/etc/pam.d/doas" ]; then
+  mv $PKG/etc/pam.d/doas $PKG/etc/pam.d/doas.new
+fi
+
+# Delete the new configuration file and its directory if PAM_FILE=yes was not
+# used. For Slackware -current users, doas can use PAM authentication provided
+# that /etc/pam.d/other and /etc/pam.d/system-auth have not been altered from
+# the state in which they are shipped. Writing new PAM configuration files was
+# deprecated after the current release of OpenDoas. To allow OpenDoas to write
+# a configuration file anyway, use PAM_FILE=yes.
+[ ${PAM_FILE:-no} != yes ] && rm -rf $PKG/etc
+
+if [ -f "$PKG/etc/pam.d/doas.new" ]; then
+  cat $CWD/doinst.sh > $PKG/install/doinst.sh
+fi
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
