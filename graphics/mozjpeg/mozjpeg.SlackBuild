@@ -25,6 +25,18 @@
 # with this program (most likely, a file named COPYING).  If not, see
 # <http://www.gnu.org/licenses/>.
 
+# 20210310 bkw: update for v4.0.3.
+# - upstream switched from autoconf to cmake, so this script can't
+#   build older versions any more.
+# - cmake chokes when trying to build static libs, apparently because
+#   we don't have a static libpng.a. So no more static libs in this
+#   package until further notice. If you actually care about this,
+#   remind me to look into it again.
+# - get rid of man pages, they're identical to the ones from libjpeg-turbo.
+# - add profile script.
+# - add -Wl,-rpath to .pc files.
+# - install HTML docs in /usr/doc.
+
 # 20180101 bkw: Update for v3.3.1. Script still works with 3.1 and 3.2,
 # if you can think of a use for them.
 
@@ -45,7 +57,7 @@
 # - BUILD=2
 
 PRGNAM=mozjpeg
-VERSION=${VERSION:-3.3.1}
+VERSION=${VERSION:-4.0.3}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -85,19 +97,18 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# JAVA=yes only tested with openjdk and openjdk6. We source the profile.d
-# script here in case someone's *just* installed jdk|openjdk, so they
-# won't have to log out & back in to get this built. This mostly helps
-# out sbopkg users.
+ARGS=""
+
+# JAVA=yes only tested with openjdk8. We source the profile.d script
+# here in case someone's *just* installed jdk|openjdk, so they won't
+# have to log out & back in to get this built. This mostly helps out
+# sbopkg users.
 JAVA="${JAVA:-no}"
 if [ "$JAVA" = "yes" ]; then
-  EXTRAOPTS="--with-java "
+  ARGS+="-DWITH_JAVA=TRUE "
 
   # Find a JDK. Presumably a sane admin will only have one of these
   # profile scripts executable, even if he's installed all of them.
@@ -105,83 +116,55 @@ if [ "$JAVA" = "yes" ]; then
   # sure it actually matters that much ("write once, run anywhere" should
   # mean a .jar built with openjdk will run with Oracle's jdk, right? But
   # there's JNI (native code) involved...)
-  for i in jdk openjdk8 openjdk openjdk6; do
+  for i in jdk openjdk8 openjdk7 openjdk6; do
     if [ -x /etc/profile.d/$i.sh ]; then
       source /etc/profile.d/$i.sh
       break
     fi
   done
-
-  # Whichever jdk we decided to use, use its JAVA_HOME. Unfortunately
-  # mozjpeg ignores the *standard* JAVA_HOME env var, so we persuade
-  # it thus:
-  sed -i "s,/usr/java,$JAVA_HOME,g" configure.ac
 fi
 
-autoreconf -fiv
-
-# Maybe TODO: really, there should be a way to build multiple API versions,
-# with file paths that don't clash: /opt/mozjpeg/jpeg$API/(bin|lib|include).
-# However, I'd be inventing my own directory layout for this (upstream
-# doesn't support it), which is kinda outside the scope of what a SlackBuild
-# should do. If you *really* need this feature, email me and convince me to
-# implement it (it's a lot of error-prone work, not going to do it unless
-# someone actually needs it).
 API="${API:-6b}"
-case "$API" in
-  6b) ;; # do nothing, this is the default
-  7|8)  EXTRAOPTS="$EXTRAOPTS --with-jpeg$API" ;;
-  *)    echo "Invalid API version, supported versions are 6b 7 8" 1>&2
-        exit 1
-        ;;
-esac
+[ "$API"  = "7" ] && ARGS+="-DWITH_JPEG7=TRUE "
+[ "$API"  = "8" ] && ARGS+="-DWITH_JPEG8=TRUE "
 
-# 20170310 bkw: This stuff needs documenting, or I'll forget why
-# I did it this way.
+mkdir -p build
+cd build
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  cmake \
+    $ARGS \
+    -DENABLE_STATIC=FALSE \
+    -DPNG_LIBRARY_DEBUG=/usr/lib$LIBDIRSUFFIX/libpng.so \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/opt/$PRGNAM \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install/strip DESTDIR=$PKG
+cd ..
 
-# Leaving off all the --prefix and related options below, since the
-# default prefix is already /opt/mozjpeg... though starting with 3.2,
-# the man pages and docs are in $PREFIX/share/(man|doc), so use
-# --mandir and --docdir. Also, to make 3.2 match the 3.1 package, need
-# --datarootdir=$PREFIX to make the java classes go to $PREFIX/classes.
+# Slackware has these man pages already.
+rm -rf $PKG/opt/$PRGNAM/man
 
-# Ryan's version of this script had --disable-static, but I'm leaving
-# that off, because sometimes static libs are easier to deal with when
-# you're linking with libraries outside the system /usr/lib(64) dir.
-
-# The LDFLAGS gibberish below is to force the binaries in /opt/mozjpeg/bin
-# to use the libraries in /opt/mozjpeg/lib(64), otherwise they use the
-# system libjpeg in /usr/lib(64) which partly defeats the purpose of
-# having optimized jpeg libs...
-
-
-LDFLAGS="-Wl,-rpath,/opt/$PRGNAM/lib$LIBDIRSUFFIX" \
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  $EXTRAOPTS \
-  --datarootdir=/opt/$PRGNAM \
-  --mandir=/opt/$PRGNAM/man \
-  --docdir=/opt/$PRGNAM/doc \
-  --build=$ARCH-slackware-linux
-
-# the java stuff chokes without -j1, everything else is OK.
-if [ "$JAVA" = "yes" ]; then
-  make -j1 -C java
-fi
-
-make # V=1
-make install-strip DESTDIR=$PKG
-gzip $PKG/opt/$PRGNAM/man/man?/*.?
-
-# docs are installed in /opt already (except the license)
+# most of the docs are installed in /opt already, but not all.
 mkdir -p $PKG/usr/doc
 mv $PKG/opt/$PRGNAM/doc $PKG/usr/doc/$PRGNAM-$VERSION
+rm -f CMakeLists.txt BUILDING.* jconfig.txt # do not want
+cp -a *.txt *.md tjexample.c doc/html $PKG/usr/doc/$PRGNAM-$VERSION
 ln -s ../../../usr/doc/$PRGNAM-$VERSION $PKG/opt/$PRGNAM/doc
-cp -a LICENSE.* $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 [ "$JAVA" = "yes" ] && cp -a java/doc $PKG/usr/doc/$PRGNAM-$VERSION/javadoc
+
+# 20210312 bkw: profile script is new with v4.0.x. It's installed without +x
+# permission (see README).
+mkdir -p $PKG/etc/profile.d
+sed "s,@,$LIBDIRSUFFIX," $CWD/${PRGNAM}.sh > $PKG/etc/profile.d/${PRGNAM}.sh
+
+# 20210312 bkw: help pkg-config out a bit.
+sed -i '/^Libs:/s|$| -lm -Wl,-rpath,${libdir}|' \
+       $PKG/opt/$PRGNAM/lib$LIBDIRSUFFIX/pkgconfig/*.pc
 
 mkdir -p $PKG/install
 sed -e "s,@API@,$API," -e "s,@JAVA@,$JAVA," \
