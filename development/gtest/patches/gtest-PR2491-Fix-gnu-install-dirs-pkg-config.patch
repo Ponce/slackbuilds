@@ -1,0 +1,166 @@
+From 5126ff48d9ac54828d1947d1423a5ef2a8efee3b Mon Sep 17 00:00:00 2001
+From: David Seifert <soap@gentoo.org>
+Date: Sat, 5 Oct 2019 15:58:45 +0200
+Subject: [PATCH 1/2] Revert "Use pcfiledir for prefix in pkgconfig file"
+
+The change makes implicit assumptions on the layout of the install
+tree, which is going to break in many ways.
+
+The correct solution is to use the `PKG_CONFIG_SYSROOT_DIR` variable
+to inject the cross-compiled sysroot into `-I` and `-L` paths.
+---
+ googlemock/cmake/gmock.pc.in      | 5 ++---
+ googlemock/cmake/gmock_main.pc.in | 5 ++---
+ googletest/cmake/gtest.pc.in      | 5 ++---
+ googletest/cmake/gtest_main.pc.in | 5 ++---
+ 4 files changed, 8 insertions(+), 12 deletions(-)
+
+diff --git a/googlemock/cmake/gmock.pc.in b/googlemock/cmake/gmock.pc.in
+index 08e045474..2ef0fbca1 100644
+--- a/googlemock/cmake/gmock.pc.in
++++ b/googlemock/cmake/gmock.pc.in
+@@ -1,6 +1,5 @@
+-prefix=${pcfiledir}/../..
+-libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+-includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
++libdir=@CMAKE_INSTALL_FULL_LIBDIR@
++includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
+ 
+ Name: gmock
+ Description: GoogleMock (without main() function)
+diff --git a/googlemock/cmake/gmock_main.pc.in b/googlemock/cmake/gmock_main.pc.in
+index b22fe6148..04658fe2e 100644
+--- a/googlemock/cmake/gmock_main.pc.in
++++ b/googlemock/cmake/gmock_main.pc.in
+@@ -1,6 +1,5 @@
+-prefix=${pcfiledir}/../..
+-libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+-includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
++libdir=@CMAKE_INSTALL_FULL_LIBDIR@
++includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
+ 
+ Name: gmock_main
+ Description: GoogleMock (with main() function)
+diff --git a/googletest/cmake/gtest.pc.in b/googletest/cmake/gtest.pc.in
+index 9aae29e26..e7967ad56 100644
+--- a/googletest/cmake/gtest.pc.in
++++ b/googletest/cmake/gtest.pc.in
+@@ -1,6 +1,5 @@
+-prefix=${pcfiledir}/../..
+-libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+-includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
++libdir=@CMAKE_INSTALL_FULL_LIBDIR@
++includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
+ 
+ Name: gtest
+ Description: GoogleTest (without main() function)
+diff --git a/googletest/cmake/gtest_main.pc.in b/googletest/cmake/gtest_main.pc.in
+index 915f2973a..fe25d9c73 100644
+--- a/googletest/cmake/gtest_main.pc.in
++++ b/googletest/cmake/gtest_main.pc.in
+@@ -1,6 +1,5 @@
+-prefix=${pcfiledir}/../..
+-libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+-includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
++libdir=@CMAKE_INSTALL_FULL_LIBDIR@
++includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
+ 
+ Name: gtest_main
+ Description: GoogleTest (with main() function)
+
+From b96832a44b4994cafc824f200d69232d79f30d81 Mon Sep 17 00:00:00 2001
+From: David Seifert <soap@gentoo.org>
+Date: Sat, 5 Oct 2019 15:58:48 +0200
+Subject: [PATCH 2/2] Add documentation for pkg-config in cross-compilation
+ settings
+
+---
+ googletest/docs/pkgconfig.md | 78 ++++++++++++++++++++++++++++++++++++
+ 1 file changed, 78 insertions(+)
+
+diff --git a/googletest/docs/pkgconfig.md b/googletest/docs/pkgconfig.md
+index 6dc067388..d5f361448 100644
+--- a/googletest/docs/pkgconfig.md
++++ b/googletest/docs/pkgconfig.md
+@@ -139,3 +139,81 @@ export PKG_CONFIG_PATH=/usr/local/lib64/pkgconfig
+ ```
+ 
+ pkg-config will also try to look in `PKG_CONFIG_PATH` to find `gtest_main.pc`.
++
++### Using pkg-config in a cross-compilation setting
++
++Pkg-config can be used in a cross-compilation setting too. To do this, let's
++assume the final prefix of the cross-compiled installation will be `/usr`,
++and your sysroot is `/home/MYUSER/sysroot`. Configure and install GTest using
++
++```
++mkdir build && cmake -DCMAKE_INSTALL_PREFIX=/usr ..
++```
++
++Install into the sysroot using `DESTDIR`:
++
++```
++make -j install DESTDIR=/home/MYUSER/sysroot
++```
++
++Before we continue, it is recommended to **always** define the following two
++variables for pkg-config in a cross-compilation setting:
++
++```
++export PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=yes
++export PKG_CONFIG_ALLOW_SYSTEM_LIBS=yes
++```
++
++otherwise `pkg-config` will filter `-I` and `-L` flags against standard
++prefixes such as `/usr` (see https://bugs.freedesktop.org/show_bug.cgi?id=28264#c3
++for reasons why this stripping needs to occur usually).
++
++If you look at the generated pkg-config file, it will look something like
++
++```
++libdir=/usr/lib64
++includedir=/usr/include
++
++Name: gtest
++Description: GoogleTest (without main() function)
++Version: 1.10.0
++URL: https://github.com/google/googletest
++Libs: -L${libdir} -lgtest -lpthread
++Cflags: -I${includedir} -DGTEST_HAS_PTHREAD=1 -lpthread
++```
++
++Notice that the sysroot is not included in `libdir` and `includedir`! If you
++try to run `pkg-config` with the correct
++`PKG_CONFIG_LIBDIR=/home/MYUSER/sysroot/usr/lib64/pkgconfig` against this `.pc`
++file, you will get
++
++```
++$ pkg-config --cflags gtest
++-DGTEST_HAS_PTHREAD=1 -lpthread -I/usr/include
++$ pkg-config --libs gtest
++-L/usr/lib64 -lgtest -lpthread
++```
++
++which is obviously wrong and points to the `CBUILD` and not `CHOST` root.
++In order to use this in a cross-compilation setting, we need to tell
++pkg-config to inject the actual sysroot into `-I` and `-L` variables. Let us
++now tell pkg-config about the actual sysroot
++
++```
++export PKG_CONFIG_DIR=
++export PKG_CONFIG_SYSROOT_DIR=/home/MYUSER/sysroot
++export PKG_CONFIG_LIBDIR=${PKG_CONFIG_SYSROOT_DIR}/usr/lib64/pkgconfig
++```
++
++and running `pkg-config` again we get
++
++```
++$ pkg-config --cflags gtest
++-DGTEST_HAS_PTHREAD=1 -lpthread -I/home/MYUSER/sysroot/usr/include
++$ pkg-config --libs gtest
++-L/home/MYUSER/sysroot/usr/lib64 -lgtest -lpthread
++```
++
++which contains the correct sysroot now. For a more comprehensive guide to
++also including `${CHOST}` in build system calls, see the excellent tutorial
++by Diego Elio Pettenò: https://autotools.io/pkgconfig/cross-compiling.html
