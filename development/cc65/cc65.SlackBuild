@@ -6,6 +6,15 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20210317 bkw:
+# - Update for 2.19 release. Script also tested with 2.18 and
+#   2.17_20180906, in case someone needs one of those versions.
+# - Use 'make html' to build the docs instead of pregenerating (tested
+#   on -current too).
+# - Add optional info docs to package.
+# - Use USER_CFLAGS instead of sed to support SLKCFLAGS.
+# - TODO: look at making good man pages for at least the executables.
+
 # 20180907 bkw:
 # - Update for 2.17_20180906, git commit b6ccd4d.
 # - Rename git2targz.sh => git2tarxz.sh.
@@ -34,7 +43,7 @@
 #   reason. Source is created from a git checkout, see git2targz.sh.
 
 PRGNAM=cc65
-VERSION=${VERSION:-2.17_20180906}
+VERSION=${VERSION:-2.19}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
@@ -67,21 +76,44 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT $PKG/usr/doc/$PRGNAM-$VERSION
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.?z
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find . -type f -print0 | xargs -0 chmod 644
 find . -type d -print0 | xargs -0 chmod 755
 
-# external CFLAGS not honored
-sed -i "/^CFLAGS/s,-O[^ ]*,$SLKCFLAGS," src/Makefile
+# v2.19 binaries report themselves as v2.18. upstream fixed this in
+# git commit cffcbce60, I'll just sed it.
+[ "$VERSION" = "2.19" ] && sed -i '/#define VER_MINOR/s,18U,19U,' src/common/version.c
+
+# HTML docs are always created and installed. If the user really
+# wants to, the same docs can be installed as .info files. They're not
+# enabled by default because they include .info files with names like
+# "index", "coding", "using-make" and even "lynx". It's not obvious
+# they belong to cc65, when they're sitting in the same /usr/info
+# dir as all the other .info files. Plus, the internal links between
+# the documents don't work when converted to .info, whereas the HTML
+# ones do.
+INFO="${INFO:-no}"
 
 PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
-make all PREFIX=/usr prefix=/usr LDFLAGS=-Wl,-s
-#make -C doc html # we use pre-generated HTML docs now
-make install PREFIX=$PKG/usr prefix=$PKG/usr htmldir=$PKGDOC samplesdir=$PKGDOC/samples
+make all PREFIX=/usr prefix=/usr LDFLAGS=-Wl,-s USER_CFLAGS="$SLKCFLAGS"
+make -C doc html
+[ "$INFO" = "yes" ] && make -C doc html info
+make install \
+  PREFIX=$PKG/usr prefix=$PKG/usr \
+  infodir=$PKG/usr/info htmldir=$PKGDOC \
+  samplesdir=$PKGDOC/samples
 
-# binaries already stripped, no man pages
+# Binaries already stripped, no man pages, but there might be info
+# pages that needs to be gzipped. Note that the the info files can be
+# read with e.g. "info cc65", but won't show up in the info directory:
+# the generated docs lack sections and descriptions, so using
+# install-info in doinst.sh doesn't do anything. I also tried using
+# "linuxdoc -B txt --manpage" on the SGML doc sources, but the results
+# are ugly and have screwed-up formatting. If I want man pages, I'll
+# probably have to make them manually (pun intended).
+[ "$INFO" = "yes" ] && gzip $PKG/usr/info/*
 
 mkdir -p $PKGDOC
 cp -a README* LICENSE $PKGDOC
