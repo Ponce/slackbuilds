@@ -69,22 +69,44 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-./autogen.sh
+patch -p1 < $CWD/glib-2.68.patch
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS -std=c++11" \
-./configure \
-  --enable-strict-build=no \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --build=$ARCH-slackware-linux
+# strip invalid tag
+sed -i /url/d org.inkscape.Inkscape.appdata.xml.in
 
-make
-make install DESTDIR=$PKG
+# https://bugs.launchpad.net/inkscape/+bug/314381
+# a couple of files have executable bits set,
+# despite not being executable
+find . -name '*.cpp' | xargs chmod -x
+find . -name '*.h' | xargs chmod -x
+# Fix end of line encodings
+dos2unix -k -q share/extensions/*.py
+
+# Fix man page location:
+sed -i CMakeScripts/Pod2man.cmake -e "s/SHARE_INSTALL/CMAKE_INSTALL_PREFIX/g"
+
+mkdir -p build
+cd build
+  # imagemagick >= 7.x is unsupported yet, so use GraphicsMagick
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_C_FLAGS_RELEASE:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS_RELEASE:STRING="$SLKCFLAGS" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=/usr/lib${LIBDIRSUFFIX} \
+    -DCMAKE_INSTALL_MANDIR=/usr/man \
+    -DCMAKE_INSTALL_SYSCONFDIR=/etc \
+    -DINKSCAPE_INSTALL_LIBDIR=/usr/lib${LIBDIRSUFFIX} \
+    -DBUILD_SHARED_LIBS=ON \
+    -DWITH_DBUS=ON \
+    -DWITH_GRAPHICS_MAGICK=ON \
+    -DWITH_IMAGE_MAGICK=OFF \
+    ..
+  make
+  make install DESTDIR=$PKG
+cd ..
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
