@@ -3,7 +3,7 @@
 # Slackware build script for Mumble
 
 # Copyright 2011-2013 James Geboski <jgeboski@gmail.com>
-# Copyright 2014-2015 Edward W. Koenig <kingbeowulf@gmail.com>
+# Copyright 2014-2021 Edward W. Koenig <kingbeowulf@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,16 +23,16 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# New maintainer: Edward W. Koenig <kingbeowulf@gmail.com>
 
 PRGNAM=mumble
-VERSION=${VERSION:-1.3.3}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.3.4}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 G15=${G15:-no}
 OVERLAY=${OVERLAY:-no}
 COMPAT32=${COMPAT32:-no}
+NUMJOBS=${NUMJOBS:-1}
 SPEECHD=${SPEECHD:-no}
 CELT070=${CELT070:-no}
 
@@ -63,20 +63,24 @@ else
   LIBDIRSUFFIX=""
 fi
 
-BUILD_G15=""
-BUILD_OVERLAY=""
-
 if [ "$G15" = "no" ]; then
   BUILD_G15="CONFIG+=no-g15"
+else
+  BUILD_G15=""
 fi
 
 if [ "$OVERLAY" = "no" ]; then
   BUILD_OVERLAY="CONFIG+=no-overlay"
+else
+  BUILD_OVERLAY=""
 fi
 
 if [ "$SPEECHD" = "no" ]; then
   BUILD_SPEECHD="CONFIG+=no-speechd"
+else
+  BUILD_SPEECHD=""
 fi
+
 # Celt is no longer maintained, and dropped in
 # favor of opus.  Celt-0.7.0 is bundled for optional
 # backware compatibility. SBo's celt is incompatible.
@@ -101,6 +105,9 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
+# Bumped overlay version to 1.3.4 as well Fixes #4857
+patch -p1 < $CWD/bump_overlay_version.patch
+
 qmake-qt5 -recursive main.pro \
   QMAKE_CFLAGS+="$SLKCFLAGS" \
   QMAKE_CXXFLAGS+="$SLKCFLAGS" \
@@ -114,9 +121,9 @@ qmake-qt5 -recursive main.pro \
   CONFIG+=no-bonjour \
   CONFIG+=no-qt4-legacy-compat \
   $BUILD_CELT \
+  $BUILD_SPEECHD \
   $BUILD_G15 \
-  $BUILD_OVERLAY \
-  $BUILD_SPEECHD
+  $BUILD_OVERLAY
 
 make release
 
@@ -125,31 +132,27 @@ mkdir -p \
   $PKG/usr/lib${LIBDIRSUFFIX}/mumble \
   $PKG/usr/man/man1 \
   $PKG/usr/share/{applications,pixmaps}
-
-install -m 755 release/mumble $PKG/usr/bin
-
-if [ "$CELT070" = "yes" ]; then
-   cp -a release/libcelt0.so* $PKG/usr/lib${LIBDIRSUFFIX}/mumble
-fi
-
-install -m 644 \
-  man/mumble-overlay.1 \
-  man/mumble.1 \
- $PKG/usr/man/man1
-
+  
+install -m 644 man/mumble-overlay.1 $PKG/usr/man/man1
+install -m 644 man/mumble.1 $PKG/usr/man/man1
 install -m 644 scripts/mumble.desktop $PKG/usr/share/applications
 install -m 644 icons/mumble.svg       $PKG/usr/share/pixmaps
 
-find release/plugins -type f -name *.so \
+install -m 755 release/mumble $PKG/usr/bin
+if [ "$CELT070" = "yes" ]; then
+  install -m 755 release/libcelt0.so* $PKG/usr/lib${LIBDIRSUFFIX}/mumble
+fi
+
+find release/plugins -type f -name "*.so" \
   -exec install -m 755 {} $PKG/usr/lib${LIBDIRSUFFIX}/mumble \;
 
 # If the overlay was built, let's install the library for it
-if [ -e release/libmumble.so.$VERSION ]; then
+if [ "$OVERLAY" = "yes" ]; then
   install -m 755 release/libmumble.so.$VERSION $PKG/usr/lib${LIBDIRSUFFIX}
   install -m 755 scripts/mumble-overlay        $PKG/usr/bin
 
   cd $PKG/usr/lib${LIBDIRSUFFIX}
-    ln -sf libmumble.so.$VERSION libmumble.so.1.2
+    ln -sf libmumble.so.$VERSION libmumble.so.1.3
     ln -sf libmumble.so.$VERSION libmumble.so.1
     ln -sf libmumble.so.$VERSION libmumble.so
   cd -
@@ -165,8 +168,7 @@ if [ "$COMPAT32" = "yes" -a "$OVERLAY" = "yes" -a "$ARCH" = "x86_64" ]; then
     qmake-qt5 \
       QMAKE_CFLAGS="-m32 -O2 -march=i486 -mtune=i686" \
       QMAKE_CXXFLAGS="-m32 -O2 -march=i486 -mtune=i686" \
-      QMAKE_LFLAGS="-m32" \
-      overlay_gl.pro
+      QMAKE_LFLAGS="-m32" overlay_gl.pro
 
     make release DESTDIR_ADD=-32
   cd -
@@ -175,7 +177,7 @@ if [ "$COMPAT32" = "yes" -a "$OVERLAY" = "yes" -a "$ARCH" = "x86_64" ]; then
   install -m 755 release-32/libmumble.so.$VERSION $PKG/usr/lib
 
   cd $PKG/usr/lib
-    ln -sf libmumble.so.$VERSION libmumble.so.1.2
+    ln -sf libmumble.so.$VERSION libmumble.so.1.3
     ln -sf libmumble.so.$VERSION libmumble.so.1
     ln -sf libmumble.so.$VERSION libmumble.so
   cd -
@@ -188,7 +190,7 @@ find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a CHANGES LICENSE README README.Linux $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS INSTALL CHANGES LICENSE README README.Linux $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
