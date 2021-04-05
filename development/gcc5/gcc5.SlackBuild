@@ -1,0 +1,569 @@
+#!/bin/sh
+# GCC package build script (written by volkerdi@slackware.com)
+#
+# Copyright 2003, 2004  Slackware Linux, Inc., Concord, California, USA
+# Copyright 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018  Patrick J. Volkerding, Sebeka, MN, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+
+# Modified 2011 by Eric Hameleers <alien at slackware.com> for OpenJDK.
+# Modified 2017, 2018 by Eric Hameleers <alien at slackware.com> for gcc5.
+
+# Some notes, Fri May 16 12:31:32 PDT 2003:
+#
+# Why i486 and not i386?  Because the shared C++ libraries in gcc-3.2.x will
+# require 486 opcodes even when a 386 target is used (so we already weren't
+# compatible with the i386 for Slackware 9.0, didn't notice, and nobody
+# complained :-).  gcc-3.3 fixes this issue and allows you to build a 386
+# compiler, but the fix is done in a way that produces binaries that are not
+# compatible with gcc-3.2.x compiled binaries.  To retain compatibility with
+# Slackware 9.0, we'll have to use i486 (or better) as the compiler target
+# for gcc-3.3.
+#
+# It's time to say goodbye to i386 support in Slackware.  I've surveyed 386
+# usage online, and the most common thing I see people say when someone asks
+# about running Linux on a 386 is to "run Slackware", but then they also 
+# usually go on to say "be sure to get an OLD version, like 4.0, before glibc,
+# because it'll be more efficient."  Now, if that's the general advice, then
+# I see no reason to continue 386 support in the latest Slackware (and indeed
+# it's no longer easily possible).
+
+# Some more notes, Mon Aug  3 19:49:51 UTC 2015:
+#
+# Changing to -march=i586 for 32-bit x86 as several things (Mesa being one of
+# them) no longer work if constrained to -march=i486.  We're not going to use
+# -march=i686 since the only additional opcode is CMOV, which is actually less
+# efficient on modern CPUs running in 32-bit mode than the alternate i586
+# instructions.  No need to throw i586 CPUs under the bus (yet).
+
+PRGNAM=gcc5
+VERSION=${VERSION:-5.5.0}
+MAJVER=$(echo ${VERSION} |cut -d. -f1)
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+# Automatically determine the architecture we're building on:
+if [ -z "$ARCH" ]; then
+  case "$(uname -m)" in
+    i?86) ARCH=i586 ;;
+    arm*) readelf /usr/bin/file -A | egrep -q "Tag_CPU.*[4,5]" && ARCH=arm || ARCH=armv7hl ;;
+    # Unless $ARCH is already set, use uname -m for all other archs:
+    *) ARCH=$(uname -m) ;;
+  esac
+  export ARCH
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i386" ]; then
+  SLKCFLAGS="-O2 -march=i386 -mcpu=i686"
+  SLKLDFLAGS=""
+  LIBDIRSUFFIX=""
+  LIB_ARCH=i386
+elif [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  SLKLDFLAGS=""
+  LIBDIRSUFFIX=""
+  LIB_ARCH=i386
+elif [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  SLKLDFLAGS=""
+  LIBDIRSUFFIX=""
+  LIB_ARCH=i386
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686"
+  SLKLDFLAGS=""
+  LIBDIRSUFFIX=""
+  LIB_ARCH=i386
+elif [ "$ARCH" = "s390" ]; then
+  SLKCFLAGS="-O2"
+  SLKLDFLAGS=""
+  LIBDIRSUFFIX=""
+  LIB_ARCH=s390
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  SLKLDFLAGS="-L/usr/lib64"
+  LIBDIRSUFFIX="64"
+  LIB_ARCH=amd64
+elif [ "$ARCH" = "armv7hl" ]; then
+  SLKCFLAGS="-O3 -march=armv7-a -mfpu=vfpv3-d16"
+  SLKLDFLAGS=""
+  LIBDIRSUFFIX=""
+  LIB_ARCH=armv7hl
+else
+  SLKCFLAGS="-O2"
+  SLKLDFLAGS=""
+  LIBDIRSUFFIX=""
+  LIB_ARCH=$ARCH
+fi
+
+# What do we want to build
+LANGS=${LANGS:-'c,c++,java'}
+
+echo "Building these compilers: $LANGS"
+
+case "$ARCH" in
+    arm*) TARGET=$ARCH-slackware-linux-gnueabi ;;
+    *)    TARGET=$ARCH-slackware-linux ;;
+esac
+
+if [ "$ARCH" = "x86_64" ]; then
+  if [ -f /usr/lib/libc.a ]; then
+    # If we find a 32bit C library on 64bit Slackware, assume multilib:
+    GCC_ARCHOPTS="--enable-multilib"
+    MULTILIB="YES"
+  else
+    GCC_ARCHOPTS="--disable-multilib"
+    MULTILIB="NO"
+  fi
+else
+  GCC_ARCHOPTS="--with-arch=$ARCH"
+  MULTILIB="NO"
+fi
+ 
+# Clear the build locations:
+rm -fr $TMP/fastjar-* $TMP/gcc-$VERSION $TMP/gcc.build.lnx $TMP/gcc.build.log $TMP/package-$PRGNAM
+
+mkdir -p $PKG/usr/doc/gcc-$VERSION
+
+# Insert package description:
+mkdir -p $PKG/install
+if [ ${MULTILIB} = "YES" ]; then
+  SLDESC="  The compilers support multilib."
+else
+  SLDESC=""
+fi
+cat $CWD/slack-desc.gcc5 | sed -e "s/@MULTILIB@/${SLDESC}/" \
+  > $PKG/install/slack-desc
+
+# Unpack the gcc sources:
+cd $TMP
+tar xvf $CWD/gcc-$VERSION.tar.?z || exit 1
+
+# Patches based inside the gcc directory go here:
+#( cd gcc-$VERSION/gcc
+#  #cat $CWD/patches/gcc.66782.diff | patch -p0 --verbose || exit 1
+#) || exit 1
+
+# Copy ecj.jar into the TLD of the source. Needed for java compiler.
+# This can be retrieved from ftp://sourceware.org/pub/java
+cp $CWD/ecj-4.9.jar gcc-$VERSION/ecj.jar
+
+# Use an antlr runtime to compile javadoc.
+# The runtime can be obtained from:
+#https://oss.sonatype.org/content/repositories/releases/org/antlr/antlr-runtime/
+ANTLJAR=$(echo $CWD/antlr-*.jar | tail -1)
+
+# install docs
+( cd gcc-$VERSION
+  # Smite the fixincludes:
+  cat $CWD/patches/gcc-no_fixincludes.diff | patch -p1 --verbose --backup --suffix=.orig || exit 1
+
+  # Add retpoline support:
+  cat $CWD/patches/0001-i386-Move-struct-ix86_frame-to-machine_function.diff | patch -p2 --verbose || exit 1
+  cat $CWD/patches/0002-i386-Use-reference-of-struct-ix86_frame-to-avoid-cop.diff | patch -p2 --verbose || exit 1
+  cat $CWD/patches/0003-i386-More-use-reference-of-struct-ix86_frame-to-avoi.diff | patch -p2 --verbose || exit 1
+  cat $CWD/patches/0004-i386-Don-t-use-reference-of-struct-ix86_frame.diff | patch -p2 --verbose || exit 1
+  cat $CWD/patches/0005-x86-Add-mindirect-branch-doc.diff | patch -p2 --verbose || exit 1
+  cat $CWD/patches/0005-x86-Add-mindirect-branch.diff | patch -p2 --verbose || exit 1
+  cat $CWD/patches/0006-x86-Add-mfunction-return-doc.diff | patch -p2 --verbose || exit 1
+  cat $CWD/patches/0006-x86-Add-mfunction-return.diff | patch -p2 --verbose || exit 1
+  cat $CWD/patches/0007-x86-Add-mindirect-branch-register-doc.diff | patch -p2 --verbose || exit 1
+  cat $CWD/patches/0007-x86-Add-mindirect-branch-register.diff | patch -p2 --verbose || exit 1
+  cat $CWD/patches/0008-x86-Add-V-register-operand-modifier-doc.diff | patch -p2 --verbose || exit 1
+  cat $CWD/patches/0008-x86-Add-V-register-operand-modifier.diff | patch -p2 --verbose || exit 1
+  cat $CWD/patches/0009-x86-Disallow-mindirect-branch-mfunction-return-with-.diff | patch -p2 --verbose || exit 1
+  cat $CWD/patches/0009-x86-Disallow-mindirect-branch-mfunction-return-with-doc.diff | patch -p2 --verbose || exit 1
+
+  # Fix build with glibc 2.28, which no longer makes available header file <sys/ustat.h>
+  cat $CWD/patches/glibc2.28-ustat.diff | patch -p0 --verbose || exit 1
+
+  # Fix perms/owners
+  chown -R root:root .
+  find . -perm 777 -exec chmod 755 {} \;
+  find . -perm 775 -exec chmod 755 {} \;
+  find . -perm 754 -exec chmod 755 {} \;
+  find . -perm 664 -exec chmod 644 {} \;
+  mkdir -p $PKG/usr/doc/gcc-$VERSION
+  cp -a \
+    COPYING* ChangeLog* FAQ INSTALL \
+    LAST_UPDATED MAINTAINERS NEWS \
+    README* *.html \
+  $PKG/usr/doc/gcc-$VERSION
+
+  # We will keep part of these, but they are really big...
+  if [ -r ChangeLog ]; then
+    DOCSDIR=$(echo $PKG/usr/doc/gcc-$VERSION)
+    cat ChangeLog | head -n 1000 > $DOCSDIR/ChangeLog
+    touch -r ChangeLog $DOCSDIR/ChangeLog
+  fi
+  if [ -r NEWS ]; then
+    DOCSDIR=$(echo $PKG/usr/doc/gcc-$VERSION)
+    cat NEWS | head -n 1000 > $DOCSDIR/NEWS
+    touch -r NEWS $DOCSDIR/NEWS
+  fi
+
+  mkdir -p $PKG/usr/doc/gcc-${VERSION}/gcc
+  ( cd gcc
+    cp -a \
+      ABOUT* COPYING* DATESTAMP DEV-PHASE LANG* ONEWS README* SERVICE \
+    $PKG/usr/doc/gcc-$VERSION/gcc
+         
+    mkdir -p $PKG/usr/doc/gcc-${VERSION}/gcc/java
+    ( cd java
+      cp -a \
+        ChangeLog.tree-ssa \
+      $PKG/usr/doc/gcc-${VERSION}/gcc/java
+      if [ -r ChangeLog ]; then
+        cat ChangeLog | head -n 1000 > $PKG/usr/doc/gcc-${VERSION}/gcc/java/ChangeLog
+        touch -r ChangeLog $PKG/usr/doc/gcc-${VERSION}/gcc/java/ChangeLog
+      fi
+    )
+
+  ) || exit 1
+
+  mkdir -p $PKG/usr/doc/gcc-${VERSION}/libffi
+  ( cd libffi
+    cp -a \
+      ChangeLog.libgcj ChangeLog.v1 \
+      LICENSE* README* \
+    $PKG/usr/doc/gcc-${VERSION}/libffi
+    if [ -r ChangeLog ]; then
+      cat ChangeLog | head -n 1000 > $PKG/usr/doc/gcc-${VERSION}/libffi/ChangeLog
+      touch -r ChangeLog $PKG/usr/doc/gcc-${VERSION}/libffi/ChangeLog
+    fi
+  )
+
+  mkdir -p $PKG/usr/doc/gcc-${VERSION}/libjava
+  ( cd libjava
+    cp -a \
+      COPYING* HACKING LIBGCJ_LICENSE \
+      NEWS README* THANKS \
+    $PKG/usr/doc/gcc-${VERSION}/libjava
+    if [ -r ChangeLog ]; then
+      cat ChangeLog | head -n 1000 > $PKG/usr/doc/gcc-${VERSION}/libjava/ChangeLog
+      touch -r ChangeLog $PKG/usr/doc/gcc-${VERSION}/libjava/ChangeLog
+    fi
+  )
+
+  if [ -d libmudflap ]; then
+    mkdir -p $PKG/usr/doc/gcc-${VERSION}/libmudflap
+    ( cd libmudflap
+      if [ -r ChangeLog ]; then
+        cat ChangeLog | head -n 1000 > $PKG/usr/doc/gcc-${VERSION}/libmudflap/ChangeLog
+        touch -r ChangeLog $PKG/usr/doc/gcc-${VERSION}/libmudflap/ChangeLog
+      fi
+    )
+  fi
+
+  mkdir -p $PKG/usr/doc/gcc-${VERSION}/libgomp
+  ( cd libgomp
+    if [ -r ChangeLog ]; then
+      cat ChangeLog | head -n 1000 > $PKG/usr/doc/gcc-${VERSION}/libgomp/ChangeLog
+      touch -r ChangeLog $PKG/usr/doc/gcc-${VERSION}/libgomp/ChangeLog
+    fi
+  )
+  
+  mkdir -p $PKG/usr/doc/gcc-${VERSION}/libstdc++-v3
+  ( cd libstdc++-v3
+    cp -a \
+      README* \
+      doc/html/faq.html \
+    $PKG/usr/doc/gcc-${VERSION}/libstdc++-v3
+    if [ -r ChangeLog ]; then
+      cat ChangeLog | head -n 1000 > $PKG/usr/doc/gcc-${VERSION}/libstdc++-v3/ChangeLog
+      touch -r ChangeLog $PKG/usr/doc/gcc-${VERSION}/libstdc++-v3/ChangeLog
+    fi
+  )
+)
+
+# Add fastjar to the gcc5 package:
+( cd $TMP
+  FASTJARVER=$(echo $CWD/fastjar-*.tar.?z* | rev | cut -f 3- -d . | cut -f 1 -d - | rev)
+  echo
+  echo "Building fastjar-$FASTJARVER first"
+  echo
+  rm -rf fastjar-$FASTJARVER
+  tar xvf $CWD/fastjar-$FASTJARVER.tar.?z* || exit 1
+  cd fastjar-$FASTJARVER || exit 1
+  chown -R root:root .
+  find . \
+    \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+    -exec chmod 755 {} \; -o \
+    \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+    -exec chmod 644 {} \;
+  for patch in $CWD/fastjar-patches/* ; do
+    cat $patch | patch -p1 --verbose || exit 1
+  done
+  LDFLAGS="$SLKLDFLAGS" \
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  ./configure \
+     --prefix=/usr \
+     --libdir=/usr/lib$LIBDIRSUFFIX \
+     --mandir=/usr/man \
+     --infodir=/usr/info \
+     --build=$TARGET
+  make || exit 1
+  make install DESTDIR=$PKG || exit 1
+  mkdir -p $PKG/usr/doc/fastjar-$FASTJARVER
+  cp -a \
+    AUTHORS CHANGES COPYING* INSTALL NEWS README* TODO \
+    $PKG/usr/doc/fastjar-$FASTJARVER
+  # If there's a ChangeLog, installing at least part of the recent history
+  # is useful, but don't let it get totally out of control:
+  if [ -r ChangeLog ]; then
+    DOCSDIR=$(echo $PKG/usr/doc/fastjar-$FASTJARVER)
+    cat ChangeLog | head -n 1000 > $DOCSDIR/ChangeLog
+    touch -r ChangeLog $DOCSDIR/ChangeLog
+  fi
+  find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+    | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+  # Compress and if needed symlink the man pages:
+  if [ -d $PKG/usr/man ]; then
+    ( cd $PKG/usr/man
+      for manpagedir in $(find . -type d -name "man*") ; do
+        ( cd $manpagedir
+          for eachpage in $( find . -type l -maxdepth 1) ; do
+            ln -s $( readlink $eachpage ).gz $eachpage.gz
+            rm $eachpage
+          done
+          gzip -9 *.?
+        )
+      done
+    )
+  fi
+  # Compress info files, if any:
+  if [ -d $PKG/usr/info ]; then
+    ( cd $PKG/usr/info
+      rm -f dir
+      gzip -9 *
+    )
+  fi
+  echo
+) || exit 1
+
+# build gcc
+( mkdir gcc.build.lnx;
+  cd gcc.build.lnx;
+
+  # I think it's incorrect to include this option (as it'll end up set
+  # to i586 on x86 platforms), and we want to tune the binary structure
+  # for i686, as that's where almost all of the optimization speedups
+  # are to be found.
+  # Correct me if my take on this is wrong.
+  #  --with-cpu=$ARCH 
+ 
+  # NOTE:  For Slackware 15.0, look into removing --with-default-libstdcxx-abi=gcc4-compatible,
+  # which will then require rebuilding all C++ libraries.  That is, if there's any benefit.
+
+  LDFLAGS="$SLKLDFLAGS" \
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  ../gcc-$VERSION/configure \
+     --prefix=/usr \
+     --libdir=/usr/lib$LIBDIRSUFFIX \
+     --mandir=/usr/man \
+     --infodir=/usr/info \
+     --enable-shared \
+     --enable-bootstrap \
+     --enable-languages=${LANGS} \
+     --enable-threads=posix \
+     --enable-checking=release \
+     --enable-objc-gc \
+     --with-system-zlib \
+     --with-python-dir=/lib$LIBDIRSUFFIX/python2.7/site-packages \
+     --enable-libstdcxx-dual-abi \
+     --with-default-libstdcxx-abi=gcc4-compatible \
+     --disable-libunwind-exceptions \
+     --enable-__cxa_atexit \
+     --enable-libssp \
+     --enable-lto \
+     --disable-install-libiberty \
+     --with-gnu-ld \
+     --without-isl \
+     --verbose \
+     --enable-java-home \
+     --with-java-home=/usr/lib$LIBDIRSUFFIX/jvm/jre \
+     --with-jvm-root-dir=/usr/lib$LIBDIRSUFFIX/jvm \
+     --with-jvm-jar-dir=/usr/lib$LIBDIRSUFFIX/jvm/jvm-exports \
+     --with-arch-directory=$LIB_ARCH \
+     --with-antlr-jar=$ANTLJAR \
+     --program-suffix=-${MAJVER} \
+     --enable-version-specific-runtime-libs \
+     $GCC_ARCHOPTS \
+     --target=${TARGET} \
+     --build=${TARGET} \
+     --host=${TARGET} || exit 1
+     #--enable-java-awt=gtk \
+     #--disable-gtktest \
+
+  # Start the build:
+
+  # Include all debugging info (for now):
+  make bootstrap
+  make info
+  make install DESTDIR=$PKG
+
+# KLUDGE ALERT
+# These *gdb.py files are causing ldconfig to complain, so they are going
+# to be REMOVED for now...  at some point, they might be moved somewhere
+# else, in which case things should Just Work(tm).  Keep an eye on it.
+rm -f $PKG/usr/lib*/*gdb.py
+
+# Be sure the "specs" file is installed.
+if [ ! -r $PKG/usr/lib${LIBDIRSUFFIX}/gcc/${TARGET}/${VERSION}/specs ]; then
+  cat stage1-gcc/specs > $PKG/usr/lib${LIBDIRSUFFIX}/gcc/${TARGET}/${VERSION}/specs
+fi
+
+if [ ${MULTILIB} = "NO" ]; then
+  # Make our 64bit gcc look for 32bit gcc binaries in ./32 subdirectory:
+  # (only needed if gcc was compiled with disable-multilib)
+  if [ "$ARCH" = "x86_64" ]; then
+    sed -i 's#;.\(:../lib !m64 m32;\)$#;32\1#' \
+      $PKG/usr/lib${LIBDIRSUFFIX}/gcc/${TARGET}/${VERSION}/specs
+  fi
+fi
+
+make -i install-info DESTDIR=$PKG
+
+# Move potentially conflicting stuff to version specific subdirectory:
+if [ -d $PKG/usr/lib${LIBDIRSUFFIX} ]; then
+  mv $PKG/usr/lib${LIBDIRSUFFIX}/lib* $PKG/usr/lib${LIBDIRSUFFIX}/gcc/${TARGET}/${VERSION}/
+fi
+if [ -d $PKG/usr/lib${LIBDIRSUFFIX}/gcc/${TARGET}/lib${LIBDIRSUFFIX}/ ]; then
+  mv $PKG/usr/lib${LIBDIRSUFFIX}/gcc/${TARGET}/lib${LIBDIRSUFFIX}/lib* $PKG/usr/lib${LIBDIRSUFFIX}/gcc/${TARGET}/${VERSION}/
+fi
+chmod 755 $PKG/usr/lib${LIBDIRSUFFIX}/gcc/${TARGET}/${VERSION}/libgcc_s.so.1
+if [ ${MULTILIB} = "YES" ]; then
+  if [ -d $PKG/usr/lib ]; then
+    mv $PKG/usr/lib/lib* $PKG/usr/lib/gcc/${TARGET}/${VERSION}/
+  fi
+  if [ -d $PKG/usr/lib/gcc/${TARGET}/lib/ ]; then
+    mv $PKG/usr/lib/gcc/${TARGET}/lib/lib* $PKG/usr/lib/gcc/${TARGET}/${VERSION}/
+  fi
+  chmod 755 $PKG/usr/lib/gcc/${TARGET}/${VERSION}/libgcc_s.so.1
+fi
+
+# The (huge) static GNU java libraries are not packaged.  In nearly all
+# cases one or more dependencies will not be available as static anyway.
+rm -f $PKG/usr/lib${LIBDIRSUFFIX}/libgcj.a
+rm -f $PKG/usr/lib${LIBDIRSUFFIX}/libgcj-tools.a
+rm -f $PKG/usr/lib/libgcj.a
+rm -f $PKG/usr/lib/libgcj-tools.a
+
+# Fix stuff up:
+( cd $PKG/usr/info
+  rm dir
+  for eachinfo in *.info ; do
+    mv $eachinfo $(basename $eachinfo .info)-${MAJVER}.info
+  done
+  gzip -9 *
+)
+
+( cd $PKG/usr/bin
+  ln -sf g++-${MAJVER} c++-${MAJVER}
+  ln -sf gcc-${MAJVER} cc-${MAJVER}
+  # Improved versions of the Slackware c?9 scripts,
+  # it is safe to overwrite the originals:
+  cat $CWD/c89.sh > c89
+  cat $CWD/c99.sh > c99
+  chmod 755 c89 c99
+)
+
+( cd $PKG/usr/man
+  rm -r man7  # Part of the system gcc package
+  gzip -9 */*
+  cd man1
+  ln -sf g++-${MAJVER}.1.gz c++-${MAJVER}.1.gz
+  ln -sf gcc-${MAJVER}.1.gz cc-${MAJVER}.1.gz
+)  
+
+# keep a log
+) 2>&1 | tee $TMP/gcc.build.log
+
+# Add profile scripts (non-executable by default) to make it easier
+# to set the environment for compiling with gcc5:
+mkdir -p $PKG/etc/profile.d
+cat $CWD/profile.d/gcc5.sh > $PKG/etc/profile.d/gcc5.sh
+cat $CWD/profile.d/gcc5.csh > $PKG/etc/profile.d/gcc5.csh
+chmod 644  $PKG/etc/profile.d/*
+
+# The ecj wrapper script:
+cat $CWD/ecj.sh | sed -e "s,@JAVADIR@,/usr/share/java," > $PKG/usr/bin/ecj
+chmod 755 $PKG/usr/bin/ecj
+# Some compatibility links.
+for JAVAPROG in gcj gcjh gcj-dbtool gjar gjarsigner gjavah ; do
+  ln -s ${JAVAPROG}-${MAJVER} $PKG/usr/bin/${JAVAPROG}
+done
+( cd $PKG
+  for JAVALIB in usr/lib${LIBDIRSUFFIX}/gcc/${TARGET}/${VERSION}/libgcj* ; do
+    ln -s /${JAVALIB} $PKG/usr/lib${LIBDIRSUFFIX}/
+  done
+)
+# And add the missing javac symlink:
+ln -s ../../../bin/ecj $PKG/usr/lib$LIBDIRSUFFIX/jvm/bin/javac
+# Don't package libffi stuff anymore.  GCC will link the internal version
+# statically, and we'll need a newer one elsewhere.
+find . -name "ffi*.h" | xargs rm -f
+find . -name "libffi*" | xargs rm -f
+rm -f usr/man/man3/ffi*
+rm -f usr/info/libffi*
+# Install a proper pkgconfig file for libgcj:
+rm $PKG/usr/lib${LIBDIRSUFFIX}/gcc/${TARGET}/${VERSION}/pkgconfig/libgcj*pc
+rm $PKG/usr/lib${LIBDIRSUFFIX}/gcc/${TARGET}/${VERSION}/32/pkgconfig/libgcj*pc
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig
+cat $CWD/libgcj-5.pc \
+  | sed -e "s,@LIBDIRSUFFIX@,${LIBDIRSUFFIX}," \
+  | sed -e "s,@TARGET@,${TARGET}," \
+  | sed -e "s,@VERSION@,${VERSION}," \
+  > $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/libgcj-5.pc
+
+# Filter all .la files (thanks much to Mark Post for the sed script):
+( cd $PKG
+  for file in $(find . -type f -name "*.la") ; do
+    cat $file | sed -e 's%-L'${TMP}'[[:graph:]]* % %g' > $TMP/tmp-la-file
+    cat $TMP/tmp-la-file > $file
+  done
+  rm $TMP/tmp-la-file
+)
+
+## Strip bloated binaries and libraries:
+( cd $PKG
+  find . -name "lib*so*" -exec strip --strip-unneeded "{}" \;
+  find . -name "lib*a" -exec strip -g "{}" \;
+  strip --strip-unneeded usr/bin/* 2> /dev/null
+  find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+  find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+)
+
+# Remove localizations overlapping with Slackware's gcc
+rm -rf $PKG/usr/share/locale
+
+( cd $PKG
+  if [ ${MULTILIB} = "YES" ]; then
+    /sbin/makepkg -l y -c n $OUTPUT/${PRGNAM}-${VERSION}_multilib-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+  else
+    /sbin/makepkg -l y -c n $OUTPUT/${PRGNAM}-${VERSION}-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+  fi
+)
