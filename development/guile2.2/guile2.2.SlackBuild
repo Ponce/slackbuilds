@@ -1,0 +1,138 @@
+#!/bin/sh
+
+# Slackware build script for guile2.2
+
+# Copyright 2020  Matteo Bernardini <ponce@slackbuilds.org>, Pisa, Italy
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+PRGNAM=guile2.2
+SRCNAM=guile
+VERSION=${VERSION:-2.2.6}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.?z
+cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+CFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --infodir=/usr/info \
+  --mandir=/usr/man \
+  --program-suffix=2.2 \
+  --with-threads \
+  --disable-error-on-warning \
+  --disable-static \
+  --disable-rpath \
+  --build=$ARCH-slackware-linux
+
+make -j1
+make install DESTDIR=$PKG
+
+# Move libguile*-gdb.scm to GDB's autoload directory to avoid
+# getting "not an ELF file" errors from ldconfig:
+mkdir -p $PKG/usr/share/gdb/auto-load/usr/lib${LIBDIRSUFFIX}
+mv $PKG/usr/lib${LIBDIRSUFFIX}/libguile*-gdb.scm $PKG/usr/share/gdb/auto-load/usr/lib${LIBDIRSUFFIX} || exit 1
+
+# Change timestamps on *.go and *.scm files, otherwise on multilib systems
+# the compiled (go) files may be detected as older than the source (scm)
+# files, causing guile to attempt to recompile itself with every use:
+find $PKG/usr/lib${LIBDIRSUFFIX} -name "*.go" -exec touch -r $CWD/$PRGNAM.SlackBuild "{}" \;
+find $PKG/usr/share -name "*.scm" -exec touch -r $CWD/$PRGNAM.SlackBuild "{}" \;
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+# Compress info files
+if [ -d $PKG/usr/info ]; then
+  ( cd $PKG/usr/info
+    rm -f dir
+    gzip -9 *
+    # rename them so that they will not overwrite Slackware's files from the guile 3.0 package
+    for i in {1..10}
+    do
+      mv guile.info-$i.gz guile2.2.info-$i.gz
+    done
+    mv guile.info.gz guile2.2.info.gz
+    mv r5rs.info.gz r5rs2.2.info.gz
+  )
+fi
+
+# Avoid duplicate with Slackware's guile.m4
+# It can detect newer and older versions of guile installed on system
+mv $PKG/usr/share/aclocal/guile.m4 $PKG/usr/share/aclocal/guile22.m4
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS COPYING* GUILE-VERSION HACKING INSTALL LICENSE NEWS README* THANKS \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Fix guile-config2.2 info
+sed -i '1s/guile/guile2.2/' -i $PKG/usr/bin/guile-config2.2
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+
