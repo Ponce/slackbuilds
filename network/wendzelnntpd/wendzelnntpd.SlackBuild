@@ -1,0 +1,128 @@
+#!/bin/bash -e
+
+# Slackware build script for WendzelNNTPd
+#
+# Copyright 2021 Steffen Wendzel, https://www.wendzel.de
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+# This script was written using the one from slackbuilds.org as a reference.
+# Thanks to Patrick Volkerding and Adis Nezirovic for the original work.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=wendzelnntpd
+VERSION=${VERSION:-2.1.2}
+TGZ_DIRNAME=cdpxe-WendzelNNTPd-5ea53d6 # for v2.1.2
+BUILD=${BUILD:-3}
+TAG=${TAG:-_SBo}
+TMP=${TMP:-/tmp/SBo}
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) export ARCH=i586 ;;
+    arm*) export ARCH=arm ;;
+       *) export ARCH=$( uname -m ) ;;
+  esac
+fi
+
+set -e
+
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD.txz"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp}
+PKG=$TMP/package-${PRGNAM}
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+
+cd $TMP
+rm -rf $TGZ_DIRNAME
+tar -xvf $CWD/v$VERSION.tar.gz
+cd $TGZ_DIRNAME
+
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Configure:
+MYSQL=NO DESTDIR=/usr CONFDIR=/etc ./configure
+
+# Build and install:
+make
+
+# spool dir + usenet database
+mkdir -p $PKG/var/spool/news/wendzelnntpd
+
+# og-rwx since the passwords are stored in the database too!
+install -d -m 0700 -o 0 -g 0 $PKG/var/spool/news/wendzelnntpd
+cp database/usenet.db $PKG/var/spool/news/wendzelnntpd/usenet.db.new
+chmod 600 $PKG/var/spool/news/wendzelnntpd/usenet.db.new
+
+# add the rc.d script ; also fix URL of the deamon binary
+mkdir -p $PKG/etc/rc.d
+cat scripts/startup/init.d_script | sed 's/^DAEMON=.*$/DAEMON=\/usr\/sbin\/wendzelnntpd/' > $PKG/etc/rc.d/rc.wendzelnntpd.new
+chmod 644 $PKG/etc/rc.d/rc.wendzelnntpd.new
+
+# add the binaries
+mkdir -p $PKG/usr/sbin
+chmod 0755 $PKG/usr/sbin/
+cp -v bin/wendzelnntpd bin/wendzelnntpadm $PKG/usr/sbin/
+chmod 755 $PKG/usr/sbin/*
+
+# rename config file to .new
+cp -v wendzelnntpd.conf $PKG/etc/wendzelnntpd.conf.new
+chmod 644 $PKG/etc/wendzelnntpd.conf.new
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+# add version number to doc directory and also put it in /usr/doc
+# instead of /usr/share/doc
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/
+cp -vr docs/docs $PKG/usr/doc/$PRGNAM-$VERSION/
+cp -v docs/docs.pdf $PKG/usr/doc/$PRGNAM-$VERSION/docs.pdf
+cp -v AUTHOR CHANGELOG HISTORY README.md INSTALL LICENSE database/usenet.db_struct database/mysql_db_struct.sql $PKG/usr/doc/$PRGNAM-$VERSION/
+chmod -R 0644 $PKG/usr/doc/$PRGNAM-$VERSION/*
+
+# Strip binaries:
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+
+# This is kept for the case that wendzelnntpd will contain a manpage in the future.
+# Compress man pages
+# If the man pages are installed to /usr/share/man instead, you'll need to either
+# add the --mandir=/usr/man flag to configure or move them manually after the
+# make install process is run.
+#find $PKG/usr/man -type f -exec gzip -9 {} \;
+#for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/${PRGNAM}-$VERSION-$ARCH-${BUILD}${TAG}.${PKGTYPE:-tgz}
+
