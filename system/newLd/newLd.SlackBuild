@@ -50,8 +50,6 @@ fi
 #  exit 0
 #fi
 
-NUMJOBS=${NUMJOBS:-" -j$(expr $(nproc) + 1) "}
-
 # Set to ld.gold or ld.bfd:
 DEFAULT_LD=ld.bfd
 
@@ -84,6 +82,8 @@ case "$ARCH" in
     *)    TARGET=$ARCH-slackware-linux ;;
 esac
 
+set -e
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 
@@ -92,32 +92,32 @@ mkdir -p $TMP $PKG
 
 cd $TMP
 rm -rf binutils-$VERSION
-tar xvf $CWD/binutils-$VERSION.tar.?z || exit 1
-cd binutils-$VERSION || exit 1
+tar xvf $CWD/binutils-$VERSION.tar.?z
+cd binutils-$VERSION
 
 # Various upstream patches:
-zcat $CWD/patches/binutils-2.20.51.0.2-libtool-lib64.patch.gz | patch -p1 --verbose || exit 1
-zcat $CWD/patches/binutils-2.25-version.patch.gz | patch -p1 --verbose || exit 1
-zcat $CWD/patches/binutils-2.25-set-long-long.patch.gz | patch -p1 --verbose || exit 1
-zcat $CWD/patches/binutils-2.20.51.0.10-copy-osabi.patch.gz | patch -p1 --verbose || exit 1
-zcat $CWD/patches/binutils-2.20.51.0.10-sec-merge-emit.patch.gz | patch -p1 --verbose || exit 1
-zcat $CWD/patches/binutils-2.24-ldforcele.patch.gz | patch -p1 --verbose || exit 1
-zcat $CWD/patches/binutils-2.25.1-cleansweep.patch.gz | patch -p2 --verbose || exit 1
+zcat $CWD/patches/binutils-2.20.51.0.2-libtool-lib64.patch.gz | patch -p1 --verbose
+zcat $CWD/patches/binutils-2.25-version.patch.gz | patch -p1 --verbose
+zcat $CWD/patches/binutils-2.25-set-long-long.patch.gz | patch -p1 --verbose
+zcat $CWD/patches/binutils-2.20.51.0.10-copy-osabi.patch.gz | patch -p1 --verbose
+zcat $CWD/patches/binutils-2.20.51.0.10-sec-merge-emit.patch.gz | patch -p1 --verbose
+zcat $CWD/patches/binutils-2.24-ldforcele.patch.gz | patch -p1 --verbose
+zcat $CWD/patches/binutils-2.25.1-cleansweep.patch.gz | patch -p2 --verbose
 
 # Export the demangle.h header file:
-zcat $CWD/patches/binutils.export.demangle.h.diff.gz | patch -p1 --verbose || exit 1
+zcat $CWD/patches/binutils.export.demangle.h.diff.gz | patch -p1 --verbose
 # Don't check to see if "config.h" was included in the installed headers:
-zcat $CWD/patches/binutils.no-config-h-check.diff.gz | patch -p1 --verbose || exit 1
+zcat $CWD/patches/binutils.no-config-h-check.diff.gz | patch -p1 --verbose
 
 # Set %version to something halfway meaningful:
 sed -i -e 's/%''{release}/slack15/g' bfd/Makefile{.am,.in}
 
 chown -R root:root .
-find . \
-  \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
-  -exec chmod 755 {} \+ -o \
-  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
-  -exec chmod 644 {} \+
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 # End of preparations
 if echo "$*" | grep -qw -- --prep ; then
@@ -143,8 +143,7 @@ CFLAGS="$SLKCFLAGS" \
   --enable-ld=default \
   --enable-initfini-array \
   $WERROR \
-  --build=$TARGET \
-  || exit 1
+  --build=$TARGET
 
 
 # Use "tooldir=/usr" to avoid internal references to the /usr/${TARGET}/
@@ -155,9 +154,9 @@ CFLAGS="$SLKCFLAGS" \
 # been built into the linker for quite some time and the ones in the
 # filesystem aren't actually loaded. For the most part they are now
 # documentation and it doesn't matter where they reside.
-make clean || exit 1
-make tooldir=$PREFIX $NUMJOBS || make tooldir=$PREFIX || exit 1
-make tooldir=$PREFIX install DESTDIR=$PKG || exit 1
+make clean
+make tooldir=$PREFIX
+make tooldir=$PREFIX install DESTDIR=$PKG
 
 # Using tooldir=/usr also makes the /usr/${TARGET}/lib${LIBDIRSUFFIX}
 # directory obsolete, and the build will no longer install it. But since
@@ -177,7 +176,7 @@ rm -rf $PKG/$PREFIX/$ARCH-slackware-linux
 
 # Delete unwanted programs
 rm -f  $PKG/$PREFIX/bin/{addr2line,ar,as,c++filt,dlltool,dllwrap,elfedit,gprof,ld.bfd,nm,objcopy,objdump,ranlib,readelf,size,strings,strip,windmc,windres}
- 
+
 mkdir -p $PKG/usr/bin
 cat << EOF > $PKG/usr/bin/ld$VERSION
 #!/bin/sh
@@ -220,8 +219,8 @@ chmod +x $PKG/usr/bin/ld$VERSION
 #  ( cd $PKG/$PREFIX/bin ; rm -f ld ; ln -sf $DEFAULT_LD ld )
 #fi
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" \
-  | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 # Remove some unneeded man pages, and then compress the rest
 (cd $PKG/usr/man/man1; mv ld.1 ld$VERSION.1)
@@ -252,19 +251,8 @@ fi
 
 chown -R root:root $PKG/$PREFIX/doc/binutils-$VERSION
 
-# Add slack-desc:
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n /tmp/binutils-$VERSION-$ARCH-$BUILD$TAG.txz
-
-# Not relation for this package
-#cat << EOF
-#
-##############################
-#oprofile links to libbfd so
-#be sure to recompile that
-##############################
-#
-#EOF
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
