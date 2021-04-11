@@ -15,13 +15,3 @@ if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
 fi
 
-CONFIGS="aiplayers.cfg \
-  default.cfg \
-  settings.cfg \
-  settings_authentication.cfg \
-  settings_dedicated.cfg \
-  settings_visual.cfg"
-for config in $CONFIGS ;
-do
-	config etc/armagetronad/$config.new ;
-done
