@@ -2,7 +2,7 @@
 
 # Slackware build script for gnash
 
-# Copyright 2012-2016 Kyle Guinn <elyk03@gmail.com>, USA
+# Copyright 2012-2021 Kyle Guinn <elyk03@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,8 +23,9 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=gnash
-VERSION=${VERSION:-0.8.10}
-BUILD=${BUILD:-7}
+VERSION=${VERSION:-0.8.11dev_20190130}
+SRCVER=${SRCVER:-583ccbc1275c7701dc4843ec12142ff86bb305b4}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
@@ -37,7 +38,7 @@ fi
 
 CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
-PKG=$TMP/package-$PRGNAM
+PKG=$TMP/package-$PRGNAM-$VERSION
 OUTPUT=${OUTPUT:-/tmp}
 
 DOCS="ABOUT-NLS AUTHORS COPYING ChangeLog INSTALL NEWS README* TODO"
@@ -59,17 +60,32 @@ else
   LIBDIRSUFFIX=""
 fi
 
-# Set $KLASH to "no" to disable Klash, the Konqueror plugin.
-if [ "${KLASH:-yes}" = "yes" ]; then
-  KLASH_OPT="\
-  --with-kde4-incl=/usr/include \
-  --with-kde4-configdir=/usr/share/config \
-  --with-kde4-prefix=/usr \
-  --with-kde4-lib=/usr/lib${LIBDIRSUFFIX} \
-  --with-kde-appsdatadir=/usr/share/apps/klash \
-  --with-kde4-servicesdir=/usr/share/kde4/services"
+# Set $NPAPI to "yes" to enable the Mozilla plugin.  Requires xulrunner.
+if [ "${NPAPI:-no}" != "no" ]; then
+  NPAPI_OPT="--enable-write"  # This option no longer does anything?
 else
-  KLASH_OPT="--disable-kparts3 --disable-kparts4"
+  NPAPI_OPT="--disable-npapi"
+fi
+
+# TODO: Test the KPARTS3 plugin with KDE3/Trinity.
+if [ "${KPARTS3:-no}" != "no" ]; then
+  KPARTS3_OPT=""
+else
+  KPARTS3_OPT="--disable-kparts3"
+fi
+
+# Set $KPARTS4 to "yes" to enable the KDE4 Konqueror plugin.
+if [ "${KPARTS4:-no}" != "no" ]; then
+  KPARTS4_OPT=" \
+  --with-kde4-prefix=/usr \
+  --with-kde4-incl=/usr/include \
+  --with-kde4-lib=/usr/lib${LIBDIRSUFFIX} \
+  --with-kde4-plugindir=/usr/lib${LIBDIRSUFFIX}/kde4 \
+  --with-kde4-servicesdir=/usr/share/kde4/services \
+  --with-kde4-configdir=/usr/share/config \
+  --with-kde-appsdatadir=/usr/share/apps/klash"
+else
+  KPARTS4_OPT="--disable-kparts4"
 fi
 
 set -e
@@ -77,33 +93,12 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
-cd $PRGNAM-$VERSION
+rm -rf $PRGNAM-$SRCVER
+tar xvf $CWD/$PRGNAM-$SRCVER.tar.gz
+cd $PRGNAM-$SRCVER
 chown -R root:root .
 chmod -R u+w,go-w,a+rX-st .
 
-# Fix compilation with GCC 4.7.
-patch -p1 < $CWD/patch/gcc47.patch
-
-# Fix a boost linking error, paths for kde plugin, and a cve patch.
-# Ripped from gentoo
-patch -p1 < $CWD/patch/gnash-0.8.10-boost-1.50.patch
-patch -p1 < $CWD/patch/gnash-0.8.10-klash.patch
-patch -p1 < $CWD/patch/gnash-0.8.10-kde4-libdir.patch
-patch -p1 < $CWD/patch/gnash-0.8.10-cve-2012-1175.patch
-
-# Fix building with giflib-5.0
-# Also ripped from gentoo :-)
-patch -p1 < $CWD/patch/58dcdd9338d965e54c8f03ce3d2757388d82b7a3.patch
-patch -p1 < $CWD/patch/cc22f2d0597f3a9547980f4786d918f8b5635472.patch
-
-# Fix build with new Boost
-# Taken from ARCH
-patch -p1 < $CWD/patch/gnash-boost.patch
-
-# The FFmpeg engine doesn't compile with FFmpeg 0.11.1.  Patches welcome.
-# In the meantime, set --enable-media=gst to avoid autodetecting FFmpeg.
 autoreconf -vif
 ./configure \
   --prefix=/usr \
@@ -115,15 +110,14 @@ autoreconf -vif
   --docdir=/usr/doc/$PRGNAM-$VERSION \
   --build=$ARCH-slackware-linux \
   --disable-dependency-tracking \
-  --enable-media=gst \
   --enable-python \
   --enable-ssh \
   --enable-ssl \
-  --enable-write \
   --without-gconf \
   --with-plugins-install=system \
-  --with-speexdsp-incl=/usr/include/speex \
-  $KLASH_OPT \
+  $NPAPI_OPT \
+  $KPARTS3_OPT \
+  $KPARTS4_OPT \
   CFLAGS="$SLKCFLAGS" \
   CXXFLAGS="$SLKCFLAGS" \
 
@@ -138,6 +132,9 @@ find $PKG/usr/lib${LIBDIRSUFFIX} -name '*.la' -delete
 
 find $PKG/etc -type f -exec mv {} {}.new \;
 find $PKG/usr/man -type f -exec gzip -9 {} +
+
+mkdir -p $PKG/etc/gconf/schemas
+mv $PKG/usr/share/applications/gnash.schemas $PKG/etc/gconf/schemas
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
