@@ -20,17 +20,17 @@ To hear the in-game music, there are several options. In the game menu,
 select "Options | Sound Options" and set "MIDI Device" to one of the
 below:
 
-1. FluidSynth - Install fluidsynth and fluid-soundfont. These are runtime
-dependencies (no need to rebuild qzdoom).
+1. FluidSynth - Install fluid-soundfont. This is a runtime dependency
+   (no need to rebuild qzdoom).
 
 2. Timidity - Install TiMidity++ and either eawpats or freepats (all
-runtime dependencies), and set up /etc/timidity/timidity.cfg to use
-it. This uses more CPU than FluidSynth, and may make the framerate
-stutter and jerk even on high-end systems.
+   runtime dependencies), and set up /etc/timidity/timidity.cfg to use
+   it. This uses more CPU than FluidSynth, and may make the framerate
+   stutter and jerk even on high-end systems.
 
 3. GUS or OPL - Nothing extra required; these are software emulations
-of classic soundcards from the early 1990s. They may sound "clunky" to
-modern ears, but they may also bring back fond memories for long-time
-Doom players.
+   of classic soundcards from the early 1990s. They may sound "clunky" to
+   modern ears, but they may also bring back fond memories for long-time
+   Doom players.
 
 qzdoom also supports WildMIDI, but this is currently not available on SBo.
