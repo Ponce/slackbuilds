@@ -1,0 +1,144 @@
+#!/bin/sh
+
+# Slackware build script for ROOT
+
+# written by Jože Zobec <jozze.zepl@gmail.com>
+
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY
+# EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Modified by the slackbuilds.org project
+# Upgraded by Andrei Rabusov <arabusov@gmail.com> for ROOT6
+
+PRGNAM=root6
+VERSION=${VERSION:-6.24.00}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+NUMJOBS=${NUMJOBS:-1}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i686 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM-$VERSION
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i486" ]; then
+  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+if [ ${GSL:-yes} = "no" ]; then
+  GSL_FLAGS="-Dgsl_shared=OFF"
+else
+  GSL_FLAGS="-Dgsl_shared=ON"
+  if [ "$MATHMORE" = "yes" ]; then
+    GSL_FLAGS="$GSL_FLAGS -Dmathmore=ON"
+  fi
+fi
+
+if [ ${FFTW:-yes} = "no" ]; then
+  FFTW_FLAGS="-Dfftw3=OFF"
+else
+  FFTW_FLAGS="-Dfftw3=ON"
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/root\_v$VERSION.source.tar.gz
+mv root-$VERSION src
+mkdir $PRGNAM-$VERSION
+mv src $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# prefix where to install stuff
+PREFIX=/opt/ROOT-${VERSION}
+
+mkdir -p build
+cd build
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+cmake ../src \
+  -Dgnuinstall=OFF \
+  -DSYSTEM_NAME=slackware-linux \
+  -DSYSTEM_PROCESSOR=$ARCH \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX=$PREFIX \
+  -DCMAKE_INSTALL_DOCDIR=$PREFIX/usr/doc/$PRGNAM-$VERSION \
+  -Drpath=ON \
+  -Dminuit2=ON \
+  -DCMAKE_CXX_STANDARD=17 \
+  -Droot7=ON \
+  -DPYTHON_EXECUTABLE=/usr/bin/python3 \
+  -Dfortran=ON \
+  -Ddataframe=ON \
+  -Dtmva=ON \
+  -Dtmva-cpu=ON \
+  $GSL_FLAGS \
+  $FFTW_FLAGS
+
+make -j${NUMJOBS}
+make install/strip DESTDIR=$PKG
+
+find $PKG$PREFIX/man -type f -exec gzip -9 {} \;
+
+# Install some profile.d scripts to use the right paths
+mkdir -p $PKG/etc/profile.d
+SCRIPT_NAME=$PRGNAM.sh
+echo 'CWD=$(pwd)'               >  $PKG/etc/profile.d/$SCRIPT_NAME
+echo cd $PREFIX                 >> $PKG/etc/profile.d/$SCRIPT_NAME
+echo 'source bin/thisroot.sh'   >> $PKG/etc/profile.d/$SCRIPT_NAME
+echo 'cd $CWD'                  >> $PKG/etc/profile.d/$SCRIPT_NAME
+echo 'unset CWD'                >> $PKG/etc/profile.d/$SCRIPT_NAME
+chmod +x $PKG/etc/profile.d/$SCRIPT_NAME
+
+# Documentation goes to /usr/doc/ despite the main tree is in /opt
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+
+# We are still in build directory
+cp -a README/ README.md LICENSE LGPL2_1.txt ../src/CONTRIBUTING.md \
+    $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README/ LICENSE \
+    $PKG$PREFIX
+find $PKG/usr/doc/$PRGNAM-$VERSION -type f -exec chmod 644 {} \;
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
