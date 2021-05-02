@@ -2,7 +2,7 @@
 
 # Slackware build script for SEGGER J-Link
 
-# Copyright 2015 Andrzej Telszewski, Sabadell
+# Copyright 2021 Andrzej Telszewski, Szczecin
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,14 +23,13 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=J-Link
-VERSION=${VERSION:-5.02}
-SRCNAM="JLink_Linux_V"$(echo $VERSION | tr -d .)"_"
+VERSION=${VERSION:-7.00a}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+    i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
@@ -47,15 +46,17 @@ else
   LIBDIRSUFFIX=""
 fi
 
-if [ "$ARCH" != "i486" ] && [ "$ARCH" != "x86_64" ]; then
+if [ "$ARCH" != "i586" ] && [ "$ARCH" != "x86_64" ]; then
   echo -ne "\n\nError: \"${ARCH}\" architecture is not supported.\n\n"
   exit 1
 fi
 
-if [ "$ARCH" = "i486" ]; then
-  SRCNAM="${SRCNAM}i386"
+SRCNAM="JLink_Linux_V$(echo $VERSION | tr -d .)"
+
+if [ "$ARCH" = "i586" ]; then
+  SRCNAM="${SRCNAM}_i386"
 else
-  SRCNAM="${SRCNAM}$ARCH"
+  SRCNAM="${SRCNAM}_${ARCH}"
 fi
 
 set -e
@@ -68,9 +69,11 @@ tar xvf $CWD/$SRCNAM.tgz
 mv $SRCNAM $PRGNAM-$VERSION
 cd $PRGNAM-$VERSION
 
-TREE_MD5=80fa37c7583e6eb366e15c1fc84e630f
-UDEV_MD5=4918ffb129c5691e8f9a01313f975fea
-TREE_MD5_NEW=( $(find . ! -name "libjlinkarm.so.*" ! -name "libedit.so.*" | sort | md5sum) )
+TREE_MD5=bfc46ffdebe4e426f48d2ad74e1aeb33
+UDEV_MD5=048a92be10a5864e558415326001d5e9
+
+TREE_MD5_NEW=( $(find . -not \( -path './x86' -prune \) -not -name 'libjlinkarm.so*' \
+  -not -name 'libjlinkarm_x86.so*' -not -name 'libQt*' | LC_ALL=C sort | md5sum) )
 UDEV_MD5_NEW=( $(md5sum 99-jlink.rules) )
 
 if [ $TREE_MD5 != $TREE_MD5_NEW ] || [ $UDEV_MD5 != $UDEV_MD5_NEW ]; then
@@ -90,29 +93,39 @@ if [ $TREE_MD5 != $TREE_MD5_NEW ] || [ $UDEV_MD5 != $UDEV_MD5_NEW ]; then
 fi
 
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+chmod -R a-st,u+rwX,go-w+rX .
 
-mkdir -p $PKG/etc/udev/rules.d
-fromdos < 99-jlink.rules > $PKG/etc/udev/rules.d/99-jlink.rules
-sed -i 's/BUS!="usb", ACTION!="add", SUBSYSTEM!=="usb_device", GOTO="jlink_rules_end"/ACTION!="add", SUBSYSTEM!="usb", GOTO="jlink_rules_end"/' \
-  $PKG/etc/udev/rules.d/99-jlink.rules
-sed -i 's/MODE="666"/MODE="664", GROUP="plugdev"/' $PKG/etc/udev/rules.d/99-jlink.rules
+mkdir -p $PKG/opt/J-Link
+cp -a Devices ETC GDBServer JFlash* JLink* JMemExe JRunExe JTAGLoadExe libQt* \
+  $PKG/opt/J-Link
 
 mkdir -p $PKG/usr/bin
-cp -a JFlashSPI_CL JLink{Exe,GDBServer,RemoteServer,RTTClient,STM32,SWOViewer} $PKG/usr/bin
+
+# The official J-Link tarball contains executables and soft links to executables
+# in the _root_ directory of the tarball. This SlackBuild makes _/opt/J-Link_
+# the _root_ directory of the executables and exposes them in _/usr/bin_ with soft links.
+
+find $PKG/opt/J-Link -maxdepth 1 -print0 | xargs -0 file -L | grep -e 'ELF.*executable' | \
+  cut -f1 -d: | rev | cut -f1 -d/ | rev | while IFS= read -r EXENAME; do
+  if [ -L $EXENAME ]; then
+    ln -s /opt/J-Link/$(readlink $EXENAME) $PKG/usr/bin/$EXENAME
+  else
+    ln -s /opt/J-Link/$EXENAME $PKG/usr/bin/$EXENAME
+  fi
+done
 
 mkdir -p $PKG/usr/lib$LIBDIRSUFFIX
-cp -a libjlinkarm.so.* $PKG/usr/lib$LIBDIRSUFFIX
+cp -a libjlinkarm.so* $PKG/usr/lib$LIBDIRSUFFIX
+ln -s /usr/lib$LIBDIRSUFFIX/libjlinkarm.so $PKG/opt/J-Link/libjlinkarm.so
+
+mkdir -p $PKG/lib/udev/rules.d
+fromdos < 99-jlink.rules > $PKG/lib/udev/rules.d/99-jlink.rules
+sed -i 's/SUBSYSTEM!="usb_device"/SUBSYSTEM!="usb"/g' $PKG/lib/udev/rules.d/99-jlink.rules
+sed -i -E 's/MODE="0{0,1}666"(, GROUP="dialout"){0,1}/MODE="0664", GROUP="plugdev"/g' \
+  $PKG/lib/udev/rules.d/99-jlink.rules
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a Doc/{License.txt,UM08001_JLink.pdf,ReleaseNotes/ReleaseJLink.html} \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/samples
-cp -a Samples/JLink/* $PKG/usr/doc/$PRGNAM-$VERSION/samples
+cp -a Doc/* Samples $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
