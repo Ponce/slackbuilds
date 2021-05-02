@@ -23,10 +23,15 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.kdc.new
-preserve_perms etc/rc.d/rc.kadmind.new
+preserve_perms etc/rc.d/rc.kadmind-heimdal.new
 preserve_perms etc/rc.d/rc.kpasswdd.new
 preserve_perms etc/rc.d/rc.ipropd-master.new
 preserve_perms etc/rc.d/rc.ipropd-slave.new
 config etc/krb5.conf.new
+config etc/profile.d/heimdal.sh.new
 config var/heimdal/kdc.conf.new
 config var/heimdal/kadmind.acl.new
+
+if [ ! "$(grep /usr/heimdal/lib@LIBDIRSUFFIX@ /etc/ld.so.conf)" ]; then
+  echo "/usr/heimdal/lib@LIBDIRSUFFIX@" >> /etc/ld.so.conf
+fi
