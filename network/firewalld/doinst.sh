@@ -22,12 +22,13 @@ preserve_perms() {
   config $NEW
 }
 
-config etc/dbus-1/system.d/FirewallD.conf.new
+config etc/default/firewalld.new
 config etc/firewall/applet.conf.new
 config etc/firewalld/firewalld.conf.new
-config etc/default/firewalld.new
+config etc/firewalld/lockdown-whitelist.xml.new
+config etc/logrotate.d/firewalld.new
+
 preserve_perms etc/rc.d/rc.firewalld.new
-preserve_perms etc/rc.d/init.d/firewalld.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
