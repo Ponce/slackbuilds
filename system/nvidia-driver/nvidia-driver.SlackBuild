@@ -27,11 +27,9 @@
 # see changelog.txt
 
 PRGNAM=nvidia-driver
-VERSION=${VERSION:-460.67}
+VERSION=${VERSION:-460.73.01}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
-
-CURRENT=${CURRENT:-no}
 
 set -e
 
@@ -104,8 +102,11 @@ find -L . \
 
 # Compiling the various open source apps instead of using the precompiled binaries
 # Compiling nvidia-installer from source
-if [ "$CURRENT" = "no" ]; then
+
 cd $TMP/nvidia-installer-$VERSION
+
+# First, we must patch for the removed sys/sysctl.h:
+  patch -p1 < $CWD/nvidia-installer-removed-sysctl-h.patch
 
 # Let's try to remove the conflicting files and GPU detection
   patch -p0 < $CWD/skip_conflict-GPU_detect.patch
@@ -128,7 +129,6 @@ cd -
 # to the driver source tree for use
 mv -f $PKG/usr/bin/nvidia-installer $TMP/$SRCNAM
 mv -f $PKG/usr/man/man1/nvidia-installer.1.gz $TMP/$SRCNAM
-fi
 
 if [ "${COMPAT32}" = "yes" ]; then
     COMP32="--install-compat32-libs --compat32-prefix=$PKG/usr"
@@ -162,36 +162,12 @@ cd $TMP/$SRCNAM
 mv /etc/OpenCL/vendors/nvidia.icd $PKG/etc/OpenCL/vendors/nvidia.icd
 mv /etc/vulkan/icd.d/nvidia_icd.json $PKG/etc/vulkan/icd.d/nvidia_icd.json
 mv /etc/vulkan/implicit_layer.d/nvidia_layers.json $PKG/etc/vulkan/implicit_layer.d/nvidia_layers.json
-# In current, mesa now puts an entry into this directory, so we
-# leave it alone if it is not empty
-if [ -z "$(ls -A /etc/OpenCL/vendors)" ]; then
-  rm -rf /etc/OpenCL
-fi
-# just in case any other programs make an entry here
-if [ -z "$(ls -A /etc/vulkan)" ]; then
-  rm -rf /etc/vulkan
-fi
 
-if [ "$CURRENT" = "yes" ]; then
-# libOpenCL.so is now included in current (in ocl-icd),
+# libOpenCL.so is now included in 15.0 (in ocl-icd),
 # so we don't need this one.
-    rm -f $PKG/usr/lib${LIBDIRSUFFIX}/libOpenCL.so.1.0.0
-    if [ "${COMPAT32}" = "yes" ]; then
-        rm -f $PKG/usr/lib/libOpenCL.so.1.0.0
-    fi
-else
-# Bash script to cleanly install (in doinst.sh) and uninstall the nvidia
-# files so we don't stomp on any overlapping xorg files.
-# Note: switching can be problematic ;-)
-    mkdir -p  $PKG/var/log/nvidia/{32,64}
-    install -m 0755 $CWD/nvidia-switch $PKG/usr/sbin/
-    sed -i s/PKGVERSION/$VERSION/g $PKG/usr/sbin/nvidia-switch
-    sed -i s/LIBDIRSUFFIX/$LIBDIRSUFFIX/g $PKG/usr/sbin/nvidia-switch
-    if [ ${COMPAT32} = "yes" ]; then
-        sed -i s/LIB32FLAG/yes/g $PKG/usr/sbin/nvidia-switch
-    else
-        sed -i s/LIB32FLAG/no/g $PKG/usr/sbin/nvidia-switch
-    fi
+rm -f $PKG/usr/lib${LIBDIRSUFFIX}/libOpenCL.so.1.0.0
+if [ "${COMPAT32}" = "yes" ]; then
+    rm -f $PKG/usr/lib/libOpenCL.so.1.0.0
 fi
 
 # Compile utilites from source, replacing the precompiled versions
@@ -284,11 +260,6 @@ else
 fi
 
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
-
-# 14.2 needs nvidia-switch, -current does not
-if [ "$CURRENT" = "no" ]; then
-  echo -e "usr/sbin/nvidia-switch --install\n" >> $PKG/install/doinst.sh
-fi
 
 # Add rc.nvidia-persistenced:
 if [ "${PERSISTENCED:-no}" = "yes" ]; then
