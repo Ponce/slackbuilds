@@ -19,3 +19,11 @@ fi
 if [ -e /opt/tauon-music-box/tauonmb.sh ]; then
     chmod +x /opt/tauon-music-box/tauonmb.sh
 fi
+
+if [ -e /opt/tauon-music-box/compile-phazor.sh ]; then
+    (
+    cd /opt/tauon-music-box/
+    chmod +x compile-phazor.sh
+    ./compile-phazor.sh
+    )
+fi
