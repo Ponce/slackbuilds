@@ -13,7 +13,7 @@ if [ -e usr/share/icons/hicolor/icon-theme.cache ]; then
 fi
 
 if [ -e /usr/bin/tauonmb ]; then
-    chmod +x /usr/bin/tauonmb
+    chmod +x /usr/bin/tauon
 fi
 
 if [ -e /opt/tauon-music-box/tauonmb.sh ]; then
