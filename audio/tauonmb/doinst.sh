@@ -12,10 +12,3 @@ if [ -e usr/share/icons/hicolor/icon-theme.cache ]; then
   fi
 fi
 
-if [ -e /usr/bin/tauonmb ]; then
-    chmod +x /usr/bin/tauonmb
-fi
-
-if [ -e /opt/tauon-music-box/tauonmb.sh ]; then
-    chmod +x /opt/tauon-music-box/tauonmb.sh
-fi
