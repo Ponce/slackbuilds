@@ -22,6 +22,8 @@ config etc/fwupd/remotes.d/vendor-directory.conf.new
 config etc/fwupd/remotes.d/fwupd-tests.conf.new
 config etc/fwupd/daemon.conf.new
 config etc/fwupd/redfish.conf.new
+config etc/fwupd/thunderbolt.conf.new
+config etc/fwupd/upower.conf.new
 
 if [ -e usr/share/icons/hicolor/icon-theme.cache ]; then
   if [ -x /usr/bin/gtk-update-icon-cache ]; then
