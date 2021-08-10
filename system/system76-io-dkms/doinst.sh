@@ -1,7 +1,5 @@
 VER=@MODULE_VERSION@
 dkms install system76-io/$VER
 
-# Before removing the system76-io package, the following command should
-# be run to unregister the module from dkms:
-#
-# dkms remove system76-io/$VER --all
+# Copy a backup of dkms.conf for module removal by douninst.sh.
+cp usr/src/system76-io-$VER/dkms.conf etc/dkms/system76-io-$VER.conf
