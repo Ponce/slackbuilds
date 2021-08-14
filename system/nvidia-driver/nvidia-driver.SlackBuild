@@ -3,7 +3,7 @@
 # Slackware build script for nvidia-driver
 
 # Copyright 2012-2019 Edward W. Koenig, Vancouver, WA, US
-# Copyright 2020 Lenard Spencer, Orlando, FL, USA
+# Copyright 2020, 2021 Lenard Spencer, Orlando, FL, USA
 #
 # All rights reserved.
 #
@@ -24,12 +24,10 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# see changelog.txt
-
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=nvidia-driver
-VERSION=${VERSION:-460.84}
+VERSION=${VERSION:-470.63.01}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -44,6 +42,10 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
 if [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   TARGET="x86_64"
@@ -55,14 +57,6 @@ else
   exit 1
 fi
 
-if [ "${COMPAT32}" = "yes" ]; then
-    COMP32="--install-compat32-libs --compat32-prefix=$PKG/usr"
-    MULTI="_multilib"
-else
-    COMP32="--no-install-compat32-libs"
-    MULTI=""
-fi
-
 # If the variable PRINT_PACKAGE_NAME is set, then this script will report what
 # the name of the created package would be, and then exit. This information
 # could be useful to other scripts.
@@ -70,10 +64,6 @@ if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION$MULTI-$TARGET-$BUILD$TAG.$PKGTYPE"
   exit 0
 fi
-
-TMP=${TMP:-/tmp/SBo}
-PKG=$TMP/package-$PRGNAM
-OUTPUT=${OUTPUT:-/tmp}
 
 # There are a couple of unresolved issues with nvidia-installer, so we
 # abort if an Nvidia driver is still installed:
@@ -93,7 +83,7 @@ mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/{drivers,extensions} \
   $PKG/etc/OpenCL/vendors/ $PKG/usr/{bin,doc,man/man1,sbin} \
   $PKG/usr/share/{applications,nvidia,pixmaps,egl/egl_external_platform.d} \
   $PKG/usr/include/GL $PKG/etc/vulkan/{icd.d,implicit_layer.d} $PKG/etc/X11/xorg.conf.d \
-  $PKG/etc/X11/glvnd/egl_vendor.d
+  $PKG/etc/X11/glvnd/egl_vendor.d $PKG/lib/firmware/nvidia $PKG/var/log
 
 if [ "$COMPAT32" = "yes" ]; then
   mkdir -p $PKG/usr/lib/tls
@@ -123,9 +113,6 @@ find -L . \
 
 cd $TMP/nvidia-installer-$VERSION
 
-# First, we must patch for the removed sys/sysctl.h:
-  patch -p1 < $CWD/nvidia-installer-removed-sysctl-h.patch
-
 # Let's try to remove the conflicting files and GPU detection
   patch -p0 < $CWD/skip_conflict-GPU_detect.patch
 
@@ -148,6 +135,14 @@ cd -
 mv -f $PKG/usr/bin/nvidia-installer $TMP/$SRCNAM
 mv -f $PKG/usr/man/man1/nvidia-installer.1.gz $TMP/$SRCNAM
 
+if [ "${COMPAT32}" = "yes" ]; then
+    COMP32="--install-compat32-libs --compat32-prefix=$PKG/usr"
+    MULTI="_multilib"
+else
+    COMP32="--no-install-compat32-libs"
+    MULTI=""
+fi
+
 # Install the binary libs using nvidia-installer compiled above
 cd $TMP/$SRCNAM
 ./nvidia-installer -s --no-kernel-module --no-drm --no-unified-memory \
@@ -166,9 +161,16 @@ cd $TMP/$SRCNAM
   --log-file-name=$PKG/var/log/nvidia-installer.log \
   --egl-external-platform-config-path=$PKG/usr/share/egl/egl_external_platform.d \
   --no-nvidia-modprobe \
+  --no-systemd \
   $COMP32
 
-  # Move ICDs to $PKG and cleanup (no switch option in installer?)
+# Starting with the 465 driver, the installer now places a version-specific
+# binary blob in /lib/firmware/nvidia.  For sanity's sake, we will move
+# it into our package:
+mv /lib/firmware/nvidia/$VERSION $PKG/lib/firmware/nvidia
+
+# Move ICDs to $PKG and cleanup (no switch option in installer?)
+# (This is why there should not be a driver already installed)
 mv /etc/OpenCL/vendors/nvidia.icd $PKG/etc/OpenCL/vendors/nvidia.icd
 mv /etc/vulkan/icd.d/nvidia_icd.json $PKG/etc/vulkan/icd.d/nvidia_icd.json
 mv /etc/vulkan/implicit_layer.d/nvidia_layers.json $PKG/etc/vulkan/implicit_layer.d/nvidia_layers.json
