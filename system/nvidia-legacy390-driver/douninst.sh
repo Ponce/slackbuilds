@@ -1,9 +1,9 @@
 ( cd usr/libSUFFIX/xorg/modules/extensions
-  if [ -e libglx.so-xorg ]; then
+  if [ -f libglx.so-xorg ]; then
     mv libglx.so-xorg libglx.so
   else
     if [ ! -e libglx.so ]; then
-      echo -e "WARNING: libglx.so not found! Please reinstall xorg-server!\n"
+      echo -e "WARNING: libglx.so not found!  Please reinstall xorg-server!\n"
     fi
   fi
   )
