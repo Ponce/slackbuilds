@@ -19,15 +19,6 @@ elif [ ! -e usr/bin/weather.expect -a -e usr/bin/weather ]; then
   # the existing /usr/bin/weather, which is assumed to come from the
   # stock expect package
   cp -a usr/bin/weather usr/bin/weather.expect
-fi  
+fi
 
 config etc/weatherrc.new
-
-if [ -x /usr/bin/update-desktop-database ]; then
-  /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
-fi
-
-if [ -x /usr/bin/update-mime-database ]; then
-  /usr/bin/update-mime-database usr/share/mime >/dev/null 2>&1
-fi
-
