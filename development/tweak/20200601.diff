@@ -1,0 +1,1315 @@
+diff -Naur tweak-3.02/actions.c tweak-3.02.patched/actions.c
+--- tweak-3.02/actions.c	2016-03-22 17:12:51.000000000 -0400
++++ tweak-3.02.patched/actions.c	2021-09-07 14:21:21.913810300 -0400
+@@ -112,11 +112,11 @@
+ 		display_write_str (question);
+ 		display_refresh();
+ 	    }
+-	    safe_update = TRUE;
++	    safe_update = true;
+ #endif
+ 	    c = display_getkey();
+ #if defined(unix) && !defined(GO32)
+-	    safe_update = FALSE;
++	    safe_update = false;
+ #endif
+ 	    if (c >= 'a' && c <= 'z')
+ 		c += 'A'-'a';
+@@ -130,32 +130,43 @@
+ 	    return;		       /* don't even quit */
+ 	}
+     }
+-    finished = TRUE;
++    finished = true;
+ }
+ 
+-static void act_save(void) {
+-    static int backed_up = FALSE;
++static bool act_save_internal(void) {
++    static bool backed_up = false;
+ 
++    if (look_mode) {
++	display_beep();
++	strcpy (message, "Cannot save in LOOK mode!");
++	return false;
++    }
+     if (!backed_up) {
+ 	if (!backup_file()) {
+ 	    display_beep();
+ 	    strcpy (message, "Unable to back up file!");
+-	    return;
++	    return false;
+ 	}
+-	backed_up = TRUE;
++	backed_up = true;
+     }
+     if (!save_file()) {
+ 	display_beep();
+ 	strcpy (message, "Unable to save file!");
+-	return;
++	return false;
+     }
+-    modified = FALSE;
++    modified = false;
++    return true;
++}
++
++static void act_save(void) {
++    act_save_internal();               /* just discard the bool return value */
+ }
+ 
+ static void act_exitsave(void) {
+-    act_save();
+-    draw_scr();			       /* update ** on status line */
+-    act_exit();
++    if (act_save_internal()) {
++        draw_scr();                    /* update ** on status line */
++        act_exit();
++    }
+ }
+ 
+ static void act_top (void) {
+@@ -294,7 +305,7 @@
+ 	display_beep();
+ 	sprintf(message, "Can't engage Insert mode when in %s mode",
+ 		(look_mode ? "LOOK" : "FIX"));
+-	insert_mode = FALSE;	       /* safety! */
++	insert_mode = false;	       /* safety! */
+     } else
+ 	insert_mode = !insert_mode;
+ }
+@@ -307,7 +318,7 @@
+ }
+ 
+ void act_self_ins(void) {
+-    int insert = insert_mode;
++    bool insert = insert_mode;
+     unsigned char c;
+ 
+     if (look_mode) {
+@@ -352,17 +363,17 @@
+ 	buf_fetch_data(filedata, &c, 1, cur_pos);
+ 	c &= 0xF0;
+ 	c |= last_char;
+-	insert = FALSE;
++	insert = false;
+ 	break;
+     }
+ 
+     if (insert) {
+ 	buf_insert_data(filedata, &c, 1, cur_pos);
+ 	file_size++;
+-	modified = TRUE;
++	modified = true;
+     } else if (cur_pos < file_size) {
+ 	buf_overwrite_data(filedata, &c, 1, cur_pos);
+-	modified = TRUE;
++	modified = true;
+     } else {
+ 	display_beep();
+ 	strcpy(message, "End of file reached");
+@@ -379,7 +390,7 @@
+ 	buf_delete (filedata, 1, cur_pos);
+ 	file_size--;
+ 	edit_type = !!edit_type;
+-	modified = TRUE;
++	modified = true;
+     }
+ }
+ 
+@@ -391,7 +402,7 @@
+ 	buf_delete (filedata, 1, cur_pos);
+ 	file_size--;
+ 	edit_type = !!edit_type;
+-	modified = TRUE;
++	modified = true;
+     }
+ }
+ 
+@@ -399,7 +410,7 @@
+     if (look_mode) {
+ 	display_beep();
+ 	strcpy (message, "Can't cut or paste in LOOK mode");
+-	marking = FALSE;	       /* safety */
++	marking = false;	       /* safety */
+ 	return;
+     }
+     marking = !marking;
+@@ -435,8 +446,8 @@
+     if (top_pos > cur_pos)
+ 	top_pos = begline(cur_pos);
+     edit_type = !!edit_type;
+-    modified = TRUE;
+-    marking = FALSE;
++    modified = true;
++    marking = false;
+ }
+ 
+ static void act_copy (void) {
+@@ -456,7 +467,7 @@
+     if (cutbuffer)
+ 	buf_free (cutbuffer);
+     cutbuffer = buf_copy (filedata, marksize, marktop);
+-    marking = FALSE;
++    marking = false;
+ }
+ 
+ static void act_paste (void) {
+@@ -475,7 +486,7 @@
+ 	file_size -= cutsize;
+     }
+     buf_paste (filedata, cutbuffer, cur_pos);
+-    modified = TRUE;
++    modified = true;
+     cur_pos += cutsize;
+     file_size += cutsize;
+     edit_type = !!edit_type;
+@@ -494,9 +505,9 @@
+ static void act_goto (void) {
+     char buffer[80];
+     fileoffset_t position, new_top;
+-    int error;
++    bool error;
+ 
+-    if (!get_str("Enter position to go to: ", buffer, FALSE))
++    if (!get_str("Enter position to go to: ", buffer, false))
+ 	return;			       /* user break */
+ 
+     position = parse_num (buffer, &error);
+@@ -531,16 +542,16 @@
+ 	statfmt = decstatus;
+ }
+ 
+-static int search_prompt(char *withdef, char *withoutdef)
++static bool search_prompt(char *withdef, char *withoutdef)
+ {
+     char buffer[80];
+     int len;
+ 
+-    if (!get_str(last_search ? withdef : withoutdef, buffer, TRUE))
+-	return 0;		       /* user break */
++    if (!get_str(last_search ? withdef : withoutdef, buffer, true))
++	return false;                  /* user break */
+     if (!last_search && !*buffer) {
+ 	strcpy (message, "Search aborted.");
+-	return 0;
++	return false;
+     }
+ 
+     if (!*buffer) {
+@@ -550,14 +561,14 @@
+ 	if (len == -1) {
+ 	    display_beep();
+ 	    strcpy (message, "Invalid escape sequence in search string");
+-	    return 0;
++	    return false;
+ 	}
+ 	if (last_search)
+ 	    free_search(last_search);
+ 	last_search = build_search (buffer, len);
+     }
+ 
+-    return 1;
++    return true;
+ }
+ 
+ static void act_search (void) {
+@@ -660,10 +671,10 @@
+     char prompt[80];
+     fileoffset_t w;
+     fileoffset_t new_top;
+-    int error;
++    bool error;
+ 
+     sprintf (prompt, "Enter screen width in bytes (now %"OFF"d): ", width);
+-    if (!get_str (prompt, buffer, FALSE))
++    if (!get_str (prompt, buffer, false))
+ 	return;
+     w = parse_num (buffer, &error);
+     if (error) {
+@@ -686,11 +697,11 @@
+     char prompt[80];
+     fileoffset_t o;
+     fileoffset_t new_top;
+-    int error;
++    bool error;
+ 
+     sprintf (prompt, "Enter start-of-file offset in bytes (now %"OFF"d): ",
+ 	     realoffset);
+-    if (!get_str (prompt, buffer, FALSE))
++    if (!get_str (prompt, buffer, false))
+ 	return;
+     o = parse_num (buffer, &error);
+     if (error) {
+diff -Naur tweak-3.02/btree.c tweak-3.02.patched/btree.c
+--- tweak-3.02/btree.c	2016-03-22 17:12:51.000000000 -0400
++++ tweak-3.02.patched/btree.c	2021-09-07 14:21:21.902810301 -0400
+@@ -47,7 +47,7 @@
+  *  - user-supplied copy function.
+  *  - bt_add when element already exists.
+  *  - bt_del when element doesn't.
+- *  - splitpos with before==TRUE.
++ *  - splitpos with before==true.
+  *  - split() on sorted elements (but it should be fine).
+  *  - bt_replace, at all (it won't be useful until we get user read
+  *    properties).
+@@ -162,13 +162,6 @@
+     free(p);
+ }
+ 
+-#ifndef FALSE
+-#define FALSE 0
+-#endif
+-#ifndef TRUE
+-#define TRUE 1
+-#endif
+-
+ /* We could probably do with more compiler-specific branches of this #if. */
+ #if defined(__GNUC__)
+ #define INLINE __inline
+@@ -274,7 +267,7 @@
+ /*
+  * Determine whether a node is a leaf node or not.
+  */
+-static INLINE int bt_is_leaf(btree *bt, nodeptr n)
++static INLINE bool bt_is_leaf(btree *bt, nodeptr n)
+ {
+     return n[0].na.p == NULL;
+ }
+@@ -292,7 +285,7 @@
+ #else
+     memset((char *)ret + bt->propoffset, 0, bt->propsize);
+ #endif
+-    testlock(TRUE, TRUE, ret);
++    testlock(true, true, ret);
+     return ret;
+ }
+ 
+@@ -301,7 +294,7 @@
+  */
+ static INLINE void bt_destroy_node(btree *bt, nodeptr n)
+ {
+-    testlock(TRUE, FALSE, n);
++    testlock(true, false, n);
+     /* Free the property. */
+     bt->propmerge(bt->userstate, NULL, NULL, n + bt->maxdegree * 2 + 2);
+     sfree(n);
+@@ -312,8 +305,8 @@
+  */
+ static INLINE nodeptr bt_reuse_node(btree *bt, nodeptr n, int nsubtrees)
+ {
+-    testlock(TRUE, FALSE, n);
+-    testlock(TRUE, TRUE, n);
++    testlock(true, false, n);
++    testlock(true, true, n);
+     n[bt->maxdegree*2-1].i = nsubtrees;
+     return n;
+ }
+@@ -405,10 +398,10 @@
+     if (addr.p && addr.p[bt->maxdegree*2+1].i > 1) {
+ 	nodeptr clone = bt_clone_node(bt, addr.p);
+ 	bt_set_child(bt, a, index, bt_node_addr(bt, clone));
+-	testlock(TRUE, TRUE, clone);
++	testlock(true, true, clone);
+ 	return clone;
+     }
+-    testlock(TRUE, TRUE, addr.p);
++    testlock(true, true, addr.p);
+     return addr.p;
+ }
+ static INLINE nodeptr bt_write_lock_root(btree *bt)
+@@ -417,21 +410,21 @@
+     if (addr.p && addr.p[bt->maxdegree*2+1].i > 1) {
+ 	nodeptr clone = bt_clone_node(bt, addr.p);
+ 	bt->root = bt_node_addr(bt, clone);
+-	testlock(TRUE, TRUE, clone);
++	testlock(true, true, clone);
+ 	return clone;
+     }
+-    testlock(TRUE, TRUE, addr.p);
++    testlock(true, true, addr.p);
+     return addr.p;
+ }
+ static INLINE nodeptr bt_read_lock(btree *bt, node_addr a)
+ {
+-    testlock(FALSE, TRUE, a.p);
++    testlock(false, true, a.p);
+     return a.p;
+ }
+ #define bt_read_lock_root(bt) (bt_read_lock(bt, (bt)->root))
+ #define bt_read_lock_child(bt,a,index) (bt_read_lock(bt,bt_child(bt,a,index)))
+ 
+-static INLINE void bt_write_relock(btree *bt, nodeptr n, int props)
++static INLINE void bt_write_relock(btree *bt, nodeptr n, bool props)
+ {
+     int i, ns, count;
+ 
+@@ -443,8 +436,8 @@
+     for (i = 0; i < ns; i++)
+ 	count += bt_child_count(bt, n, i);
+     n[bt->maxdegree*2].i = count;
+-    testlock(TRUE, FALSE, n);
+-    testlock(TRUE, TRUE, n);
++    testlock(true, false, n);
++    testlock(true, true, n);
+ 
+     /*
+      * Update user read properties.
+@@ -477,13 +470,13 @@
+ }
+ 
+ static INLINE node_addr bt_write_unlock_internal(btree *bt, nodeptr n,
+-						 int props)
++						 bool props)
+ {
+     node_addr ret;
+ 
+     bt_write_relock(bt, n, props);
+ 
+-    testlock(TRUE, FALSE, n);
++    testlock(true, false, n);
+ 
+     ret.p = n;
+     return ret;
+@@ -491,7 +484,7 @@
+ 
+ static INLINE node_addr bt_write_unlock(btree *bt, nodeptr n)
+ {
+-    return bt_write_unlock_internal(bt, n, TRUE);
++    return bt_write_unlock_internal(bt, n, true);
+ }
+ 
+ static INLINE void bt_read_unlock(btree *bt, nodeptr n)
+@@ -500,7 +493,7 @@
+      * For trees in memory, we do nothing here, except run some
+      * optional testing.
+      */
+-    testlock(FALSE, FALSE, n);
++    testlock(false, false, n);
+ }
+ 
+ /* ----------------------------------------------------------------------
+@@ -594,14 +587,14 @@
+  * searching for that element.
+  * 
+  * Return value is either the index of the element, or the index of
+- * the subtree (both 0 upwards). `is_elt' returns FALSE or TRUE
++ * the subtree (both 0 upwards). `is_elt' returns false or true
+  * respectively.
+  * 
+  * Since this may be used by bt_find() with an alternative cmpfn_t,
+  * we always pass the input element as the first argument to cmp.
+  */
+ static int bt_lookup_cmp(btree *bt, nodeptr n, bt_element_t element,
+-			 cmpfn_t cmp, int *is_elt)
++			 cmpfn_t cmp, bool *is_elt)
+ {
+     int mintree = 0, maxtree = bt_subtrees(bt, n)-1;
+ 
+@@ -610,7 +603,7 @@
+ 	int c = cmp(bt->userstate, element, bt_element(bt, n, elt));
+ 
+ 	if (c == 0) {
+-	    *is_elt = TRUE;
++	    *is_elt = true;
+ 	    return elt;
+ 	} else if (c < 0) {
+ 	    /*
+@@ -634,7 +627,7 @@
+      * to search next.
+      */
+     assert(mintree == maxtree);
+-    *is_elt = FALSE;
++    *is_elt = false;
+     return mintree;
+ }
+ 
+@@ -986,7 +979,8 @@
+ 			   int relation, int *index)
+ {
+     nodeptr n, n2;
+-    int child, is_elt;
++    int child;
++    bool is_elt;
+     bt_element_t gotit;
+     int pos = 0;
+ 
+@@ -1083,7 +1077,8 @@
+ 			 int *index)
+ {
+     nodeptr n, n2;
+-    int i, j, count, is_elt;
++    int i, j, count;
++    bool is_elt;
+     void **props;
+     int *counts;
+     bt_element_t *elts;
+@@ -1294,7 +1289,8 @@
+ bt_element_t bt_add(btree *bt, bt_element_t element)
+ {
+     nodeptr n, n2;
+-    int child, is_elt;
++    int child;
++    bool is_elt;
+     int pos = 0;
+ 
+     n = bt_read_lock_root(bt);
+@@ -1322,7 +1318,8 @@
+ {
+     nodeptr n, c, c2, saved_n;
+     nodeptr *nodes;
+-    int nnodes, child, nroot, pos2, ends, st, splitpoint, saved_pos;
++    int nnodes, child, pos2, ends, st, splitpoint, saved_pos;
++    bool nroot;
+     bt_element_t e, ret;
+ 
+     /*
+@@ -1334,7 +1331,7 @@
+     nnodes = 0;
+ 
+     n = bt_write_lock_root(bt);
+-    nroot = TRUE;
++    nroot = true;
+     saved_n = NULL;
+ 
+     if (!n || pos < 0 || pos >= bt_node_count(bt, n)) {
+@@ -1405,7 +1402,7 @@
+ 		    bt_shift_root(bt, n, bt_node_addr(bt, c));
+ 		    nnodes--;	       /* don't leave it in nodes[]! */
+ 		    n = NULL;
+-		    bt_write_relock(bt, c, TRUE);
++		    bt_write_relock(bt, c, true);
+ 		} else
+ 		    bt_write_unlock(bt, c);
+ 	    } else {
+@@ -1422,7 +1419,7 @@
+ 
+ 	    if (n) {
+ 		/* Recompute the counts in n so we can do lookups again. */
+-		bt_write_relock(bt, n, TRUE);
++		bt_write_relock(bt, n, true);
+ 
+ 		/* Having done the transform, redo the position lookup. */
+ 		pos = pos2;
+@@ -1485,7 +1482,7 @@
+ 
+ 	/* Descend to the child and go round again. */
+ 	n = c;
+-	nroot = FALSE;
++	nroot = false;
+     }
+ 
+     /*
+@@ -1725,7 +1722,7 @@
+  * Perform the healing process after a tree has been split. `rhs'
+  * is set if the cut edge is the one on the right.
+  */
+-static void bt_split_heal(btree *bt, int rhs)
++static void bt_split_heal(btree *bt, bool rhs)
+ {
+     nodeptr n;
+     nodeptr *nodes;
+@@ -1881,15 +1878,15 @@
+      * which will sort all that out for us.
+      */
+     while (nnodes-- > 0) {
+-	bt_write_unlock_internal(bt1, lnodes[nnodes], FALSE);
+-	bt_write_unlock_internal(bt2, rnodes[nnodes], FALSE);
++	bt_write_unlock_internal(bt1, lnodes[nnodes], false);
++	bt_write_unlock_internal(bt2, rnodes[nnodes], false);
+     }
+ 
+     /*
+      * Then we make a healing pass down each side of the tree.
+      */
+-    bt_split_heal(bt1, TRUE);
+-    bt_split_heal(bt2, FALSE);
++    bt_split_heal(bt1, true);
++    bt_split_heal(bt2, false);
+ 
+     ifree(lnodes);
+     ifree(rnodes);
+@@ -1900,7 +1897,7 @@
+ /*
+  * Split a tree at a numeric index.
+  */
+-btree *bt_splitpos(btree *bt, int index, int before)
++btree *bt_splitpos(btree *bt, int index, bool before)
+ {
+     btree *ret;
+     node_addr na;
+@@ -1932,15 +1929,16 @@
+  */
+ btree *bt_split(btree *bt, bt_element_t element, cmpfn_t cmp, int rel)
+ {
+-    int before, index;
++    bool before;
++    int index;
+ 
+     assert(rel != BT_REL_EQ);	       /* has to be an inequality */
+ 
+     if (rel == BT_REL_GT || rel == BT_REL_GE) {
+-	before = TRUE;
++	before = true;
+ 	rel = (rel == BT_REL_GT ? BT_REL_LE : BT_REL_LT);
+     } else {
+-	before = FALSE;
++	before = false;
+     }
+     if (!bt_findrelpos(bt, element, cmp, rel, &index))
+ 	index = -1;
+@@ -1979,7 +1977,7 @@
+     n = bt_read_lock_root(bt);
+     i = bt_subtrees(bt, n);
+     bt_read_unlock(bt, n);
+-    return (i == 2 ? TRUE : FALSE);
++    return (i == 2 ? true : false);
+ }
+ 
+ /*
+@@ -2394,7 +2392,7 @@
+ 	printf("splittest: %d\n", i);
+ 	tree3 = BT_COPY(tree);
+ 	testlock(-1, 0, NULL);
+-	tree4 = bt_splitpos(tree3, i, 0);
++	tree4 = bt_splitpos(tree3, i, false);
+ 	testlock(-1, 0, NULL);
+ 	verifytree(tree3, array, i);
+ 	verifytree(tree4, array+i, arraylen-i);
+diff -Naur tweak-3.02/btree.h tweak-3.02.patched/btree.h
+--- tweak-3.02/btree.h	2016-03-22 17:12:51.000000000 -0400
++++ tweak-3.02.patched/btree.h	2021-09-07 14:21:21.903810301 -0400
+@@ -31,6 +31,7 @@
+ #define BTREE_H
+ 
+ #include <stddef.h> /* for offsetof */
++#include <stdbool.h>
+ 
+ #ifndef alignof
+ #define alignof(typ) ( offsetof(struct { char c; typ t; }, t) )
+@@ -47,7 +48,7 @@
+ typedef void (*propmergefn_t)(void *state, void *s1, void *s2, void *dest);
+ typedef int (*searchfn_t)(void *tstate, void *sstate, int ntrees,
+ 			  void **props, int *counts,
+-			  bt_element_t *elts, int *is_elt);
++			  bt_element_t *elts, bool *is_elt);
+ 
+ enum {
+     BT_REL_EQ, BT_REL_LT, BT_REL_LE, BT_REL_GT, BT_REL_GE
+@@ -77,7 +78,7 @@
+ bt_element_t bt_del(btree *bt, bt_element_t element);
+ btree *bt_join(btree *bt1, btree *bt2);
+ btree *bt_joinr(btree *bt1, btree *bt2);
+-btree *bt_splitpos(btree *bt, int index, int before);
++btree *bt_splitpos(btree *bt, int index, bool before);
+ btree *bt_split(btree *bt, bt_element_t element, cmpfn_t cmp, int rel);
+ 
+ #endif /* BTREE_H */
+diff -Naur tweak-3.02/buffer.c tweak-3.02.patched/buffer.c
+--- tweak-3.02/buffer.c	2016-03-22 17:12:51.000000000 -0400
++++ tweak-3.02.patched/buffer.c	2021-09-07 14:21:21.917810299 -0400
+@@ -3,6 +3,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <errno.h>
+ #include <ctype.h>
+ #include <assert.h>
+ 
+@@ -112,7 +113,7 @@
+ 
+ static int bufblksearch(void *tstate, void *sstate, int ntrees,
+ 			void **props, int *counts,
+-			bt_element_t *elts, int *is_elt)
++			bt_element_t *elts, bool *is_elt)
+ {
+     fileoffset_t *disttogo = (fileoffset_t *)sstate;
+     fileoffset_t distsofar = 0;
+@@ -128,7 +129,7 @@
+ 	    /*
+ 	     * Descend into this subtree.
+ 	     */
+-	    *is_elt = FALSE;
++	    *is_elt = false;
+ 	    return i;
+ 	}
+ 
+@@ -142,7 +143,7 @@
+ 		 * Select this element.
+ 		 */
+ 		*disttogo -= distsofar;
+-		*is_elt = TRUE;
++		*is_elt = true;
+ 		return i;
+ 	    }
+ 
+@@ -164,6 +165,16 @@
+     return index;
+ }
+ 
++static void fread_check(void *buf, size_t size, FILE *fp)
++{
++    if (fread(buf, 1, size, fp) != size) {
++        display_cleanup();
++        fprintf(stderr, "Fatal error reading from file: %s\n",
++                strerror(errno));
++        exit(1);
++    }
++}
++
+ /*
+  * Convert a file-data block of size at most BUFMAX into a
+  * literal-data block. Returns the replacement block (the old one
+@@ -179,7 +190,7 @@
+ 	ret->filepos = 0;
+ 	ret->len = blk->len;
+ 	fseeko(blk->file->fp, blk->filepos, SEEK_SET);
+-	fread(ret->data, blk->len, 1, blk->file->fp);
++	fread_check(ret->data, blk->len, blk->file->fp);
+ 
+ 	return ret;
+     }
+@@ -298,7 +309,7 @@
+     return index + 1;
+ }
+ 
+-static btree *buf_bt_split(btree *bt, fileoffset_t pos, int before)
++static btree *buf_bt_split(btree *bt, fileoffset_t pos, bool before)
+ {
+     int index = buf_bt_splitpoint(bt, pos);
+     return bt_splitpos(bt, index, before);
+@@ -318,14 +329,14 @@
+ 
+ static void buf_insert_bt(buffer *buf, btree *bt, fileoffset_t pos)
+ {
+-    btree *right = buf_bt_split(buf->bt, pos, FALSE);
++    btree *right = buf_bt_split(buf->bt, pos, false);
+     buf->bt = buf_bt_join(buf->bt, bt);
+     buf->bt = buf_bt_join(buf->bt, right);
+ }
+ 
+ static int bufblklensearch(void *tstate, void *sstate, int ntrees,
+ 			   void **props, int *counts,
+-			   bt_element_t *elts, int *is_elt)
++			   bt_element_t *elts, bool *is_elt)
+ {
+     fileoffset_t *output = (fileoffset_t *)sstate;
+     fileoffset_t size = 0;
+@@ -347,7 +358,7 @@
+     *output = size;
+ 
+     /* Actual return value doesn't matter */
+-    *is_elt = TRUE;
++    *is_elt = true;
+     return 1;
+ }
+ 
+@@ -417,7 +428,7 @@
+ 
+ 	if (blk->file) {
+ 	    fseeko(blk->file->fp, blk->filepos + poswithin, SEEK_SET);
+-	    fread(data, thislen, 1, blk->file->fp);
++	    fread_check(data, thislen, blk->file->fp);
+ 	} else {
+ 	    memcpy(data, blk->data + poswithin, thislen);
+ 	}
+@@ -473,8 +484,8 @@
+ 
+ extern void buf_delete(buffer *buf, fileoffset_t len, fileoffset_t pos)
+ {
+-    btree *left = buf_bt_split(buf->bt, pos, TRUE);
+-    btree *right = buf_bt_split(buf->bt, len, FALSE);
++    btree *left = buf_bt_split(buf->bt, pos, true);
++    btree *right = buf_bt_split(buf->bt, len, false);
+ 
+     bt_free(buf->bt);
+ 
+@@ -490,8 +501,8 @@
+ 
+ extern buffer *buf_cut(buffer *buf, fileoffset_t len, fileoffset_t pos)
+ {
+-    btree *left = buf_bt_split(buf->bt, pos, TRUE);
+-    btree *right = buf_bt_split(buf->bt, len, FALSE);
++    btree *left = buf_bt_split(buf->bt, pos, true);
++    btree *right = buf_bt_split(buf->bt, len, false);
+     btree *ret = buf->bt;
+ 
+     buf->bt = buf_bt_join(left, right);
+@@ -501,8 +512,8 @@
+ 
+ extern buffer *buf_copy(buffer *buf, fileoffset_t len, fileoffset_t pos)
+ {
+-    btree *left = buf_bt_split(buf->bt, pos, TRUE);
+-    btree *right = buf_bt_split(buf->bt, len, FALSE);
++    btree *left = buf_bt_split(buf->bt, pos, true);
++    btree *right = buf_bt_split(buf->bt, len, false);
+     btree *ret = bt_clone(buf->bt);
+ 
+     buf->bt = buf_bt_join(left, buf->bt);
+diff -Naur tweak-3.02/curses.c tweak-3.02.patched/curses.c
+--- tweak-3.02/curses.c	2016-03-22 17:12:51.000000000 -0400
++++ tweak-3.02.patched/curses.c	2021-09-07 14:21:21.918810299 -0400
+@@ -61,7 +61,7 @@
+ #define MAXCOLOURS 32
+ int attrs[MAXCOLOURS];
+ 
+-void display_define_colour(int colour, int fg, int bg, int reverse)
++void display_define_colour(int colour, int fg, int bg, bool reverse)
+ {
+     static int colours[8] = {
+         COLOR_BLACK,
+@@ -117,24 +117,28 @@
+ 	    schedule_update();
+ 	    continue;
+ 	}
++        if (ret == ERR) {
++            /* A failure to read from standard input is fatal */
++            exit(1);
++        }
+ 	return ret;
+     }
+ }
+ 
+-int display_input_to_flush(void)
++bool display_input_to_flush(void)
+ {
+     int ret;
+     if (last_getch != ERR)
+-	return TRUE;
++	return true;
+ 
+     nodelay(stdscr, 1);
+     ret = getch();
+     nodelay(stdscr, 0);
+     if (ret == ERR)
+-	return FALSE;
++	return false;
+ 
+     last_getch = ret;
+-    return TRUE;
++    return true;
+ }
+ 
+ void display_post_error(void)
+diff -Naur tweak-3.02/keytab.c tweak-3.02.patched/keytab.c
+--- tweak-3.02/keytab.c	2016-03-22 17:12:51.000000000 -0400
++++ tweak-3.02.patched/keytab.c	2021-09-07 14:21:21.920810299 -0400
+@@ -61,16 +61,33 @@
+ /*
+  * Format an ASCII code into a printable description of the key stroke.
+  */
+-static void strkey (char *s, int k) {
+-    k &= 255;			       /* force unsigned */
+-    if (k==27)
+-	strcpy(s, " ESC");
+-    else if (k<32 || k==127)
+-	sprintf(s, " ^%c", k ^ 64);
+-    else if (k<127)
+-	sprintf(s, " %c", k);
+-    else
+-	sprintf(s, " <0x%2X>", k);
++struct strkey_state {
++    char *s, *end;
++    bool truncated;
++};
++static void strkey (struct strkey_state *sks, int k) {
++    char thisbuf[32];
++
++    if (sks->truncated)
++        return;
++
++    if (sks->end - sks->s < 16) {
++        sks->truncated = true;
++        strcpy(thisbuf, " ...");
++    } else {
++        k &= 255;			       /* force unsigned */
++        if (k==27)
++            strcpy(thisbuf, " ESC");
++        else if (k<32 || k==127)
++            sprintf(thisbuf, " ^%c", k ^ 64);
++        else if (k<127)
++            sprintf(thisbuf, " %c", k);
++        else
++            sprintf(thisbuf, " <0x%2X>", k);
++    }
++
++    strcpy(sks->s, thisbuf);
++    sks->s += strlen(sks->s);
+ }
+ 
+ /*
+@@ -82,19 +99,25 @@
+ #if defined(unix) && !defined(GO32)
+     if (update_required)
+ 	update();
+-    safe_update = TRUE;
++    safe_update = true;
+ #endif
+     last_char = display_getkey();
+ #if defined(unix) && !defined(GO32)
+-    safe_update = FALSE;
++    safe_update = false;
+ #endif
+     strcpy(message, "Unknown key sequence");
+-    strkey(message+strlen(message), last_char);
++
++    struct strkey_state sks;
++    sks.s = message + strlen(message);
++    sks.end = message + sizeof(message);
++    sks.truncated = false;
++
++    strkey(&sks, last_char);
+     kt = base[(unsigned char) last_char];
+     if (!kt) {
+ 	display_beep();
+ 	while (display_input_to_flush())
+-	    strkey(message+strlen(message), display_getkey());
++	    strkey(&sks, display_getkey());
+ 	return;
+     }
+ 
+@@ -102,18 +125,18 @@
+ #if defined(unix) && !defined(GO32)
+ 	if (update_required)
+ 	    update();
+-	safe_update = TRUE;
++	safe_update = true;
+ #endif
+ 	last_char = display_getkey();
+ #if defined(unix) && !defined(GO32)
+-	safe_update = FALSE;
++	safe_update = false;
+ #endif
+-	strkey(message+strlen(message), last_char);
++	strkey(&sks, last_char);
+ 	kt = kt->e.extended[(unsigned char) last_char];
+ 	if (!kt) {
+ 	    display_beep();
+ 	    while (display_input_to_flush())
+-		strkey(message+strlen(message), display_getkey());
++		strkey(&sks, display_getkey());
+ 	    return;
+ 	}
+     }
+diff -Naur tweak-3.02/main.c tweak-3.02.patched/main.c
+--- tweak-3.02/main.c	2016-03-22 17:12:51.000000000 -0400
++++ tweak-3.02.patched/main.c	2021-09-07 14:21:21.903810301 -0400
+@@ -200,20 +200,20 @@
+ char *pname;
+ char *filename = NULL;
+ buffer *filedata, *cutbuffer = NULL;
+-int fix_mode = FALSE;
+-int look_mode = FALSE;
+-int eager_mode = FALSE;
+-int insert_mode = FALSE;
++bool fix_mode = false;
++bool look_mode = false;
++bool eager_mode = false;
++bool insert_mode = false;
+ int edit_type = 1;		       /* 1,2 are hex digits, 0=ascii */
+-int finished = FALSE;
+-int marking = FALSE;
+-int modified = FALSE;
+-int new_file = FALSE;		       /* shouldn't need initialisation -
++bool finished = false;
++bool marking = false;
++bool modified = false;
++bool new_file = false;                 /* shouldn't need initialisation -
+ 					* but let's not take chances :-) */
+ fileoffset_t width = 16;
+ fileoffset_t realoffset = 0, offset = 16;
+ 
+-int ascii_enabled = TRUE;
++bool ascii_enabled = true;
+ 
+ fileoffset_t file_size = 0, top_pos = 0, cur_pos = 0, mark_point = 0;
+ 
+@@ -284,13 +284,13 @@
+ 		}
+ 		break;
+ 	      case 'f': case 'F':
+-		fix_mode = TRUE;
++		fix_mode = true;
+ 		break;
+ 	      case 'l': case 'L':
+-		look_mode = TRUE;
++		look_mode = true;
+ 		break;
+ 	      case 'e': case 'E':
+-		eager_mode = TRUE;
++		eager_mode = true;
+ 		break;
+ 	      case 'D':
+ 		write_default_rc();
+@@ -339,11 +339,11 @@
+ 		  "Width reduced to %"OFF"d to fit on the screen", width);
+     }
+     if (4*width+14 > display_cols) {
+-	ascii_enabled = FALSE;
++	ascii_enabled = false;
+ 	if (edit_type == 0)
+ 	    edit_type = 1;	       /* force to hex mode */
+     } else
+-	ascii_enabled = TRUE;
++	ascii_enabled = true;
+     offset = realoffset % width;
+     if (!offset)
+ 	offset = width;
+@@ -358,11 +358,11 @@
+ 
+     display_setup();
+ 
+-    display_define_colour(COL_BUFFER, -1, -1, FALSE);
+-    display_define_colour(COL_SELECT, 0, 7, TRUE);
+-    display_define_colour(COL_STATUS, 11, 4, TRUE);
+-    display_define_colour(COL_ESCAPE, 9, 0, FALSE);
+-    display_define_colour(COL_INVALID, 11, 0, FALSE);
++    display_define_colour(COL_BUFFER, -1, -1, false);
++    display_define_colour(COL_SELECT, 0, 7, true);
++    display_define_colour(COL_STATUS, 11, 4, true);
++    display_define_colour(COL_ESCAPE, 9, 0, false);
++    display_define_colour(COL_INVALID, 11, 0, false);
+ 
+     for (i=0; i<256; i++) {
+ 	sprintf(hex[i], "%02X", i);
+@@ -412,7 +412,7 @@
+ 		     "opened %s (size %"OFF"d == 0x%"OFF"X).",
+ 		     fname, file_size, file_size);
+ 	}
+-	new_file = FALSE;
++	new_file = false;
+     } else {
+ 	if (look_mode || fix_mode) {
+ 	    fprintf(stderr, "%s: file %s not found, and %s mode active\n",
+@@ -421,19 +421,19 @@
+ 	}
+ 	filedata = buf_new_empty();
+ 	snprintf(message, sizeof(message), "New file %s.", fname);
+-	new_file = TRUE;
++	new_file = true;
+     }
+ }
+ 
+ /*
+- * Save the file. Return TRUE on success, FALSE on error.
++ * Save the file. Return true on success, false on error.
+  */
+-int save_file (void) {
++bool save_file (void) {
+     FILE *fp;
+     fileoffset_t pos = 0;
+ 
+     if (look_mode)
+-	return FALSE;		       /* do nothing! */
++	return false;		       /* do nothing! */
+ 
+     if ( (fp = fopen (filename, "wb")) ) {
+ 	static char buffer[SAVE_BLKSIZ];
+@@ -446,25 +446,25 @@
+ 	    buf_fetch_data (filedata, buffer, size, pos);
+ 	    if (size != fwrite (buffer, 1, size, fp)) {
+ 		fclose (fp);
+-		return FALSE;
++		return false;
+ 	    }
+ 	    pos += size;
+ 	}
+     } else
+-	return FALSE;
++	return false;
+     fclose (fp);
+-    return TRUE;
++    return true;
+ }
+ 
+ /*
+  * Make a backup of the file, if such has not already been done.
+- * Return TRUE on success, FALSE on error.
++ * Return true on success, false on error.
+  */
+-int backup_file (void) {
++bool backup_file (void) {
+     char backup_name[FILENAME_MAX];
+ 
+     if (new_file)
+-	return TRUE;		       /* unnecessary - pretend it's done */
++	return true;		       /* unnecessary - pretend it's done */
+     strcpy (backup_name, filename);
+ #if defined(unix) && !defined(GO32)
+     strcat (backup_name, ".bak");
+@@ -498,7 +498,7 @@
+     int scrsize, scroff, llen, i, j;
+     fileoffset_t currpos;
+     fileoffset_t marktop, markbot;
+-    int mark;
++    bool mark;
+     char *p;
+     unsigned char c, *q;
+     char *linebuf;
+@@ -657,15 +657,15 @@
+     display_refresh ();
+ }
+ 
+-volatile int safe_update, update_required;
++volatile bool safe_update, update_required;
+ void update (void);
+ 
+ /*
+- * Get a string, in the "minibuffer". Return TRUE on success, FALSE
++ * Get a string, in the "minibuffer". Return true on success, false
+  * on break. Possibly syntax-highlight the entered string for
+  * backslash-escapes, depending on the "highlight" parameter.
+  */
+-int get_str (char *prompt, char *buf, int highlight) {
++bool get_str (char *prompt, char *buf, bool highlight) {
+     int maxlen = 79 - strlen(prompt);  /* limit to 80 - who cares? :) */
+     int len = 0;
+     int c;
+@@ -702,17 +702,17 @@
+ 	display_refresh();
+ 	if (update_required)
+ 	    update();
+-	safe_update = TRUE;
++	safe_update = true;
+ 	c = display_getkey();
+-	safe_update = FALSE;
++	safe_update = false;
+ 	if (c == 13 || c == 10) {
+ 	    buf[len] = '\0';
+-	    return TRUE;
++	    return true;
+ 	} else if (c == 27 || c == 7) {
+ 	    display_beep();
+ 	    display_post_error();
+ 	    snprintf(message, sizeof(message), "User Break!");
+-	    return FALSE;
++	    return false;
+ 	}
+ 
+ 	if (c >= 32 && c <= 126) {
+@@ -794,12 +794,12 @@
+     if (safe_update)
+ 	update();
+     else
+-	update_required = TRUE;
++	update_required = true;
+ }
+ 
+-fileoffset_t parse_num (char *buffer, int *error) {
++fileoffset_t parse_num (char *buffer, bool *error) {
+     if (error)
+-	*error = FALSE;
++	*error = false;
+     if (!buffer[strspn(buffer, "0123456789")]) {
+ 	/* interpret as decimal */
+ 	return ATOOFF(buffer);
+@@ -812,6 +812,6 @@
+     } else {
+ 	return 0;
+ 	if (error)
+-	    *error = TRUE;
++	    *error = true;
+     }
+ }
+diff -Naur tweak-3.02/rcfile.c tweak-3.02.patched/rcfile.c
+--- tweak-3.02/rcfile.c	2016-03-22 17:12:51.000000000 -0400
++++ tweak-3.02.patched/rcfile.c	2021-09-07 14:21:21.903810301 -0400
+@@ -146,7 +146,7 @@
+     char rcbuffer[256];
+     char rcname[FILENAME_MAX];
+     int lineno = 0;
+-    int errors = FALSE, errors_here;
++    bool errors = false, errors_here;
+ 
+ #if defined(unix) && !defined(GO32)
+     rcname[0] = '\0';
+@@ -200,7 +200,7 @@
+ 	    strcpy (rcbuffer, *p++);
+ 	}
+ 	lineno++;
+-	errors_here = FALSE;
++	errors_here = false;
+ 
+ 	/*
+ 	 * Now we have a line from the .rc file, wherever it's
+@@ -242,7 +242,7 @@
+ 	    else {
+ 		fprintf(stderr, "%s: no key sequence after \"bind\" command"
+ 			" on line %d of "RCNAME, pname, lineno);
+-		errors = TRUE;
++		errors = true;
+ 		continue;
+ 	    }
+ 
+@@ -255,8 +255,8 @@
+ 		    if (!*++q) {
+ 			fprintf(stderr, "%s: nothing follows `^' on line %d"
+ 				" of "RCNAME, pname, lineno);
+-			errors = TRUE;
+-			errors_here = TRUE;
++			errors = true;
++			errors_here = true;
+ 		    } else {
+ 			*s++ = *q++ ^ 0x40;
+ 		    }
+@@ -264,8 +264,8 @@
+ 		    if (!*++q) {
+ 			fprintf(stderr, "%s: nothing follows `\\' on line %d"
+ 				" of "RCNAME, pname, lineno);
+-			errors = TRUE;
+-			errors_here = TRUE;
++			errors = true;
++			errors_here = true;
+ 		    } else if (*q == '\\' || *q == '^') {
+ 			*s++ = *q++;
+ 		    } else if (isxdigit((unsigned char)*q) &&
+@@ -278,8 +278,8 @@
+ 		    } else {
+ 			fprintf(stderr, "%s: badly formed `\\' sequence on"
+ 				" line %d of "RCNAME, pname, lineno);
+-			errors = TRUE;
+-			errors_here = TRUE;
++			errors = true;
++			errors_here = true;
+ 		    }
+ 		} else
+ 		    *s++ = *q++;
+@@ -307,7 +307,7 @@
+ 		fprintf(stderr, "%s: unrecognised key action \"%s\""
+ 			" at line %d of "RCNAME"\n",
+ 			pname, r, lineno);
+-		errors = TRUE;
++		errors = true;
+ 	    }
+ 	} else if (!strcmp(q, "width")) {
+ 	    width = atoi(r);
+@@ -317,7 +317,7 @@
+ 	    fprintf(stderr, "%s: unrecognised "RCNAME" directive \"%s\""
+ 		    " at line %d of "RCNAME"\n",
+ 		    pname, q, lineno);
+-	    errors = TRUE;
++	    errors = true;
+ 	}
+     }
+     if (errors)
+diff -Naur tweak-3.02/slang.c tweak-3.02.patched/slang.c
+--- tweak-3.02/slang.c	2016-03-22 17:12:51.000000000 -0400
++++ tweak-3.02.patched/slang.c	2021-09-07 14:21:21.918810299 -0400
+@@ -69,7 +69,7 @@
+ 	exit (1);
+     }
+     SLang_set_abort_signal (NULL);
+-    SLtt_Use_Ansi_Colors = TRUE;
++    SLtt_Use_Ansi_Colors = true;
+ 
+     get_screen_size ();
+     if (SLsmg_init_smg () < 0) {
+@@ -109,7 +109,7 @@
+     SLsmg_write_nchars(str, len);
+ }
+ 
+-void display_define_colour(int colour, int fg, int bg, int reverse)
++void display_define_colour(int colour, int fg, int bg, bool reverse)
+ {
+     static char *colours[16] = {
+ 	"black", "red", "green", "brown",
+@@ -142,10 +142,15 @@
+ 
+ int display_getkey(void)
+ {
+-    return SLang_getkey();
++    int key = SLang_getkey();
++    if (key == SLANG_GETKEY_ERROR) {
++        /* A failure to read from standard input is fatal */
++        exit(1);
++    }
++    return key;
+ }
+ 
+-int display_input_to_flush(void)
++bool display_input_to_flush(void)
+ {
+     return SLang_input_pending(0);
+ }
+@@ -153,7 +158,7 @@
+ void display_post_error(void)
+ {
+     SLKeyBoard_Quit = 0;
+-    SLang_Error = 0;
++    SLang_set_error (0);
+ }
+ 
+ void display_recheck_size(void)
+diff -Naur tweak-3.02/tweak.h tweak-3.02.patched/tweak.h
+--- tweak-3.02/tweak.h	2016-03-22 17:12:51.000000000 -0400
++++ tweak-3.02.patched/tweak.h	2021-09-07 14:21:21.903810301 -0400
+@@ -16,12 +16,7 @@
+ 
+ #endif
+ 
+-#ifndef FALSE
+-#define FALSE 0
+-#endif
+-#ifndef TRUE
+-#define TRUE 1
+-#endif
++#include <stdbool.h>
+ 
+ #define EVER ;;
+ 
+@@ -80,23 +75,25 @@
+ extern char decstatus[], hexstatus[], *statfmt;
+ extern char last_char, *pname, *filename;
+ extern buffer *filedata, *cutbuffer;
+-extern int fix_mode, look_mode, insert_mode, edit_type, finished, marking;
++extern bool fix_mode, look_mode, insert_mode, finished, marking;
++extern int edit_type;
+ extern fileoffset_t file_size, top_pos, cur_pos, mark_point;
+-extern int scrlines, modified, new_file;
++extern int scrlines;
++extern bool modified, new_file;
+ extern fileoffset_t width, offset, realoffset;
+-extern int ascii_enabled;
++extern bool ascii_enabled;
+ 
+ #ifdef unix
+-extern volatile int safe_update, update_required;
++extern volatile bool safe_update, update_required;
+ extern void update (void);
+ #endif
+ 
+ extern void fix_offset(void);
+-extern fileoffset_t parse_num (char *buffer, int *error);
++extern fileoffset_t parse_num (char *buffer, bool *error);
+ 
+ extern void draw_scr (void);
+-extern int backup_file (void);
+-extern int save_file (void);
++extern bool backup_file (void);
++extern bool save_file (void);
+ 
+ extern void act_self_ins (void);
+ extern keyact parse_action (char *);
+@@ -107,7 +104,7 @@
+ extern Search *build_search (char *, int);
+ void free_search(Search *s);
+ 
+-extern int get_str (char *, char *, int);
++extern bool get_str (char *, char *, bool);
+ extern int parse_quoted (char *);
+ extern void suspend (void);
+ 
+@@ -137,11 +134,11 @@
+ extern void display_refresh(void);
+ extern void display_write_str(char *str);
+ extern void display_write_chars(char *str, int len);
+-extern void display_define_colour(int colour, int fg, int bg, int reverse);
++extern void display_define_colour(int colour, int fg, int bg, bool reverse);
+ extern void display_set_colour(int colour);
+ extern void display_clear_to_eol(void);
+ extern int display_getkey(void);
+-extern int display_input_to_flush(void);
++extern bool display_input_to_flush(void);
+ extern void display_post_error(void);
+ extern void display_recheck_size(void);
+ 
