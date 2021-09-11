@@ -1,25 +1,21 @@
 
-The TL;DR version: install lame if you want to rip to mp3.
+The TL;DR version: you probably don't need any of the optional deps.
 
 If you're still reading: ripit's optional dependencies are runtime deps,
 so you can install them after installing ripit and they will be detected.
 
-If you don't install anything extra, you'll be able to rip with cdparanoia
-or cdda2wav, and encode to flac, ogg, or wavpack. You'll also be unable
-to submit updated CDDB entries (most people don't need to do this anyway).
+If you don't install anything extra, you'll be able to rip with
+cdparanoia or cdda2wav, and encode to mp3, flac, ogg, wavpack, or any
+format supported by ffmpeg (try "ffmpeg -encoders|grep ^.A"). You'll
+be UNable to submit updated CDDB entries (most people don't need to do
+this anyway).
 
 Here's the list of optional deps available from SBo:
 
-lame - Normally required for encoding to mp3 (-c 0 option, which is the
-       default), though ffmpeg can be used instead.
-
 faac - Required for encoding to mp4/aac (-c 3 option).
 
-ffmpeg - Can encode to any format supported by ffmpeg (-c 7 option, plus
-        --ffmpegopt and --ffmpegsuffix options).
-
-musepack-tools or mppenc -
-  Required for encoding to MusePack (mpc) format (-c 5 option).
+musepack-tools or mppenc - Required for encoding to MusePack
+                           (mpc) format (-c 5 option).
 
 libwwwperl - Required for submitting updated CDDB entries to freedb.org.
              If this package is missing, ripit will warn that LWP::Simple
