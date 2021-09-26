@@ -31,8 +31,15 @@ for file in etc/openrc/local.d/*.new; do
   preserve_perms "${file}"
 done
 
+# Enable some basic services
+[ ! -e "etc/openrc/runlevels/sysinit/udev" ] && ln -s /etc/openrc/init.d/udev "etc/openrc/runlevels/sysinit/udev"
+[ ! -e "etc/openrc/runlevels/sysinit/udev-trigger" ] && ln -s /etc/openrc/init.d/udev-trigger "etc/openrc/runlevels/sysinit/udev-trigger"
+
 # disable udev-postmount
 [ -e "etc/openrc/runlevels/sysinit/udev-postmount" ] && rm -v "etc/openrc/runlevels/sysinit/udev-postmount"
 
 # disable kmod-static-nodes (openrc-0.26.1, 2017-05-14)
 [ -e "etc/openrc/runlevels/sysinit/kmod-static-nodes" ] && rm -v "etc/openrc/runlevels/sysinit/kmod-static-nodes"
+
+# maintain compatibilty with previous xdm script
+ln -sf /usr/bin/startDM "etc/X11/startDM.sh"
