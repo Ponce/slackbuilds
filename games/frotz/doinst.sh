@@ -11,3 +11,9 @@ if [ -e usr/share/icons/hicolor/icon-theme.cache ]; then
     /usr/bin/gtk-update-icon-cache usr/share/icons/hicolor >/dev/null 2>&1
   fi
 fi
+
+if [ -e usr/share/fonts/misc/Zork_r400-10.pcf ]; then
+  if [ -x /usr/bin/mkfontdir ]; then
+    /usr/bin/mkfontdir usr/share/fonts/misc >/dev/null 2>&1
+  fi
+fi
