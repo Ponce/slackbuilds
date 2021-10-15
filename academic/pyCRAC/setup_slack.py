@@ -1,10 +1,10 @@
 #!/usr/bin/python
 
 __author__      = "Sander Granneman"
-__copyright__   = "Copyright 2020"
-__version__     = "1.5.0"
+__copyright__   = "Copyright 2021"
+__version__     = "1.5.1"
 __credits__     = ["Sander Granneman","Grzegorz Kudla","Hywell Dunn Davies"]
-__maintainer__  = ["Sander Granneman","Rob van Nues via SlackBuilds.org"]
+__maintainer__  = ["Sander Granneman","Rob van Nues for SlackBuilds.org"]
 __email__       = ["sgrannem@staffmail.ed.ac.uk", "sborg63@disroot.org"]
 __status__      = "Production"
 
