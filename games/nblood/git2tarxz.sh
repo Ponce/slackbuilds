@@ -59,7 +59,9 @@ GIT_SHA=$( git rev-parse --short HEAD )
 
 DATE=$( git log --date=format:%Y%m%d --format=%cd | head -1 )
 
-VERTAG=$( git tag -l | tail -1 )
+# 20211101 bkw: wha? there used to be tags, now they're gone.
+#VERTAG=$( git tag -l | tail -1 )
+VERTAG=v1.01
 
 VERSION=${VERTAG}+${DATE}_${GIT_SHA}
 
