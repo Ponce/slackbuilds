@@ -24,6 +24,11 @@
 
 # Now maintained by B. Watson.
 
+# 20211102 bkw: someone else updated this for v2.3.1 BUILD=1.
+# - BUILD=2.
+# - new-style icons.
+# - binaries in /usr/games.
+
 # 20170207 bkw:
 # - Take over maintenance, BUILD=2
 # - Remove OpenAL and fmodapi from REQUIRES, since they are not
@@ -48,7 +53,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=doomsday
 VERSION=${VERSION:-2.3.1}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -60,9 +65,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -95,11 +97,8 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 # build amethyst
 mkdir -p build-amethyst
@@ -111,10 +110,9 @@ cd build-amethyst
     -DCMAKE_BUILD_TYPE=Release \
     ../doomsday/tools/amethyst
   make
-  make install DESTDIR=$PKG
+  make install/strip DESTDIR=$PKG
 cd ..
 
-# already provided by the assimp package
 mkdir -p build
 cd build
   cmake \
@@ -123,19 +121,30 @@ cd build
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_BUILD_TYPE=Release ..
   make
-  make install DESTDIR=$PKG
+  make install/strip DESTDIR=$PKG
 cd ..
+
+mv $PKG/usr/bin $PKG/usr/games
+
+DESKDIR=$PKG/usr/share/applications
+chmod -x $DESKDIR/*
+sed -i -e 's,/bin/,/games/,g' \
+       -e '/^Encoding/d' \
+       $DESKDIR/*
+
+mkdir -p $PKG/usr/share/pixmaps
+convert -resize 48x48 \
+  $PKG/usr/share/icons/hicolor/256x256/apps/net.dengine.Doomsday.png \
+  $PKG/usr/share/pixmaps/$PRGNAM.png
 
 # already provided by the assimp package
 rm -fR $PKG/usr/include/assimp
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
 # manually install man pages
+rm -rf $PKG/usr/share/man
 mkdir -p $PKG/usr/man/man6
-for i in doomsday doomsday-server doomsday-shell-text; do
-  gzip -c9 doomsday/doc/$i.6 > $PKG/usr/man/man6/$i.6.gz
+for i in doomsday/doc/*.6; do
+  gzip -9c < $i > $PKG/usr/man/man6/$( basename $i ).gz
 done
 
 mkdir -p $PKG/usr/doc
