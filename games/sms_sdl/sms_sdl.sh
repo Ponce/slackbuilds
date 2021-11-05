@@ -49,6 +49,15 @@ unzip_rom() {
 
 mkdir -p $sms_userdir
 
+# 20211025 bkw: if there's no config file, create one.
+if [ ! -e "$conf_file" ]; then
+   cat > "$conf_file" <<EOF
+joystick
+fm
+filter 2x
+EOF
+fi
+
 if [ -e "$conf_file" ]; then
 	while read line; do
 		# remove comments

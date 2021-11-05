@@ -29,4 +29,4 @@ touch var/log/ipxnet.log
 chown @IPXUSER@:@IPXGROUP@ var/log/ipxnet.log
 
 # 14.2 uses tar-1.15 for makepkg, can't handle capabilities, so:
-[ -e /sbin/setcap] && /sbin/setcap cap_net_bind_service=epi usr/sbin/ipxnet-system
+[ -e /sbin/setcap ] && /sbin/setcap cap_net_bind_service=epi usr/sbin/ipxnet-system

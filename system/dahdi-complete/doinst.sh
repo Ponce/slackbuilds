@@ -29,15 +29,8 @@ preserve_perms etc/rc.d/rc.dahdi.new
 
 config etc/udev/rules.d/xpp.rules.new
 config etc/udev/rules.d/dahdi.rules.new
-config etc/hotplug/usb/xpp_fxloader.usermap.new
-config etc/dahdi/system.conf.new
 config etc/dahdi/assigned-spans.conf.sample.new
 config etc/dahdi/span-types.conf.sample.new
-config etc/dahdi/init.conf.new
-config etc/dahdi/modules.new
-config etc/dahdi/genconf_parameters.new
 config etc/bash_completion.d/dahdi.new
-config etc/modprobe.d/dahdi.conf.new
-config etc/modprobe.d/dahdi.blacklist.conf.new
 
 chroot . /sbin/depmod -a

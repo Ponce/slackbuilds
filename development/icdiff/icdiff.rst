@@ -2,7 +2,7 @@
 ..   rst2man.py icdiff.rst > icdiff.1
 .. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 1.9.5
+.. |version| replace:: 2.0.4
 .. |date| date::
 
 ======
@@ -51,8 +51,11 @@ OPTIONS
 --output-encoding=OUTPUT_ENCODING
                       specify the output encoding; defaults to utf8
 -r, --recursive       recursively compare subdirectories
+-s, --report-identical-files
+                      report when two files are the same
 --show-all-spaces     color all non-matching whitespace including that which is not needed for drawing the eye to changes.  Slow, ugly, displays all changes
 --tabsize=TABSIZE     tab stop spacing
+-t, --truncate        truncate long lines instead of wrapping them
 -u, --patch           generate patch. This is always true, and only exists for compatibility
 -U NUM, --unified=NUM, --numlines=NUM
                       how many lines of context to print; can't be combined with --whole-file
@@ -60,6 +63,7 @@ OPTIONS
 --strip-trailing-cr   strip any trailing carriage return at the end of an input line
 --color-map=COLOR_MAP
                       choose which colors are used for which items. Default is --color-map='add:green_bold,change:yellow_bold,description:blue,meta:magenta,separator:blue,subtract:red_bold'.  You don't have to override all of them: '--color-map=separator:white,description:cyan'
+--is-git-diff         Show the real file name when displaying git-diff result
 
 NOTE
 ====

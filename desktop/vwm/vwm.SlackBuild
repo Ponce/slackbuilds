@@ -25,6 +25,17 @@
 # Previously maintained by Gerardo Zamudio.
 # Now maintained by B. Watson <yalhcru@gmail.com>.
 
+# 20210908 bkw:
+# - Update this stale build. It compiled on -current, but failed to
+#   run properly. Upstream never updated the old sourceforge page to
+#   let us know he moved to github, so I just now found it out...
+#   Upstream doesn't use tags for releases, I used latest git for
+#   all 3 projects (vwm, libviper, libvterm).
+# - Bundle libviper. The old libviper build is gone (nothing else used it).
+# - Bundled libs are now shared, not static, and are included in the
+#   built package (along with their includes).
+# - Upstream switched to cmake, many changes because of that.
+
 # 20170825 bkw:
 # - Take over maintenance.
 # - Update for v2.1.3.
@@ -41,8 +52,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=vwm
-VERSION=${VERSION:-2.1.3}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-3.3.2+20200112_207d888}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -54,9 +65,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -80,76 +88,95 @@ else
   LIBDIRSUFFIX=""
 fi
 
-fixperms() {
-  chown -R root:root .
-  find -L . \
-     \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
-     -exec chmod 755 {} \; -o \
-     \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
-     -exec chmod 644 {} \;
-}
 
 set -e
 
-rm -rf $PKG
-mkdir -p $TMP/$PRGNAM $PKG $OUTPUT
+rm -rf $PKG $TMP/$PRGNAM-$VERSION
+mkdir -p $PKG $OUTPUT
+cd $TMP
 
-# First, the library. This is "libvterm", by the same author as vwm,
-# but it's completely unrelated to the libvterm on SBo. Two projects
-# happened to pick the same name. This one doesn't build a static lib
-# by default (which we need) so it's done here with 'ar'. None of this
-# stuff gets included in the package.
-# libvterm-20170804.tar.xz was created thus:
-# git clone https://github.com/TragicWarrior/libvterm.git libvterm-20170804
-# tar cvfJ libvterm-20170804.tar.xz libvterm-20170804
-LIBNAM=libvterm
-LIBVER=${LIBVER:-20170804}
+# The tarball includes all 3 projects (vwm, libviper, libvterm) and
+# was created by git2tarxz.sh.
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-cd $TMP/$PRGNAM
-rm -rf $LIBNAM-$LIBVER
-tar xvf $CWD/$LIBNAM-$LIBVER.tar.xz
-cd $LIBNAM-$LIBVER
-fixperms
+BASEDIR=$( pwd )
 
-# Build a static library. We need -fPIC even on 32-bit.
-make CFLAGS="$SLKCFLAGS -fPIC"
-rm -f *.so
-ar rcs $LIBNAM.a *.o
+# First, we build the two libraries vwm needs. These are by the same
+# author as vwm. The one called libvterm is *not* related to the
+# libvterm on SBo (two projects happened to pick the same name).
+# These have to be shared libs (or anyway, libvterm has to be, as
+# vwm's vwmterm module loads it via dlopen()).
 
-# Now, the main program, which will link with the static lib we just built.
-cd $TMP/$PRGNAM
-rm -rf $PRGNAM
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM
-fixperms
+buildlib() {
+  cd $BASEDIR/lib$1
+  mkdir -p build
+  cd build
 
-# Patch the relevant Makefiles to not use hardcoded paths.
-patch -p1 < $CWD/patches/paths.diff
+  # Note: the cmake stuff here ignores any attempt to install to lib64.
+  # We'll fix it later.
+  cmake \
+    -DCMAKE_C_FLAGS_RELEASE="$SLKCFLAGS -DNDEBUG" \
+    -DCMAKE_CXX_FLAGS_RELEASE="$SLKCFLAGS -DNDEBUG" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make VERBOSE=1
+  make install/strip DESTDIR=$PKG
+}
 
-# Allows us to pass a full path to libvterm.a, avoids 'undefined symbol'
-# when starting vmterm3.
-patch -p1 < $CWD/patches/vterm_static.diff
+buildlib vterm
+buildlib viper
 
-LIBDIR=$TMP/$PRGNAM/$LIBNAM-$LIBVER
-make CFLAGS="$SLKCFLAGS -I$LIBDIR" VTERM_A=$LIBDIR/libvterm.a
-make install prefix=$PKG/usr libdir=$PKG/usr/lib${LIBDIRSUFFIX}
+# no way to disable static libs via cmake, so...
+rm -f $PKG/usr/lib/*.a
 
-# Build and install the sysmon module (the vmwterm3 one is done with
-# the main installation).
-cd modules/sysmon
-   make CFLAGS="$SLKCFLAGS -I$PKG/usr/include"
-   make install prefix=$PKG/usr libdir=$PKG/usr/lib${LIBDIRSUFFIX}
+# Finally, we can build vwm. Easier to force-override the autodetect
+# for the libs, than it would be to make the autodetect actually work.
+cd $BASEDIR/$PRGNAM
+
+  # why is this hardcoded?
+  sed -i "s,/usr/local/lib/vwm/,/usr/lib$LIBDIRSUFFIX/vwm/," vwm.h
+
+  mkdir -p build
+  cd build
+  cmake \
+    -DCMAKE_C_FLAGS_RELEASE="$SLKCFLAGS -DNDEBUG" \
+    -DCMAKE_CXX_FLAGS_RELEASE="$SLKCFLAGS -DNDEBUG" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DVTERM_LIBRARY=$PKG/usr/lib/libvterm.so \
+    -DVIPER_LIBRARY=$PKG/usr/lib/libviper.so \
+    -DVTERM_INCLUDE_DIR=$PKG/usr/include \
+    -DVIPER_INCLUDE_DIR=$PKG/usr/include \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make VERBOSE=1
+  make install/strip DESTDIR=$PKG
 cd -
 
-# Build and install the keycodes tool to determine codes for remapping
-# keystrokes in '~/.vwm/vwmrc'.
-make -j1 keycode_tool
-install -s -m0755 keycodes/keycodes $PKG/usr/bin/
+# *Now* we can fix the lib=>lib64 mess, if needed.
+[ "$LIBDIRSUFFIX" != "" ] && mv $PKG/usr/lib $PKG/usr/lib$LIBDIRSUFFIX
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a CHANGELOG LICENSE NOTES samples $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README$TAG
+# Build and install the keycodes tool to determine codes for remapping
+# keystrokes in '~/.vwm/vwmrc'. Don't think we need the non-wide version,
+# since the main program uses wide ncurses.
+make -j1 -C keycodes keycodes_wide
+install -s -m0755 keycodes/keycodes_wide $PKG/usr/bin/keycodes
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+
+# upstream's README.md is mostly install instructions.
+mkdir -p $PKGDOC
+cp -a BUGS CHANGELOG LICENSE NEWS* README* TODO samples $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+cat $CWD/README > $PKGDOC/README$TAG
+
+# include docs for the libraries too.
+cd $BASEDIR
+mkdir -p $PKGDOC/{libviper,libvterm}
+cp -a libviper/{CHANGELOG,LICENSE,README.md,TODO} $PKGDOC/libviper
+cp -a libvterm/{API,CHANGELOG,COPY*,LIC*,*.md} $PKGDOC/libvterm
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
