@@ -36,14 +36,6 @@ http://www.linuxquestions.org/questions/slackware-14/bug-in-makepkg-and-symlinks
 
 The general consensus seems to be, changing makepkg isn't going to happen.
 
-SlackBuilds.org Note
---------------------
-
-In the .info file, stratagus, ffmpeg2theora, fluidsynth, and
-fluid-soundfont are listed as requirements. ffmpeg2theora is only required
-at build time; the others required at runtime (matters if you're deploying
-on a host other than the build host).
-
 Game Data
 ---------
 
@@ -72,6 +64,9 @@ export GAMEDATA=/tmp/warcraft2.iso       # image of CD
 
 ...then run ./wargus.SlackBuild
 
+Note: For game data extraction to work from a 7zip or rar archive,
+you'll need p7zip or unrar.
+
 If GAMEDATA isn't set, or if the extraction process fails, your wargus
 package won't include the game data. You'll be unable to play the game
 until you've extracted the data yourself.
@@ -85,15 +80,9 @@ If you build a package without the data:
 The extraction script used by the SlackBuild is installed as
 /usr/bin/extract-warcraft2 (run with no arguments for usage) and can
 be run any time without reinstalling the wargus package. If you do
-this, and later decide to remove wargus, you'll have to manually rm -rf
-/usr/share/games/stratagus/wargus after package removal.
-
-For game data extraction to work, you will need:
-
-- ffmpeg2theora
-
-- if you're extracting from a 7zip or rar archive, you'll need p7zip
-  or unrar.
+this, and later decide to remove wargus, you'll have to manually rm
+-rf /usr/share/games/stratagus/wargus after package removal... or you
+can extract the game data to ~/.stratagus/data.Wargus/ instead.
 
 Extraction takes a while, depending on your CPU speed. It renders all the
 game's MIDI music as wav files, transcodes those to .ogg, then transcodes
@@ -101,4 +90,3 @@ all the game's videos to ogg theora.
 
 extract-warcraft2 is a wrapper for wartool, supplied with wargus. See
 the wartool man page for more information.
-
