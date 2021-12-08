@@ -43,6 +43,12 @@ OPTIONS
 -x Xcoord          Original X placement.                             
 -y Ycoord          Original Y placement.
 
+BUGS
+====
+
+There is no way to exit **mag** normally. Use e.g. **killall mag** or
+**xkill** to force it to quit.
+
 AUTHORS
 =======
 
