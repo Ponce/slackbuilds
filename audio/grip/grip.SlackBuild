@@ -1,0 +1,125 @@
+#!/bin/bash
+
+# Slackware build script for grip
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20211213 bkw: This replaces the ancient grip2 build. We didn't have
+# grip 3.x builds because they had too many gnome dependencies; the
+# 4.x series dropped those and is a pure GTK+ application. Except for
+# its Help option, which requires yelp. To avoid a dependency on yelp,
+# I convert the docs to HTML and patch grip to open a browser.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=grip
+VERSION=${VERSION:-4.2.3}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# The icons aren't quite correctly sized, e.g. the 64x64 one is really 64x67.
+for i in pixmaps/*/apps/$PRGNAM.png; do
+  size="$( echo $i | cut -d/ -f2 )"
+  convert -crop $size+0+1 $i $i.new.png
+  mv $i.new.png $i
+done
+
+# Patch makes grip open the help table of contents in a browser, if
+# yelp is not installed. Have to convert the help to HTML, see below.
+patch -p1 < $CWD/help_fallback_html.diff
+
+mkdir build
+cd build
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  meson .. \
+    --buildtype=release \
+    --infodir=/usr/info \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    -Dstrip=true
+  "${NINJA:=ninja}" -v
+  DESTDIR=$PKG $NINJA -v install
+cd ..
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC/html
+
+# Generate HTML documentation, so we don't need yelp.
+# 2 choices here: docbook2html or xmlto. I go with xmlto because
+# docbook2html (a) doesn't handle UTF-8 input, and (b) wants to
+# do network access to download the DTD.
+# The documentation is short enough that there's no point having
+# separate HTML pages for each section. html-nochunks gives us
+# one HTML file with all the content.
+cd doc/C
+xmlto --stringparam chunker.output.encoding=UTF-8 html-nochunks grip.xml
+
+# While we're at it, make the smilie images easier to see on modern hi-res
+# screens (I have to squint).
+for i in smile*.png; do
+  convert \
+    -resize 36x36 \
+    -extent 40x40 \
+    -background '#808080' \
+    -gravity center \
+    $i $i.new.png
+  mv $i.new.png $i
+done
+
+cp -a *.html *.png $PKGDOC/html
+cd -
+
+# NEWS is 0-byte placeholder in 4.2.3.
+cp -a AUTHORS COPYING* CREDITS ChangeLog README TODO $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
