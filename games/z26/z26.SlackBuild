@@ -7,6 +7,13 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211214 bkw:
+# - BUILD=3
+# - update for -current, which involves building with 14.2's nasm.
+#   there's probably a better way to fix it, but it's been 16+ years
+#   since I looked at z26's asm source and the details elude me now.
+# - TODO: fix the statified binary for x86_64 use.
+
 # 20180123 bkw:
 # - move binary to /usr/games, man page to section 6
 # - 64-bit support via statified binary (see statify.sh)
@@ -16,7 +23,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=z26
 VERSION=${VERSION:-2.13}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -58,12 +65,17 @@ fi
 
 set -e
 
+# 20211214 bkw: recent versions of nasm won't build this, so use
+# an older one (the one from Slackware 14.2, actually).
+NASMVER=${NASMVER:-2.13.01}
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $SNAPVER
 tar xvf $CWD/$TARBALL
 cd $SNAPVER
+tar xvf $CWD/nasm-$NASMVER.tar.xz
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
@@ -76,7 +88,13 @@ if [ "$ARCH" = "x86_64" ]; then
   chmod 755 $PRGNAM
   cp conf/config_linux-static.mak config.mak
 else
-  make linux CFLAGS="$SLKCFLAGS"
+  cd nasm-$NASMVER
+    CFLAGS="$SLKCFLAGS -Wno-error" ./configure --disable-werror
+    # neither CFLAGS="-Wno-error" nor --disable-werror actually works.
+    sed -i 's,-Werror[^ ]*,,g' Makefile
+    make
+  cd -
+  make linux NASM="$(pwd)/nasm-$NASMVER/nasm" CFLAGS="$SLKCFLAGS"
 fi
 make $PRGNAM.man
 make docs
