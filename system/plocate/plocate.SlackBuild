@@ -1,0 +1,111 @@
+#!/bin/bash
+
+# Slackware build script for plocate
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=plocate
+VERSION=${VERSION:-1.1.13}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# doubleplusungood ref systemd.
+sed -i.bak '/systemd\.timer/s,.*,.BR crond (8)\njob,' updatedb.8.in
+
+mkdir build
+cd build
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  meson .. \
+    --buildtype=release \
+    --infodir=/usr/info \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    -Dstrip=true \
+    -Dlocategroup=slocate \
+    -Dupdatedb_progname=$PRGNAM-updatedb
+  "${NINJA:=ninja}"
+  DESTDIR=$PKG $NINJA install
+cd ..
+
+gzip -9 $PKG/usr/man/man*/*.*
+mv $PKG/usr/man/man5/updatedb.conf.5.gz $PKG/usr/man/man5/$PRGNAM-updatedb.conf.5.gz
+
+# change the permissions to match Slackware's mlocate.
+chown root:slocate $PKG/var/lib/$PRGNAM
+chmod 750 $PKG/var/lib/$PRGNAM
+chmod 2711 $PKG/usr/bin/$PRGNAM
+
+# do not install upstream's cron script. it doesn't actually run plocate's
+# updatedb; it converts mlocate's database into plocate format, meaning
+# mlocate would still have to be installed and be run from cron. upstream
+# expects plocate's updatedb to be run from systemd, which we scorn, so
+# include our own cron script.
+mkdir -p $PKG/etc/cron.daily
+install -oroot -groot -m0755 $CWD/cron.sh $PKG/etc/cron.daily/$PRGNAM
+
+# this updatedb.conf is identical to the one in Slackware's mlocate.
+install -oroot -groot -m0755 $CWD/updatedb.conf $PKG/etc/updatedb.conf.new
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a COPYING NEWS README $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
