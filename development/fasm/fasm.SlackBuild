@@ -1,0 +1,123 @@
+#!/bin/bash
+
+# Slackware build script for fasm
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Note: the source archive includes the full source plus prebuilt 32-
+# and 64-bit binaries. This SlackBuild uses the prebuilt binary to
+# bootstrap the binary it's going to install.
+
+# I almost didn't bother with an x86_64 option. The assembler is
+# 32-bit but fully static, will run fine on 64-bit without multilib,
+# and there doesn't seem to be any advantage to using the 64-bit
+# native binary... but upstream provides it, so I do too. Plus the
+# tools need help on Slackware64 due to lack of multilib.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=fasm
+VERSION=${VERSION:-1.73.29}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+# Build will fail on non-x86/x86_64. Let's fail ASAP though, not
+# bother to extract the source.
+case "$ARCH" in
+  i?86|x86_64) ;; # OK
+  *) cat <<EOF
+*** $PRGNAM can only be built and run on i586, i686, or x86_64 (not '$ARCH')
+EOF
+exit 1
+esac
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM
+tar xvf $CWD/$PRGNAM-$VERSION.tgz
+cd $PRGNAM
+
+if [ "$ARCH" = "x86_64" ]; then
+  SRCDIR=source/Linux/x64
+  FASM="$(pwd)/fasm.x64"
+  tar xvf $CWD/fasm-prebuilt-tools-$VERSION.tar.xz
+else
+  FASM="$(pwd)/fasm"
+  SRCDIR=source/Linux
+fi
+
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# Bootstrap using the prebuilt binary.
+cd $SRCDIR
+$FASM fasm.asm
+
+# The binary we just built should be byte-for-byte identical with
+# the prebuilt one. If not, this will error out of the script.
+cmp $FASM fasm
+
+# Note: do not attempt to strip this (no section headers).
+mkdir -p $PKG/usr/bin
+install -m0755 fasm $PKG/usr/bin/fasm
+
+cd -
+
+# Build the tools, if we're on 32-bit. For 64-bit we use prebuilt
+# statically-linked tools, since we don't have a 32-bit libc for them
+# to link with. The prebuilt tools just came from running this script
+# on i586, then tarring up the binaries. For some reason, the Debian
+# fasm package doesn't include compiled tools, though it does include
+# the sources for them (even the win32 source).
+
+cd tools/libc
+for i in listing prepsrc symbols; do
+  # if the file exists, it's prebuilt, we won't (and can't) build it.
+  if [ ! -e $i ]; then
+    $FASM $i.asm
+    gcc -static -Wl,-s -o $i $i.o
+  fi
+  install -m0755 -oroot -groot $i $PKG/usr/bin/$i
+done
+cd -
+
+# Man page written for this SlackBuild. Debian had one already,
+# but it's not very detailed and is missing the -d option.
+mkdir -p $PKG/usr/man/man1
+gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+mv tools/readme.txt tools-readme.txt
+cp -a *.txt tools/*.txt examples $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
