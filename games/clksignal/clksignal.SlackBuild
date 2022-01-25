@@ -1,0 +1,123 @@
+#!/bin/bash
+
+# Slackware build script for clksignal
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=clksignal
+VERSION=${VERSION:-20211219}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+SRCNAM=CLK
+SRCVER="$( echo $VERSION | sed 's,^\(....\)\(..\)\(..\),\1\-\2-\3,' )"
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$SRCVER
+tar xvf $CWD/$SRCNAM-$SRCVER.tar.gz
+cd $SRCNAM-$SRCVER
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+mkdir -p $PKG/usr/games $PKG/usr/man/man6 $PKG/usr/share/applications
+
+# Qt5 user interface is optional.
+if [ "{QT:-yes}" = "yes" ]; then
+  cd OSBindings/Qt
+  qmake-qt5
+  make
+  install -s $PRGNAM $PKG/usr/games/$PRGNAM-qt
+  cd -
+  # clksignal-qt man page written for this SlackBuild
+  gzip -9c < $CWD/$PRGNAM-qt.6 > $PKG/usr/man/man6/$PRGNAM-qt.6.gz
+  cat $CWD/$PRGNAM-qt.desktop > $PKG/usr/share/applications/$PRGNAM-qt.desktop
+fi
+
+cd OSBindings/SDL
+scons $MAKEFLAGS
+install -s $PRGNAM $PKG/usr/games
+cd -
+
+# fix the clksignal man page (no, I'm not going to use ansible).
+THLINE=".TH $PRGNAM 6 \\\"$SRCVER\\\" \\\"$VERSION\\\" \\\"SlackBuilds.org\\\""
+sed '/^\.TH/s,.*,'"$THLINE"',' Packaging/templates/$PRGNAM.1.j2 | \
+  gzip -9c > $PKG/usr/man/man6/$PRGNAM.6.gz
+
+# there actually are a few ROMs in here, plus lots of readme.txt
+mkdir -p $PKG/usr/share/$SRCNAM
+cp -a ROMImages/* $PKG/usr/share/$SRCNAM
+
+MACICONS="OSBindings/Mac/Clock Signal/Assets.xcassets/AppIcon.appiconset/"
+for px in 16 32 64 128; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  cp -a "$MACICONS/Icon$px.png" $dir/$PRGNAM.png
+done
+
+mkdir -p $PKG/usr/share/icons/hicolor/48x48/apps
+convert -resize 48x48 \
+  "$MACICONS/Icon1024.png" \
+  $PKG/usr/share/icons/hicolor/48x48/apps/$PRGNAM.png
+
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# include a .desktop file with Hidden=true. it won't show up in the menus,
+# because running it with no args is useless, but it will be available for
+# "Open with".
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC/html
+cp -a README.md LICENSE* $PKGDOC
+markdown_py -f $PKGDOC/html/index.html $PKGDOC/README.md
+cp -a READMEImages $PKGDOC/html
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
