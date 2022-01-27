@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for commandergenius
 
@@ -6,6 +6,7 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211021 bkw: updated for 3.0.8
 # 20210310 bkw: updated for 2.7.7
 # 20201224 bkw: updated for 2.7.3
 # 20201111 bkw: updated for 2.6.3.1
@@ -31,10 +32,13 @@
 # - use github long-form URL
 # 20170122 bkw: updated for 1.9.8.1beta.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=commandergenius
-VERSION=${VERSION:-2.7.7}
+VERSION=${VERSION:-3.0.8}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -44,7 +48,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -76,8 +84,9 @@ mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $SRCNAM-v$VERSION
 # OSX and Windows stuff takes up 31MB in /tmp, no need to extract it.
+# Also don't extract the prebuilt icotool binary (ugh).
 tar xvf $CWD/$SRCNAM-v$VERSION.tar.bz2 \
-        --wildcards --exclude='*/dlls' --exclude='*/Build/Xcode'
+        --wildcards --exclude='*/dlls' --exclude='*/Build/Xcode' --exclude='*/icotool'
 cd $SRCNAM-v$VERSION
 chown -R root:root .
 
@@ -86,13 +95,15 @@ find -L . -type f -a -exec chmod 644 '{}' '+'
 find -L . -type d -a -exec chmod 755 '{}' '+'
 
 # placate desktop-file-validate
-sed -i 's,Application;,,' share/$DESKTOP
+sed -i -e 's,Application;,,' \
+       -e 's,cg\.svg,'$PRGNAM',' \
+       share/$DESKTOP
 
 mkdir -p build
 cd build
-  export "PATH=/opt/cmake-202x/bin:$PATH"
   cmake \
     -DUSE_SDL2=yes \
+    -DDOCDIR=/usr/doc/$PRGNAM-$VERSION \
     -DGAMES_SHAREDIR:STRING=/usr/share/games \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
@@ -104,32 +115,34 @@ cd build
   make install/strip DESTDIR=$PKG
 cd ..
 
+# clean up the icon names
+for dir in $PKG/usr/share/icons/hicolor/*; do
+  px="$( basename $dir | cut -dx -f1 )"
+  mv $dir/apps/cg.$px.png $dir/apps/$PRGNAM.png
+done
+
 # upstream installs 2 identical-looking (but not byte-identical) icons
-rm -f $PKG/usr/share/icons/hicolor/512x512/apps/CGLogo.png
-ln -s ../../../../games/$PRGNAM/cglogo512.png \
-      $PKG/usr/share/icons/hicolor/512x512/apps/CGLogo.png
+rm -f $PKG/usr/share/games/$PRGNAM/CGLogo.png
+ln -s ../../icons/hicolor/512x512/apps/$PRGNAM.png \
+      $PKG/usr/share/games/$PRGNAM/CGLogo.png
+
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
 # grrrr. don't force command-line users to remember the name is CGeniusExe
 ln -s $EXENAME $PKG/usr/games/$PRGNAM
 
-# the High Quality Pack. this is redundant for Keen 1 and 4 (just download
-# the Special versions of these games), so we only install the data for
-# 2 and 3. strace shows the files are being loaded, but TBH I haven't
-# played these games enough to notice the difference with/without the HQP.
-rm -rf hqp/games/keen1 hqp/games/keen4
+# the High Quality Pack.
 cp -a hqp/* $PKG/usr/share/games/$PRGNAM
+mv $PKG/usr/share/games/$PRGNAM/Readme_hqp.txt $PKG/usr/doc/$PRGNAM-$VERSION
 
 # man page written for this SlackBuild.
 mkdir -p $PKG/usr/man/man6
 gzip -9c < $CWD/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
 ln -s $PRGNAM.6.gz $PKG/usr/man/man6/$EXENAME.6.gz
 
-# upstream installs most of the docs in /usr/share/games/$PRGNAM...
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+# most of the docs were already installed.
 cp -a COPYRIGHT $PKG/usr/doc/$PRGNAM-$VERSION
-for i in README changelog.txt Readme_hqp.txt; do
-  ln -s ../../share/games/$PRGNAM/$i $PKG/usr/doc/$PRGNAM-$VERSION
-done
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
@@ -137,4 +150,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

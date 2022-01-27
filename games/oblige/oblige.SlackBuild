@@ -1,10 +1,15 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for oblige
 
 # Written by B. Watson (yalhcru@gmail.com)
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20211020 bkw: BUILD=2
+# - fix -current build.
+# - binary in /usr/games.
+# - new-style icons.
 
 # 20171220 bkw:
 # - update for 7.70. Upstream calls this the final release :(
@@ -37,10 +42,13 @@
 # Rider for the bug report). Also get rid of +x permissions on the data files
 # in /usr/share.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=oblige
 VERSION=${VERSION:-7.70}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -50,7 +58,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -74,6 +86,19 @@ set -e
 SRCVER=${VERSION//./}
 SRCNAM="Oblige" # grrrr!
 
+if [ ! -e $CWD/swap.$VERSION.diff.gz ]; then
+  supported="$( echo $( /bin/ls $CWD/*.diff.gz | sed 's,.*/,,' | cut -d. -f2,3 ) )"
+  cat <<EOF
+
+*** Unsupported version of oblige: $VERSION.
+*** Supported versions are: $supported.
+*** The build will probably fail. Press ^C to abort, or wait
+*** 10 seconds to continue.
+
+EOF
+  sleep 10
+fi
+
 rm -rf $PKG
 mkdir -p $TMP $PKG/usr/bin $PKG/usr/share/$PRGNAM $OUTPUT
 cd $TMP
@@ -89,32 +114,47 @@ fi
 
 cd ${SRCNAM}-${VERSION}-source
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# N.B. these diffs *must* be gzipped, they contain a mix of \n and
+# \r\n line endings, git would strip the \r's.
+zcat $CWD/swap.$VERSION.diff.gz | patch -p1
 
 # 'make install' would install the .desktop and icon to /usr, not PREFIX.
 sed -i '/xdg-/d' Makefile
 
 # if there's no prefabs/ dir, don't try to install it. doing it this
-# way allows this script to still build oblige 7.666, if needed.
+# way would allow this script to still build oblige 7.666, if needed.
 if [ ! -d prefabs ]; then
   sed -i '/\/prefabs/d' Makefile
 fi
 
 make PREFIX=/usr OPTIMISE="$SLKCFLAGS"
 make install PREFIX=$PKG/usr
+mv $PKG/usr/bin $PKG/usr/games
 
 # man page written for this build (based on --help output)
 mkdir -p $PKG/usr/man/man6
 gzip -9c < $CWD/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
 
 # Starting with 6.20, upstream includes a .desktop and icon.
+# The icon's fugly though, see below.
 mkdir -p $PKG/usr/share/pixmaps $PKG/usr/share/applications
-cat misc/icon_128x128.png > $PKG/usr/share/pixmaps/$PRGNAM.png
-cat misc/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+sed "s,Exec=,Exec=/usr/games/," \
+  < misc/$PRGNAM.desktop \
+  > $PKG/usr/share/applications/$PRGNAM.desktop
+
+# icons made from upstream's icon, by turning the background transparent.
+for i in $CWD/icons/*.png; do
+  px=$( basename $i | cut -d. -f1 )
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  cat $i > $dir/$PRGNAM.png
+done
+
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 rm -f INSTALL.txt # don't need compile instruction in bin package
@@ -132,4 +172,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

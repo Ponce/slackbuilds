@@ -1,10 +1,20 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for pcc (Portable C Compiler)
 
-# Originally written by Armin Besirovic <armin[at]linux[dot]org[dot]ba>
-
+# Originally written by Armin Besirovic <email removed>
 # Modified by B. Watson <yalhcru@gmail.com>
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20210906 bkw:
+# - updated for 1.2.0.DEVEL+20210905. Putting the .DEVEL in VERSION
+#   is a bit unsightly, but it matches the output of "pcc --version"
+#   and also Debian's version numbering scheme.
+# - compiling with gcc no longer works, use clang or pcc. actually,
+#   compiling with gcc gives us a pcc that seems to compile stuff OK,
+#   but anything compiled with that pcc will segfault on startup.
+# - add WTPL (since there was no license at all).
 
 # 20141031 bkw:
 # - took over maintentance.
@@ -25,10 +35,21 @@
 # - upgraded for pcc-1.1.0 release, no more beta
 # - add seddery to fix typo in cc.c (ifdef => ifndef)
 
+# Note to self: when updating to a new CVS snapshot, first download
+# the latest: http://pcc.ludd.ltu.se/ftp/pub/pcc/pcc-current.tgz Then
+# look at the file DATESTAMP inside that tarball, and use that date's
+# snapshot. This is because the CVS snap tarballs are generated
+# nightly, whether or not there actually were any code changes,
+# and we want VERSION to be the date of the last actual code change.
+# For pcc-libs, just use the same snapshot date as pcc.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=pcc
-VERSION=${VERSION:-1.1.0}
+VERSION=${VERSION:-1.2.0.DEVEL+20210905}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -38,10 +59,16 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
+
+TARVER=${VERSION/*+}
 
 # non-standard stanza here: we're not going to use -march= or -mtune=
 # on 32-bit Slackware, because doing so prevents pcc from being used
@@ -61,13 +88,21 @@ if [ "$CC" = "" ]; then
   # user didn't specify, autodetect.
   if pcc --version &>/dev/null; then
     CC=pcc
-  elif gcc --version &>/dev/null; then
-    CC=gcc
   elif clang --version &>/dev/null; then
     CC=clang
+    SLKCFLAGS+=" -fcommon"
   else
-    echo "Can't find any of pcc, gcc, or clang in \$PATH. Giving up." 1>&2
+    echo "Can't find pcc or clang in \$PATH. Giving up." 1>&2
   fi
+fi
+
+# let the user shoot himself in the foot if he insists, but at least
+# warn him how much it's going to hurt.
+if [ "$CC" = "gcc" ]; then
+  echo
+  echo "!!! CC is gcc, this will produce a non-working pcc. You asked for it..."
+  echo
+  sleep 3
 fi
 
 export CC
@@ -83,23 +118,16 @@ fi
 rm -rf $PKG $TMP/$PRGNAM
 mkdir -p $TMP/$PRGNAM $PKG $OUTPUT
 cd $TMP/$PRGNAM
-tar xvf $CWD/$PRGNAM-$VERSION.tgz
-tar xvf $CWD/$PRGNAM-libs-$VERSION.tgz
+tar xvf $CWD/$PRGNAM-$TARVER.tgz
+tar xvf $CWD/$PRGNAM-libs-$TARVER.tgz
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 # first, the compiler itself:
-cd $PRGNAM-$VERSION
-
-# fix typo, ref http://marc.info/?l=pcc-list&m=141824411830017&w=2
-sed -i '0,/^#ifdef MULTI/!s,^#ifdef \(MULTI\),#ifndef \1,' cc/cc/cc.c
+cd $PRGNAM-$TARVER
 
 CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   $TLSOPT \
   --prefix=/usr \
@@ -126,7 +154,7 @@ sed -n '/Copyright/,/^ *$/s,^...,,p' cc/cc/cc.c \
 
 # now, build the libs. we don't attempt to build them with the just-built
 # pcc (maybe possible, but not worth the effort).
-cd $TMP/$PRGNAM/$PRGNAM-libs-$VERSION
+cd $TMP/$PRGNAM/$PRGNAM-libs-$TARVER
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -148,4 +176,4 @@ sed -e "s,@WITHCC@,$WITHCC," \
 	$CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

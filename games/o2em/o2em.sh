@@ -12,7 +12,7 @@
 # source, but we want to avoid massive amounts of patching.
 
 EXE=/usr/libexec/o2em.bin
-SHAREDIR=/usr/share/o2em
+SHAREDIR=/usr/share/games/o2em
 DIR=~/.o2em
 
 if [ ! -d $DIR ]; then

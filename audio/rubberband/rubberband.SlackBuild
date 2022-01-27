@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for rubberband
 
@@ -8,6 +8,7 @@
 # Modified version licensed under the WTFPL. See
 # http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211125 bkw: update for v2.0.0
 # 20201103 bkw: update for v1.9.0
 # 20180702 bkw:
 # - update for v1.8.2
@@ -21,10 +22,13 @@
 # - fix libdir in .pc files also
 # - add man page
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=rubberband
-VERSION=${VERSION:-1.9.0}
+VERSION=${VERSION:-2.0.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -34,7 +38,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -65,40 +73,73 @@ chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# Fixup libdir on x86_64
-sed -i "s,\<lib\>,lib$LIBDIRSUFFIX,g" Makefile.in *.pc.in
+JAVA="${JAVA:-no}"
 
-# For 1.8.2, the Makefile tries to install the JNI stuff even if
-# we don't build it.
-sed -i '/cp *-f .*JNI_TARGET/s,$, || true,' Makefile.in
+if [ "$JAVA" = "yes" ]; then
+  if [ -z "$JAVA_HOME" ]; then
+    # if JAVA_HOME isn't set, try to set it by sourcing the profile script
+    for i in /etc/profile.d/*jdk*.sh; do
+      if [ -x $i ]; then
+        source $i
+        break
+      fi
+    done
+  fi
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --build=$ARCH-slackware-linux
+  if [ -z "$JAVA_HOME" ]; then
+    cat <<EOF
+!!! Java support requested, but JAVA_HOME is unset and I can't find
+!!! a /etc/profile.d script that sets it. Are you sure you have a JDK
+!!! package installed?
+EOF
+    exit 1
+  fi
 
-make
+  echo "=== JAVA_HOME='$JAVA_HOME'"
+  if [ -z "$JAVA_HOME" -o ! -e $JAVA_HOME/include/jni.h ]; then
+     cat <<EOF
+!!! Java support requested, but JAVA_HOME doesn't have the jni.h header.
+EOF
+    exit 1
+  fi
 
-# 20180703 bkw: build java JNI stuff if we have javac in $PATH and
-# the user says JAVA=yes. Disabled by default because we have too many
-# choices for java compilers, and I can't be bothered to test them all
-# (jdk, openjdk 6 through 8, zulu-openjdk 6 thru 8). Plain "make"
-# doesn't build this...
-WITHJAVA=without
-if [ "${JAVA:-no}" = "yes" ] && which javac &>/dev/null; then
-  make lib$LIBDIRSUFFIX/librubberband-jni.so
-  WITHJAVA=with
+  EXTRA="-Dextra_include_dirs=$JAVA_HOME/include,$JAVA_HOME/include/linux"
+  echo "=== EXTRA='$EXTRA'"
 fi
 
-make install DESTDIR=$PKG
+mkdir build
+cd build
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  meson .. \
+    --buildtype=release \
+    --infodir=/usr/info \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    $EXTRA \
+    -Dstrip=true
+  "${NINJA:=ninja}"
+  DESTDIR=$PKG $NINJA install
+cd ..
 
-# We don't need the static lib
-rm -f $PKG/usr/lib$LIBDIRSUFFIX/*.a
+# I don't see a way to disable the static lib at build time, so:
+rm -f $PKG/usr/lib*/lib$PRGNAM.a
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+JNILIB=$PKG/usr/lib$LIBDIRSUFFIX/lib$PRGNAM-jni.so
+
+if [ "$JAVA" = "yes" -a ! -e $JNILIB ]; then
+  cat <<EOF
+!!! Java support requested, but failed to build. Check the above output
+!!! from Meson and Ninja, and adjust JAVA_HOME if needed.
+EOF
+  exit 1
+fi
+
+WITHJAVA=WITHOUT
+[ -e $JNILIB ] && WITHJAVA=WITH
 
 # man page borrowed from Debian
 mkdir -p $PKG/usr/man/man1
@@ -112,4 +153,4 @@ mkdir -p $PKG/install
 sed "s,@WITHJAVA@,$WITHJAVA," $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

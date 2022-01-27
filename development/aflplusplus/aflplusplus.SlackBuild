@@ -1,0 +1,123 @@
+#!/bin/bash
+
+# Slackware build script for aflplusplus
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=aflplusplus
+SRCNAM=AFLplusplus
+VERSION=${VERSION:-3.14c}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+DOCDIR=/usr/doc/$PRGNAM-$VERSION
+PKGDOC=$PKG/$DOCDIR
+
+# Make it use the qemu source provided by us, instead of doing a git
+# clone (which didn't work properly anyway). Also this removes the
+# hexagon arch in qemu, because its meson.build breaks the build (even
+# though we're not even building hexagon support).
+patch -p1 < $CWD/build_qemu_support.diff
+
+# qemu mode is optional, only build if the source exists.
+QEMUVER="$( cat qemu_mode/QEMUAFL_VERSION )"
+QEMUSRC="$CWD/qemuafl-$QEMUVER.tar.xz"
+if [ -e "$QEMUSRC" ]; then
+  echo "=== QEMU source found, building qemu_mode"
+  ( cd qemu_mode
+    rm -rf qemuafl
+    tar xvf "$QEMUSRC" )
+    WITHQEMU=WITH
+else
+  echo "=== QEMU source NOT found, not building qemu_mode"
+  sed -i \
+    -e '/-cd qemu_mode/d' \
+    GNUmakefile
+    WITHQEMU=WITHOUT
+fi
+
+# Apply our flags, disable frida and unicorn modes because they
+# don't build.
+sed -i \
+  -e "s/= *-O3 *-funroll-loops/= $SLKCFLAGS/" \
+  -e '/MAKE.*-C *frida_mode *$/d' \
+  -e '/-cd unicorn_mode/d' \
+  GNUmakefile
+
+make \
+  DESTDIR=$PKG \
+  PREFIX=/usr \
+  HELPER_PATH=/usr/lib$LIBDIRSUFFIX/$PRGNAM \
+  DOC_PATH=$DOCDIR \
+  MAN_PATH=/usr/man/man8 \
+  distrib \
+  install
+
+# 20211216 bkw: faster than the usual find|strip stuff. Maybe this
+# should be the new template.
+find $PKG/usr/bin $PKG/usr/lib* -type f -print0 | \
+  xargs -0 file -m /etc/file/magic/elf | \
+  grep -e "executable" -e "shared object" | \
+  grep ELF | \
+  cut -d: -f1 | \
+  xargs strip --strip-unneeded 2> /dev/null || true
+
+gzip $PKG/usr/man/man8/*.8
+
+rm -f $PKGDOC/INSTALL*              # useless.
+cat README.md > $PKGDOC/README.md   # upstream forgot this.
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+sed "s,@WITHQEMU@,$WITHQEMU," $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

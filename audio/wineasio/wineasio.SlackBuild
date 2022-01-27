@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for wineasio
 
@@ -6,10 +6,18 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
+# 20220101 bkw:
+# - update to v1.0.0, switch to falkTX's fork (which is actually maintained).
+# - 64-bit support.
+# - asio.h no longer needed, update README.
+
 PRGNAM=wineasio
-VERSION=${VERSION:-0.9.2}
+VERSION=${VERSION:-1.0.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -19,61 +27,66 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  # WARNING: presence of this block of code does not imply the
-  # existence of x86_64 support. Caveat scriptor.
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
-fi
+SLKCFLAGS32="-O2 -march=i586 -mtune=i686"
+SLKCFLAGS64="-O2 -fPIC"
 
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM
+rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM
+cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-if [ -e "$CWD/asio.h" ]; then
-  cp "$CWD/asio.h" .
-else
-  echo "To build this package, get asio.h from the Steinberg ASIO SDK" 1>&2
-  exit 1
+# 20220102 bkw: support multilib, if possible. we will try both
+# 32 and 64 bit builds, and it's only a fatal error if both fail.
+# This is UNTESTED but should work. I think.
+
+trymake() {
+  local BITS="$1"
+  local WINELIB="$2"
+  local FLAGS="$3"
+
+  if make $BITS CFLAGS="$FLAGS" CXXFLAGS="$FLAGS"; then
+    mkdir -p $WINELIB
+    install -m0755 -s build$BITS/wineasio.dll.so $WINELIB
+  fi
+}
+
+trymake 32 $PKG/usr/lib/wine "$SLKCFLAGS32"
+
+if [ "$ARCH" = "x86_64" ]; then
+  make clean
+  trymake 64 $PKG/usr/lib64/wine "$SLKCFLAGS64"
 fi
 
-make CFLAGS="$SLKCFLAGS" CXXFLAGS="$SLKCFLAGS"
-mkdir -p $PKG/usr/lib/wine
-cp wineasio.dll.so $PKG/usr/lib/wine
+count="$( find $PKG/usr -name '*.dll.so' | wc -l )"
+case "$count" in
+  1) MULTILIB="" ;;
+  2) MULTILIB=" This package supports both 32-bit and 64-bit WINE." ;;
+  *) echo "*** Failed to build either 32-bit or 64-bit $PRGNAM."
+     exit 1 ;;
+esac
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  COPYING.LIB README \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a COPYING.* *.md $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "15s,\$,$MULTILIB," $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

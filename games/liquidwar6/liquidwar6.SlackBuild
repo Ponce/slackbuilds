@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for liquidwar6
 
@@ -6,13 +6,25 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211031 bkw: BUILD=3
+# - fix build on -current again.
+# - use upstream's icon and .desktop.
+# - install/remove info file in doinst/douninst.
+# - new-style icons.
+# - always include the extra game maps. they don't take up much space,
+#   and it's one less hoop to make people jump through.
+
 # 20170621 bkw: fix build on -current
+
+cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=liquidwar6
 VERSION=${VERSION:-0.6.3902}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
+MAPVER=${MAPVER:-0.0.13beta}
 SHORTNAM=${PRGNAM/[0-9]*/}
 
 if [ -z "$ARCH" ]; then
@@ -23,7 +35,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -50,21 +66,28 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-extra-maps-$MAPVER.tar.gz
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 # -current needs this:
 sed -i 's,-Werror,,' configure
+
+# 20211031 bkw: it looks like we ought to be able to force the
+# guile-config binary by setting GUILE_CONFIG in the env, but later
+# on the configure script uses the hard-coded name "guile-config" (the
+# one we want is "guile-config1.8"). So:
+mkdir -p fakebin
+ln -s /usr/bin/guile-config1.8 fakebin/guile-config
+export PATH=$(pwd)/fakebin:$PATH
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
   --bindir=/usr/games \
+  --datadir=/usr/share/games \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
@@ -77,17 +100,31 @@ CXXFLAGS="$SLKCFLAGS" \
 make
 make install-strip DESTDIR=$PKG
 
+DIRVER="$( echo $VERSION | cut -d. -f1,2 )"
+EXTRADIR=$PKG/usr/share/games/$PRGNAM-$DIRVER/map/extra
+mkdir -p $EXTRADIR
+cp -r $PRGNAM-extra-maps-$MAPVER/map/* $EXTRADIR
+
+# the .desktop and icon should be installed in --datarootdir, not
+# --datadir. Sigh.
+mv $PKG/usr/share/games/applications $PKG/usr/share/applications
+sed -i 's,Exec=,&/usr/games/,' $PKG/usr/share/applications/$PRGNAM.desktop
+mv $PKG/usr/share/games/pixmaps $PKG/usr/share/pixmaps
+rm -f $PKG/usr/share/pixmaps/$PRGNAM.png
+# pixmaps still contains upstream's 48x48 xpm icon.
+
+for px in 16 32 48 64 128; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  convert -resize $size data/icon/$PRGNAM.png $dir/$PRGNAM.png
+done
+
 gzip $PKG/usr/man/man6/$PRGNAM.6
 ( cd $PKG/usr/man/man6 ; ln -s $PRGNAM.6.gz $SHORTNAM.6.gz )
 ( cd $PKG/usr/games ; ln -s $PRGNAM $SHORTNAM )
 
-# PNG icon converted from data/net/htdocs/favicon.ico
-mkdir -p $PKG/usr/share/pixmaps
-cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
-
-mkdir -p $PKG/usr/share/applications
-cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
-
+# see doinst.sh and douninst.sh, for how to install/remove info files.
 rm -f $PKG/usr/info/dir
 gzip -9 $PKG/usr/info/*
 
@@ -100,21 +137,9 @@ cp -a README NEWS ChangeLog COPYING AUTHORS $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@MAPVER@,$MAPVER," $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh  > $PKG/install/doinst.sh
-
-# If the extra-maps source is found, install it
-# (do this last so we can edit the slack-desc in place)
-if [ -r $CWD/$PRGNAM-extra-maps-$VERSION.tar.gz ]; then
-  ( cd $TMP
-    tar xvf $CWD/$PRGNAM-extra-maps-$VERSION.tar.gz
-    mkdir -p $PKG/usr/share/$PRGNAM-$VERSION/map/extra
-    cp -r $PRGNAM-extra-maps-$VERSION/map/* \
-       $PKG/usr/share/$PRGNAM-$VERSION/map/extra
-  )
-  sed -i -e '18s/:/: This package includes the extra game maps./' \
-    $PKG/install/slack-desc
-fi
+cat $CWD/douninst.sh  > $PKG/install/douninst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

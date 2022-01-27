@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for openjazz
 
@@ -6,10 +6,20 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211026 bkw:
+# - update for v20190106. Can't build old versions.
+# - binary in /usr/games, share dir /usr/share/games/openjazz.
+# - update man page.
+# - install shareware docs as *.txt, convert to utf-8.
+# - recreate paths.diff for this version.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=openjazz
-VERSION=${VERSION:-160214}
+VERSION=${VERSION:-20190106}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -19,7 +29,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -40,26 +54,19 @@ fi
 
 set -e
 
-SRCNAM=OpenJazz
-ZIPFILE=$SRCNAM-src-$VERSION.zip
-
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-mkdir -p $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
 cd $PRGNAM-$VERSION
-unzip $CWD/$ZIPFILE
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 # Patch does 4 things:
 
-# - Always look for openjazz.000 in /usr/share/openjazz. Saves the user
+# - Always look for openjazz.000 in /usr/share/games/openjazz. Saves the user
 #   from having to keep copies or symlinks of it in every game dir.
 
 # - Writes config file to user's homedir, not current dir.
@@ -86,6 +93,7 @@ CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
+  --bindir=/usr/games/ \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --localstatedir=/var \
@@ -96,32 +104,50 @@ CXXFLAGS="$SLKCFLAGS" \
 make
 make install-strip DESTDIR=$PKG
 
-# icon came from windows jazz jackrabbit CD, converted with icotool
+# grr.
+mv $PKG/usr/games/OpenJazz $PKG/usr/games/$PRGNAM
+mkdir -p $PKG/usr/share/games
+mv $PKG/usr/share/$PRGNAM $PKG/usr/share/games/$PRGNAM
+
+# 20211026 bkw: upstream's .desktop is useless.
+rm -f $PKG/usr/share/applications/*.desktop
+
 mkdir -p $PKG/usr/share/pixmaps
-cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+ln -s ../icons/hicolor/48x48/apps/OpenJazz.png $PKG/usr/share/pixmaps/OpenJazz.png
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/shareware \
-  $PKG/usr/share/$PRGNAM/shareware
+  $PKG/usr/share/games/$PRGNAM/shareware
 
-cd $PKG/usr/share/$PRGNAM/shareware
+# shareware data. the *.DOC files are renamed to .txt to avoid dumb
+# desktop environments thinking they're ms-word docs. ORDER_DE and
+# ORDER_UK are non-ASCII, convert to Unicode and UTF-8.
+cd $PKG/usr/share/games/$PRGNAM/shareware
 unzip $CWD/jjrabbit.zip
   for i in *.DOC; do
-    sed 's,\r,,g' $i > $PKG/usr/doc/$PRGNAM-$VERSION/shareware/$i
+    j=$( basename $i .DOC )
+    dest=$PKG/usr/doc/$PRGNAM-$VERSION/shareware/$j.txt
+    sed 's,\r,,g' $i | iconv -f cp437 -t utf-8 > $dest
   done
   rm -f *.EXE *.DIZ *.DOC *.PIF
 cd -
 
-# wrapper script
+# shareware wrapper script
 mkdir -p $PKG/usr/games
 cat <<EOF >$PKG/usr/games/$PRGNAM-shareware
 #!/bin/sh
-exec $PRGNAM /usr/share/$PRGNAM/shareware "\$@"
+exec $PRGNAM /usr/share/games/$PRGNAM/shareware "\$@"
 EOF
 chmod 755 $PKG/usr/games/$PRGNAM-shareware
+
+# shareware icon came from windows jazz jackrabbit CD, converted with icotool
+cat $CWD/$PRGNAM.png > $PKG/usr/share/icons/hicolor/48x48/apps/$PRGNAM-shareware.png
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM-shareware.png \
+      $PKG/usr/share/pixmaps/$PRGNAM-shareware.png
 
 # man page written for this slackbuild
 mkdir -p $PKG/usr/man/man6
 gzip -9c < $CWD/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
+ln -s $PRGNAM.6.gz $PKG/usr/man/man6/$PRGNAM-shareware.6.gz
 
 mkdir -p $PKG/usr/share/applications
 cat $CWD/$PRGNAM-shareware.desktop \
@@ -130,6 +156,7 @@ cat $CWD/$PRGNAM-shareware.desktop \
 for i in *.txt; do
   sed 's,\r,,g' $i > $PKG/usr/doc/$PRGNAM-$VERSION/$i
 done
+cp -a README* $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
@@ -137,4 +164,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

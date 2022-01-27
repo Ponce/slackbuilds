@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for solarwolf
 
@@ -6,10 +6,30 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211228 bkw: BUILD=2.
+# SDL2_mixer on -current utterly lacks support for tracker music
+# (.mod, .it, .xm, etc). This game's music is in .xm format... so
+# unless/until Pat adds support in SDL2_mixer, this script works
+# around it by using timidity to convert the .xm music to .ogg, which
+# SDL2_mixer can handle.
+# Add TiMidity++ as a dep, to make this work. It's really only
+# build-time, not runtime.
+# Also, new-style icon.
+
+# TODO: when running in windowed mode, clicking the window's close
+# button does close the window, but leaves the game process running.
+# using the Quit option from the main menu works correctly.
+
+# TODO: scaling in fullscreen mode. our pygame is built with SDL2,
+# this should be possible.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=solarwolf
 VERSION=${VERSION:-1.5}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -19,7 +39,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -56,9 +80,23 @@ find . -name .xvpics -print0 | xargs -0 rm -rf
 mkdir -p \
   $PKG/usr/games \
   $PKG/usr/share/games/$PRGNAM \
+  $PKG/usr/share/icons/hicolor/64x64/apps \
   $PKG/usr/share/pixmaps \
   $PKG/usr/share/applications \
   $PKG/usr/man/man6
+
+# 20211228 bkw: convert the music to .ogg. Use separate oggenc instead
+# of timidity's -Ov, so we can set the bitrate to 64k (to match the
+# one .ogg file shipped with the source). This bloats the package by
+# 30%, but it still comes out to less than 4MB total, so no problem.
+for i in data/music/*.xm; do
+  out="data/music/$( basename $i .xm ).ogg"
+  timidity -Ow1sl -id -o- $i | oggenc -Q -b 64 -o $out -
+  rm -f $i
+done
+
+# 20211228 bkw: make the game play the converted .ogg music.
+sed -i 's,\.xm,.ogg,g' code/game*.py
 
 # the code is all python, keep in /usr/share along with the game data.
 sed -i "s,usr/lib/games/$PRGNAM,usr/share/games/$PRGNAM/code," $PRGNAM.py
@@ -69,7 +107,9 @@ install -oroot -groot -m0755 $PRGNAM.py $PKG/usr/games/$PRGNAM
 # original .desktop file don't validate, use our own
 cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
 
-cat dist/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+cat dist/$PRGNAM.png > $PKG/usr/share/icons/hicolor/64x64/apps/$PRGNAM.png
+ln -s ../icons/hicolor/64x64/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
 cat dist/$PRGNAM.6.gz > $PKG/usr/man/man6/$PRGNAM.6.gz
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
@@ -81,4 +121,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

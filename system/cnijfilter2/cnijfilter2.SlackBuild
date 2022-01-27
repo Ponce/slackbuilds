@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for cnijfilter2
 
@@ -22,46 +22,48 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=cnijfilter2
-VERSION=${VERSION:-5.90.1}
+VERSION=${VERSION:-6.20.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 SRCNAM=$PRGNAM-source
-SRCVERSION=5.90-1
+SRCVERSION=6.20-1
 
+MARCH=$( uname -m )
 if [ -z "$ARCH" ]; then
-  case "$( uname -m )" in
-    i?86) ARCH=i586 ;;
-    arm*) ARCH=arm ;;
-       *) ARCH=$( uname -m ) ;;
+  case "$MARCH" in
+    i?86) export ARCH=i586 
+          export SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+          export LIBDIRSUFFIX=""
+          BITS="i686";;
+    x86_64) export ARCH=x86_64
+            export SLKCFLAGS="-O2 -fPIC"
+            export LIBDIRSUFFIX="64"
+            BITS="x86_64" ;;
+    aarch64) export ARCH=aarch64
+             export SLKCFLAGS="-O2 -fPIC"
+             export LIBDIRSUFFIX="64"
+             BITS="aarch64" ;;
+    *) echo "Package for $MARCH architecture is not available."
+       exit 1 ;;
   esac
 fi
 
-CWD=$(pwd)
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
-
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-  LDFLAGS="-L$TMP/${SRCNAM}-${SRCVERSION}/com/libs_bin32"
-  BITS="i386"
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-  LDFLAGS="-L$TMP/${SRCNAM}-${SRCVERSION}/com/libs_bin32"
-  BITS="i386"
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-  LDFLAGS="-L$TMP/${SRCNAM}-${SRCVERSION}/com/libs_bin64"
-  BITS="amd64"
-else
-  echo "Package for $(uname -m) architecture is not available."
-  exit 1
-fi
 
 set -e
 
@@ -82,39 +84,65 @@ find -L . \
  \( -type f \! -name autogen.sh \) \
   -exec chmod 644 {} \;
 
+patch -p1 < $CWD/gcc10.patch
+
+for dir in cmdtocanonij2 cmdtocanonij3 ; do
+  pushd $dir
+  ./autogen.sh --prefix=/usr --datadir=/usr/share LDFLAGS="-L../../com/libs_bin_${BITS}"
+  make
+  popd
+done
+
+pushd cnijbe2
+  ./autogen.sh --prefix=/usr --enable-progpath=/usr/bin
+  make
+popd
+
+pushd lgmon3
+  ./autogen.sh --prefix=/usr --enable-libpath=/usr/lib${LIBDIRSUFFIX}/bjlib2 --enable-progpath=/usr/bin \
+    --datadir=/usr/share LDFLAGS="-L../../com/libs_bin_${BITS}"
+  make
+popd
+
+pushd rastertocanonij
+  ./autogen.sh --prefix=/usr --enable-progpath=/usr/bin
+  make
+popd
+
+for dir in tocanonij tocnpwg ; do
+  pushd $dir
+  ./autogen.sh --prefix=/usr
+  make
+  popd
+done
+
 common_pkg="cmdtocanonij2 cmdtocanonij3 cnijbe2 lgmon3 rastertocanonij tocanonij tocnpwg"
 for dir in $common_pkg; do
-  cd $dir
-    ./autogen.sh --prefix=/usr LDFLAGS="$LDFLAGS"
-    make
-    make install-strip DESTDIR=$PKG
-  cd ..
+  pushd $dir
+    make install DESTDIR=$PKG
+  popd
 done
-cd lgmon3
-  ./autogen.sh --prefix=/usr --enable-libpath=/usr/lib/bjlib2 LDFLAGS="$LDFLAGS"
-  make
-  make install-strip DESTDIR=$PKG
-cd ..
 
 if [ "$ARCH" = "x86_64" ]; then
   mv $PKG/usr/lib $PKG/usr/lib64
-  mkdir $PKG/usr/lib64/bjlib2
-  install -c -m 644 com/ini/cnnet.ini $PKG/usr/lib64/bjlib2/
-  install -c -m 755 com/libs_bin64/libcnnet2.so.* $PKG/usr/lib64/
-  install -c -m 755 com/libs_bin64/libcnbpnet20.so.* $PKG/usr/lib64/
-  install -c -m 755 com/libs_bin64/libcnbpnet30.so.* $PKG/usr/lib64/
-  install -c -m 755 com/libs_bin64/libcnbpcnclapicom2.so.* $PKG/usr/lib64/
-elif [ "$ARCH" = "i686" ]; then
-  mkdir $PKG/usr/lib/bjlib2
-  install -c -m 644 com/ini/cnnet.ini $PKG/usr/lib/bjlib2/
-  install -c -m 755 com/libs_bin32/libcnnet2.so.* $PKG/usr/lib/
-  install -c -m 755 com/libs_bin32/libcnbpnet20.so.* $PKG/usr/lib/
-  install -c -m 755 com/libs_bin32/libcnbpnet30.so.* $PKG/usr/lib/
-  install -c -m 755 com/libs_bin32/libcnbpcnclapicom2.so.* $PKG/usr/lib/
+fi
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/bjlib2
+install -c -o lp -g lp -m 644 com/ini/cnnet.ini $PKG/usr/lib${LIBDIRSUFFIX}/bjlib2/
+install -c -m 755 com/libs_bin_${BITS}/*.so.* $PKG/usr/lib${LIBDIRSUFFIX}/
+
+# Run ldconfig in the build script so that /usr/lib{64}/libcn*.so
+# are tracked by doinst.sh
+if [ -x /sbin/ldconfig ]; then
+  /sbin/ldconfig $PKG/usr/lib${LIBDIRSUFFIX}
 fi
 
-mkdir -p $PKG/usr/share/ppd/cnijfilter2
+mkdir -p $PKG/usr/share/ppd/cnijfilter2 $PKG/usr/share/cups/model
 cp -a ppd/*.ppd $PKG/usr/share/ppd/cnijfilter2
+
+PPD_FILES=$( cd $PKG/usr/share/ppd/cnijfilter2 ; ls *.ppd )
+for f in $PPD_FILES; do
+  ln -fs /usr/share/ppd/cnijfilter2/${f} $PKG/usr/share/cups/model/${f}
+done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/lproptions
 cp -a doc/* $PKG/usr/doc/$PRGNAM-$VERSION
@@ -123,11 +151,11 @@ cat ppd/NEWS > $PKG/usr/doc/$PRGNAM-$VERSION/NEWS
 # Copy all README to /usr/doc
 for dir in $common_pkg; do
   mkdir $PKG/usr/doc/$PRGNAM-$VERSION/$dir
-  cd $dir
-    for file in AUTHORS COPYING ChangeLog INSTALL LICENSE NEWS README; do
+  pushd $dir
+    for file in AUTHORS COPYING ChangeLog INSTALL LICENSE* NEWS README; do
       [ -f $file ] && cp -a $file $PKG/usr/doc/$PRGNAM-$VERSION/$dir
     done
-  cd ..
+  popd
 done
 cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.SBo
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
@@ -136,4 +164,4 @@ mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

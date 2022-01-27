@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for fbpdf
 
@@ -6,15 +6,25 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-# Source tarball made from: git clone git://repo.or.cz/fbpdf.git
-
+# 20210927 bkw:
+# - update to latest git (20200617_f590024).
+# - rework navigation.diff for this version.
+# - use upstream's man page, now that there is one (but, patch it).
+# - mupdf-legacy no longer needed, change optional dep to mupdf.
+# - add MUPDF=no option.
+# - update README and slack-desc.
+# - add git2tarxz.sh, for future updates. upstream doesn't do releases.
+# - actually use SLKCFLAGS.
 # 20200218 bkw: mupdf got updated to an incompatible version, use mupdf-legacy.
 # 20170313 bkw: update for 20161202 (commit e31a61b), need due to mupdf update.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=fbpdf
-VERSION=${VERSION:-20161202}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-20200617_f590024}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -24,7 +34,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -49,18 +63,23 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# This patch has been sent upstream. In my opinion, fbpdf is needlessly
-# difficult to use without it.
-# ...a year later, and upstream never responded to my email (not even to
-# say "no"). It's staying here though.
-[ "${PRISTINE:-no}" != "yes" ] && \
+# 20210929 bkw: actually use the flags.
+sed -i "s,-O2,$SLKCFLAGS," Makefile
+
+# The navigation patch has been sent upstream. In my opinion, fbpdf is
+# needlessly difficult to use without it. Upstream never responded to
+# my email (not even to say "no"). It's staying here though.
+# The manpage patch explains the difference between fbpdf, fbpdf2, fjdjvu.
+if [ "${PRISTINE:-no}" != "yes" ]; then
   patch -p1 < $CWD/navigation.diff
+  patch -p1 < $CWD/manpage.diff
+fi
 
 mkdir -p $PKG/usr/bin
 
@@ -69,16 +88,15 @@ make ${PRGNAM}2 fbdjvu
 install -s -m0755 ${PRGNAM}2 $PKG/usr/bin
 install -s -m0755 fbdjvu $PKG/usr/bin
 
-# autodetect mupdf-legacy, build fbpdf if found
-if [ -d /opt/mupdf-legacy ]; then
-  # Use old libs/headers. Works even if a newer mupdf is installed in /usr.
-  PKG_CONFIG_PATH=/opt/mupdf-legacy/lib$LIBDIRSUFFIX/pkgconfig:$PKG_CONFIG_PATH
-  export PKG_CONFIG_PATH
+WITH="WITHOUT"
 
+# autodetect mupdf, build fbpdf if found
+if [ "${MUPDF:-yes}" = "yes" ] && pkg-config --exists mupdf; then
+  WITH="WITH"
   # mupdf API keeps changing
   sed -i \
     -e '/^CFLAGS/s,$, $(shell pkg-config --cflags mupdf),' \
-    -e 's,-lmupdf -lmupdfthird,$(shell pkg-config --libs mupdf) -lharfbuzz,' \
+    -e 's,-lmupdf -lmupdf-third.*,$(shell pkg-config --libs mupdf) -lharfbuzz,' \
     Makefile
 
   make clean
@@ -86,18 +104,19 @@ if [ -d /opt/mupdf-legacy ]; then
   install -s -m0755 $PRGNAM $PKG/usr/bin
 fi
 
-# man page written for this build.
-mkdir -p $PKG/usr/man/man1
-gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
-ln -s $PRGNAM.1.gz $PKG/usr/man/man1/${PRGNAM}2.1.gz
-ln -s $PRGNAM.1.gz $PKG/usr/man/man1/fbdjvu.1.gz
+PKGMAN1=$PKG/usr/man/man1
+mkdir -p $PKGMAN1
+gzip -9c < $PRGNAM.1 > $PKGMAN1/$PRGNAM.1.gz
+ln -s $PRGNAM.1.gz $PKGMAN1/${PRGNAM}2.1.gz
+ln -s $PRGNAM.1.gz $PKGMAN1/fbdjvu.1.gz
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a README $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a README $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@WITH@,$WITH," < $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

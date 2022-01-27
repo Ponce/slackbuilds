@@ -1,10 +1,28 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for eduke32
 
 # Written by B. Watson (yalhcru@gmail.com)
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Note to self: in 20211102_9751_8970754aa, ekenbuild won't compile.
+
+# TODO: man page(s). eduke32.6 is ancient.
+
+# 20211108 bkw:
+# - update for 20211102_9751_8970754aa.
+# - include voidsw (shadow warrior), wangulator (sw map editor), and
+#   fury (ion fury) executables.
+# - fix the tools compilation (again).
+# - get rid of wrapper script, upstream now supports looking for
+#   data in /usr/share/games/eduke32, and creates its own ~/.config/eduke32
+#   to save settings/etc in.
+# - stop the game from creating a log file in the current dir.
+# - rewrite README_game_data.txt, it's now complete for all the games
+#   except Ion Fury.
+# - fix the @!%!#$% mouse sensitivity in voidsw.
+# - get rid of SDL1 build.
 
 # 20170128 bkw:
 # - update for 20170123_6052
@@ -24,12 +42,19 @@
 #   core Slackware 14.2 package
 # - slack-desc shows SDL version and whether or not libvpx was used.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=eduke32
-VERSION=${VERSION:-20170123_6052}
+VERSION=${VERSION:-20211102_9751_8970754aa}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -44,91 +69,105 @@ fi
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
 fi
 
 set -e
 
-SRCVER=${VERSION/_/-}
+SRCVER="$( echo $VERSION | tr _ - )"
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf ${PRGNAM}_${SRCVER}
-tar xvf $CWD/${PRGNAM}_src_${SRCVER}.tar.xz
+tar xvf $CWD/${PRGNAM}_src_${SRCVER}.tar.xz --exclude=platform
 cd ${PRGNAM}_${SRCVER}
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# this was always undocumented, defaulted to "no" in Slack <= 14.1.
-# should be safe to default to "yes" now that 14.2 has libvpx.
-if [ "${VPX:-yes}" != "yes" ]; then
-  VPXFLAG="USE_LIBVPX=0"
-else
-  ANDVPX=" and libvpx"
-fi
+# Notes to self:
+# - adding LDFLAGS="-fuse-ld=gold" doesn't seem to affect the link times.
+# - SLKCFLAGS get applied, but also a bunch of other optimizations.
+runmake() {
+  echo "===> runmake args: '$@'"
+  make RELEASE=1 \
+       PRETTY_OUTPUT=0 \
+       CFLAGS="$SLKCFLAGS" \
+       CXXFLAGS="$SLKCFLAGS" \
+       "$@"
+}
+
+installbins() {
+  echo "===> installbins args: '$@'"
+  install -s -m0755 $@ $PKG/usr/games/
+}
+
+# 20211108 bkw: recent eduke32 no longer needs a wrapper script,
+# except that it wants to write a logfile to the current dir where
+# it was run. Since the log is just a copy of the game's stdout,
+# we don't actually need it, so:
+sed -i '/OSD_SetLogFile/d' \
+  source/duke3d/src/game.cpp \
+  source/duke3d/src/astub.cpp \
+  source/kenbuild/src/game.cpp \
+  source/kenbuild/src/bstub.cpp \
+  source/sw/src/game.cpp \
+  source/sw/src/jnstub.cpp
 
 # On some systems, the game spits out tons of warnings:
 # Error: glGetTexLevelParameteriv returned GL_FALSE!
 # These don't seem to actually hurt anything (the game looks
 # and plays fine), so let's get rid of them to clean up
 # the log output.
-sed -i '/"Error: glGetTexLevelParameteriv/d' build/src/texcache.c
+sed -i '/"Error: glGetTexLevelParameteriv/d' source/build/src/texcache.cpp
 
-# SDL2 might be preferred for some users. Specifically, those of us
-# who use a left-handed mouse (SDL1 gets the button mappings backwards).
-SDL2=${SDL2:-auto}
-SDL_TARGET=1
-if [ "$SDL2" = "auto" ]; then
-  sdl2-config --version >/dev/null && SDL_TARGET=2
-elif [ "$SDL2" = "yes" ]; then
-  SDL_TARGET=2
-else
-  SDL_TARGET=1
-fi
+# voidsw's in-game menus don't let you crank the mouse sensitivity up high
+# enough. the mouse barely does anything at the default setting, and it's
+# still too slow-moving to be usable at the max.
+sed -i 's,8192,660,g' source/sw/src/config.cpp source/sw/src/menus.cpp
+sed -i '/MouseAnalogScale/s,65536,131071,' source/sw/src/config.cpp
 
-# Mildly confusing: the Makefile uses ARCH for arch-specific cflags
-make \
-  ARCH="" \
-  OPTIMIZATIONS="$SLKCFLAGS" \
-  SDL_TARGET=$SDL_TARGET \
-  $VPXFLAG
+# Our twin dragon is a different repack from the ones voidsw knows
+# about. Also, upstream incorrectly says the Wanton Destruction
+# wd.grp requires sw.grp as a dependency. Actually, it's a
+# complete/standalone game, add-on or not, so this patch fixes that.
+patch -p1 < $CWD/twin_dragon.diff
 
-# Build the utilities, if requested.
-if [ "${BUILD_UTILS:-yes}" = "yes" ]; then
-  make utils sdlutils \
-    OPTIMIZATIONS="$SLKCFLAGS" \
-    ARCH="" \
-    $VPXFLAG \
-    SDL_TARGET=$SDL_TARGET \
+# Make eduke32 load autoload content from the system dir. voidsw
+# already does this.
+patch -p1 < $CWD/system_autoload.diff
 
-  for i in kextract kgroup transpal wad2art wad2map kmd2tool \
-           md2tool generateicon cacheinfo arttool givedepth \
-           mkpalette unpackssi map2stl ivfrate makesdlkeytrans
-  do
-    install -s -D -m0755 $i $PKG/usr/games/$i
-  done
-fi
+# eduke32 and mapster:
+runmake
 
-install -D -m0755 $PRGNAM $PKG/usr/libexec/$PRGNAM/$PRGNAM
-install -D -m0755 mapster32 $PKG/usr/libexec/$PRGNAM/mapster32
+# voidsw and wangulator:
+runmake sw
+
+mkdir -p $PKG/usr/games
+installbins $PRGNAM mapster32 voidsw wangulator
+
+# the tools:
+# patch does 2 things: fix linking (add mimalloc as a dep) and
+# get rid of the generateicon tool (which still fails to build).
+patch -p1 < $CWD/tools.diff
+runmake tools
+installbins arttool bsuite cacheinfo givedepth ivfrate kextract kgroup \
+            kmd2tool makesdlkeytrans map2stl md2tool mkpalette transpal \
+            unpackssi wad2art wad2map
+
+# fury (which would fail without the 'make clean' first):
+make clean
+runmake fury FURY=1
+installbins fury
 
 mkdir -p $PKG/usr/man/man6
 gzip -9c $CWD/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
-
-# Wrapper script to make things behave nicer
-install -D -m0755 $CWD/$PRGNAM.wrapper  $PKG/usr/games/$PRGNAM
-( cd $PKG/usr/games ; ln -s $PRGNAM mapster32 )
 
 # Mapster help files
 mkdir -p $PKG/usr/share/games/$PRGNAM
@@ -137,14 +176,26 @@ cp *.hlp *.HLP names.h tiles.cfg $PKG/usr/share/games/$PRGNAM
 cd -
 
 mkdir -p $PKG/usr/share/applications
-cp $CWD/mapster32.desktop $CWD/$PRGNAM.desktop $PKG/usr/share/applications
+for i in $CWD/desktop/*.desktop; do
+  cat $i > $PKG/usr/share/applications/$( basename $i )
+done
 
 mkdir -p $PKG/usr/share/pixmaps
-cp $CWD/$PRGNAM.png $PKG/usr/share/pixmaps
+for subdir in $CWD/icons/*; do
+  name=$( basename $subdir )
+  for i in $subdir/*.png; do
+    px=$( basename $i | cut -d. -f1 )
+    size=${px}x${px}
+    dir=$PKG/usr/share/icons/hicolor/$size/apps
+    mkdir -p $dir
+    cat $i > $dir/$name.png
+  done
+  ln -s ../icons/hicolor/48x48/apps/$name.png $PKG/usr/share/pixmaps/$name.png
+done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp build/doc/* $PKG/usr/doc/$PRGNAM-$VERSION
-cp build/buildlic.txt source/gpl-2.0.txt $CWD/README_game_data.txt \
+cp source/build/doc/* $PKG/usr/doc/$PRGNAM-$VERSION
+cp source/build/buildlic.txt source/duke3d/gpl-2.0.txt $CWD/README_game_data.txt \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cp -r package/sdk/samples $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
@@ -153,10 +204,8 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
   ln -s ../../../doc/$PRGNAM-$VERSION/README_game_data.txt . )
 
 mkdir -p $PKG/install
-sed -e "s,@SDL_TARGET@,$SDL_TARGET," \
-    -e "s,@ANDVPX@,$ANDVPX," \
-       $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

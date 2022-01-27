@@ -1,10 +1,16 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for cwiid
 
 # Written by B. Watson (yalhcru@gmail.com)
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20210910 bkw:
+# - Upgrade to 0.6.91_2 (Debian's 0.6.91-2).
+# - Actually apply SLKCFLAGS.
+# - Use icon, .desktop, lswm.1 from Debian tarball instead of
+#   including in SBo git.
 
 # 20170306 bkw:
 # - Add --disable-ldconfig
@@ -18,10 +24,16 @@
 # - Fixed permissions of config files and header
 # - Added ir_fps and nunchuk_kb plugins
 
+# https://deb.debian.org/debian/pool/main/c/cwiid/cwiid_0.6.91-2.debian.tar.xz
+# https://deb.debian.org/debian/pool/main/c/cwiid/cwiid_0.6.91.orig.tar.xz
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=cwiid
-VERSION=${VERSION:-0.6.00+svn201}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-0.6.91_2}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -31,7 +43,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -52,64 +68,73 @@ fi
 
 set -e
 
+TARVER=${VERSION/_*}
+DEBVER=${VERSION/*_}
+
+LIBDIR=/usr/lib$LIBDIRSUFFIX
+PKGLIB=$PKG/$LIBDIR
+
 rm -rf $PKG
 mkdir -p $TMP $PKG/usr $PKG/etc $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/${PRGNAM}_$VERSION.orig.tar.gz
-cd $PRGNAM-$VERSION
+rm -rf $PRGNAM
+tar xvf $CWD/${PRGNAM}_$TARVER.orig.tar.xz
+cd $PRGNAM
+tar xvf $CWD/${PRGNAM}_$TARVER-$DEBVER.debian.tar.xz
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# Underlinking fix (add -lbluetooth)
-patch -p1 < $CWD/bluetooth-linker.patch
+# this patch is debian-specific (calls dpkg):
+rm -f debian/patches/python-setup.py.patch
 
-# Add ir_fps and nunchuk_kb plugins (patch comes from Debian)
-patch -p1 < $CWD/"add_other_plugins_#487498.patch"
+for i in $( cat debian/patches/series ); do
+  [ -e $i ] && patch -p1 < debian/patches/$i
+done
+
+# re-enable this when needed
+#patch -p1 < $CWD/python310.patch
 
 autoreconf -if
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
 ./configure \
-  --disable-ldconfig \
   --prefix=/usr \
-  --libdir=/usr/lib$LIBDIRSUFFIX \
+  --libdir=$LIBDIR \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
   --mandir=/usr/man \
   --build=$ARCH-slackware-linux
 
-make
+# configure script ignores CFLAGS in the env. Can't use CFLAGS
+# nor DEBUGFLAGS with make... sneak them in this way.
+make WARNFLAGS="-Wall $SLKCFLAGS"
 make install DESTDIR=$PKG
 
-# Config and include files get installed +x, fix
-find $PKG/etc/cwiid/wminput/ -maxdepth 1 -a -type f | xargs chmod 644
-chmod 644 $PKG/usr/include/*.h
+# no install-strip...
+strip $PKG/usr/bin/* \
+      $PKGLIB/*.so.?.? \
+      $PKGLIB/$PRGNAM/plugins/*.so \
+      $PKGLIB/python*/site-packages/*.so
+
+# Header gets installed +x, fix
+chmod 644 $PKG/etc/cwiid/wminput/*
 
 # Remove static library, configure doesn't accept --disable-static
-rm -f $PKG/usr/lib$LIBDIRSUFFIX/libcwiid.a
+rm -f $PKGLIB/libcwiid.a
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+gzip -9 $PKG/usr/man/man1/*
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
+# Use Debian's extra man page, desktop file, icons.
+gzip -9c debian/lswm.1 > $PKG/usr/man/man1/lswm.1.gz
 
-# lswm man page borrowed from Debian
-gzip -9c $CWD/lswm.1 > $PKG/usr/man/man1/lswm.1.gz
-
-# icon borrowed from Debian
 mkdir -p $PKG/usr/share/pixmaps
-cat $CWD/wmgui.xpm > $PKG/usr/share/pixmaps/wmgui.xpm
+cp -a debian/icons/*.xpm $PKG/usr/share/pixmaps
 
-# .desktop borrowed from Debian and fixed so it validates
 mkdir -p $PKG/usr/share/applications
-cat $CWD/wmgui.desktop > $PKG/usr/share/applications/wmgui.desktop
+sed -e '/^Icon/s,=.*,=/usr/share/pixmaps/wmgui.xpm,' \
+    -e '/^Categories/s,$,;Settings;,' \
+    debian/menus/wmgui.desktop > $PKG/usr/share/applications/wmgui.desktop
 
 # init script written for this build
 mkdir -p $PKG/etc/rc.d/
@@ -125,4 +150,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

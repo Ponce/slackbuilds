@@ -1,10 +1,15 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for doomseeker
 
 # Written by B. Watson (yalhcru@gmail.com)
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20211102 bkw:
+# - updated for v1.3.2.
+# - new-style icons.
+# - /usr/share/doomseeker => /usr/share/games/doomseeker.
 
 # 20201030 bkw: updated for v1.3.1
 # 20200122 bkw: updated for v1.3+20200119_b623ab1. Latest git fixes
@@ -15,10 +20,13 @@
 # 20181218 bkw: updated for v1.2. Upstream has changed things around,
 # so this script won't build 1.1 any longer.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=doomseeker
-VERSION=${VERSION:-1.3.1}
+VERSION=${VERSION:-1.3.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 TARVER="$( echo "$VERSION" | cut -d+ -f1 )"
 
@@ -30,7 +38,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -63,12 +75,9 @@ chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# 20200122 bkw: sorry, rworkman, I know you hate gzipped diffs, but
-# this one has mixed \r\n and \n line endings, git would eat it.
-# 20201030 bkw: leaving the diff in the repo for a while, in case
-# 1.3.1 has issues and someone needs to build the previous version.
-# It'll be removed at next update.
-[ -e "$CWD/$VERSION.diff.gz" ] && zcat "$CWD/$VERSION.diff.gz" | patch -p1
+sed -i 's,Exec=,&/usr/games/,' media/*.desktop
+
+sed -i 's,share/doomseeker,share/games/doomseeker,' src/core/datapaths.cpp
 
 mkdir -p build
 cd build
@@ -84,34 +93,48 @@ cd build
   make install/strip DESTDIR=$PKG
 cd ..
 
+mkdir $PKG/usr/share/games
+mv $PKG/usr/share/$PRGNAM $PKG/usr/share/games
+
 # Shared lib gets installed to wrong place, easier to fix it here than patch.
 [ "$LIBDIRSUFFIX" != "" ] && \
   [ -e "$PKG/usr/lib" ] && \
   mv $PKG/usr/lib $PKG/usr/lib$LIBDIRSUFFIX
 
-# This is a game (or anyway a game utility, the binary
+# This is a game (or anyway a game utility), the binary
 # belongs in /usr/games. cmake accepts and totally ignores
 # "-DCMAKE_INSTALL_BINDIR=games" so just move the damn thing after
 # install.
 mv $PKG/usr/bin $PKG/usr/games
 
 # cmake is also ignoring -DCMAKE_INSTALL_DOCDIR.
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-mv $PKG/usr/share/doc/$PRGNAM/* $PKG/usr/doc/$PRGNAM-$VERSION
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+mv $PKG/usr/share/doc/$PRGNAM/* $PKGDOC
 rm -rf $PKG/usr/share/doc
 
 chmod 755 $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM/engines/*.so
 strip $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM/engines/*.so
 
-# only got the one PNG icon here
-mv $PKG/usr/share/icons $PKG/usr/share/pixmaps
+# upstream installs their *giant* icon directly in /usr/share/icons...
+rm -rf $PKG/usr/share/icons
+for px in 16 32 48 64 128; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  convert -resize $size media/icon.png $dir/$PRGNAM.png
+done
 
-cp -a LICENSE *.md $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+cp -a LICENSE *.md $PKGDOC
+sed -i 's,\r,,' $PKGDOC/*
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

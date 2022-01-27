@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware Package Build Script for DAHDI complete package (http://www.asterisk.org/downloads/dahdi)
 # SlackBuild source at https://github.com/chapmajs/dahdi-complete-slackbuild
@@ -9,10 +9,13 @@
 # glitch@glitchwrks.com
 # All rights reserved.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=dahdi-complete
-VERSION=${VERSION:-3.0.0}
+VERSION=${VERSION:-20201116_5c840cf}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -25,7 +28,14 @@ fi
 KERNEL=${KERNEL:-$(uname -r)}
 PKGKERNEL=$(echo $KERNEL | tr - _)
 
-CWD=$(pwd)
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-${VERSION}_$PKGKERNEL-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -51,9 +61,9 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $ARCHIVE_NAME-$VERSION+$VERSION
-tar zxvf $CWD/$ARCHIVE_NAME-$VERSION+$VERSION.tar.gz
-cd $ARCHIVE_NAME-$VERSION+$VERSION
+rm -rf $ARCHIVE_NAME-$VERSION
+tar xvf $CWD/$ARCHIVE_NAME-$VERSION.tar.?z
+cd $ARCHIVE_NAME-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -65,12 +75,17 @@ sed -i -e 's/ -Werror//' tools/acinclude.m4 tools/xpp/Makefile.am
 sed -i -e 's/-Werror //' tools/Makefile.am
 
 # Fix Perl install location (otherwise it installs to /usr/local/share/perl5)
-sed -i -e 's/sitelib/vendorlib/' linux/build_tools/live_dahdi tools/xpp/Makefile.am
+sed -i -e 's/sitelib/vendorlib/' linux/build_tools/live_dahdi tools/xpp/Makefile.am || exit 1
 
 cd linux
+# thanks Gentoo for the patches!
+#for i in $CWD/patches/* ; do patch -p1 < $i ; done
 make all
+make install DESTDIR=$PKG
 
 cd ../tools
+# thanks debian for this patch!
+patch -p1 < $CWD/dahdi-tools-3.1.0-fno-common.patch
 ./bootstrap.sh
 autoreconf -fi
 CPPFLAGS="-I$(pwd)/../linux/include" \
@@ -89,7 +104,6 @@ CXXFLAGS="$SLKCFLAGS" \
 make
 make install DESTDIR=$PKG
 cd ..
-make config DESTDIR=$PKG
 
 mkdir -p $PKG/usr/share/perl5/vendor_perl
 mv $PKG/usr/local/share/perl5/* $PKG/usr/share/perl5/vendor_perl/
@@ -101,7 +115,7 @@ for file in $(find . -type f); do
 	mv $file "$file.new"
 done
 
-install -D -m 0644 $TMP/$ARCHIVE_NAME-$VERSION+$VERSION/tools/dahdi.init $PKG/etc/rc.d/rc.dahdi.new
+install -D -m 0644 $TMP/$ARCHIVE_NAME-$VERSION/tools/dahdi.init $PKG/etc/rc.d/rc.dahdi.new
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -119,4 +133,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-${VERSION}_$PKGKERNEL-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-${VERSION}_$PKGKERNEL-$ARCH-$BUILD$TAG.$PKGTYPE

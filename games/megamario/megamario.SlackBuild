@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for megamario
 
@@ -6,10 +6,17 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211022 bkw: BUILD=2
+# - new-style icons.
+# - make the in-game music work (by transcoding it to ogg).
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=megamario
 VERSION=${VERSION:-1.7}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -19,7 +26,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -56,20 +67,22 @@ unzip $CWD/$ZIPFILE -x '*.exe' '*.dll' \
      log.txt data/save.sav data/levels/1/1 data/levels/11/mai
 
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# 20211025 bkw: gzip the patches. Don't trust git not to eat the \r
+# characters, since it's configurable by whoever checks this out.
 
 # missing includes
-patch -p1 < $CWD/patches/compilefix.diff
+zcat $CWD/patches/compilefix.diff.gz | patch -p1
 
-# look for mp3music in DATADIR, not current dir
-patch -p1 < $CWD/patches/usemp3music.diff
+# Use ogg music rather than mp3, and look for music in DATADIR, not
+# current dir. Slackware's sdl has a libSDL_mixer.so that doesn't
+# support mp3, so we have to convert to sometime it does support.
+zcat $CWD/patches/oggmusic.diff.gz | patch -p1
 
 # write log.txt to ~/.megamario/, not current dir
-patch -p1 < $CWD/patches/logfile.diff
+zcat $CWD/patches/logfile.diff.gz | patch -p1
 
 # bin is hardcoded
 sed -i 's,\<bin\>,games,' Makefile
@@ -92,15 +105,38 @@ make install \
      PREFIX=$PKG/usr \
      DATADIR="$PKG/$DATADIR"
 
-# 'make install' doesn't install the high-quality mp3 music
-cp -a mp3music $PKG/$DATADIR
+# not doing a man page as there are no command-line options.
+
+# 'make install' doesn't install the high-quality mp3 music. We have
+# to transcode them to ogg anyway. Sadly we're converting from one
+# lossy codec to another... while we're at it, get rid of the embedded
+# video frames in some of the mp3s, which the game never displays.
+# The converted music is ~17% smaller than the original mp3 music.
+OGGDIR=$PKG/$DATADIR/oggmusic
+mkdir -p $OGGDIR
+cp -a mp3music/*.dat $OGGDIR
+totalcount="$( /bin/ls -1 mp3music/*.mp3 | wc -l )"
+for song in mp3music/*.mp3; do
+  echo "===> [$((++count))/$totalcount] transcoding $song"
+  ffmpeg -loglevel 16 -i "$song" -vn -b:a 128k \
+    "$OGGDIR/$( basename "$song" .mp3 )".ogg
+done
 
 # upstream's .desktop fails to validate, use our own fixed one.
-# the icon is upstream's.
-# not doing a man page as there are no command-line options.
 mkdir -p $PKG/usr/share/applications $PKG/usr/share/pixmaps
 cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
-cat $PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# the icon was made from upstream's player2l.png and full_pipe_left.png.
+# native size is 80x80.
+for i in 32 48 64 80; do
+  px=$( basename $i | cut -d. -f1 )
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  convert -resize $size $CWD/$PRGNAM.png $dir/$PRGNAM.png
+done
+
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a *.txt $PKG/usr/doc/$PRGNAM-$VERSION
@@ -113,4 +149,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for jalv
 
@@ -6,10 +6,18 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211202 bkw:
+# - update for v1.6.6.
+# - fix man pages.
+# - add source tarball for waflib (no longer included in jalv src).
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=jalv
-VERSION=${VERSION:-1.4.6}
+VERSION=${VERSION:-1.6.6}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -19,7 +27,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -40,39 +52,50 @@ fi
 
 set -e
 
+# waflib got broken out into its own submodule, which isn't included
+# in github's generated tarball. my waflib tarball was made by
+# $ git clone https://github.com/drobilla/jalv/
+# $ cd jalv
+# $ git submodule update --init
+# $ tar cvfJ ../waflib-b600c92.tar.xz waflib/
+# (the commit hash came from 'cd waflib; git log')
+WAFLIBVER=${WAFLIBVER:-b600c92}
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
+tar xvf $CWD/waflib-$WAFLIBVER.tar.xz
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# only the textmode and gtk+2 UIs are considered stable by upstream,
-# no point building the others
-if [ "${ALL_UIS:-no}" = "no" ]; then
-  patch -p1 < $CWD/remove_experimental_uis.diff
-fi
+# Fix references to 'jalv.qt(2)', mention jalv.gtk3 and jalv.qt5 in
+# jalv.gtk.1 and jalv.qt.1.
+patch -p1 < $CWD/manpages.diff
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
   ./waf configure \
+  --libdir=/usr/lib$LIBDIRSUFFIX \
   --prefix=/usr \
   --mandir=/usr/man
 
 ./waf build
 ./waf install --destdir=$PKG
 
-strip $PKG/usr/bin/*
+# the one in /usr/lib*/jack/ seems to be a jack plugin. not documented,
+# but jack won't load it by default so leaving it there is OK.
+strip $PKG/usr/bin/* $PKG/usr/lib*/jack/*.so
 gzip -9 $PKG/usr/man/man1/*.1
 
+ln -s $PRGNAM.qt.1.gz $PKG/usr/man/man1/$PRGNAM.qt5.1.gz
+ln -s $PRGNAM.gtk.1.gz $PKG/usr/man/man1/$PRGNAM.gtk3.1.gz
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS COPYING NEWS README $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS* COPYING* NEWS* README* $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
@@ -87,4 +110,4 @@ if [ "${SETCAP:-yes}" = "yes" ]; then
 fi
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

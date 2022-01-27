@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for perl-text-unaccent
 
@@ -6,10 +6,19 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20210822 bkw: BUILD=2.
+# - fix build on -current.
+# - update unac.[ch] to match latest system/unac.
+# - fix the perldoc/manpage.
+# - typo-fix and reflow README and slack-desc.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=perl-text-unaccent
 VERSION=${VERSION:-1.08}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -19,7 +28,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -49,20 +62,28 @@ rm -rf $TARNAME-$VERSION
 tar xvf $CWD/$TARNAME-$VERSION.tar.gz
 cd $TARNAME-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 # combined patch made by diffing against the unac.c in system/unac.
-patch -p1 < $CWD/oe_lig_and_size_t.diff
+# also UNAC_VERSION has to be defined.
+patch -p1 < $CWD/ligatures.diff
+
+# fix minor issue with the docs.
+patch -p1 < $CWD/podfix.diff
+
+# https://rt.cpan.org/Public/Bug/Display.html?id=124815
+# patch for newer perls
+sed -i 's/\(-DHAVE_CONFIG_H\)/\1 -DHAS_VPRINTF/' Makefile.PL
 
 perl Makefile.PL \
   PREFIX=/usr \
   INSTALLDIRS=vendor \
   INSTALLVENDORMAN3DIR=/usr/man/man3
-make
+
+# 20210822 bkw: we have vsnprintf(), but somehow it's not getting defined
+# on -current, which breaks the build... so define it ourselves.
+make OPTIMIZE="$SLKCFLAGS -DHAVE_VSNPRINTF"
 make test
 make install DESTDIR=$PKG
 
@@ -84,4 +105,4 @@ mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

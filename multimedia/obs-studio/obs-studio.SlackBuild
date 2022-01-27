@@ -1,9 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for Open Broadcaster Software
 #
 # Copyright 2015 Gethyn ThomasQuail <gethyn@bloodbathsoftworks.com>
-# Copyright 2016-2020 Christoph Willing,  Brisbane Australia
+# Copyright 2016-2021 Christoph Willing,  Brisbane Australia
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,10 +23,14 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=obs-studio
-VERSION=${VERSION:-26.0.2}
+VERSION=${VERSION:-27.0.1}
+COMMIT=cd5873e9bcfaf9cc2614939ddb3264bea919be4a
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -36,7 +40,14 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -44,12 +55,15 @@ OUTPUT=${OUTPUT:-/tmp}
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
+  CEF_ROOT=cef_binary_87.1.14+ga29e9a3+chromium-87.0.4280.141_linux32_minimal
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
+  CEF_ROOT=cef_binary_87.1.14+ga29e9a3+chromium-87.0.4280.141_linux32_minimal
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
+  CEF_ROOT=cef_binary_87.1.14+ga29e9a3+chromium-87.0.4280.141_linux64_minimal
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
@@ -60,9 +74,19 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+rm -rf $PRGNAM-$COMMIT
+tar xvf $CWD/$PRGNAM-$COMMIT.tar.gz
+tar xvf $CWD/$CEF_ROOT.tar.bz2
+cd $CEF_ROOT
+  strip -v Release/*.so
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_BUILD_TYPE=Release .
+  make libcef_dll_wrapper
+  cd ..
+cd $PRGNAM-$COMMIT
+sed -i -e "s/^obs_install/#obs_install/" libobs/CMakeLists.txt
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -70,15 +94,6 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Check for mbedtls existence and version suitability (need at least version 2.7.0)
-mbedtls="-DMBEDTLS_LIB=OFF"
-if test -e /usr/include/mbedtls/version.h ; then
-  version_number_line=$(grep MBEDTLS_VERSION_NUMBER /usr/include/mbedtls/version.h)
-  if [ "$?" = "0" ]; then
-	version_number=$(expr substr $(echo $version_number_line | rev | cut -d' ' -f1 | rev) 3 8)
-	if expr $version_number \> 02070000 1>/dev/null ; then mbedtls="" ; fi
-  fi
-fi
 
 mkdir -p build
 cd build
@@ -89,7 +104,8 @@ cd build
     -DOBS_MULTIARCH_SUFFIX="$LIBDIRSUFFIX" \
     -DOBS_VERSION_OVERRIDE=${VERSION} \
     -DUNIX_STRUCTURE=ON \
-    $mbedtls \
+    -DBUILD_BROWSER=ON \
+    -DCEF_ROOT_DIR="../../$CEF_ROOT" \
     -DCMAKE_BUILD_TYPE=Release ..
   make
   make install DESTDIR=$PKG
@@ -103,4 +119,4 @@ mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

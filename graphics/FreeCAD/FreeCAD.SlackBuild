@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for FreeCAD
 
@@ -24,10 +24,13 @@
 #
 # Maintained by David Spencer <baildon.research@googlemail.com>
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=FreeCAD
-VERSION=${VERSION:-0.18.4}
+VERSION=${VERSION:-0.19.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -37,7 +40,14 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -62,7 +72,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
@@ -71,22 +81,6 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Patch to fix boost header include according to https://github.com/FreeCAD/FreeCAD/commit/200c7c7e00d569ed9f00e06c9d9751a27fa67c2d#diff-b3a49ec758b2fdfb5ee0069b6c113f656133a89cabc0ae789398b41c3295aa57
-patch -p1 < $CWD/addBoostHeaders-200c7c7.patch
-
-# SBo's OpenCASCADE 6.9.1 includes were in /opt/OpenCASCADE, but for 7.3.0
-# the includes are in /usr/include/opencascade, so let's accept either :)
-if [ -d /usr/include/opencascade ]; then
-  occinc=/usr/include/opencascade
-elif [ -d /opt/OpenCASCADE/inc ]; then
-  occinc=/opt/OpenCASCADE/inc
-  # However, 6.9.1's libs are in /usr/lib${LIBDIRSUFFIX} just like 7.3.0
-  # (see OCC_LIBRARY below)
-else
-  echo "OpenCASCADE include directory was not found"
-  exit 1
-fi
-
 mkdir build
 cd build
   cmake \
@@ -94,12 +88,18 @@ cd build
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/opt/$PRGNAM \
     -DDOCDIR=/usr/doc/$PRGNAM-$VERSION \
-    -DOCC_INCLUDE_DIR:PATH=$occinc \
+    -DOCC_INCLUDE_DIR:PATH=/usr/include/opencascade \
     -DOCC_LIBRARY:PATH=/usr/lib${LIBDIRSUFFIX} \
     -DRESOURCEDIR=/opt/$PRGNAM/share/data \
+    -DBUILD_ENABLE_CXX_STD=C++14 \
+    -DBUILD_QT5=ON \
     -DBUILD_FEM=OFF \
+    -DPYTHON_EXECUTABLE=/usr/bin/python3 \
+    -DFREECAD_USE_PYSIDE=ON \
+    -DFREECAD_USE_SHIBOKEN=ON \
     -DOCCT_CMAKE_FALLBACK=ON \
     -DCMAKE_BUILD_TYPE=Release ..
+
   make
   make install DESTDIR=$PKG
 cd ..
@@ -114,13 +114,13 @@ find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | gr
 
 # Copy icon, desktop file and mime info
 mkdir -p $PKG/usr/share/applications $PKG/usr/share/pixmaps $PKG/usr/share/mime/packages
-cp $PKG/opt/$PRGNAM/data/freecad.xpm $PKG/usr/share/pixmaps/
-cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
-cat $CWD/$PRGNAM.xml > $PKG/usr/share/mime/packages/$PRGNAM.xml
+cp $PKG/opt/$PRGNAM/share/pixmaps/freecad.xpm $PKG/usr/share/pixmaps/
+cp $PKG/opt/$PRGNAM/share/applications/*.desktop $PKG/usr/share/applications/
+cp $PKG/opt/$PRGNAM/share/mime/packages/*.xml $PKG/usr/share/mime/packages/
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  README.md ChangeLog.txt \
+  README.md ChangeLog.txt LICENSE \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
@@ -129,4 +129,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

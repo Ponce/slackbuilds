@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for odamex
 
@@ -6,6 +6,13 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211231 bkw: BUILD=2.
+# - the SDL2 segfault will likely be fixed soon (reported to PV, along
+#   with a patch). add SDL2 environment variable, default to no.
+
+# 20211028 bkw: update for v0.9.5.
+# - had to switch to SDL 1 to avoid SDL2_Mixer-related segfaults.
+#   unfortunately I can't get the music to work with SDL 1...
 # 20201024 bkw: update for v0.8.3.
 # 20191201 bkw: update for v0.8.1.
 
@@ -21,10 +28,13 @@
 # - get rid of hard-coded /usr/share/games/doom, no longer needed
 # - include sample orasrv.cfg from 0.6.4 source (it's gone from 0.7.0)
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=odamex
-VERSION=${VERSION:-0.8.3}
-BUILD=${BUILD:-1}
+VERSION=${VERSION:-0.9.5}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -34,7 +44,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -70,28 +84,39 @@ rm -rf $PRGNAM-src-$VERSION
 tar xvf $CWD/$PRGNAM-src-$VERSION.tar.bz2
 cd $PRGNAM-src-$VERSION
 chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# Every file in 0.9.5 is +x, and none of them need to be!
+# Do not revert to template.
+find . -type f -exec chmod 644 {} \+
+find . -type d -exec chmod 755 {} \+
+
+SDL12ARG=ON
+[ "${SDL2:-no}" = "yes" ] && SDL12ARG=OFF
+
+# 20220101 bkw: do not use systemwide install of portmidi, if it exists.
+# This is to avoid a hidden portmidi dependency breaking the odamex
+# binary when portmidi gets removed or upgraded.
+patch -p1 < $CWD/use_bundled_portmidi.diff
 
 # Make the launcher look in /usr/games for the odamex binary rather
 # than the current directory. User can override with the settings
 # dialog, this just sets the default.
-sed -i \
-  '/launchercfg_s.odamex_directory *= */s,wxGetCwd(),wxString::FromAscii("/usr/games"),' \
-  odalaunch/src/dlg_main.cpp
+sed -i 's,OdaGetInstallDir(),"/usr/games",g' \
+       odalaunch/src/dlg_main.cpp \
+       odalaunch/src/dlg_config.cpp
 
-# 20201024 bkw: Not sure why make is exiting with nonzero status after
-# linking odalaunch. There are no error messages. Adding "-i" to the
-# make command line is a band-aid for this.
+rm -rf build
 mkdir -p build
 cd build
   cmake \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_BINDIR=games \
     -DwxWidgets_CONFIG_EXECUTABLE=$WXCONFIG \
+    -DUSE_SDL12=$SDL12ARG \
     -DCMAKE_BUILD_TYPE=Release ..
-  make -i VERBOSE=1
+  make VERBOSE=1
 cd ..
 
 # cmake-based odamex lacks a 'make install' target, do it manually.
@@ -101,36 +126,51 @@ install -s -m0755 build/client/$PRGNAM $PKG/usr/games
 install -s -m0755 build/server/odasrv $PKG/usr/games
 install -s -m0755 build/odalaunch/odalaunch $PKG/usr/games
 
-mkdir -p $PKG/usr/share/games/doom
-
-# wad file has moved in the source tree, accomodate either version
-WAD="$PRGNAM.wad"
-[ -e "wad/$PRGNAM.wad" ] && WAD="wad/$PRGNAM.wad"
-install -m0644 $WAD $PKG/usr/share/games/doom
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/tech
-cp -a CHANGELOG LICENSE MAINTAINERS README $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/odasrv.cfg > $PKG/usr/doc/$PRGNAM-$VERSION/odasrv.cfg.sample
-install -m0644 documentation/tech/* $PKG/usr/doc/$PRGNAM-$VERSION/tech
-
 # Man page created for this slackbuild
-mkdir -p $PKG/usr/man/man6
-gzip -9c < $CWD/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
+MANDIR=$PKG/usr/man/man6
+mkdir -p $MANDIR
+gzip -9c < $CWD/$PRGNAM.6 > $MANDIR/$PRGNAM.6.gz
+for i in odasrv odalaunch; do
+  ln -s $PRGNAM.6.gz $MANDIR/$i.6.gz
+done
 
 # Desktop stuff
 mkdir -p $PKG/usr/share/applications $PKG/usr/share/pixmaps
 for exe in $PRGNAM odasrv odalaunch; do
-  sed -e '/^Encoding/d' -e 's,/usr/share/doom,/usr/share/games/doom,' \
+  # make these validate and call the correct binary
+  sed -e '/^Encoding/d' -e 's, -waddir.*,,' -e 's,Exec=,&/usr/games/,' \
     < installer/arch/$exe.desktop \
     > $PKG/usr/share/applications/$exe.desktop
-  cat media/icon_${exe}_512.png > $PKG/usr/share/pixmaps/$exe.png
+
+  # use upstream's icons
+  for i in media/icon_${exe}_*.png; do
+    px=$( basename $i | cut -d. -f1 | cut -d_ -f3 )
+    size=${px}x${px}
+    dir=$PKG/usr/share/icons/hicolor/$size/apps
+    mkdir -p $dir
+    cat $i > $dir/$exe.png
+  done
+
+  # make old-school icon, too
+  convert -resize 48x48 media/icon_${exe}_512.png $PKG/usr/share/pixmaps/$exe.png
 done
 
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# 20211027 bkw: In 0.9.5, upstream doesn't ship the wad. It expects
+# to build it using deutex. Easier to use a prebuilt one, from their
+# windows package.
+WADDIR=$PKG/usr/share/games/doom
+mkdir -p $WADDIR
+unzip -p $CWD/$PRGNAM-win32-$VERSION.zip $PRGNAM.wad > $WADDIR/$PRGNAM.wad
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a CHANGELOG LICENSE MAINTAINERS README.md documentation/tech $PKGDOC
+cat $CWD/odasrv.cfg > $PKGDOC/odasrv.cfg.sample
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

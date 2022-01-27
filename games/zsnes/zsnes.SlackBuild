@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for zsnes
 
@@ -23,13 +23,28 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20211230 bkw:
+# - statifier's never going to work on current/15.0, its author hasn't
+#   updated it since 2016. so get rid of the 64-bit download and code
+#   to support it. sorry.
+
+# 20211215 bkw: BUILD=5
+# - fix -current 32-bit build.
+# - new-style icons.
+# - TODO: statified binary needs updating. Except statifier seems not
+#   to work on -current. Sigh.
+# - TODO: investigate fork: https://github.com/xyproto/zsnes
+
 # 20180123 bkw: Finally, 64-bit support! Sort-of. Using a dirty hack.
 # Also, move binary to /usr/games and man page to section 6.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=zsnes
 VERSION=${VERSION:-1.51b}
-BUILD=${BUILD:-4}
+BUILD=${BUILD:-5}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 ZSNESSRC="$(echo $VERSION | tr -d .)src"
 ZSNESDIR="_$(echo $VERSION | tr . _)"
@@ -42,7 +57,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -51,8 +70,6 @@ if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-elif [ "$ARCH" = "x86_64" ]; then
-  echo "=== $ARCH detected, using statified binary"
 else
   printf "\n  Error: $PRGNAM won't compile on $ARCH\n\n"
   exit 1
@@ -71,55 +88,30 @@ mv $PRGNAM-$VERSION/src/* $PRGNAM-$VERSION
 cd $PRGNAM-$VERSION
 
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-if [ "$ARCH" = "x86_64" ]; then
-  # Can't compile, so use a statified binary. This was prepared
-  # by compiling zsnes with the same configure flags as below,
-  # plus --disable-opengl, then converting with:
-  # $ statifier \
-  #   --set=LD_PRELOAD=/usr/lib/libudev.so:/usr/lib/libaoss.so:/usr/lib/libasound.so \
-  #   zsnes zsnes.static
-  # Unfortunately this won't work with OpenGL because the shared libs
-  # are driver-specific: I could preload the nvidia driver, but the
-  # result would only work on systems that use nvidia (not AMD or intel,
-  # or even nouveau).
-  mkdir -p $PKG/usr/games $PKG/usr/doc/$PRGNAM-$VERSION $PKG/usr/man/man1
-  xz -d < $CWD/$PRGNAM.static.xz > $PKG/usr/games/$PRGNAM
-  chmod 755 $PKG/usr/games/$PRGNAM
+# GCC 4.7 fixes from Debian
+cat $CWD/0012-Fix-build-with-gcc-4.7.patch | patch -p2 --verbose
 
-  # Docs and man page still come from the source.
-  cp -a docs/* $PKG/usr/doc/$PRGNAM-$VERSION
-  cp -a linux/$PRGNAM.1 $PKG/usr/man/man1
-else
-  # GCC 4.7 fixes from Debian
-  cat $CWD/0012-Fix-build-with-gcc-4.7.patch | patch -p2 --verbose
+# Fix for libpng16 (thanks to Arch Linux)
+# https://projects.archlinux.org/svntogit/community.git/plain/trunk/zsnes-1.51-libpng15.patch?h=packages/zsnes
+patch -p1 < $CWD/zsnes-1.51-libpng15.patch
 
-  # Fix for libpng16 (thanks to Arch Linux)
-  # https://projects.archlinux.org/svntogit/community.git/plain/trunk/zsnes-1.51-libpng15.patch?h=packages/zsnes
-  patch -p1 < $CWD/zsnes-1.51-libpng15.patch
+CFLAGS="$SLKCFLAGS -fcommon -std=c++11" \
+force_arch="$ARCH" \
+./configure \
+  --prefix=/usr \
+  --enable-release \
+  --disable-cpucheck \
+  --disable-debugger
 
-  CFLAGS="$SLKCFLAGS" \
-  CXXFLAGS="$SLKCFLAGS" \
-  force_arch="$ARCH" \
-  ./configure \
-    --prefix=/usr \
-    --enable-release \
-    --disable-cpucheck \
-    --disable-debugger
-
-  CFLAGS="$SLKCFLAGS" \
-  CXXFLAGS="$SLKCFLAGS" \
-  force_arch="$ARCH" \
-  make
-  make install DESTDIR=$PKG
-  mv $PKG/usr/bin $PKG/usr/games # configure ignores --bindir, grr!
-  strip $PKG/usr/games/$PRGNAM
-fi
+CFLAGS="$SLKCFLAGS -fcommon -std=c++11" \
+force_arch="$ARCH" \
+make
+make install DESTDIR=$PKG
+mv $PKG/usr/bin $PKG/usr/games # configure ignores --bindir, grr!
+strip $PKG/usr/games/$PRGNAM
 
 # Man page belongs in section 6, since this is a game.
 mkdir -p $PKG/usr/man/man6
@@ -130,7 +122,15 @@ rm -rf $PKG/usr/man/man1
 # Add a .desktop file and icon for good menu integration
 mkdir -p $PKG/usr/share/applications $PKG/usr/share/pixmaps
 install -m 0644 $CWD/zsnes.desktop $PKG/usr/share/applications/zsnes.desktop
-install -m 0644 $CWD/zsnes.png $PKG/usr/share/pixmaps/zsnes.png
+
+for px in 16 32 48 64; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  convert -resize $size $CWD/$PRGNAM.png $dir/$PRGNAM.png
+done
+
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a docs/* $PKG/usr/doc/$PRGNAM-$VERSION
@@ -141,4 +141,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

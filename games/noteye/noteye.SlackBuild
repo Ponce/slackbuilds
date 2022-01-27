@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for noteye
 
@@ -6,10 +6,23 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211115 bkw:
+# - update for v8.4.
+# - compile with g++ again (needs -std=gnu++98).
+# - new-style icons.
+# - s/lua/luajit/ in REQUIRES.
+# - get rid of shared high score file in /var. it's now per-user
+#   in ~/.config/noteye.
+# - don't install binary setgid games.
+# - add hydraslayer info to slack-desc.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=noteye
-VERSION=${VERSION:-7.6}
+VERSION=${VERSION:-8.4}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -19,7 +32,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -52,11 +69,8 @@ rm -rf $PRGNAM
 eval unzip $CWD/$PRGNAM-$SRCVER.zip $EXCLUDES
 cd $PRGNAM
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 # these don't need to be executable.
 chmod 0644 common/*.noe games/*.noe
@@ -68,16 +82,14 @@ chmod 0644 common/*.noe games/*.noe
 # to Slack-specific sbopkg.
 patch -p1 < $CWD/sbo.diff
 
-# apparently Ubuntu has liblua-5.1.so, we just have liblua.so (same version).
-sed -i 's,-llua5.1,-llua,g' src/Makefile
+# fix underlinking.
+sed -i '/-lGLU *\$(TGT) *$/s,$, -lSDL2,' src/Makefile
 
-# store the writable high score file in /var, not /usr/share.
-sed -i 's,"hydrascores.sav","/var/games/hydrascores.sav",' hydra/hydra.cpp
+# release tarball for 8.4 is missing this header (so use a copy
+# from upstream's github)
+xzcat $CWD/mtrand.h.xz > hydra/mtrand.h
 
-# use clang++ as the code won't build with gcc >= 5.x
-sed -i 's|g++ |clang++ |' src/Makefile
-
-make -C src CFLAGS="$SLKCFLAGS"
+make -C src CFLAGS="$SLKCFLAGS -std=gnu++98 -fpermissive"
 
 # The 'make install' target is bad and wrong. Don't use.
 PKGLIB=$PKG/usr/lib$LIBDIRSUFFIX
@@ -87,9 +99,8 @@ SOVER=$( echo $VERSION | cut -d. -f1 )
 mkdir -p $PKG/usr/games $PKGLIB/$PRGNAM $PKGSHARE
 
 # shared lib needs to be in /usr/lib(64), *not* /usr/share.
-# also put the game binary in a private dir instead of /usr/share,
-# and make it setgid games so the high score file can be updated.
-install -s -m2755 -oroot -ggames $PRGNAM $PKGLIB/$PRGNAM/
+# also put the game binary in a private dir instead of /usr/share.
+install -s -m0755 $PRGNAM $PKGLIB/$PRGNAM/
 install -s -m0755 lib$PRGNAM.so $PKGLIB/lib$PRGNAM.so.$VERSION
 ln -s lib$PRGNAM.so.$VERSION $PKGLIB/lib$PRGNAM.so.$SOVER
 ln -s lib$PRGNAM.so.$VERSION $PKGLIB/lib$PRGNAM.so
@@ -116,12 +127,29 @@ sed -i \
   "s,^\$NOTEYEDIR/,/usr/lib$LIBDIRSUFFIX/$PRGNAM/," \
   $PKG/usr/games/*
 
-# don't install a highscore file here, see doinst.sh.
+# this results in better-looking noteye icons than if we extracted
+# noteye.ico, which is only 48x36. hydra.ico is 48x48 and there's
+# no larger version of the image in the source (it's composed of
+# even smaller pieces, from the hydraslayer graphics).
+for px in 16 32 48 64 128; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  convert -background none \
+          -extent 400x400 \
+          -gravity center \
+          -resize $size \
+          gfx/noteye-logo.png \
+          $dir/$PRGNAM.png
+  [ "$px" -le "48" ] && \
+    convert 'hydra/hydra.ico[2]' -resize $px $dir/hydraslayer.png
+done
 
 # icons extracted from the .ico files in the source, with icotool.
-mkdir -p $PKG/usr/share/pixmaps
-cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
-cat $CWD/hydraslayer.png > $PKG/usr/share/pixmaps/hydraslayer.png
+PIXMAPS=$PKG/usr/share/pixmaps
+mkdir -p $PIXMAPS
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PIXMAPS/$PRGNAM.png
+ln -s ../icons/hicolor/48x48/apps/hydraslayer.png $PIXMAPS/hydraslayer.png
 
 # .desktop files written for this build.
 mkdir -p $PKG/usr/share/applications
@@ -136,7 +164,7 @@ gzip -9c $CWD/hydraslayer.6 > $PKG/usr/man/man6/hydraslayer.6.gz
 # We don't need licenses/* as we're linking with system-wide libs, which
 # have already installed their own licenses in /usr/doc.
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a COPYING README.txt sample $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE README.md sample $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
@@ -144,4 +172,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

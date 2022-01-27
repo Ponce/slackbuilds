@@ -5,9 +5,8 @@
 # Written by Chris Abela <chris.abela@maltats.com>, 20100515
 # Modified by Mario Preksavec <mario@slackware.hr>
 
-KERNEL=${KERNEL:-4.4.240}
-XEN=${XEN:-4.13.1}
-BOOTLOADER=${BOOTLOADER:-lilo}
+KERNEL=${KERNEL:-5.15.4}
+XEN=${XEN:-4.15.1}
 
 ROOTMOD=${ROOTMOD:-ext4}
 ROOTFS=${ROOTFS:-ext4}
@@ -15,16 +14,9 @@ ROOTDEV=${ROOTDEV:-/dev/sda2}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-      i?86) ARCH=i686 ;;
     x86_64) ARCH=x86_64 ;;
          *) echo "Unsupported architecture detected ($ARCH)"; exit ;;
   esac
-fi
-
-if [ "$BOOTLOADER" = lilo ] && [ ! -x /usr/bin/mbootpack ]; then
-  echo "LILO bootloader requires mbootpack."
-  echo "Get it from slackbuilds.org and rerun this script."
-  exit
 fi
 
 if [ ! -d /usr/src/linux-$KERNEL ]; then
@@ -78,15 +70,7 @@ cp -a $TMP/lib/modules/$KERNEL-xen /lib/modules
 mkinitrd -c -k $KERNEL-xen -m $ROOTMOD -f $ROOTFS -r $ROOTDEV \
   -o /boot/initrd-$KERNEL-xen.gz
 
-# For lilo we use mbootpack
-if [ "$BOOTLOADER" = lilo ]; then
-  gzip -d -c /boot/xen-$XEN.gz > xen-$XEN
-  mbootpack -m arch/x86/boot/bzImage -m /boot/initrd-$KERNEL-xen.gz xen-$XEN \
-    -o /boot/vmlinuz-$KERNEL-xen
-else
-  cp arch/x86/boot/bzImage /boot/vmlinuz-$KERNEL-xen
-fi
-
+cp arch/x86/boot/bzImage /boot/vmlinuz-$KERNEL-xen
 cp System.map /boot/System.map-$KERNEL-xen
 cp .config /boot/config-$KERNEL-xen
 

@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #
 # Slackware build script for sic
 # Copyright 2011  Haroldo F. Jardim <email removed>
@@ -22,6 +22,13 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20210924 bkw:
+# - update for latest git.
+# - add support for SLASH=yes.
+# - add support for user config.h.
+# - add support for patches.
+# - update README to reflect the above.
+
 # 20201113 bkw: The original author of this script hasn't been heard
 # from since 2011, and it needs some attention (still mentions i486)
 # so I'm taking it.
@@ -32,10 +39,13 @@
 # - add env vars for default host and port
 # - simplify script
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=sic
-VERSION=${VERSION:-1.2}
+VERSION=${VERSION:-1.2+20210506_058547e}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -45,7 +55,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -70,22 +84,52 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvzf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.?z
 cd $PRGNAM-$VERSION
 chown -R root:root .
 chmod 644 *
 
-sed -i "s/CFLAGS =/CFLAGS +=/" config.mk
+# this is more complex than it has to be: upstream released a a mix
+# of -p0 and -p1 patches.
+for i in $CWD/patches/*.diff; do
+  if [ -e "$i" ]; then
+    P=1
+    patch --dry-run -p0 < $i &>/dev/null && P=0
+    echo "=== Applying $( basename $i ) with -p$P"
+    patch -p$P < $i
+  fi
+done
 
-[ -n "$IRCHOST" ] && \
-  sed -i "/host *= *\"/s,\"[^\"]*\",\"$IRCHOST\"," $PRGNAM.c
+if [ -e "$CWD/config.h" ]; then
+  # if the user's got his own config.h, use it
+  cat "$CWD/config.h" > config.h
+else
+  # if not, use the upstream default
+  cat config.def.h > config.h
+fi
 
-[ -n "$IRCPORT" ] && \
-  sed -i "/port *= *\"/s,\"[^\"]*\",\"$IRCPORT\"," $PRGNAM.c
+# IRCHOST IRCPORT SLASH modify the config.h, even overriding what's
+# in the user's custom one. Also fixup the man page.
+if [ -n "$IRCHOST" ]; then
+  sed -i "/DEFAULT_HOST/s,\".*\"\$,\"$IRCHOST\"," config.h
+  sed -i "/default host/s,(.*) *$,($IRCHOST)," $PRGNAM.1
+fi
+
+if [ -n "$IRCPORT" ]; then
+  sed -i "/DEFAULT_PORT/s,\".*\"\$,\"$IRCPORT\"," config.h
+  sed -i "/default port/s,(.*) *$,($IRCPORT)," $PRGNAM.1
+fi
+
+if [ "${SLASH:-no}" = "yes" ]; then
+  sed -i "s|':'|'/'|" config.h
+  sed -i '/^\.BI :/s,:,/,' $PRGNAM.1
+fi
 
 CFLAGS="$SLKCFLAGS -Wl,-s" \
 DESTDIR=$PKG \
 make \
+  VERSION="$VERSION" \
+  CFLAGS="$SLKCFLAGS" \
   PREFIX=/usr \
   MANPREFIX=/usr/man \
   install
@@ -93,11 +137,11 @@ make \
 gzip -9 $PKG/usr/man/man1/$PRGNAM.1
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a LICENSE README $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE README config.h $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

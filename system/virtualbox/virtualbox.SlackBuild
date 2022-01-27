@@ -1,8 +1,8 @@
-#!/bin/sh
+#!/bin/bash
 
-# Slackware build script for virtualbox-ose
+# Slackware build script for virtualbox
 
-# Copyright 2008-2020 Heinz Wiesinger, Amsterdam, The Netherlands
+# Copyright 2008-2021 Heinz Wiesinger, Amsterdam, The Netherlands
 # Copyright 2008 Mauro Giachero <mauro.giachero@gmail.com>
 # All rights reserved.
 #
@@ -12,32 +12,42 @@
 # 1. Redistributions of this script must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 #
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
-# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
-# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=virtualbox
 SRCNAM=VirtualBox
-VERSION=${VERSION:-6.1.18}
-BUILD=${BUILD:-1}
+VERSION=${VERSION:-6.1.28}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+    i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
 fi
 
-CWD=$(pwd)
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -45,31 +55,11 @@ OUTPUT=${OUTPUT:-/tmp}
 # kmk doesn't support MAKEFLAGS, so we use JOBS here
 JOBS=${JOBS:-3}
 
-# Define Variable Names
-gui=""
-
 # Check for vboxusers group here
 if ! grep ^vboxusers: /etc/group 2>&1 > /dev/null; then
   echo "  You must have a vboxusers group to run this script."
   echo "    # groupadd -g 215 vboxusers"
   exit 1
-fi
-
-# Enable Hardening - Defaulting to yes as requested by upstream
-if [ "${HARDENING:-yes}" = "yes" ]; then
-  harden="--enable-hardening"
-else
-  harden="--disable-hardening"
-fi
-
-# Support for the Qt & SDL frontends
-if [ "${HEADLESS:-no}" = "no" ]; then
-  guiapp="VirtualBox VirtualBoxVM VBoxSDL"
-  suidgui="VirtualBoxVM VBoxSDL"
-else
-  gui+=" --build-headless"
-  guiapp=""
-  suidgui=""
 fi
 
 # Enable building of java bindings
@@ -98,8 +88,8 @@ else
     sw_virt=""
 fi
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
   BUILDDIR="x86"
 elif [ "$ARCH" = "i686" ]; then
@@ -137,8 +127,8 @@ patch -d src/VBox/Installer/linux -i $CWD/vboxdrv.sh-setup.diff
 # Fix wrong path to rdesktop-vrdp-keymaps
 patch -p1 -i $CWD/006-rdesktop-vrdp-keymap-path.patch
 
-# Remove gcc version check
-sed -i 's/^check_gcc$/#check_gcc/' ./configure
+# Skip python2 detection and cheat about python-3.10 support
+sed -i 's|python2.7 python2.6 |python3.10 |' ./configure
 
 # Use our CFLAGS
 sed -i "s|CXX_FLAGS=\"\"|CXX_FLAGS=\"$SLKCFLAGS -std=c++11\"|" ./configure
@@ -148,9 +138,8 @@ sed -i "s|CXX_FLAGS=\"\"|CXX_FLAGS=\"$SLKCFLAGS -std=c++11\"|" ./configure
   --enable-vde \
   --enable-vnc \
   --with-makeself=/usr/bin/echo \
+  --enable-hardening \
   $web_service \
-  $harden \
-  $gui \
   $sw_virt \
   $java
 
@@ -206,7 +195,7 @@ cd out/linux.$BUILDDIR/release/bin/
 
   export VBOX_INSTALL_PATH=/usr/lib$LIBDIRSUFFIX/virtualbox
   cd sdk/installer
-    python ./vboxapisetup.py install --prefix "/usr" --root $PKG
+    python3 ./vboxapisetup.py install --prefix "/usr" --root $PKG
   cd -
   rm -rf sdk/installer
 
@@ -221,8 +210,11 @@ cd out/linux.$BUILDDIR/release/bin/
   mv $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/VBox.sh $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/VBox
 cd $TMP/$SRCNAM-${VERSION}
 
+# Drop broken symlink
+rm -f $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/components/VBoxREM.so
+
 for i in VBoxManage VBoxHeadless VBoxVRDP VBoxBalloonCtrl VBoxBugReport \
-  VBoxAutostart $guiapp $vboxwebsrv; do
+  VBoxAutostart VirtualBox VirtualBoxVM VBoxSDL $vboxwebsrv; do
   ln -s /usr/lib$LIBDIRSUFFIX/virtualbox/VBox $PKG/usr/bin/$i
 done
 
@@ -245,11 +237,9 @@ if [ "$vboxwebsrv" = "vboxwebsrv" ]; then
   sed -i "s/\[ -z \"\$DEBIAN\"/#\[ -z \"\$DEBIAN\"/" $PKG/etc/rc.d/rc.vboxweb-service.new
 fi
 
-if [ "$harden" = "--enable-hardening" ]; then
-  for i in VBoxHeadless $suidgui VBoxNetDHCP VBoxNetAdpCtl VBoxNetNAT; do
-    chmod 4711 $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/$i
-  done
-fi
+for i in VBoxHeadless VirtualBoxVM VBoxSDL VBoxNetDHCP VBoxNetAdpCtl VBoxNetNAT; do
+  chmod 4711 $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/$i
+done
 
 # install headers. Needed by some third party tools
 cp -rf include/* $PKG/usr/include/virtualbox/
@@ -300,4 +290,4 @@ if [ "$vboxwebsrv" = "vboxwebsrv" ]; then
 fi
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

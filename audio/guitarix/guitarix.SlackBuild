@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for guitarix
 # Originally written by Michales Michaloudes (email removed)
@@ -9,48 +9,23 @@
 # Note to self: git URL for guitarix is:
 # git://git.code.sf.net/p/guitarix/git/
 
+# 20211205 bkw: BUILD=2
+# - new-style icons.
+# - correct install permissions in /usr/share/gx_head
+# - who the heck is kb6?
 # 20200408 kb6: Updated for 0.42.1. Add -fpermissive compiler flag.
 # 20201105 bkw: Add no-upgrade note to README.
 # 20200307 bkw: Updated for 3.39.0.
 # 20191211 bkw: Updated for 0.38.1.
 # 20180828 bkw: Updated for 0.37.3.
 
-# 20180619 bkw:
-# - Updated for 0.37.1.
-# - Force building with bundled zita-convolver and resampler libs.
-#   Previously, system libs would be linked if they were installed,
-#   otherwise bundled libs were used... caused a problem if the
-#   system zita-convolver was updated to an incompatible version.
-# - Add config options to re-enable ladspa and lv2 mod-gui stuff that
-#   used to be enabled by default in 0.36.1.
-# - Add patches from upstream git, to fix segfaults when online
-#   button gets clicked. Also if dbus isn't running, guitarix will now
-#   actually say so, in its error message.
-# - Move old changelog entries to ChangeLog.old.
-
-# 20171223 bkw: Updated for 0.36.1.
-# 20170825 bkw: Updated for 0.35.6. Install the bundled roboto font.
-# 20170725 bkw: Updated for 0.35.5
-
-# 20170710 bkw:
-# - Updated for 0.35.4
-# - Remove README stuff about webkitgtk, since upstream dropped it.
-# - Add README.online with troubleshooting info. I had trouble
-#   getting the new Online Presets stuff to work, so hopefully this
-#   might help the next guy.
-
-# 20170404 bkw:
-# - Updated for 0.35.3
-# - Use + rather than ; in find/chmod. Noticeably faster.
-
-# 20170306 bkw:
-# - Flip changelog comments right-side up
-# - Stop writing outside of $TMP.
+cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=guitarix
 VERSION=${VERSION:-0.42.1}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -60,7 +35,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -95,6 +74,9 @@ chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
+# 20211205 bkw: why? *WHY?!*
+sed -i '/chmod/s,0o664,0o644,g' wscript
+
 # guitarix wants to install the roboto font in the wrong place for
 # slackware.
 sed -i '/fonts/s,\<truetype\>,TTF,' wscript tools/undiag
@@ -126,18 +108,12 @@ LIBDIR="/usr/lib${LIBDIRSUFFIX}"
 ./waf build # -v # verbose, shows actual commands
 ./waf install --destdir=$PKG
 
-# 20200307 bkw: 0.39.0 installs this in the wrong dir
-if [ "$VERSION" = "0.39.0" ]; then
-  mv $PKG/$LIBDIR/lv2/gx_wah.lv2/manifest.ttl $PKG/$LIBDIR/lv2/gx_colwah.lv2/
-  rmdir $PKG/$LIBDIR/lv2/gx_wah.lv2
-fi
+# Dunno how to make waf strip stuff...
+strip $PKG/usr/bin/* $PKG/usr/lib*/{,ladspa/*,lv2/*/*}*.so \
 
 # --install-roboto-font does the wrong thing, we'll install it manually.
 mkdir -p $PKG/usr/share/fonts/TTF
 install -m0644 fonts/* $PKG/usr/share/fonts/TTF
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 # Shared libraries are supposed to be +x.
 chmod 755 $PKG/$LIBDIR/libgx*.so.?.?
@@ -146,10 +122,28 @@ chmod 755 $PKG/$LIBDIR/libgx*.so.?.?
 mkdir -p $PKG/usr/man/man1
 gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
 
+# for the 128x128 icon, center upstream's 100x100 icon in a 128x128 png.
+dir=$PKG/usr/share/icons/hicolor/128x128/apps
+mkdir -p $dir
+convert -background none -extent 128x128 -gravity center \
+        pixmaps/gx_head.png \
+        $dir/$PRGNAM.png
+
+# for the rest, resize as usual.
+for px in 16 32 48 64; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  convert -resize $size \
+          pixmaps/gx_head.png \
+          $dir/$PRGNAM.png
+done
+
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a COPYING changelog README* $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-find $PKG/usr/doc -type f -exec chmod 0644 {} \;
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
@@ -164,4 +158,4 @@ if [ "${SETCAP:-yes}" = "yes" ]; then
 fi
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

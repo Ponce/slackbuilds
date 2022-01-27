@@ -1,27 +1,26 @@
-#!/bin/sh
+#!/bin/bash
 
-# Slackware build script for VICE
+# Slackware build script for vice
 
 # Copyright 2008 Mauro Giachero (email removed)
-# Copyright 2020 B. Watson (yalhcru@gmail.com)
-# All rights reserved.
-#
-# Redistribution and use of this script, with or without modification, is
-# permitted provided that the following conditions are met:
-#
-# 1. Redistributions of this script must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-#
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
-# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
-# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Copyright 2020, 2021 B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20210809 bkw: update for v3.5, many changes, can't build old versions.
+# - Relicense as WTFPL, with permission from the original author.
+# - Build & install the actual HTML docs (not the bundled copy of
+#   the upstream website).
+# - Don't install fonts. They were part of the above.
+# - Use upstream's .desktop files instead of our own.
+# - Upstream removed the man pages; restore them (for now).
+# - Build the gtk+3 UI. Also build the SDL2 UI, unless the user's
+#   requested the SDL1 one (or disabled SDL).
+# - Really fix the paths in the documentation.
+# - ffmpeg now included in Slackware (pre-15.0 -current). Still
+#   autodetected, but the docs no longer mention it.
+# - Get rid of README_SBo.txt as the build options are simpler
+#   and "fit" in the regular README now.
 
 # 20200801 bkw:
 # - Take over maintenance
@@ -35,10 +34,13 @@
 # - Re-enable the old x64 emulator
 # - BUILD=3
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=vice
-VERSION=${VERSION:-3.4}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-3.5}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -48,7 +50,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -72,143 +78,203 @@ fi
 
 set -e
 
-# The "--enable-shared-ffmpeg" option creates conflicts with external
-# ffmpeg libraries, so we don't use it here. Static would be OK, but
-# it won't build, so it's not an option for now either: I don't care
-# enough about it to spend any more time trying to fix it. If you do
-# care, come up with a way to build with --enable-static-ffmpeg, send
-# me a patch, and I'll include it here.
-
+# ffmpeg is included in the base OS on post-14.2 -current, but leave
+# this here in case someone's doing something clever.
 [ -x /usr/bin/ffmpeg ] && ffmpeg="--enable-external-ffmpeg"
-
-SDL="${SDL:-auto}"
-if [ "$SDL" = "auto" ]; then
-  SDL=1
-  pkg-config --exists sdl2 && SDL=2
-fi
-
-case "$SDL" in
-  1)   sdlopt="--enable-sdlui"  ;;
-  2)   sdlopt="--enable-sdlui2" ;;
-  *)   echo -e "$( basename $0 ):" \
-               "invalid SDL option '$SDL'." \
-               "Valid options are:\n  auto 1 2" \
-               1>&2
-       exit 1 ;;
-esac
 
 # Anticipating 15.0's pure-alsa-system
 if [ "${PULSE:-yes}" != "yes" ]; then
   pulseopt="--without-pulse"
 fi
 
-echo "=== sdlopt '$sdlopt', ffmpeg '$ffmpeg', pulseopt '$pulseopt'"
+echo "=== pulseopt='$pulseopt'"
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.?z
+
+# Fancy tar command here, avoid extracting what we don't need.
+tar xvf $CWD/$PRGNAM-$VERSION.tar.?z \
+    --wildcards \
+    --exclude='*/src/lib/lib*'
+
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# Set proper paths in documentation.
-sed -i "s/\/usr\/local\/lib\//\/usr\/lib${LIBDIRSUFFIX}\//g" \
-  man/vice.1
-sed -i 's/"\/vice_toc\.html"/"\/html\/vice_toc\.html"/g' \
-  src/arch/gtk3/uicommands.c
-sed -i "s/\/usr\/local/\/usr/g" doc/vice.* doc/html/*html
-sed -i "s/\/usr\/lib\//\/usr\/lib${LIBDIRSUFFIX}\//g" doc/vice.* doc/html/*html
-
-# Avoid the need for xa. It's only used to generate a small C header
-# file, which we include a prebuilt version of here. There's nothing
-# dynamic about this header, it's just a small chunk of 6502 object
-# code as a C array, and for a given version of vice it'll always be
-# the same code.
-cat $CWD/psiddrv.h.prebuilt.$VERSION > src/c64/psiddrv.h
-
-autoreconf -vif
-
 DOCDIR=/usr/doc/$PRGNAM-$VERSION
 PKGDOC=$PKG/$DOCDIR
 
-CFLAGS="$SLKCFLAGS -w -Wl,--allow-multiple-definition" \
-CXXFLAGS="$SLKCFLAGS" \
-XA=/bin/true \
-./configure \
-  $sdlopt \
-  $ffmpeg \
-  $pulseopt \
-  --enable-x64 \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --infodir=/usr/info \
-  --docdir=$DOCDIR \
-  --with-x \
-  --enable-quicktime \
-  --enable-ethernet \
-  --enable-parsid \
-  --enable-cpuhistory \
-  --build=$ARCH-slackware-linux
+# setting TEXMFVAR prevents writing to /root, which SlackBuilds
+# really shouldn't do.
+export TEXMFVAR=$( pwd )/.texmf-var
 
+# Set proper paths in documentation.
+rm -rf doc/vice.pdf # will be rebuilt, along with the HTML doc.
+sed -i -e "1,2000s/\/usr\/local/\/usr/g" \
+       -e "s,/lib/vice/,/share/vice/,Ig" \
+     doc/vice.texi
+
+autoreconf -vif
+
+# We build up to 3 times with slightly different ./configure args,
+# so make it a function.
+config() {
+  local configarg="$1"
+
+  # Avoid the need for xa. It's only used to generate a small C header
+  # file, which we include a prebuilt version of here. There's nothing
+  # dynamic about this header, it's just a small chunk of 6502 object
+  # code as a C array, and for a given version of vice it'll always be
+  # the same code. It didn't change between vice 3.4 and 3.5, either.
+  cat $CWD/psiddrv.h.prebuilt.3.4 > src/c64/psiddrv.h
+
+  # 20210809 bkw: in 3.5, upstream added dos2unix as a required dep,
+  # but it's *only used* if you run "make dist" or "make dist-gzip",
+  # which we don't do. DOS2UNIX=/bin/true bypasses the autodetection.
+  # XDG_DESKTOP_MENU=/bin/true prevents installing .desktop files,
+  # because those don't respect $DESTDIR. We can't just disable them
+  # with a configure argument, because that stops them being built
+  # at all.
+
+  CFLAGS="$SLKCFLAGS -w -Wl,--allow-multiple-definition" \
+  CXXFLAGS="$SLKCFLAGS" \
+  DOS2UNIX=/bin/true \
+  XA=/bin/true \
+  XDG_DESKTOP_MENU=/bin/true \
+  ./configure \
+    $configarg \
+    $ffmpeg \
+    $pulseopt \
+    --enable-x64 \
+    --prefix=/usr \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --infodir=/usr/info \
+    --docdir=$DOCDIR \
+    --with-x \
+    --enable-quicktime \
+    --enable-ethernet \
+    --enable-parsid \
+    --enable-cpuhistory \
+    --with-mpg123 \
+    --with-flac \
+    --with-vorbis \
+    --with-gif \
+    --with-jpeg \
+    --with-png \
+    --enable-midi \
+    --enable-lame \
+    --build=$ARCH-slackware-linux
+
+  make
+}
+
+# SDL UI: *Only* build/install the binaries (not the docs or ROMs),
+# rename them to <whatever>-sdl2 (or -sdl1).
+buildsdl() {
+  local exesuf="-sdl$1"
+  local configarg="--disable-pdf-docs --enable-sdlui"
+  [ "$1" = "2" ] && configarg+="2"
+
+  config "$configarg"
+  make -C src install-binPROGRAMS \
+              DESTDIR="$PKG" \
+              EXEEXT="$exesuf" \
+              INSTALL_PROGRAM="install -s -m0755"
+
+  # get rid of the non-graphical tools (the gtk3 build will
+  # install them again without -$exesuf).
+  rm -f $PKG/usr/bin/[cp]*$exesuf
+
+  make distclean
+}
+
+# Build the SDL binaries, unless disabled.
+# Be generous in what we accept for SDL in the env. "both" isn't
+# mentioned in README, it's probably only useful to me.
+case "${SDL:-2}" in
+  ""|2*|y*|Y*|t*|T*) buildsdl 2 ;;
+  1*)                buildsdl 1 ;;
+  both)              buildsdl 1 ; buildsdl 2 ;;
+  n*|N*|f*|F*|0*)    ;; # NOP
+  *) cat <<EOF
+
+***
+$0: invalid value for SDL environment variable.
+Allowed values: "1", "2", "no", "both", or empty/unset (same as "2").
+***
+EOF
+     exit 1 ;;
+esac
+
+# Now build & install the whole project with the gtk3 UI.
+config "--enable-native-gtk3ui --enable-desktop-files"
 make
 make install-strip DESTDIR=$PKG
-rm -f $PKG/usr/info/dir
-gzip -9 $PKG/usr/man/man?/*.?  $PKG/usr/info/*
 
-mkdir -p $PKG/usr/share/{applications,pixmaps}
-install -D -m 0644 $CWD/config/*.desktop $PKG/usr/share/applications
-install -D -m 0644 $CWD/config/vice.png $PKG/usr/share/pixmaps
+# This is a source file, doesn't belong in the package.
+rm -f $PKGDOC/*.texi
 
-# Move the docs to the Slackware standard place, symlink to where vice
-# expects it to be.
-mkdir -p $PKGDOC
-mv $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM/doc/* $PKGDOC
-( cd $PKGDOC
-  chmod 644 *
-  mkdir html
-  mv *.html *.png *.gif *.css html/ )
-( cd $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM
-  rmdir doc
-  ln -s $DOCDIR doc )
+# Install desktop files manually.
+mkdir -p $PKG/usr/share/desktop-directories \
+         $PKG/usr/share/applications
+install -m0644 src/arch/gtk3/data/unix/vice*desktop \
+        $PKG/usr/share/applications
+install -m0644 src/arch/gtk3/data/unix/vice*directory \
+        $PKG/usr/share/desktop-directories
 
-# 20200728 bkw: when I inherited this build, it was installing the
-# fonts to the doc dir (where they can't be used), but updating
-# the font cache in doinst.sh. I'm not so sure the fonts are
-# really necessary, but in case they are, I've moved them to
-# /usr/share/fonts/TTF (and gotten rid of the non-TTF ones).
-mkdir -p $PKG/usr/share/fonts/TTF
-mv $PKGDOC/*.ttf $PKG/usr/share/fonts/TTF
-rm -f $PKGDOC/Lato-*
+# Documentation. vice.pdf has already been installed to the doc dir.
+# Generate info, plaintext, and HTML versions here. The text doc is
+# harder to navigate, but easier to grep, so it's worth having IMO.
+makeinfo doc/$PRGNAM.texi
+mkdir -p $PKG/usr/info
+mv $PRGNAM.info* $PKG/usr/info
 
-# This would install Commodore font where other software can use it.
-# However, the characters in the font are in PETSCII order, not ASCII
-# or Unicode, so it's not all that useful.
-#ln -s ../../../lib$LIBDIRSUFFIX/$PRGNAM/common/CBM.ttf $PKG/usr/share/fonts/TTF
+makeinfo --plaintext doc/$PRGNAM.texi > $PKGDOC/$PRGNAM.txt
 
-cp -a AUTHORS ChangeLog COPYING FEEDBACK NEWS README $PKGDOC
+( cd doc ; texi2any --html $PRGNAM.texi )
+cp -a doc/$PRGNAM $PKGDOC/html
+
+# 20210810 bkw: as of 3.5, upstream dropped the man pages. I'm
+# including the man pages from 3.4 in the 3.5 package. Edited them
+# slightly to add correct paths to the HTML and PDF docs, also
+# convert the iso-8859-1 characters into troff escapes. Also
+# added (and expanded) vsid.1 from Debian.
+mkdir -p $PKG/usr/man/man1
+for i in $CWD/man/*.?; do
+  sed -e "s,@HTMLDOC@,$DOCDIR/html/index.html," \
+      -e "s,@PDFDOC@,$DOCDIR/$PRGNAM.pdf," \
+      < $i > $PKG/usr/man/man1/$( basename $i )
+done
+gzip -9 $PKG/usr/man/man?/*.? $PKG/usr/info/*
+for i in x64 x64sc xscpu64 x64dtv x128 xvic xpet xplus4 xcbm2 xcbm5x0; do
+  ln -s vice.1.gz $PKG/usr/man/man1/$i.1.gz
+done
+
+cp -a NEWS README $PKGDOC
 cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 # Make the slack-desc reflect the build options.
-FF=no; SDL=1.2; PA=no
-
-# We can't use ldd to detect whether ffmpeg is built in since it
-# gets loaded with dlopen(). Hence this stuff:
-grep -q '^#define USE_SDLUI2\>'  src/config.h && SDL=2.0
-grep -q '^#define HAVE_FFMPEG\>' src/config.h && FF=yes
-grep -q '^#define USE_PULSE\>'   src/config.h && PA=yes
+PA=no
+if [ "$SDL" = "both" ]; then
+  SDL="1.2 and 2.0"
+else
+  SDL=no
+  [ -x $PKG/usr/bin/x128-sdl1 ] && SDL=1.2
+  [ -x $PKG/usr/bin/x128-sdl2 ] && SDL=2.0
+fi
+grep -q '^#define USE_PULSE\>' src/config.h && PA=yes
 
 mkdir -p $PKG/install
-sed -e "s,@FF@,$FF," \
-    -e "s,@PA@,$PA," \
+sed -e "s,@PA@,$PA,"   \
     -e "s,@SDL@,$SDL," \
- $CWD/slack-desc > $PKG/install/slack-desc
+  $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

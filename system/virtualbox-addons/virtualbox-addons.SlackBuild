@@ -1,8 +1,8 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for virtualbox-addons
 
-# Copyright 2008-2017 Heinz Wiesinger, Amsterdam, The Netherlands
+# Copyright 2008-2021 Heinz Wiesinger, Amsterdam, The Netherlands
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -11,22 +11,25 @@
 # 1. Redistributions of this script must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 #
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
-# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
-# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=virtualbox-addons
 SRCNAM=VirtualBox
-VERSION=${VERSION:-5.0.40}
+VERSION=${VERSION:-6.1.28}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -36,7 +39,14 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -50,11 +60,8 @@ fi
 # kmk doesn't support MAKEFLAGS, so we use JOBS here
 JOBS=${JOBS:-3}
 
-# set xorg-server version
-XSERVER=$(X -version 2>&1 | grep Server | cut -d " " -f 4 | sed "s/\.//" | cut -d "." -f 1)
-
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
   TARGET="x86"
 elif [ "$ARCH" = "i686" ]; then
@@ -82,13 +89,6 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# We don't want an init-script building kernel modules.
-# Use virtualbox-kernel-addons.SlackBuild for this.
-patch -d src/VBox/Additions/linux/installer/ -i $CWD/rc.vboxadd.diff
-
-# Cheat!
-sed -i "s|cc_maj -gt 7|cc_maj -gt 9|" configure
-
 ./configure \
   --only-additions \
   --disable-kmods \
@@ -96,27 +96,23 @@ sed -i "s|cc_maj -gt 7|cc_maj -gt 9|" configure
 
 . ./env.sh
 
-OPENSSL=$(grep openssl src/libs/Makefile.kmk | cut -d "/" -f 2)
-
-mkdir -p src/libs/$OPENSSL
-touch src/libs/$OPENSSL/Makefile.kmk
-
 kmk -j ${JOBS} LOCALCFG=$CWD/LocalConfig.kmk
 
 mkdir -p $PKG/lib/udev/rules.d $PKG/sbin \
-  $PKG/etc/{xdg/autostart,rc.d} \
-  $PKG/usr/{src,bin,sbin,share/autostart} \
-  $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/drivers
+  $PKG/lib$LIBDIRSUFFIX/security \
+  $PKG/etc/rc.d \
+  $PKG/usr/{bin,sbin}
 
-cp -f src/VBox/Additions/linux/installer/vboxadd.sh \
-  $PKG/etc/rc.d/rc.vboxadd.new
 cp -f src/VBox/Additions/linux/installer/vboxadd-service.sh \
   $PKG/etc/rc.d/rc.vboxadd-service.new
 
+mkdir -p $PKG/etc/xdg/autostart \
+  $PKG/usr/share/autostart
 cp -f src/VBox/Additions/x11/Installer/vboxclient.desktop \
   $PKG/etc/xdg/autostart/
 cp -f src/VBox/Additions/x11/Installer/vboxclient.desktop \
   $PKG/usr/share/autostart/
+
 install -m 755 src/VBox/Additions/x11/Installer/98vboxadd-xclient \
   $PKG/usr/bin/VBoxClient-all
 
@@ -126,35 +122,22 @@ echo "KERNEL==\"vboxuser\", NAME=\"vboxuser\", OWNER=\"vboxadd\", MODE=\"0666\""
  >> $PKG/lib/udev/rules.d/60-vboxadd.rules
 
 cd out/linux.$TARGET/release/bin/additions
-  cp -rf src/vboxguest $PKG/usr/src/vboxguest-$VERSION
-  cp -rf src/vboxsf $PKG/usr/src/vboxsf-$VERSION
-  cp -rf src/vboxvideo $PKG/usr/src/vboxvideo-$VERSION
   install -m 755 VBoxControl $PKG/usr/bin/
   install -m 755 VBoxClient $PKG/usr/bin/
+  install -m 4755 VBoxDRMClient $PKG/usr/bin/
   install -m 755 VBoxService $PKG/usr/sbin/
   install -m 4755 mount.vboxsf $PKG/sbin/mount.vboxsf
-  install -m 644 vboxvideo_drv_$XSERVER.so \
-    $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/drivers/vboxvideo_drv.so
-
-  install -m 644 VBoxOGLcrutil.so $PKG/usr/lib$LIBDIRSUFFIX
-  install -m 644 VBoxOGLerrorspu.so $PKG/usr/lib$LIBDIRSUFFIX
-  install -m 644 VBoxOGLarrayspu.so $PKG/usr/lib$LIBDIRSUFFIX
-  install -m 644 VBoxOGLfeedbackspu.so $PKG/usr/lib$LIBDIRSUFFIX
-  install -m 644 VBoxOGLpackspu.so $PKG/usr/lib$LIBDIRSUFFIX
-  install -m 644 VBoxOGLpassthroughspu.so $PKG/usr/lib$LIBDIRSUFFIX
-  install -m 644 VBoxOGL.so $PKG/usr/lib$LIBDIRSUFFIX
+  install -m 755 pam_vbox.so $PKG/lib$LIBDIRSUFFIX/security/pam_vbox.so
 
   install -m 755 $CWD/vbox-uninstall-guest-additions $PKG/usr/sbin/
-
-  mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/dri
-  ln -s /usr/lib$LIBDIRSUFFIX/VBoxOGL.so \
-    $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/dri/vboxvideo_dri.so
 cd -
 
-# kconf_update script to disable OpenGL within KDE
-mkdir -p $PKG/usr/share/apps/kconf_update $PKG/usr/share/config/
-install -m 644 $CWD/kwin_blacklist_vbox.sh $PKG/usr/share/apps/kconf_update/
-install -m 644 $CWD/kwinrc $PKG/usr/share/config/
+# kconf_update script to disable kscreen within KDE
+# See bug at https://bugs.kde.org/show_bug.cgi?id=407058
+mkdir -p $PKG/usr/share/kconf_update $PKG/etc/kde/xdg
+install -m 755 $CWD/plasma_disable_kscreen.sh $PKG/usr/share/kconf_update/
+install -m 644 $CWD/virtualbox_plasma_disable_kscreen.upd $PKG/usr/share/kconf_update/
+install -m 644 $CWD/kded5rc $PKG/etc/kde/xdg/
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -169,4 +152,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

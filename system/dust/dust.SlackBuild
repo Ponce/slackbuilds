@@ -1,8 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for dust
 
 # Copyright 2019-2021 Benjamin Trigona-Harany <slackbuilds@jaxartes.net>
+# Copyright 2021 Erich Ritz, Jenks, Oklahoma, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,10 +23,13 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=dust
-VERSION=${VERSION:-0.5.4}
+VERSION=${VERSION:-0.7.5}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -41,7 +45,14 @@ if [ -z "$ARCH" ]; then
   fi
 fi
 
-CWD=$(pwd)
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -77,13 +88,13 @@ cd $PRGNAM-$VERSION
 # configuration tells cargo to use the configured directory
 # for dependencies intead of downloading from crates.io
 mkdir .cargo
-cat << EOF >> .cargo/config
+cat << EOF >> .cargo/config.toml
+[source]
 [source.crates-io]
-registry = 'https://github.com/rust-lang/crates.io-index'
-replace-with = 'vendored-sources'
+replace-with = "vendored-sources"
 
 [source.vendored-sources]
-directory = '$(pwd)/vendor'
+directory = "vendor"
 EOF
 
 # deps and versions come from Cargo.lock
@@ -91,15 +102,31 @@ mkdir vendor
 (
   cd vendor
 
-  grep -h -A 3 "\[\[package\]\]" $(find ../ -maxdepth 1 -mindepth 1 -name Cargo.lock | tr '\n' ' ') | \
-    sed 's/[[:space:]]*=[[:space:]]*/=/g;s/^--//;s/^\[\[/--\n[[/' | \
-    awk 'BEGIN { RS = "--\n" ; FS="\n" } { print $2, $3, $4 }' | sed 's/"//g;s/name=//;s/ version=/=/' | \
-    grep crates\.io-index | sed 's/ source=.*$//' | sort -u | while read -r dep ; do
+  grep -h -A 4 "\[\[package\]\]" \
+      $(find "../" -maxdepth 1 -mindepth 1 -name Cargo.lock | tr '\n' ' ') | \
+      sed 's/[[:space:]]*=[[:space:]]*/=/g;s/^--//;s/^\[\[/--\n[[/' | \
+      awk 'BEGIN { RS = "--\n" ; FS="\n" } { print $2, $3, $4, $5 }' | \
+      sed 's/"//g;s/name=//;s/ version=/=/' | \
+      grep " source=" | \
+      sed 's/ dependencies=.*$//' | \
+      sed 's/ source=[^ ]*//' | \
+      sed 's/ checksum=/=/' | \
+      sort -u | \
+      while read -r dep ; do
 
+    cksum="$(printf "%s\n" "$dep" | cut -d= -f3)"
     ver="$(printf "%s\n" "$dep" | cut -d= -f2)"
     dep="$(printf "%s\n" "$dep" | cut -d= -f1)"
 
-    tar xvf $CWD/$dep-$ver.crate
+    CRATE_FILE=$CWD/$dep-$ver.crate
+
+    if [ -z "$cksum" ] ; then
+      mkdir $dep-$ver
+      tar xvf $CRATE_FILE -C $dep-$ver --strip-components=1
+      cksum="null"
+    else
+      tar xvf $CRATE_FILE
+    fi
 
     touch $dep-$ver/.cargo-ok
 
@@ -114,9 +141,7 @@ mkdir vendor
       ) | sed '$ s/,$//'
 
       printf "    },\n"
-      printf '    "package": "'
-
-      sha256sum "$CWD/$dep-$ver.crate" | cut -f1 -d' ' | sed 's/$/"/'
+      printf '    "package": "%s"'  "$cksum"
 
       printf "}\n"
     } | python -c "import sys, json; data = sys.stdin.read(); print json.dumps(json.loads(data), sort_keys=True, indent=4, separators=(',', ' : '))" > $dep-$ver/.cargo-checksum.json
@@ -151,4 +176,4 @@ mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Copyright (c) 2011-2014 LEVAI Daniel
 # Copyright (c) 2020 B. Watson
@@ -24,12 +24,25 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20210925 bkw: BUILD=4
+# - get rid of unneeded configure lcrypto patches.
+# - add bugfix patches from Debian.
+# - don't install useless INSTALL in doc dir.
+# - fix compiler warnings caused by such brain damage as:
+#   char *foo = (char)NULL;
+# - install ssmptd.conf.new and (comment-only) revaliases.new.
+# - *don't* install generate_config script.
+# - fix doinst.sh.
+
 # 20200129 bkw: take over maintenance, no script changes yet.
+
+cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=ssmtp
 VERSION=${VERSION:-2.64}
-BUILD=${BUILD:-3}
+BUILD=${BUILD:-4}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -39,7 +52,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -67,43 +84,46 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/${PRGNAM}_${VERSION}.orig.tar.bz2
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-for diff in "${CWD}"/patches/*.diff.gz;do
-	gzip -dc "${diff}" |patch -p0
+for i in $CWD/patches/*.patch; do
+  patch -p1 < $i
 done
 
+LIBS="-lcrypto" \
+CFLAGS="$SLKCFLAGS -Wl,-s" \
 ./configure \
-	--prefix=/usr \
-	--sysconfdir='$(DESTDIR)/etc' \
-	--mandir=/usr/man \
-	--enable-ssl
+  --prefix=/usr \
+  --sysconfdir='$(DESTDIR)/etc' \
+  --mandir=/usr/man \
+  --enable-ssl
 
-sed -i	-e's,prefix=/usr,prefix=$(DESTDIR)/usr,' \
-	-e'/\$(GEN_CONFIG) \$(INSTALLED_CONFIGURATION_FILE)/d' \
-	Makefile
-CFLAGS="$SLKCFLAGS" make
-make install DESTDIR=$PKG
-install -D -m644 -o root -g root ssmtp.conf.5 $PKG/usr/man/man5/ssmtp.conf.5
+# Make generate_config non-interactive (just take the defaults).
+# Also don't install it as part of the package. The config file is
+# simple enough to edit, well-commented, and has its own man page.
+sed -i '/^read/d' generate_config
 
-strip --strip-unneeded $PKG/usr/sbin/ssmtp
-gzip -9 $PKG/usr/man/man8/ssmtp.8 $PKG/usr/man/man5/ssmtp.conf.5
+make
+make install prefix=$PKG/usr DESTDIR=$PKG
+
+gzip -9 $PKG/usr/man/man?/*.*
+
+# upstream wrote this handy man page, but forgot to install it
+mkdir -p $PKG/usr/man/man5
+gzip -9c < ssmtp.conf.5 > $PKG/usr/man/man5/ssmtp.conf.5.gz
+
+for i in $PKG/etc/$PRGNAM/*; do
+  mv $i $i.new
+done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp README INSTALL COPYING COPYRIGHT TLS $PKG/usr/doc/$PRGNAM-$VERSION/
+cp -a README COPY* CHANGE* Change* TLS $PKG/usr/doc/$PRGNAM-$VERSION/
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-find $PKG/usr/doc -type f -exec chmod 0644 {} \;
-cp generate_config $PKG/usr/sbin
-chmod 755 $PKG/usr/sbin/generate_config
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-sed -i -e"s,<VERSION>,${VERSION}," $CWD/doinst.sh
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

@@ -1,10 +1,10 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for VTK
 
 # Copyright 2013,2014 Youjie Zhou <jmpopush@gmail.com>
 # All rights reserved.
-# Copyright 2016-2020 Christoph Willing,  Brisbane Australia
+# Copyright 2016-2021 Christoph Willing,  Brisbane Australia
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,11 +25,13 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=VTK
-VERSION=${VERSION:-8.2.0}
-SHORT_VERSION=${SHORT_VERSION:-$(echo $VERSION | sed -e 's/\.[0-9]*//2g')}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-9.0.3}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -39,7 +41,14 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -60,14 +69,14 @@ fi
 
 # configure VTK features
 # (defaults suitable for OpenCASCADE, it's the only SBo package that depends on VTK)
-group_imaging="" ; [ "${IMAGING:-yes}" != "no" ] && group_imaging="-DVTK_Group_Imaging=true"
-group_mpi=""     ; [ "${MPI:-no}" != "no" ]      && group_mpi="-DVTK_Group_MPI=true"
-group_qt=""      ; [ "${QT:-yes}" != "no" ]      && group_qt="-DVTK_Group_Qt=true"
-group_tk=""      ; [ "${TK:-yes}" != "no" ]      && group_tk="-DVTK_Group_Tk=true"
-group_views=""   ; [ "${VIEWS:-no}" != "no" ]    && group_views="-DVTK_Group_Views=true"
-group_web=""     ; [ "${WEB:-no}" != "no" ]      && group_web="-DVTK_Group_Web=true"
-wrap_python=""   ; [ "${PYTHON:-yes}" != "no" ]  && wrap_python="-DVTK_WRAP_PYTHON=true"
+group_imaging="" ; [ "${IMAGING:-yes}" != "no" ] && group_imaging="-DVTK_GROUP_ENABLE_Imaging=YES"
+group_mpi=""     ; [ "${MPI:-no}" != "no" ]      && group_mpi="-DVTK_GROUP_ENABLE_MPI=YES"
+group_qt=""      ; [ "${QT:-yes}" != "no" ]      && group_qt="-DVTK_GROUP_ENABLE_Qt=YES"
+group_views=""   ; [ "${VIEWS:-no}" != "no" ]    && group_views="-DVTK_GROUP_ENABLE_Views=YES"
+group_web=""     ; [ "${WEB:-no}" != "no" ]      && group_web="-DVTK_GROUP_ENABLE_Web=YES"
 wrap_java=""     ; [ "${JAVA:-no}" != "no" ]     && wrap_java="-DVTK_WRAP_JAVA=true"
+wrap_python=""   ; [ "${PYTHON:-yes}" != "no" ]  && wrap_python="-DVTK_WRAP_PYTHON=true"
+python_version="-DVTK_PYTHON_VERSION=3"; [ "${PYTHONVERSION:-3}" == "2" ]  && python_version="-DVTK_PYTHON_VERSION=2"
 
 if pkg-config --exists jsoncpp ; then jsoncpp="-DVTK_USE_SYSTEM_JSONCPP:BOOL=ON" ; else jsoncpp="" ; fi
 
@@ -89,6 +98,9 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
+patch -p1 < $CWD/vtk-includes.patch
+patch -p1 < $CWD/vtk-AllValues.patch
+patch -p1 < $CWD/include_limits.patch
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -102,17 +114,9 @@ sed -i '/include <QTextStream>/a #include <QPainterPath>' \
 
 if pkg-config --exists proj ; then
   proj="-DVTK_USE_SYSTEM_LIBPROJ:BOOL=ON"
-  # proj6 patch courtesy of
-  # https://git.archlinux.org/svntogit/community.git/plain/trunk/proj6.patch?h=packages/vtk
-  patch -p1 < $CWD/patch-proj6.diff
 else
   proj=""
 fi
-
-# https://github.com/archlinux/svntogit-community/blob/packages/vtk/trunk/PKGBUILD
-( cd ThirdParty/exodusII/vtkexodusII
-  patch -p1 < $CWD/patch-gcc10.diff )
-sed -i 's|REGEX MATCH \"\[3-9\]|REGEX MATCH \"[1-9][0-9]|' CMake/VTKGenerateExportHeader.cmake
 
 mkdir -p build
 cd build
@@ -124,14 +128,17 @@ cd build
     -DBUILD_SHARED_LIBS=ON \
     -DVTK_CUSTOM_LIBRARY_SUFFIX="" \
     -DVTK_INSTALL_INCLUDE_DIR:PATH=include/VTK \
+    -DVTK_USE_TK=ON \
+    -DVTK_BUILD_EXAMPLES=ON \
+    -DINSTALL_DOCS=ON \
     $group_imaging \
     $group_mpi \
     $group_qt \
-    $group_tk \
     $group_views \
     $group_web \
-    $wrap_python \
     $wrap_java \
+    $wrap_python \
+    $python_version \
     -DVTK_USE_SYSTEM_EXPAT:BOOL=ON \
     -DVTK_USE_SYSTEM_FREETYPE:BOOL=ON \
     -DVTK_USE_SYSTEM_GLEW:BOOL=ON \
@@ -163,18 +170,18 @@ find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | gr
     $PKG/usr/lib${LIBDIRSUFFIX}/qt
 }
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/licenses
 cp -a \
   CONTRIBUTING.md Copyright.txt README.md \
   $PKG/usr/doc/$PRGNAM-$VERSION
-mv \
-  $PKG/usr/share/doc/vtk-$SHORT_VERSION/verdict/ \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-rm -rf $PKG/usr/share/doc
+cp -a \
+  $PKG/usr/share/licenses/VTK/* \
+  $PKG/usr/doc/$PRGNAM-$VERSION/licenses/
+rm -rf $PKG/usr/share
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

@@ -1,9 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for audacity
 
 # Copyright 2006-2010 Chess Griffin <chess@chessgriffin.com>
-# Copyright 2011-2020 Matteo Bernardini <ponce@slackbuilds.org>
+# Copyright 2011-2021 Matteo Bernardini <ponce@slackbuilds.org>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -29,12 +29,15 @@
 
 # Modified by the SlackBuilds.org project
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=audacity
 SRCNAM=Audacity
-VERSION=${VERSION:-2.4.1}
-MANVER=${MANVER:-2.4.1}
+VERSION=${VERSION:-3.0.2}
+MANVER=${MANVER:-3.0.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -44,7 +47,14 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -63,12 +73,11 @@ else
   LIBDIRSUFFIX=""
 fi
 
-if [ -x /usr/bin/listplugins ];      then do_ladspa="--with-ladspa";          else do_ladspa="--without-ladspa";   fi
-if pkg-config --exists libavcodec;   then do_ffmpeg="-ffmpeg=system";         else do_ffmpeg="out-ffmpeg";         fi
-if pkg-config --exists soundtouch;   then do_soundtouch="-soundtouch=system"; else do_soundtouch="out-soundtouch"; fi
-if pkg-config --exists twolame;      then do_twolame="-libtwolame=system";    else do_twolame="out-libtwolame";    fi
-if pkg-config --exists vamp-hostsdk; then do_vamp="-libvamp=system";          else do_vamp="out-libvamp";          fi
-if $(pkg-config --exists lilv-0) && $(pkg-config --exists suil-0); then do_lv2="-lv2=system"; else do_lv2="out-lv2"; fi
+if [ -x /usr/bin/listplugins ];      then do_ladspa="on";         else do_ladspa="off";     fi
+if pkg-config --exists soundtouch;   then do_soundtouch="system"; else do_soundtouch="off"; fi
+if pkg-config --exists twolame;      then do_twolame="system";    else do_twolame="off";    fi
+if pkg-config --exists vamp-hostsdk; then do_vamp="system";       else do_vamp="off";       fi
+if $(pkg-config --exists lilv-0) && $(pkg-config --exists suil-0); then do_lv2="system"; else do_lv2="off"; fi
 
 set -e
 
@@ -78,12 +87,15 @@ cd $TMP
 rm -rf $PRGNAM-$SRCNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$SRCNAM-$VERSION.tar.gz
 cd $PRGNAM-$SRCNAM-$VERSION
+mkdir -p build/cmake-proxies/wxWidgets
+( cd build/cmake-proxies/wxWidgets
+  tar xvf $CWD/wxwidgets-audacity-$VERSION.tar.xz )
 chown -R root:root .
 find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 # fix vamp plugin search path on x86_64 - thanks to B. Watson
 sed -i "s,lib/vamp,lib$LIBDIRSUFFIX/vamp,g" \
@@ -92,43 +104,39 @@ sed -i "s,lib/vamp,lib$LIBDIRSUFFIX/vamp,g" \
 # fix building against ffmpeg-2.6.x, patch from archlinux
 patch -p1 < $CWD/audacity-ffmpeg.patch || exit 1
 
-autoreconf -fi
+# add a missing include for gcc >= 11.x
+sed -i '/#include <functional>/a #include <limits>' include/audacity/Types.h
 
-# libsoxr is the new default resampling library
-LDFLAGS="-L/usr/lib$LIBDIRSUFFIX" \
-CFLAGS="$SLKCFLAGS -fcommon" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --enable-unicode \
-  --enable-nyquist \
-  --with-expat=system \
-  --with-lame=system \
-  --with-libvorbis=system \
-  --with-libmad=system \
-  --with-libflac=system \
-  --with-libsndfile=system \
-  --with-libid3tag=system \
-  --with-libsoxr \
-  --with-portaudio \
-  $do_ladspa \
-  --with$do_ffmpeg \
-  --with$do_lv2 \
-  --with$do_soundtouch \
-  --with$do_twolame \
-  --with$do_vamp \
-  --without-libresample \
-  --without-libsamplerate
-
-# ensure we use the system headers for these: note that we do this after the
-# configure as this last wants to run sub-configures in these dirs
-for i in ffmpeg expat lame libid3tag libflac libmad libresample libsndfile libvamp lv2 soundtouch twolame; do
-  rm -rf lib-src/$i
-done
-
-make
-make install DESTDIR=$PKG
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+    -DMAN_INSTALL_DIR=/usr/man \
+    -Daudacity_use_sndfile=system \
+    -Daudacity_use_soxr=system \
+    -Daudacity_use_lame=system \
+    -Daudacity_use_twolame=$do_twolame \
+    -Daudacity_use_flac=system \
+    -Daudacity_use_ladspa=$do_ladspa \
+    -Daudacity_use_vorbis=system \
+    -Daudacity_use_id3tag=system \
+    -Daudacity_use_expat=system \
+    -Daudacity_use_soundtouch=$do_soundtouch \
+    -Daudacity_use_vamp=$do_vamp \
+    -Daudacity_use_lv2=$do_lv2 \
+    -Daudacity_use_midi=system \
+    -Daudacity_use_ogg=system \
+    -Daudacity_use_ffmpeg=loaded \
+    -Daudacity_use_sqlite=local \
+    -Daudacity_use_wxwidgets=local \
+    -Daudacity_use_portaudio=local \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install DESTDIR=$PKG
+cd ..
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -161,4 +169,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

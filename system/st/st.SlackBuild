@@ -1,33 +1,28 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for st
 
-# Copyright 2011-2020, Nikolay Korotkiy <sikmir@gmail.com>
-# All rights reserved.
-#
-# Redistribution and use of this script, with or without modification, is
-# permitted provided that the following conditions are met:
-#
-# 1. Redistributions of this script must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-#
-#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
-#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
-#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Originally written by Nikolay Korotkiy <email removed>
+# Now maintained by B. Watson <yalhcru@gmail.com>
 
-# Modified by the SlackBuilds.org project
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20211119 bkw: BUILD=2
+# - new maintainer.
+# - don't overwrite ncurses' st and st-256color terminfo entries.
+#   thanks to Eric Lindblad for pointing this out.
+# - install the rest of the docs (FAQ, LEGACY, TODO).
+# - include config.h in the doc dir.
+# - include patches.txt in the doc dir, if patches are used.
+# - add .desktop and icon.
+
+cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=st
 VERSION=${VERSION:-0.8.4}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -37,7 +32,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -65,22 +64,22 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# Now apply any other patches that users might have added
+[ -e "$CWD/config.h" ] && cp -f $CWD/config.h config.h
+
+# Now apply any other patches the user might have added. Have to
+# do this *after* applying custom config.h, so any changes to
+# config.h here won't get overwritten.
 for i in $(ls $CWD/patches 2>/dev/null); do
-  echo "Applying patch $i"
+  [ "$i" = "README" ] && continue
+  echo "=== applying patch $i"
   patch -p1 < $CWD/patches/$i
+  PATCHES+=" $i"
 done
 
-# Remove "tic" line from Makefile - we cannot do this here!
-#sed -i "/^\t@tic/d" Makefile
-
-# 20200123 bkw: Actually, yes we can:
+# 20200123 bkw: 'tic' stuff in Makefile doesn't respect DESTDIR.
 sed -i "s|\\<tic\\>|& -o $PKG/usr/share/terminfo|" Makefile
 
 # Above sed command got broken by upstream (they removed the @)
@@ -89,26 +88,68 @@ sed -i "s|\\<tic\\>|& -o $PKG/usr/share/terminfo|" Makefile
 # when the package is removed. tic won't create the dir, so:
 mkdir -p $PKG/usr/share/terminfo
 
-[ -f "$CWD/config.h" ] && cp -f $CWD/config.h config.h
-
 CFLAGS="$SLKCFLAGS" make && \
 make install \
   PREFIX=/usr \
   MANPREFIX=/usr/man \
   DESTDIR=$PKG
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+strip $PKG/usr/bin/$PRGNAM
+gzip -9 $PKG/usr/man/man?/*
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $(find $PKG/usr/man -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+# 20211119 bkw: some of st's terminfo defs have been included in
+# Slackware's ncurses package. After some discussion with Thomas
+# Dickey (the ncurses maintainer) I've decided the ncurses versions
+# of these are better. Instead of hardcoding a list here, we'll
+# actually use the ncurses package's file list to decide what to
+# exclude.
+pkgfile="$(
+  ls /var/lib/pkgtools/packages/ncurses-* \
+  | grep '/ncurses-[^-]\+-[^-]\+-[^-]\+$' \
+)"
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a LICENSE README $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+if [ -z "$pkgfile" ]; then
+  echo "!!! can't find ncurses package, including all st terminfo entries"
+  pkgfile=/dev/null
+fi
+
+for file in $PKG/usr/share/terminfo/s/*; do
+  name="$( basename $file )"
+  if grep -q '^usr/share/terminfo/s/'$name'$' $pkgfile
+  then
+    echo "=== excluding terminfo entry: $name"
+    rm $file
+  fi
+done
+
+# .desktop file adapted from xterm.desktop
+mkdir -p $PKG/usr/share/applications
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+# Icons converted from https://en.wikipedia.org/wiki/File:Suckless_logo.svg
+for px in 16 32 48 64 128; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  convert -resize $size $CWD/$PRGNAM.png $dir/$PRGNAM.png
+done
+
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a config.h FAQ LEGACY LICENSE README TODO $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+if [ -n "$PATCHES" ]; then
+  echo "This package was built with the following patch(es):" > $PKGDOC/patches.txt
+  echo "$PATCHES" | sed 's, ,\n,g' >> $PKGDOC/patches.txt
+fi
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

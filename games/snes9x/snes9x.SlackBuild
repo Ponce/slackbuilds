@@ -1,10 +1,23 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for snes9x
 
 # Written by B. Watson (yalhcru@gmail.com)
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20211014 bkw: *downgrade* to 1.59, for now at least. 1.60 crashes
+# immediately if built with gtk+2 and started with a ROM filename.
+# If you pick a ROM from within the app, it'll work sometimes, but
+# sometimes it'll crash. When build with gtk+3, it crashes any time
+# you try to open the Preferences dialog while a ROM is loaded. I
+# also tried the latest git, it acts the same as 1.60 (except that it
+# can't be built with gtk+2 any more). I can't get 1.59 to crash, so
+# that's what I'm packaging. I don't know if the issues with 1.60 are
+# something to do with -current (something that might be fixed before
+# 15.0 releases) or something broken upstream. If you're reading this
+# after Slackware 15.0 has been released, please remind me to look
+# into it again.
 
 # 20191126 bkw: update for 1.60. Upstream has switched from autotools
 # to meson for the build system, so this script can no longer build
@@ -56,10 +69,13 @@
 # 20161015 bkw: update for 1.54.1. script has changed enough that it
 # can't build 1.53 any more.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=snes9x
-VERSION=${VERSION:-1.60}
+VERSION=${VERSION:-1.59}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -69,7 +85,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -95,7 +115,7 @@ mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
 # Don't extract the stuff we don't need, this saves 7.9MB in $TMP.
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz \
+tar xvf $CWD/$PRGNAM-$VERSION.tar.?z \
         --wildcards --exclude '*/win32/*' \
         --exclude '*/macosx/*' --exclude '*/unix/*'
 cd $PRGNAM-$VERSION
@@ -117,13 +137,21 @@ if [ "${OSS:-no}" = "no" ]; then
   WITHOSS=no
 fi
 
+# 20211012 bkw: we can now build with gtk+3
+if [ "${GTK3:-yes}" = "yes" ]; then
+  GTKDEFS="-D gtk3=true -D gtk2=false"
+else
+  GTKDEFS="-D gtk3=false -D gtk2=true"
+fi
+
+SLKCFLAGS+=" -DNDEBUG"
 mkdir build
 cd build
   CFLAGS="$SLKCFLAGS" \
   CXXFLAGS="$SLKCFLAGS" \
   meson .. \
     $PULSEOPT $OSSOPT \
-    -D gtk3=false -D gtk2=true \
+    $GTKDEFS \
     --buildtype=release \
     --infodir=/usr/info \
     --libdir=/usr/lib${LIBDIRSUFFIX} \
@@ -131,8 +159,8 @@ cd build
     --mandir=/usr/man \
     --prefix=/usr \
     --sysconfdir=/etc
-  ninja
-  DESTDIR=$PKG ninja install
+  "${NINJA:=ninja}" -v
+  DESTDIR=$PKG $NINJA install
   mv $PKG/usr/bin $PKG/usr/games
 cd ..
 
@@ -189,4 +217,4 @@ sed -e "s,@WITHPULSE@,$WITHPULSE," \
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

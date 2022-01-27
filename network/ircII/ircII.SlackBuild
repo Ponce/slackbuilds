@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for ircII
 
@@ -10,13 +10,31 @@
 # Normally I prefer all-lowercase package names, but this just looks
 # *wrong* as "ircii".
 
+# 20210913 bkw:
+# - update for v20210616. The datestamp comes from the output of
+#   "ircII -v" (not the ChangeLog).
+# - change DEFSRV to irc.libera.chat, now that freenode is a wasteland.
+# - use a private libexec/ircII dir instead of binaries in /usr/libexec.
+#   done because some other ircII-based client might conflict someday.
+# - generate and include HTML docs.
+# - add NOTES_TO_SELF to avoid cluttering up the script with comments.
+# - correct and expand Debian's man pages.
+# - add support for 'paranoid mode'.
+# - have slack-desc show default server and paranoid mode.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=ircII
-VERSION=${VERSION:-20190117_1}
+VERSION=${VERSION:-20210616_2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 SRCNAM=${PRGNAM,,}
 SRCVER=${VERSION%_*}
+
+# We're applying Debian's patches against a slightly older version.
+DEBSRCVER=20210328
 DEBVER=${VERSION#*_}
 
 if [ -z "$ARCH" ]; then
@@ -27,7 +45,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -48,7 +70,14 @@ fi
 
 set -e
 
-DEFSRV="${DEFSRV:-SSLIRC/chat.freenode.org:6697}"
+PARANOID="${PARANOID:-no}"
+case "$PARANOID" in
+  y*|Y*|t*|T*|1) para_opt="--with-paranoid" ;;
+  *)             para_opt="--without-paranoid" ;;
+esac
+echo "=== PARANOID='$PARANOID', para_opt='$para_opt'"
+
+DEFSRV="${DEFSRV:-SSLIRC/irc.libera.chat:6697}"
 case "$DEFSRV" in
   none|NONE) ;;
   *:*) srvopt="--with-default-server=$DEFSRV" ;;
@@ -61,16 +90,24 @@ echo "=== DEFSRV='$DEFSRV', srvopt='$srvopt'"
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $SRCNAM-$SRCVER
-tar xvf $CWD/$SRCNAM-$SRCVER.tar.gz
-cd $SRCNAM-$SRCVER
-tar xvf $CWD/${SRCNAM}_$SRCVER-$DEBVER.debian.tar.xz
+rm -rf $SRCNAM
+tar xvf $CWD/$SRCNAM-$SRCVER.tar.bz2
+cd $SRCNAM
+tar xvf $CWD/${SRCNAM}_$DEBSRCVER-$DEBVER.debian.tar.xz
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# apply most of Debian's patches.
-rm -f debian/patches/0004-absolute-path*
+# apply most of Debian's patches, except:
+# - the absolute-path patch would move the nonexistent
+#   /usr/share/irc/ircII.{motd,servers} to /etc/irc/{motd,servers}.
+#   Since we don't ship either file, and their paths are settable in
+#   ~/.ircrc anyway, I see no use for this patch.
+# - the Add-ioption patch is meant to fix some compile warnings that we
+#   don't actually get. Plus, it won't apply cleanly.
+rm -f debian/patches/0004-absolute-path* \
+      debian/patches/0003-Add-ioption*
+
 for i in $( cat debian/patches/series ); do
   [ -e debian/patches/$i ] && patch -p1 < debian/patches/$i
 done
@@ -85,16 +122,25 @@ sed -i -e '1i#include <curses.h>' \
 sed -i -e '/AC_CHECK_LIB(termcap/s,termcap,ncurses,g' \
        -e 's,termcap\.h ,,' \
        configure.in
+
+# my own typo/grammar/etc fixes. minor nitpicks, maybe.
+patch -p1 < $CWD/manpage.diff
+
 autoreconf -ifv
 
 # is there a disadvantage to enabling emacs meta keys?
-CFLAGS="$SLKCFLAGS -Wl,-s" \
-CXXFLAGS="$SLKCFLAGS -Wl,-s" \
+# 20210913 bkw: force --with-openssl, rather than letting it
+# autodetect. this is so we can find out right away if Slackware's
+# openssl gets upgraded to something ircII doesn't yet support.
+CFLAGS="$SLKCFLAGS -Wall -Wl,-s" \
 ./configure \
   $srvopt \
+  $para_opt \
   --with-emacs-meta-keys \
+  --with-openssl \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --libexecdir=/usr/libexec/$PRGNAM \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --mandir=/usr/man \
@@ -109,24 +155,33 @@ mkdir -p $PKG/usr/man/man1
 make install DESTDIR=$PKG mandir=$PKG/usr/man/man1
 
 # package called ircII, so let's have an ircII executable.
-ln -s irc-$VERSION $PKG/usr/bin/$PRGNAM
+ln -s $(basename $(realpath $PKG/usr/bin/irc)) $PKG/usr/bin/$PRGNAM
 
 rm -f $PKG/usr/man/man1/irc.1
 gzip -9 $PKG/usr/man/man1/*.1
 ln -s ircII.1.gz $PKG/usr/man/man1/irc.1.gz
 
-# Debian includes some extra man pages
-for i in debian/*.1; do
-  gzip -9c < $i > $PKG/usr/man/man1/$( basename $i ).gz
+# Debian includes some extra man pages. I've expanded them a bit and
+# fixed some typos.
+for i in $CWD/man/*.1; do
+  sed "s,@VERSION@,$VERSION,g" < $i | \
+    gzip -9c > $PKG/usr/man/man1/$( basename $i ).gz
 done
 
-rm -f doc/*.1 doc/*.spec*
+# HTML docs (generated from /help text). Sure, why not?
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/html
+perl doc/help2html.pl $PKG/usr/share/irc/help $PKG/usr/doc/$PRGNAM-$VERSION/html
+
+rm -f doc/*.1 doc/*.spec* doc/*.orig doc/*.pl
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a ChangeLog NEWS README doc/* contrib $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s,@para_opt@,$para_opt," \
+    -e "s,@srvopt@,$srvopt," \
+    < $CWD/slack-desc \
+    > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

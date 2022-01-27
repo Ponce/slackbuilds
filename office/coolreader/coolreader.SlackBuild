@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for CoolReader
 
@@ -23,6 +23,15 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20210930 bkw: update for v3.2.57. This is not the latest release, but
+# 3.2.58 fails to build. Will revisit when the next release happens. If
+# you can't wait that long, send me a patch (does anyone even use this?)
+# - remove fribidi from DOWNLOAD, -current's is new enough now.
+# - remove libunibreak from DOWNLOAD, add to REQUIRES (SBo's libunibreak
+#   is now new enough to use for coolreader).
+# - drop QT (qt4) GUI option since qt4's not on SBo (yet?).
+# - wxGTK3 build no longer works, for GUI=wx require wxPython 2.8.
+
 # 20210222 bkw: update for v3.2.54. Upstream no longer ships libunibreak
 # and fribidi source, so add them to DOWNLOAD. Replace qt4_settings_ui.diff
 # with a more robust sed command. Add -fpermissive. Sigh.
@@ -46,10 +55,13 @@
 # - add supported filetypes to README and slack-desc
 # - save/load settings (.ini file) to ~/.cr3, not /usr/share/cr3.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=coolreader
-VERSION=${VERSION:-3.2.54}
+VERSION=${VERSION:-3.2.57}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -59,7 +71,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -80,31 +96,14 @@ fi
 
 set -e
 
-FBDVER=${FBDVER:-1.0.10}
-LUBVER=${LUBVER:-4.3}
-
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-cr$VERSION
 tar xvf $CWD/$PRGNAM-cr$VERSION.tar.gz
 cd $PRGNAM-cr$VERSION
-( cd thirdparty
-  tar xvf $CWD/fribidi-$FBDVER.tar.xz
-  tar xvf $CWD/libunibreak-$LUBVER.tar.gz )
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
-
-# Apply coolreader-specific patches to thirdparty libs.
-( cd thirdparty/fribidi-$FBDVER
-  for i in ../../thirdparty_repo/patches/fribidi/*.patch; do
-    patch -p1 < $i
-  done )
-
-( cd thirdparty/libunibreak-$LUBVER
-  for i in ../../thirdparty_repo/patches/libunibreak/*.patch; do
-    patch -p1 < $i
-  done )
 
 # FFS, it's 2020, we don't need GUI apps hardcoded to start at
 # 640x400 window size. Honestly we don't need them hardcoded at
@@ -113,12 +112,6 @@ find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
 sed -i 's,\(<height>\)400,\11024,' cr3qt/src/mainwindow.ui
 sed -i 's,\(<width>\)600,\11280,' cr3qt/src/mainwindow.ui
 
-# Use bundled libunibreak, ours is too old (3.0).
-# Use bundled fribidi, Pat's is too old (0.19.7).
-sed -i -e '/find_package(libunibreak)/d' \
-       -e '/find_package(FriBidi)/d' \
-       CMakeLists.txt
-
 # Install the docs in the right place for Slackware.
 sed -i "s,share/doc/cr3,doc/$PRGNAM-$VERSION," cr3qt/CMakeLists.txt
 
@@ -126,16 +119,19 @@ sed -i "s,share/doc/cr3,doc/$PRGNAM-$VERSION," cr3qt/CMakeLists.txt
 # into Qt Designer and saving it again. Needed because upstream's
 # using a different (older?) version of qt4.
 
-GUI=${GUI:-QT}
+GUI=${GUI:-QT5}
 GUI="$( echo $GUI | tr a-z A-Z )"
 case "$GUI" in
-  QT)  UI=Qt4
-       sed -i '/<property name="currentText"/s,>, stdset="0">,' cr3qt/src/settings.ui
-       ;;
+  # 20210930 bkw: Qt4 disabled for now, unless/until SBo gets a qt4 build.
+  #QT)  UI=Qt4
+       #sed -i '/<property name="currentText"/s,>, stdset="0">,' cr3qt/src/settings.ui
+       #;;
   QT5) UI=Qt5 ;;
-  WX)  # Either 2.8.x or 3.0.x works, be specific in the slack-desc.
-       UI="wxWidgets $( wx-config --version | cut -d. -f1,2)" ;;
-  *)   echo "*** Unsupported GUI '$GUI', use one of: QT QT5 WX"
+  WX)  # Only 2.8.x works, be specific in the slack-desc.
+       UI="wxWidgets 2.8"
+       SLKCFLAGS+=" $( wx-config --version=2.8 --cflags )"
+       SLKLDFLAGS="$( wx-config --version=2.8 --libs )" ;;
+  *)   echo "*** Unsupported GUI '$GUI', use one of: QT5 WX"
        exit 1 ;;
 esac
 
@@ -160,6 +156,7 @@ echo "=== Building $UI GUI"
 mkdir -p build
 cd build
   cmake \
+    -D CMAKE_EXE_LINKER_FLAGS="$SLKLDFLAGS" \
     -D USE_UNRAR=1 \
     -D CMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -D CMAKE_CXX_FLAGS:STRING="$SLKCFLAGS -fpermissive" \
@@ -196,4 +193,4 @@ sed "s,@UI@,$UI," $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

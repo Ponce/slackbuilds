@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for pom1
 
@@ -7,10 +7,20 @@
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/
 # for details.
 
+# 20211027 bkw: BUILD=2
+# - new-style icons.
+# - binary in /usr/games.
+# - get rid of silly wrapper script.
+# - /usr/share/pom1 => /usr/share/games/pom1.
+# - man page.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=pom1
 VERSION=${VERSION:-1.0.0}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -20,7 +30,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -48,18 +62,23 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-sed -i 's/Emulator;/&System;/' src/$PRGNAM.desktop.in
+sed -i -e 's/Emulator;/&System;/' \
+       -e 's,Exec=,&/usr/games/,' \
+       src/$PRGNAM.desktop.in
+
+# 20211027 bkw: we don't need a wrapper script that just sets one
+# environment variable and calls the real binary, when we can
+# set the default in the code.
+sed -i '/setRomDirectory/s,"roms","/usr/share/games/pom1/roms",' src/main.c
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
+  --bindir=/usr/games \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --localstatedir=/var \
@@ -70,24 +89,35 @@ CXXFLAGS="$SLKCFLAGS" \
 make
 make install-strip DESTDIR=$PKG
 
-mv $PKG/usr/share/icons $PKG/usr/share/pixmaps
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+rm -rf $PKG/usr/share/icons
+mkdir -p $PKG/usr/share/games
+mv $PKG/usr/share/$PRGNAM $PKG/usr/share/games/$PRGNAM
+
+for px in 16 32 48 64 128; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  convert -resize $size $CWD/$PRGNAM.png $dir/$PRGNAM.png
+done
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
 # Why is there a fricken --docdir option when every configure
 # script ignores it?!
 mv $PKG/usr/share/doc/$PRGNAM/* $PKG/usr/doc/$PRGNAM-$VERSION
 rm -rf $PKG/usr/share/doc
 
+# man page written by SlackBuild author.
+mkdir -p $PKG/usr/man/man6
+gzip -9c < $CWD/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
+
 # Icon created by Creative Nerds, downloaded from:
 # http://www.iconarchive.com/show/wooden-social-icons-by-creativenerds/apple-icon.html
 mkdir -p $PKG/usr/share/pixmaps
 cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
 
-# I prefer not to clutter /usr/bin with binaries you're not supposed
-# to actually ever run, so:
-mkdir -p $PKG/usr/libexec
-mv $PKG/usr/bin/$PRGNAM-$VERSION $PKG/usr/libexec
-sed -i "s,^$PRGNAM-$VERSION,/usr/libexec/&," $PKG/usr/bin/$PRGNAM
+mv $PKG/usr/games/$PRGNAM-$VERSION $PKG/usr/games/$PRGNAM
 
 cp -a COPYING $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
@@ -97,4 +127,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

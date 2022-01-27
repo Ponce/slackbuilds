@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for mididings
 
@@ -6,10 +6,34 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211230 bkw:
+# - updated for v20151117_bbec99a.
+# - don't install doc/*, it's the *source* for the documentation.
+# - do install doc/examples, it's just python code.
+
+# Notes to self:
+
+# The documentation for mididings requires an archaic version of
+# Sphinx to build it. Modern Sphinx (4.2 on SBo) won't work. Rather
+# than diving into that rabbit hole, I'm just adding a link to the
+# docs on upstream's site.
+
+# Debian has man pages for mididings and livedings, but they're
+# horribly outdated (2010). Don't include here.
+
+# Previous versions were built with libsmf, and could process MIDI
+# files as-is. This version needs pysmf for that purpose, and we don't
+# (yet) have it on SBo, so there's no MIDI file support. However, you
+# could always use a MIDI player to play a file and connect its output
+# to mididings, so it's not a show-stopper.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=mididings
-VERSION=${VERSION:-20120419}
+VERSION=${VERSION:-20151117_bbec99a}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -19,7 +43,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -44,26 +72,28 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-python setup.py install --root=$PKG --enable-smf
+# "async" is a keyword in recent pythons, code uses it as a variable name.
+sed -i 's,async,is_async,g' $PRGNAM/units/call.py
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# make it look for e.g. -lboost_python39.so (not -lboost_python-py39.so).
+sed -i '/^boost_python_suffixes/s,-py,,' setup.py
+
+python3 setup.py install --root=$PKG --enable-smf
+
+strip $PKG/usr/lib*/py*/site-*/*.so
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a COPYING NEWS PKG-INFO README doc/* $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a COPYING NEWS README doc/examples $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

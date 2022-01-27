@@ -1,8 +1,8 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for GoldenCheetah
 
-# Copyright 2018-2020 Kyle Guinn <elyk03@gmail.com>
+# Copyright 2018-2021 Kyle Guinn <elyk03@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,11 +22,14 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=goldencheetah
 SRCNAM=GoldenCheetah
 VERSION=${VERSION:-3.5}
-BUILD=${BUILD:-3}
+BUILD=${BUILD:-4}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$(uname -m)" in
@@ -36,7 +39,14 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM-$VERSION
 OUTPUT=${OUTPUT:-/tmp}
@@ -68,11 +78,32 @@ cd $SRCNAM-$VERSION
 chown -R root:root .
 chmod -R u+w,go-w,a+rX-st .
 
-# GoldenCheetah statically links its own version of qwt, which doesn't seem to
-# correspond to any released version.  The build system uses -L/-l flags to
+# Fixes from release_3.5.0 branch.  0003 and 0004 contain images treated as
+# text since `patch` doesn't decode git binary patches.  Comment them out if
+# they won't apply.
+patch -p1 < $CWD/patches/0001-SEGV-on-Overview-Chart.patch
+patch -p1 < $CWD/patches/0002-View-on-Strava.patch
+patch -p1 < $CWD/patches/0003-Compatible-with-Strava.patch
+patch -p1 < $CWD/patches/0004-Connect-with-Strava.patch
+patch -p1 < $CWD/patches/0005-3.5-BUILD-INCREMENT.patch
+
+# GoldenCheetah statically links its own version of qwt, which is likely a fork
+# from around version 6.1.0 or 6.1.1.  The build system uses -L/-l flags to
 # refer to the static lib, but due to other -L flags and symlinked directories,
 # it might find the system qwt instead.  Replace the flags with a filename.
-sed -i 's|-L\(\$\${PWD}/../qwt/lib\) -l\(qwtd\?\)|\1/lib\2.a|' src/src.pro
+sed -i 's|-L\(\$\${PWD}/\.\./qwt/lib\) -l\(qwtd\?\)|\1/lib\2.a|' src/src.pro
+
+# Fixes for qwt and Qt5 compatibility.
+patch -p1 < $CWD/patches/0001-Fix-Qwt-incompatibilities-with-Qt-5.15.0.patch
+
+# Use the system levmar if available.
+# Builtin copy is version 2.6 without lapack support.
+# TODO:  Replace other builtins (qzip?, qxt, lmfit).
+if [ -f /usr/include/levmar/levmar.h ]; then
+  sed -i 's|\.\./levmar[^ ]* *||g'             src/src.pro
+  echo "INCLUDEPATH += /usr/include/levmar" >> src/src.pro
+  echo "LIBS += -llevmar"                   >> src/src.pro
+fi
 
 # We don't have a '-qt4' suffix on lrelease.
 sed -i 's|\(lrelease\)-qt4|\1|' src/src.pro
@@ -82,22 +113,50 @@ cp qwt/qwtconfig.pri.in qwt/qwtconfig.pri
 cp src/gcconfig.pri.in  src/gcconfig.pri
 
 # Set up the build configuration.
-sed -i 's|^#\(CONFIG += release\)|\1|'  src/gcconfig.pri
-sed -i 's|^#\(QMAKE_LEX  = flex\)|\1|'  src/gcconfig.pri
-sed -i 's|^#\(QMAKE_YACC = bison\)|\1|' src/gcconfig.pri
-sed -i 's|^#\(LIBZ_INCLUDE =\)|\1|'     src/gcconfig.pri
-sed -i 's|^#\(LIBZ_LIBS    = -lz\)|\1|' src/gcconfig.pri
+sed -i 's|^#\(CONFIG += release\)\>|\1|'  src/gcconfig.pri
+sed -i 's|^#\(QMAKE_LEX  = flex\)\>|\1|'  src/gcconfig.pri
+sed -i 's|^#\(QMAKE_YACC = bison\)\>|\1|' src/gcconfig.pri
+
+# Use -b y to force bison >= 3.7 to copy y.tab.h's contents into y.tab.cpp
+# instead of #including it, since qmake's renaming to $base_yacc.{h,cpp}
+# breaks the #include.
+#echo "QMAKE_YACCFLAGS_MANGLE = -p $base -b y" >> src/gcconfig.pri
+#echo "QMAKE_YACC_HEADER = y.tab.h"            >> src/gcconfig.pri
+#echo "QMAKE_YACC_SOURCE = y.tab.cpp"          >> src/gcconfig.pri
+# But that breaks parallel builds (multiple build steps produce temporary files
+# with the same y.tab.{h,cpp} names).  Make the files available by both names.
+sed -i 's|^#\(  QMAKE_MOVE =\).*|\1 ln -sf|' src/gcconfig.pri
 
 # Enable optional dependencies found in stock Slackware.
-# Also enable optional video and webengine from QT5 since QT5 is required.
-# TODO:  Enable other optional dependencies (python3, R, libsamplerate, ...)
-sed -i 's|^#\(ICAL_INSTALL =\).*|\1 /usr|'      src/gcconfig.pri
-sed -i 's|^#\(LIBUSB_INSTALL =\).*|\1 /usr|'    src/gcconfig.pri
-sed -i 's|^#\(CONFIG   += link_pkgconfig\)|\1|' src/gcconfig.pri
-sed -i 's|^#\(PKGCONFIG =\)|\1|'                src/gcconfig.pri
-sed -i 's|^\(DEFINES += GC_VIDEO_NONE\)|#\1|'   src/gcconfig.pri
-sed -i 's|^#\(DEFINES += GC_VIDEO_QT5\)|\1|'    src/gcconfig.pri
-sed -i 's|^#\(DEFINES += NOWEBKIT\)|\1|'        src/gcconfig.pri
+sed -i 's|^#\(ICAL_INSTALL =\).*|\1 /usr|'        src/gcconfig.pri
+sed -i 's|^#\(LIBUSB_INSTALL =\).*|\1 /usr|'      src/gcconfig.pri
+sed -i 's|^#\(LIBUSB_USE_V_1 = true\)\>|\1|'      src/gcconfig.pri
+sed -i 's|^#\(SAMPLERATE_INSTALL =\).*|\1 /usr|'  src/gcconfig.pri
+sed -i 's|^#\(CONFIG   += link_pkgconfig\)\>|\1|' src/gcconfig.pri
+sed -i 's|^#\(PKGCONFIG =\).*|\1|'                src/gcconfig.pri
+sed -i 's|^#\(LIBZ_INCLUDE =\).*|\1|'             src/gcconfig.pri
+sed -i 's|^#\(LIBZ_LIBS    = -lz\)\>|\1|'         src/gcconfig.pri
+sed -i 's|^#\(HTPATH = \.\./httpserver\)\>|\1|'   src/gcconfig.pri
+sed -i 's|^\(DEFINES += GC_VIDEO_NONE\)\>|#\1|'   src/gcconfig.pri
+sed -i 's|^#\(DEFINES += GC_VIDEO_QT5\)\>|\1|'    src/gcconfig.pri
+sed -i 's|^#\(DEFINES += NOWEBKIT\)\>|\1|'        src/gcconfig.pri
+
+# Python support.  Regenerate the SIP files.
+echo "DEFINES += GC_WANT_PYTHON"                             >> src/gcconfig.pri
+echo "PYTHONINCLUDES = $(pkg-config --cflags python3-embed)" >> src/gcconfig.pri
+echo "PYTHONLIBS = $(pkg-config --libs python3-embed)"       >> src/gcconfig.pri
+make -C src/Python/SIP -f Makefile.hack clean
+make -C src/Python/SIP -f Makefile.hack
+
+# Optional KML support.
+if pkg-config --exists libkml; then
+  sed -i 's|^#\(KML_INSTALL =\).*|\1 /usr|' src/gcconfig.pri
+fi
+
+# Optional R support.
+if pkg-config --exists libR; then
+  sed -i 's|^#\(DEFINES += GC_WANT_R\)\>|\1|' src/gcconfig.pri
+fi
 
 qmake-qt5 \
   -recursive \
@@ -128,4 +187,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

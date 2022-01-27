@@ -1,9 +1,20 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for flite
 # Originally written by Martin Lefebvre (email removed)
 # Now maintained by B. Watson (yalhcru@gmail.com), original author is MIA.
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20210802 bkw: update for v2.2
+# - remove texi2html dep, as upstream now uses texi2any
+# - related to above, always build the HTML docs
+# - add flite_time and t2p to usr/bin. Also man pages for same,
+#   from Debian.
+# - Note to self: the shared library versioning is weird looking. The
+#   soname version is 1, same as FLITE_PROJECT_SHLIB_VERSION
+#   in flite_version.h, and the files are installed as
+#   libfliteblah.2.2. So we end up with symlinks libfliteblah.so.1 =>
+#   libfliteblah.2.2, which is actually correct.
 
 # 20181114 bkw:
 # - BUILD=2
@@ -42,10 +53,13 @@
 # The updated version is released under the WTFPL, see
 # http://www.wtfpl.net/txt/copying/ for details.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=flite
-VERSION=${VERSION:-2.1}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-2.2}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -55,7 +69,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -79,18 +97,15 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION-release
-tar xvf $CWD/$PRGNAM-$VERSION-release.tar.bz2
-cd $PRGNAM-$VERSION-release
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# fix LDLAGS to allow external programs to find libflite.so
-patch -p1 < $CWD/flite-ldflags-fix.patch
-
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
+CFLAGS="$SLKCFLAGS -Wl,-s" \
+CXXFLAGS="$SLKCFLAGS -Wl,-s" \
 ./configure \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
@@ -100,67 +115,50 @@ CXXFLAGS="$SLKCFLAGS" \
   --enable-shared \
   --build=$ARCH-slackware-linux
 
-# Fix builds with SBo standalone texi2html. The -number option works
-# with Slackware's ancient texi2html (from t/tetex), but would have to
-# be --number-sections in the newer SBo texi2html. It turns out section
-# numbering is enabled by default in both versions, so get rid of it...
-sed -i '/texi2html/s,-number,,' doc/Makefile
-
 make
 make install prefix=$PKG/usr INSTALLLIBDIR=$PKG/usr/lib${LIBDIRSUFFIX}
+strip $PKG/usr/lib$LIBDIRSUFFIX/*.so.*.*
 
 # --disable-static is accepted by configure but totally ignored, so:
 rm -rf $PKG/usr/lib$LIBDIRSUFFIX/*.a
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# flite.1 written by SlackBuild author. The rest are from Debian.
+mkdir -p $PKG/usr/man/man1
+for i in $CWD/man/*.1; do
+  gzip -9c < $i > $PKG/usr/man/man1/"$( basename "$i" )".gz
+done
+
+# the Debian package includes these 2 binaries that don't get installed
+# by 'make install'. They look useful enough, so:
+install -s -m0755 bin/t2p bin/flite_time $PKG/usr/bin
 
 # include any *.flitevox files the user downloaded.
 for file in $CWD/*.flitevox; do
   [ -e "$file" ] && \
     mkdir -p $PKG/usr/share/$PRGNAM && \
-    cat $file > $PKG/usr/share/$PRGNAM/"$( basename "$file" )" &&
+    cat $file > $PKG/usr/share/$PRGNAM/"$( basename "$file" )" && \
     EXTRA=yes
 done
 
-# -current's tex is texlive, which lacks texi2html. Also lots of
-# users prefer to run texlive on 14.2, which has the same problem.
-# So only try to build the HTML docs if (a) the user forces with
-# HTML=yes, or (b) if HTML=auto (the default) and texi2html is
-# actually found on the $PATH.
-HTML="${HTML:-auto}"
-
-if [ "$HTML" = "auto" ]; then
-  if which texi2html 2>/dev/null; then
-    HTML="yes"
-  else
-    HTML="no"
-  fi
-fi
-
 # build the docs. NB don't replace subshells with "cd dir" and
 # "cd -", as they don't nest.
-HTMLDOC=""
-if [ "$HTML" = "yes" ]; then
-  HTMLDOC="doc/html"
-  ( cd doc
-    # build the HTML docs.
-    make $PRGNAM.html
-    ( cd html
-  
-      # Upstream hardlinks index.html, use a symlink instead.
-      rm -f index.html
-      ln -s ${PRGNAM}_toc.html index.html
-  
-      # Also, we don't ship the PDF doc, so link to upstream's.
-      # Fix link to source package.
-      sed -i \
-        -e 's,HREF="flite.pdf",HREF="http://www.festvox.org/flite/doc/flite.pdf",' \
-        -e 's,\.tar\.gz,.tar.bz2,g' \
-        ${PRGNAM}_toc.html
-    )
+( cd doc
+  # build the HTML docs.
+  make $PRGNAM.html
+  ( cd html
+
+    # Upstream hardlinks index.html, use a symlink instead.
+    rm -f index.html
+    ln -s ${PRGNAM}_toc.html index.html
+
+    # Also, we don't ship the PDF doc, so link to upstream's.
+    # Fix link to source package.
+    sed -i \
+      -e 's,HREF="flite.pdf",HREF="http://www.festvox.org/flite/doc/flite.pdf",' \
+      -e 's,\.tar\.gz,.tar.bz2,g' \
+      ${PRGNAM}_toc.html
   )
-fi
+)
 
 # 20181114 bkw: always build the GNU info docs.
 ( cd doc
@@ -170,13 +168,9 @@ fi
 )
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a ACKNOWLEDGEMENTS COPYING README* $HTMLDOC doc/*.txt doc/alice \
+cp -a ACKNOWLEDGEMENTS COPYING README* doc/html doc/*.txt doc/alice \
       $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-
-# man page written by SlackBuild author.
-mkdir -p $PKG/usr/man/man1
-gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
 
 mkdir -p $PKG/install
 
@@ -192,4 +186,4 @@ fi
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

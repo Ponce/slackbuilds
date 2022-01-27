@@ -11,4 +11,3 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/bash_completion.d/multivalent-tool-pdf.new

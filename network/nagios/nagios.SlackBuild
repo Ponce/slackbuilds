@@ -1,9 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for nagios
 
 # Copyright 2009-2013 Niels Horn, Rio de Janeiro, RJ, Brazil
-# Copyright 2014, 2015, 2016, 2017  Mario Preksavec, Zagreb, Croatia
+# Copyright 2014, 2021  Mario Preksavec, Zagreb, Croatia
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,10 +23,13 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=nagios
-VERSION=${VERSION:-4.3.4}
+VERSION=${VERSION:-4.4.6}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -44,7 +47,14 @@ for i in $(echo $DOCROOT | tr "/" " "); do
   RELPATH="${RELPATH}../"
 done
 
-CWD=$(pwd)
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -105,6 +115,9 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
+# Fix /var/run usage
+patch -p1 <$CWD/default-init.in.diff
+
 CFLAGS="$SLKCFLAGS -w -Wl,--allow-multiple-definition" \
   ./configure \
   --prefix=/usr \
@@ -119,6 +132,7 @@ CFLAGS="$SLKCFLAGS -w -Wl,--allow-multiple-definition" \
   --with-httpd-conf=/etc/httpd/extra \
   --with-checkresult-dir=/var/spool/$PRGNAM \
   --with-init-dir=/etc/rc.d \
+  --with-init-type=sysv \
   --with-lockfile=/var/run/nagios/nagios.lock
 
 make all
@@ -161,25 +175,29 @@ chmod -R g-w,o-rx $PKG/etc/$PRGNAM
 mkdir -p $PKG/var/run/nagios
 
 # Change init script and leave it -x
+mv $PKG/etc/init.d $PKG/etc/rc.d
 mv $PKG/etc/rc.d/$PRGNAM $PKG/etc/rc.d/rc.$PRGNAM.new
 chmod -x $PKG/etc/rc.d/rc.$PRGNAM.new
 
 # Move documentation to right location
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  Changelog INSTALLING LEGAL LICENSE README THANKS UPGRADING contrib \
-    $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CONTRIBUTING.md Changelog INSTALLING LEGAL LICENSE README.md \
+  THANKS UPGRADING contrib $PKG/usr/doc/$PRGNAM-$VERSION
 mv $PKG/$DOCROOT/$PRGNAM/docs $PKG/usr/doc/$PRGNAM-$VERSION/html
 find $PKG/usr/doc/$PRGNAM-$VERSION -type f -exec chmod 644 {} \;
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
+
+# Move cgi files to their place
+mkdir -p $PKG/usr/sbin/$PRGNAM
+mv $PKG/usr/sbin/*.cgi $PKG/usr/sbin/$PRGNAM/
 
 # Fixup some ownership and permission issues
 chown root:root $PKG/usr/sbin
 chown -R root:nagios $PKG/usr/sbin/$PRGNAM
 chmod -R 0754 $PKG/usr/sbin/$PRGNAM
 chown root:root $PKG/usr/bin
-chmod 0755 $PKG/usr/bin
+chmod 0755 $PKG/usr/{,s}bin
 chown root:nagios $PKG/usr/bin/*
 chmod 0754 $PKG/usr/bin/*
 chown nagios:nagios $PKG/var/run/$PRGNAM
@@ -190,4 +208,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

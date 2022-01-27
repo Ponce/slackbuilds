@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for mac
 
@@ -9,6 +9,13 @@
 # Original version of this script had no license. Modified version
 # licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/
 # for details.
+
+# 20211125 bkw: BUILD=2
+# - add -DSHNTOOL to CXXFLAGS, which enables human-readable
+#   error messages (but not shn support).
+# - add README note about 'invalid input file' error.
+# - update README and slack-desc.
+# - add man page.
 
 # 20190107 bkw:
 # - download URL went away, use netbsd pkgsrc
@@ -22,10 +29,13 @@
 # - get rid of .la file
 # - minor script simplification
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=mac
 VERSION=${VERSION:-3.99_u4_b5_s7}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -35,7 +45,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -75,10 +89,23 @@ find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 if [ "${FORCE_SLACK_CFLAGS:-no}" = "yes" ]; then
-   sed -i 's,-O3\>,,' configure
+  sed -i 's,-O3\>,,' configure
 fi
 
 patch -p1 < $CWD/gcc6.patch
+
+# This option isn't well explained... it turns on human-readable error
+# messages (without it, you get "Error: 1002", no idea WTF it means),
+# and the -q (quick verify) option. It does *not* make mac able to
+# read/write .shn files... I would never have known any of this from
+# reading the docs, had to read the source.
+SLKCFLAGS+=" -DSHNTOOL"
+
+# Clean up the usage output a little.
+sed -i -e 's,\[EXE\],mac,' \
+       -e 's,mac\.exe,mac,' \
+       -e 's,int filenames,filenames w/spaces,' \
+       src/Console/Console.cpp
 
 LDFLAGS="-Wl,-s" \
 CFLAGS="$SLKCFLAGS" \
@@ -94,15 +121,20 @@ CXXFLAGS="$SLKCFLAGS" \
 make all
 make install DESTDIR=$PKG
 
-# pretty sure we don't need this:
+# We don't need this:
 rm -f $PKG/usr/lib$LIBDIRSUFFIX/*.la
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS COPYING ChangeLog NEWS README TODO $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# 20211125 bkw: man page by SlackBuild author. I got bored, sorry.
+mkdir -p $PKG/usr/man/man1
+gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a AUTHORS src/License.htm ChangeLog* NEWS README TODO $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

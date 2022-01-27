@@ -1,11 +1,17 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for mhwaveedit
-# Written by Felix Krueger
+# Originally written by Felix Krueger
 
 # Now maintained by B. Watson <yalhcru@gmail.com>. Original script
 # had no license. Modified version licensed under the WTFPL. See
 # http://www.wtfpl.net/txt/copying/ for details.
+
+# 20211127 bkw: BUILD=2
+# - portaudio support was broken, explicitly disable it and remove
+#   from README.
+# - add JACK=no in case someone needs it.
+# - dynamic slack-desc.
 
 # 20181022 bkw:
 # - Take over maintenance.
@@ -15,10 +21,13 @@
 # - Minor script cleanups.
 # - Don't install the install directions in docdir.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=mhwaveedit
 VERSION=${VERSION:-1.4.24}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -28,7 +37,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -63,17 +76,28 @@ find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
 patch -p0 < $CWD/intbox.diff
 
 # 20181023 bkw: environment variables to control the build options.
-MIXER="${MIXER:-xterm -e alsamixer}"
 PULSE="${PULSE:-yes}"
 OSS="${OSS:-no}"
+JACK="${JACK:-yes}"
 
-[ "$PULSE" = "no" ] && EXTRAOPTS="$EXTRAOPTS --without-pulse"
-[ "$OSS" =   "no" ] && EXTRAOPTS="$EXTRAOPTS --without-oss"
+[ "$PULSE" = "no" ] && EXTRAOPTS+=" --without-pulse"
+[ "$OSS"   = "no" ] && EXTRAOPTS+=" --without-oss"
+[ "$JACK"  = "no" ] && EXTRAOPTS+=" --without-jack"
+
+# 20211127 bkw: this just sets the default; it can be changed in the
+# preferences.
+MIXER="${MIXER:-xterm -e alsamixer}"
+
+# 20211127 bkw: add --without-portaudio. Our portaudio lacks the
+# Pa_Timestamp type, so the configure script would disable it anyway.
+# Not sure if that means our portaudio is too new or too old, not
+# all that interested anyway.
 
 CFLAGS="$SLKCFLAGS" \
   ./configure \
   --with-default-mixerapp="$MIXER" \
   $EXTRAOPTS \
+  --without-portaudio \
   --with-default-ladspa-path=/usr/lib$LIBDIRSUFFIX/ladspa \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
@@ -100,11 +124,16 @@ cp -a AUTHORS COPYING ChangeLog NEWS README TODO $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
+J=no; P=no; O=no
+
+objdump -p $PKG/usr/bin/$PRGNAM | grep -q 'NEEDED.*libpulse' && P=yes
+strings    $PKG/usr/bin/$PRGNAM | grep -q /dev/dsp           && O=yes
+
 # realtime audio stuff only if JACK support included.
-if ldd $PKG/usr/bin/$PRGNAM | grep -q libjack; then
+if objdump -p $PKG/usr/bin/$PRGNAM | grep -q 'NEEDED.*libjack'; then
+  J=yes
   if [ "${SETCAP:-yes}" = "yes" ]; then
     cat $CWD/setcap.sh >> $PKG/install/doinst.sh
     chown root:audio $PKG/usr/bin/$PRGNAM
@@ -112,5 +141,10 @@ if ldd $PKG/usr/bin/$PRGNAM | grep -q libjack; then
   fi
 fi
 
+sed -e "s,@J@,$J," \
+    -e "s,@P@,$P," \
+    -e "s,@O@,$O," \
+  $CWD/slack-desc > $PKG/install/slack-desc
+
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

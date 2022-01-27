@@ -1,10 +1,18 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for sonic-visualiser
 
 # Written by B. Watson (yalhcru@gmail.com)
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20211207 bkw: update for 4.4.
+# - liblo is now a hard dep.
+# - jack is a hard dep again.
+# - get rid of 10+ year outdated Debian man pages, write an up-to-date one.
+#   unfortunately I do not speak French, so the new man page is English-only.
+# - upstream switched to meson, can no longer build older versions with
+#   this script.
 
 # 20201104 bkw: update for 4.2.
 # 20191212 bkw:
@@ -60,10 +68,13 @@
 # - add MIME types for desktop integration
 # - add realtime capabilities
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=sonic-visualiser
-VERSION=${VERSION:-4.2}
+VERSION=${VERSION:-4.4}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -73,7 +84,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -104,114 +119,62 @@ chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# In case the user just now installed qt5 and hasn't sourced the profile
-# script, let's be nice and do it here.
-[ "$QT5DIR" = ""  ] && \
-  [ -x /etc/profile.d/qt5.sh ] && \
-  source /etc/profile.d/qt5.sh
+# 20211207 bkw: upstream switched from autotools to meson/ninja. Also,
+# the test suite is no longer run by default, so all the extra code here
+# that was needed to make the tests pass, is gone. And, there's now a
+# functional 'install' target.
+# According to COMPILE_linux.md, mlton is required. But building without
+# it works fine and produces a binary that works fine...
+mkdir build
+cd build
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  meson .. \
+    --buildtype=release \
+    --infodir=/usr/info \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    -Dstrip=true
+  "${NINJA:=ninja}"
+  DESTDIR=$PKG $NINJA install
+cd ..
 
-# Fudge the test suite, all but 2 tests pass. I think the error is in the
-# test suite, not a real error in the code. Even if it is broken code, the
-# failure is caused by a 32KHz mp3, which is is pretty uncommon sampling
-# rate to find in an mp3 and shouldn't prevent us using sonic-visualiser
-# on other filetypes (or mp3 at normal sampling rates, e.g. the 44.1KHz
-# test cases pass).
-rm -f svcore/data/fileio/test/audio/mp3/32000-1.mp3
+# binaries already stripped, .desktop already installed.
 
-# The test suite uses utf8 encoded filenames, so it will *fail* if
-# the current locale is a non-utf8 one (such as Slackware's default
-# of en_US). Try to set a locale that makes sense for the user, fall
-# back on en_US.UTF-8 if we can't figure it out.
-FALLBACK="en_US.UTF-8"
-case "$LANG" in
-  *.utf8|*.UTF8|*.utf-8|*.UTF-8) ;; # already OK
-  ??_??) LANG="$LANG.UTF-8"      ;; # e.g "en_US", "de_DE"
-  *)     LANG=$FALLBACK          ;; # empty, "C", or garbage
-esac
+for i in icons/sv-*x*.png; do
+  size="$( basename $i | cut -d- -f2 | cut -d. -f1 )"
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  cp -a $i $dir/$PRGNAM.png
+done
 
-# Make sure the chosen locale exists. If it doesn't, the locale
-# command will give us errors that begin with "locale:" (its exit
-# status is always 0/success, how annoying).
-export LANG
-if locale 2>&1 >/dev/null | grep -q '^locale:'; then
-  LANG=$FALLBACK
-  export LANG
-fi
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
-QTDIR=$QT5DIR \
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --build=$ARCH-slackware-linux
-
-# Override $HOME since the unit tests insist on writing useless stuff
-# there. In case the user's using ccache, this changes the cache dir,
-# so we put it back like it was (no harm done if user not using ccache).
-# Parallel build seems to work OK in 4.0.1. If not, uncomment the -j1
-# and email me a bug report.
-CCACHE_DIR=${CCACHE_DIR:-$HOME/.ccache} \
-HOME=$( pwd ) \
-  make # -j1
-
-# There is a 'make install' in 3.0.1, but it's broken. It's not clear to
-# me whether piper-convert should be installed: it's used by the unit
-# tests, and mentioned in deploy/win32/sonic-visualiser.wxs but not in
-# deploy/linux/deploy-deb.sh. I'll include it, just in case.
-mkdir -p $PKG/usr/share/$PRGNAM/samples $PKG/usr/bin
-install -m0644 samples/* $PKG/usr/share/$PRGNAM/samples
-install -m0755 -s \
-  $PRGNAM \
-  vamp-plugin-load-checker \
-  piper-vamp-simple-server \
-  piper-convert \
-  $PKG/usr/bin/
-
-# man page borrowed from Debian
-mkdir -p $PKG/usr/man/man1 $PKG/usr/man/fr/man1 $PKG/usr/man/fr.UTF-8/man1
+# man page written by SlackBuild author.
+mkdir -p $PKG/usr/man/man1
 gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
-gzip -9c < $CWD/$PRGNAM.fr.1 > $PKG/usr/man/fr.UTF-8/man1/$PRGNAM.1.gz
-iconv -f UTF-8 -t ISO8859-1 $CWD/$PRGNAM.fr.1 \
-  | gzip -9c > $PKG/usr/man/fr/man1/$PRGNAM.1.gz
-
-mkdir -p $PKG/usr/share/applications
-sed "/^Icon/s,=.*,=/usr/share/pixmaps/$PRGNAM.png," $PRGNAM.desktop \
-  > $PKG/usr/share/applications/$PRGNAM.desktop
 
 # define MIME types to associate *.sv and *.svl
 mkdir -p $PKG/usr/share/mime/packages
 cat $CWD/$PRGNAM.xml > $PKG/usr/share/mime/packages/$PRGNAM.xml
 
-mkdir -p $PKG/usr/share/pixmaps
-cat icons/sv-128x128.png > $PKG/usr/share/pixmaps/$PRGNAM.png
-
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a CHANGELOG CITATION COPYING README* $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
-JACKYN=no; PAYN=no; LIBLOYN=no
-ldd $PKG/usr/bin/$PRGNAM > ldd.out
-#fgrep -q libjack.so ldd.out && JACKYN=yes # jack is dynamically loaded!
-pkg-config --exists jack && JACKYN=yes
-fgrep -q libportaudio.so ldd.out && PAYN=yes
-fgrep -q liblo.so ldd.out && LIBLOYN=yes
+WITH_PA=WITHOUT
+objdump -p $PKG/usr/bin/$PRGNAM | grep -q 'NEEDED.*libportaudio' && WITH_PA=WITH
 
 mkdir -p $PKG/install
-sed \
-  -e "s,@JACKYN@,$JACKYN," \
-  -e "s,@PAYN@,$PAYN," \
-  -e "s,@LIBLOYN@,$LIBLOYN," \
-  $CWD/slack-desc \
-  > $PKG/install/slack-desc
+sed "s,@WITH_PA@,$WITH_PA," $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
-# Only add capability stuff if not disabled (and if we built with JACK):
-if [ "${SETCAP:-yes}" = "yes" -a "$JACKYN" = "yes" ]; then
+# Only add capability stuff if not disabled:
+if [ "${SETCAP:-yes}" = "yes" ]; then
   cat $CWD/setcap.sh >> $PKG/install/doinst.sh
   # Only allow execution by audio group
   chown root:audio $PKG/usr/bin/$PRGNAM
@@ -219,4 +182,4 @@ if [ "${SETCAP:-yes}" = "yes" -a "$JACKYN" = "yes" ]; then
 fi
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

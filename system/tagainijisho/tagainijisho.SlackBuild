@@ -1,10 +1,10 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for tagainijisho
 
 # originally written by Alex-P. Natsios <drakevr@2f30.org>
 
-# Copyright 2019 Andrew Clemons, Wellington New Zealand
+# Copyright 2019,2021 Andrew Clemons, Wellington New Zealand
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -24,10 +24,17 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=tagainijisho
-VERSION=${VERSION:-1.0.3}
+GITREV=${GITREV:-a84d46be05fd2c25c53289a6759142a902c9afd0}
+VERSION=${VERSION:-git$(echo "$GITREV" | sed 's/^\(.\{7\}\).*$/\1/')}
+VERSION_JMDICT=${VERSION_JMDICT:-2021-10-01}
+VERSION_KANJIDIC2=${VERSION_KANJIDIC2:-2021-10-01}
+VERSION_KANJIVG=${VERSION_KANJIVG:-20160426}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -37,7 +44,14 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -61,9 +75,13 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+rm -rf $PRGNAM-$GITREV
+tar xvf $CWD/$PRGNAM-$GITREV.tar.gz
+cd $PRGNAM-$GITREV
+mkdir -p 3rdparty
+zcat $CWD/kanjivg-$VERSION_KANJIVG.xml.gz > 3rdparty/kanjivg.xml
+zcat $CWD/JMdict-$VERSION_JMDICT.gz > 3rdparty/JMdict
+zcat $CWD/kanjidic2-$VERSION_KANJIDIC2.xml.gz > 3rdparty/kanjidic2.xml
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -71,38 +89,30 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# thanks to fedora
-patch -p1 < $CWD/tagainijisho-1.0.3-fts3_tokenizer.patch
-
-cd $TMP/$PRGNAM-$VERSION
-  cmake . \
+mkdir -p build
+cd build
+  cmake \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DBUILD_TESTS=OFF \
-    -DDEBUG_DETAILED_VIEW=OFF \
-    -DDEBUG_ENTRIES_CACHE=OFF \
-    -DDEBUG_LISTS=OFF \
-    -DDEBUG_PATHS=OFF \
-    -DDEBUG_QUERIES=OFF \
-    -DDEBUG_TRANSACTIONS=OFF \
-    -DDICT_LANG="fr;de;es;ru;it;pt;th;tr" \
+    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+    -DDICT_LANG="ar;cs;de;en;es;fa;fi;fr;hu;id;it;ja;nb;nl;pl;pt;ru;sv;tr;uk;vi;zh" \
     -DEMBED_SQLITE=OFF \
-    -DGUNZIP=/usr/bin/gunzip \
-    -DQT_QMAKE_EXECUTABLE=/usr/bin/qmake \
-    -DSQLITE_INCLUDE_DIR=/usr/include \
-    -DSQLITE_LIBRARY=/usr/lib${LIBDIRSUFFIX}/libsqlite3.so
-
+    -DMAN_INSTALL_DIR=/usr/man \
+    -DCMAKE_BUILD_TYPE=Release ..
   make
-  make install DESTDIR=$PKG
+  make install/strip DESTDIR=$PKG
 cd ..
+
+# Don't ship .la files:
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  $TMP/$PRGNAM-$VERSION/doc \
+  doc COPYING.txt Changelog README.md \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
@@ -111,4 +121,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

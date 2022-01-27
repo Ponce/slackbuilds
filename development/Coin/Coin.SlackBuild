@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for Coin
 
@@ -6,10 +6,15 @@
 # Versions >= 3.1.3 maintained by Niels Horn <niels.horn@gmail.com>
 # Revision date: 2010/07/10
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=Coin
-VERSION=${VERSION:-3.1.3}
-BUILD=${BUILD:-4}
+SRCNAM=coin
+VERSION=${VERSION:-4.0.0.f8a82c09bb5aa62702b9ed396067a25905571c82}
+COMMIT=f8a82c09bb5aa62702b9ed396067a25905571c82
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -19,7 +24,14 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -51,9 +63,9 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$COMMIT
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
@@ -61,42 +73,40 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-# Thanks Fedora
-patch -p1 < $CWD/memhandler-initialization.patch
-
-# Thanks Debian
-patch -p1 < $CWD/coin-include_and_js.patch
-
-# fix compilation - from AUR
-sed -i \
-  '/^#include "fonts\/freetype.h"$/i #include <cstdlib>\n#include <cmath>' \
-  src/fonts/freetype.cpp
-
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --mandir=/usr/man \
-  --build=$ARCH-slackware-linux$ARCHQUADLET
-
-make
-make install DESTDIR=$PKG
+mkdir -p coin_build
+cd coin_build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -Hcoin -G "Unix Makefiles" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCOIN_BUILD_DOCUMENTATION=ON \
+    -DCOIN_BUILD_DOCUMENTATION_MAN=ON \
+    -DCMAKE_BUILD_TYPE=Release ..
+  
+  make
+  make install DESTDIR=$PKG
+cd ..
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
+mv $PKG/usr/share/man $PKG/usr/
+mkdir -p $PKG/usr/man/man1
+cp man/man1/coin-config.1 $PKG/usr/man/man1/
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  AUTHORS COPYING ChangeLog FAQ* INSTALL* LICENSE.GPL NEWS RE* THANKS \
+  AUTHORS COPYING ChangeLog FAQ* INSTALL* NEWS RE* THANKS \
   $PKG/usr/doc/$PRGNAM-$VERSION
+mv $PKG/usr/share/doc/Coin/html $PKG/usr/doc/$PRGNAM-$VERSION
+rm -rf $PKG/usr/share/doc
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

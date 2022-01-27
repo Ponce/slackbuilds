@@ -1,8 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for ufoai
 
-# Written by Joze Zobec <jozze.zepl@gmail.com>
+# Written by Joze Zobec <email removed>
+# Now maintained by B. Watson <yalhcru@gmail.com>
 
 # THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY
 # EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -15,8 +16,22 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# 20170706 bkw:
-# - fix build on -current
+# 20211017 bkw: BUILD=3
+# - fix build on -current again:
+# -   disable building with BFD.
+# -   -std=c++11
+# - new-style icons.
+# - make .desktop files validate.
+# - get rid of useless 'memory' binary.
+# - document missing optional dep, gtkglext.
+# - patches from Debian that (hopefully) prevent segfaults.
+# - make the game default to running in a window, as there are
+#   issues with fullscreen on -current with (at least) intel video.
+# - disable uforadiant by default, it segfaults on startup and
+#   I haven't figured out why yet.
+# - slack-desc reflects builds options (sdl 1/2, uforadiant).
+
+# 20170706 bkw: fix build on -current
 
 # 20151126 bkw:
 # - fix build on systems that have SDL2 but not SDL2_ttf
@@ -32,10 +47,13 @@
 # - allow building the radiant editor. I have no idea if it's working
 #   correctly, since I have no idea how to use it.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=ufoai
 VERSION=${VERSION:-2.5}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -45,7 +63,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -64,12 +86,14 @@ else
   LIBDIRSUFFIX=""
 fi
 
-# If gtksourceview is available build the radiant editor
-if pkg-config --exists gtksourceview-2.0 ; then
-  radiant="--enable-uforadiant"
-else
-  radiant="--disable-uforadiant"
-fi
+# If gtksourceview and gtkglext are installed and RADIANT=yes, build
+# the uforadiant editor.
+radiant="--disable-uforadiant"
+
+[ "${RADIANT:-no}" = "yes" ] && \
+  pkg-config --exists gtksourceview-2.0 && \
+  pkg-config --exists gtkglext-1.0 && \
+    radiant="--enable-uforadiant"
 
 if [ "${SSE:-yes}" = "no" ]; then
   sseopt="--disable-sse"
@@ -88,16 +112,35 @@ mv $PRGNAM-$VERSION-source $PRGNAM-$VERSION
 cd $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION-data.tar
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 # 20170706 bkw: fix build with gcc7
 echo 'CXXFLAGS += -Wno-narrowing' >> build/flags.mk
 
-[ "${SDL2:-no}" = "no" ] && EXTRAOPT="--disable-sdl2"
+# 20211017 bkw: apply patches from Debian's build 6.
+for i in $( cat $CWD/patches/series ); do
+  patch -p1 < $CWD/patches/$i
+done
+
+# 20211017 bkw: change the default from fullscreen to windowed. This
+# is helpful because on my hardware, at least, the game crashes when
+# it tries to to fullscreen... and takes the whole X server with it.
+# This is just the default; users can switch to fullscreen from
+# within the game if they want.
+sed -i '/"vid_fullscreen"/s,"1","0",' src/client/cl_video.cpp
+
+# 20211017 bkw: bfd gratuitous API changes. This disables bfd, which
+# means the game can't print a backtrace if it crashes. Since we
+# install the binaries stripped, the backtrace wouldn't have been
+# all that useful anyway.
+sed -i '/check_header.*bfd\.h/d' configure
+
+# 20211017 bkw: it ignores environment CXXFLAGS, and we need this, so:
+echo 'CXXFLAGS += -std=c++11' >> build/flags.mk
+
+# 20211017 bkw: leave this here, but default to yes.
+[ "${SDL2:-yes}" = "no" ] && EXTRAOPT="--disable-sdl2"
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -107,52 +150,92 @@ CXXFLAGS="$SLKCFLAGS" \
    --datadir=/usr/share/games/$PRGNAM \
    --enable-release \
    $sseopt \
-   --enable-memory \
+   --disable-memory \
+   --disable-testall \
    --enable-ufo \
    --enable-ufoded \
    --enable-ufoslicer \
    $EXTRAOPT \
    $radiant
 
-make
+# Normally it's "make V=1" for verbose build, but here it's different.
+make Q=''
 make lang
-make maps
-make pk3
 
-BINARIES=
+# We get "make: nothing to be done for..." for these 2.
+# make maps
+# make pk3
 
 # Manual install: first the data...
 mkdir -p $PKG/usr/share/games/$PRGNAM $PKG/usr/games
 cp -a base $PKG/usr/share/games/$PRGNAM/
 
 # ...then the binaries
-if [ "$radiant" = "--enable-uforadiant" ]; then
+if [ -x radiant/uforadiant ]; then
   cp -a radiant $PKG/usr/share/games/$PRGNAM/
   rm -f $PKG/usr/share/games/$PRGNAM/radiant/uforadiant
   BINARIES="radiant/uforadiant"
 fi
 
-BINARIES="$BINARIES ufo ufoded ufo2map ufomodel memory ufoslicer"
+BINARIES="$BINARIES ufo ufoded ufo2map ufomodel ufoslicer"
 install -s -m0755 $BINARIES $PKG/usr/games/
 
-# .desktop files, icons and man pages...
+# 20211017 bkw: make the .desktop files validate
+sed -i -e 's,Application;,,' \
+       -e '/^Encoding/d' \
+       -e '/^Icon/s,\.xpm,,' \
+       debian/*.desktop
+sed -i '/^StartupNotify=false/d' debian/uforadiant.desktop
+
+# .desktop files, old-style icons
 mkdir -p $PKG/usr/share/applications $PKG/usr/share/pixmaps $PKG/usr/man/man6
 install -m 0644 debian/*.desktop $PKG/usr/share/applications/
 install -m 0644 debian/*.xpm $PKG/usr/share/pixmaps/
-install -m 0644 debian/*.6 $PKG/usr/man/man6/
+
+# man pages taken from more recent debian (ufoai_2.5-6.debian.tar.xz) and
+# modified for this SlackBuild. For one thing, I made them all section 6.
+install -m 0644 $CWD/man/*.6 $PKG/usr/man/man6/
 gzip $PKG/usr/man/man6/*.6
+ln -s ufo.6.gz $PKG/usr/man/man6/$PRGNAM.6.gz
+
+# new-style icons, created by mkicons.sh, q.v.
+for i in $CWD/icons/*; do
+  app="$( basename $i )"
+  if [ -e $PKG/usr/games/$app ]; then
+    for png in $CWD/icons/$app/*.png; do
+      px="$( basename "$png" .png )"
+      size=${px}x${px}
+      dir=$PKG/usr/share/icons/hicolor/$size/apps
+      mkdir -p $dir
+      cat $png > $dir/$app.png
+    done
+  fi
+done
 
 # Get rid of uforadiant stuff if we don't have uforadiant
-[ "$radiant" = "" ] && rm $PKG/usr/share/applications/uforadiant.desktop \
-  $PKG/usr/man/man6/uforadiant.6.gz $PKG/usr/share/pixmaps/uforadiant.xpm
+if [ -x radiant/uforadiant ]; then
+  INCLUDES="includes"
+  # This looks like it doesn't belong
+  rm -f $PKG/usr/share/games/$PRGNAM/radiant/prefabs/pipes.map
+else
+  INCLUDES="does NOT include"
+  rm $PKG/usr/share/applications/uforadiant.desktop \
+     $PKG/usr/man/man6/uforadiant.6.gz \
+     $PKG/usr/share/pixmaps/uforadiant.xpm
+fi
+
+SDLVER="1.2"
+ldd $PKG/usr/games/ufo | grep -q SDL2 && SDLVER="2.0"
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a LICENSES README COPYING $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s,@INCLUDES@,$INCLUDES," \
+    -e "s,@SDLVER@,$SDLVER," \
+    $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

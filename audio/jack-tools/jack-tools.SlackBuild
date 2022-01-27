@@ -1,10 +1,17 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for jack-tools
 
 # Written by B. Watson (yalhcru@gmail.com)
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20211128 bkw:
+# - Update for v20210917_ab297f4 (latest git).
+# - Now that Slackware-current has asciidoctor, use it to generate
+#   man pages (and get rid of my own hacked-up ones).
+# - Binary names all changed from jack-* to rju-*, note in README.
+# - Add git2tarxz.sh now that upstream's switched to git.
 
 # 20180617 bkw:
 # - BUILD=2
@@ -32,10 +39,13 @@
 #   and jack-play have changed.
 # - Add capability stuff.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=jack-tools
-VERSION=${VERSION:-20170117}
+VERSION=${VERSION:-20210917_ab297f4}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -45,7 +55,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -71,50 +85,48 @@ mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/${PRGNAM}-$VERSION.tar.xz
-cd $PRGNAM-$VERSION
+
+# Sources live in a subdir (but the docs don't).
+cd $PRGNAM-$VERSION/cmd
 
 # apply our flags. -Wl,-s strips the binaries.
-sed -i "s/-O./$SLKCFLAGS -Wl,-s/" Makefile c-common/Makefile
-
-# Slackware 14.2 doesn't have libtinfo (15.0 will, IIRC).
-sed -i 's,-ltinfo,,' Makefile
-
-# Author's library
-make -C c-common
+sed -i "s/-O./$SLKCFLAGS -Wl,-s/" Makefile r-common/c/Makefile
 
 # If the Steinberg VST headers are found, put them where the build can find
 # them. Neither SBo nor upstream can distribute the headers, you have to get
 # them direct from Steinberg.
 VST_HEADERS=${VST_HEADERS:-$CWD}
 if [ -e $VST_HEADERS/aeffect.h -a -e $VST_HEADERS/aeffectx.h ]; then
+  # Steinberg me harder!
   mkdir -p pluginterfaces/vst2.x
   cp $VST_HEADERS/aeffect.h $VST_HEADERS/aeffectx.h pluginterfaces/vst2.x
-  STEINBERG_ME_HARDER="yes"
   WITH=WITH
 else
-  sed -i '/^bin=/s,jack-lxvst,,' Makefile
+  sed -i '/^bin *=/s,\(rju-lxvst\|lxvst-query\),,g' Makefile
   WITH=WITHOUT
+  # Don't install the lxvst man page if building without VST.
+  rm -f ../md/*lxvst*
 fi
 
 make
+make all VST_SDK=$(pwd)
 
 mkdir -p $PKG/usr/bin $PKG/usr/include
 make install prefix=$PKG/usr
 
-# man pages generated from *.md markdown files, then manually edited
-# to clean up the formatting.
-mkdir -p $PKG/usr/man/man1
-for page in $CWD/man/*.1; do
-  gzip -9c < $page > $PKG/usr/man/man1/$( basename $page ).gz
-done
+# Back to parent source dir.
+cd $TMP/$PRGNAM-$VERSION
 
-# Only install the lxvst man page if the lxvst binary got built.
-if [ "$STEINBERG_ME_HARDER" = "yes" ]; then
-  gzip -9c < $CWD/man/jack-lxvst.1.optional > $PKG/usr/man/man1/jack-lxvst.1.gz
-fi
+# generate man pages. results aren't perfectly formatted, but not too bad.
+# upstream doesn't have a lxvst-query.md.
+asciidoctor -b manpage -d manpage md/rju-*.md
+
+mkdir -p $PKG/usr/man/man1
+cp md/*.1 $PKG/usr/man/man1
+gzip -9 $PKG/usr/man/man1/*
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cat README > $PKG/usr/doc/$PRGNAM-$VERSION/README
+cat README.md > $PKG/usr/doc/$PRGNAM-$VERSION/README
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
@@ -128,4 +140,4 @@ if [ "${SETCAP:-yes}" = "yes" ]; then
 fi
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for hexinator
 
@@ -6,8 +6,8 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211224 bkw: BUILD=2, fix for -current (add old openssl lib).
 # 20200326 bkw: update for v1.12 for 64-bit, stay at 1.10 for 32-bit.
-
 # 20200317 bkw: update for v1.10, switched from RPM to .deb. Yes, there
 # is a v1.11 available, but there are good reasons for not packaging it,
 # from our POV:
@@ -16,10 +16,13 @@
 #    should be packaged with it, so it doesn't *work*. Reported to
 #    upstream, possibly will be fixed soon.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=hexinator
 VERSION=${VERSION:-1.12}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -29,7 +32,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -75,6 +82,28 @@ mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
+# 20211224 bkw: upstream's QtNetwork library was built with
+# openssl-1.0.x. It won't work with openssl-1.1.x, and hexinator
+# won't work with Slackware's qt5. Since PV dropped openssl10-solibs,
+# we have to include the shared lib in this package. Before you
+# start freaking out about how insecure and unmaintained this old
+# openssl is, remember that it's *only* used by hexinator (lives in
+# /opt/hexinator), and that hexinator only uses it to talk to its own
+# vendor's server. So long as you trust the vendor, it's OK. And if
+# you don't, you wouldn't run their precompiled binary anyway, right?
+
+SSL10VER="${SSL10VER:-1.0.2u}"
+SSL10BLD="${SSL10BLD:-2}"
+SSL10ARCH="x86_64"
+[ "$ARCH" != "x86_64" ] && SSL10ARCH=i586
+
+mkdir tmp
+cd tmp
+  tar xvf $CWD/openssl10-solibs-$SSL10VER-$SSL10ARCH-$SSL10BLD.txz
+  mv ./lib*/lib{ssl,crypto}*.so.* $PKG/opt/$PRGNAM/lib
+cd -
+rm -rf tmp
+
 # The hexinator binary was built with rpath support, so it can find its
 # own libraries. The libs need some attention before hexinator can find
 # them (presumably dpkg would automagically do this when the package gets
@@ -82,8 +111,12 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 # libs. We *don't* want it using any other qt5 libs that may happen to
 # exist (like the ones in /usr/lib64 from the qt5 SlackBuild). The
 # ldconfig step here prevents that.
+
 chmod 755 $PKG/opt/$PRGNAM/lib/*
 ldconfig -n -N $PKG/opt/$PRGNAM/lib
+for i in ssl crypto; do
+  ln -s lib$i.so.1 $PKG/opt/$PRGNAM/lib/lib$i.so
+done
 
 # Convenience symlink, for us command line freaks.
 mkdir -p $PKG/usr/bin
@@ -94,4 +127,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

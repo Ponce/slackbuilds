@@ -1,26 +1,35 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackbuild for vbam
 
 # Currently maintained by B. Watson <yalhcru@gmail.com>.
 # Previously maintained by Dugan Chen <email removed>.
+# Modified by the SlackBuilds.org project.
 # Written by JK Wood <email removed>.
 
-# Slackbuild is released under the Dog-on-Fire License:
-# If use of this script causes your dog to catch on fire,
-# you agree to send me five dollars.  Or a picture
-# of the dog on fire.
-# Otherwise, you're on your own.  I've tested the script
-# on my own computer, and it hasn't broken anything.
-# So if it does it on your computer, that falls in
-# the realm of "Not my problem."
-#
-# Of course, if you'll send a bug report to the above
-# email address, I may be able to see what you did
-# wrong and prevent it from happening in the future.
-# In which case, I may just send YOU five dollars.
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-# Modified by the SlackBuilds.org project.
+# 20211117 bkw: note to self: there's been recent activity in
+# upstream's git. If another 6-12 months goes by without a release,
+# consider updating this for the latest git.
+
+# 20211117 bkw: BUILD=2
+# - fix build for -current and recent wxGTK3 update.
+# - relicense as WTFPL with permission from JK Wood.
+# - old-style icon symlink.
+# - call executable with full path in .desktop.
+# - add missing changelog/readme/todo to docdir.
+# - get rid of FFMPEG option (it's always enabled now).
+# - disable checking for updates (there haven't been any in
+#   5 years anyway, and this is a bit of a privacy concern for
+#   some users).
+# - make wxGTK3 optional.
+# - only include .desktop and doinst in package if wxGTK3 enabled.
+# - make SFML optional. it's actually autodetected in v2.1.4,
+#   so all this means is removing it from REQUIRES and adding
+#   a note to README.
+# - always build the SDL UI executable (/usr/games/vbam).
+# - include vbam.ini.sample in docdir.
 
 # 20191129 bkw: updated for 2.1.4.
 # 20180702 bkw: updated for 2.1.0.
@@ -43,16 +52,16 @@
 #   old vbam name as symlinks.
 # - Correct README, plus cosmetic reformatting.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=vbam
 VERSION=${VERSION:-2.1.4}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 SRCVER="$VERSION"
 SRCNAM="visualboyadvance-m"
-
-# Set to ON to enable FFMPEG A/V recording.
-FFMPEG=${FFMPEG:-OFF}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -62,7 +71,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -100,7 +113,27 @@ find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
 # if both wx(Python|GTK) 2 and 3 are installed, /usr/bin/wx-config
 # is a symlink to the config for whichever was installed last. Avoid
 # confusion, force the correct version.
-WXCONF=${WXCONF:-/usr/lib$LIBDIRSUFFIX/wx/config/gtk2-unicode-3.0}
+# 20211117 bkw: willysr's wxGTK3 has switched from gtk2 to gtk3, so
+# this line had to be adjusted slightly. With gtk2 this was failing
+# to build on -current anyway...
+WXCONF=${WXCONF:-/usr/lib$LIBDIRSUFFIX/wx/config/gtk3-unicode-3.0}
+
+# 20211117 bkw: upstream doesn't autodetect wx, we have to explicitly
+# set it to ON or OFF.
+WXDEF="-DENABLE_WX=OFF"
+if [ "${WX:-yes}" = "yes" ]; then
+  [ -x "$WXCONF" ] && WXDEF="-DENABLE_WX=OFF -DwxWidgets_CONFIG_EXECUTABLE=$WXCONF"
+fi
+
+# 20211117 bkw: lirc doesn't autodetect.
+LIRCOPT=OFF
+[ "${LIRC:-yes}" = "yes" ] && pkg-config --exists lirc && LIRCOPT=ON
+
+# 20211117 bkw: no handy -Dwhatever to disable this, surgery required.
+# At first glance it looks like -DENABLE_LINK=OFF would work, but it
+# doesn't: it disables the GBA Link emulation, but the vbam binaries
+# still get linked with the SFML shared libs. Derp.
+[ "${SFML:-yes}" = "no" ] && sed -i '/^find_package(SFML/d' CMakeLists.txt
 
 # upstream cleverly parses their own ChangeLog to get the version number
 # that gets compiled into the binary. They un-cleverly failed to follow
@@ -108,18 +141,29 @@ WXCONF=${WXCONF:-/usr/lib$LIBDIRSUFFIX/wx/config/gtk2-unicode-3.0}
 # says 2.0.1 in its window title. So:
 sed -i '/\[2\.0\.2\]/s,Bug fix release,-,' CHANGELOG.md
 
+# 20211117 bkw: fix the SDL UI build.
+sed -i 's,KMOD_META,KMOD_ALT,g' src/sdl/SDL.cpp
+
+# 20211117 bkw: -fuse-ld=gold works, but doesn't speed things up much.
+
 mkdir -p build
 cd build
   cmake \
-    -DwxWidgets_CONFIG_EXECUTABLE=$WXCONF \
+    -DENABLE_SDL=ON \
+    "$WXDEF" \
+    -DENABLE_LINK=$LINKOPT \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DENABLE_ASM_CORE=${ASM} \
     -DENABLE_ASM_SCALERS=${ASM} \
-    -DENABLE_FFMPEG=${FFMPEG} \
+    -DENABLE_FFMPEG=ON \
+    -DENABLE_ONLINEUPDATES=OFF \
+    -DENABLE_LIRC=$LIRCOPT \
+    -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=gold" \
+    -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=gold" \
     -DCMAKE_BUILD_TYPE=Release ..
-  make
+  make VERBOSE=1
   sed -i \
       -e 's,/usr/share/man,/usr/man,g' \
       -e 's,/usr/bin,/usr/games,g' \
@@ -127,20 +171,47 @@ cd build
   make install DESTDIR=$PKG
 cd ..
 
-strip $PKG/usr/games/$SRCNAM
-ln -s $SRCNAM $PKG/usr/games/$PRGNAM
-
-gzip $PKG/usr/man/man6/$SRCNAM.6
-ln -s $SRCNAM.6.gz $PKG/usr/man/man6/$PRGNAM.6.gz
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-rm -f doc/ReadMe.MFC.txt # this is for Windows only
-cp -a doc/* $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+strip $PKG/usr/games/*
+gzip $PKG/usr/man/man6/$PRGNAM.6
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
-cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+if [ -x $PKG/usr/games/$SRCNAM ]; then
+  gzip $PKG/usr/man/man6/$SRCNAM.6
+
+  # in case someone's missing /usr/games from $PATH:
+  sed -i 's,^Exec=,&/usr/games/,' $PKG/usr/share/applications/*desktop
+
+  # old-style windowmanagers might need this:
+  mkdir -p $PKG/usr/share/pixmaps
+
+  ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+  # only need the doinst.sh if the WX GUI was built.
+  cat $CWD/doinst.sh > $PKG/install/doinst.sh
+fi
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+# This config file gets installed, but never actually used by vbam...
+mv $PKG/etc/$PRGNAM.cfg $PKGDOC/$PRGNAM.cfg.sample
+rmdir $PKG/etc
+rm -f doc/ReadMe.MFC.txt # this is for Windows only
+cp -a *.md doc/* $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+# 20211117 bkw: actually look at what we just built, to see what's
+# enabled (instead of trusting that everything got included correctly).
+# It's better to use objdump than ldd here IMO.
+SFYN=no; LIRCYN=no; WXYN=no
+objdump -p $PKG/usr/games/$PRGNAM | grep -q 'NEEDED *libsfml' && SFYN=yes
+strings $PKG/usr/games/$PRGNAM | grep -q lircrc && LIRCYN=yes
+[ -x $PKG/usr/games/$SRCNAM ] && WXYN=yes
+
+sed -e "s,@SFYN@,$SFYN," \
+    -e "s,@LIRCYN@,$LIRCYN," \
+    -e "s,@WXYN@,$WXYN," \
+    $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

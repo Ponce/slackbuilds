@@ -24,22 +24,7 @@ Shareware/Demo version 1.3
 --------------------------
 Data files: HUNTBGIN.WAD HUNTBGIN.RTC HUNTBGIN.RTL REMOTE1.RTS
 
-If you want to include the shareware game data files in your package,
-download the shareware version of the game and place it in the SlackBuild
-directory before building:
-
-# wget http://icculus.org/rott/share/1rott13.zip
-# ./rott.SlackBuild
-# installpkg /tmp/rott-$VERSION-$ARCH-$BUILD.tgz
-
-If the icculus.org link doesn't work, the same file can be downloaded
-from http://www.3drealms.com/rott/ (look for "v1.3 Shareware
-Episode" on the page). Either way, the md5sum for rott13.zip is
-0fafd6b629eab80278fc726e31f9cf41.
-
-If you built the package without the shareware data files, you can just
-extract the zip file and copy the data files to /usr/share/games/rott
-manually.
+This is always included in the package.
 
 The binary for the shareware version is called "rott-demo".
 ---

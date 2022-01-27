@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for libpst
 
@@ -23,6 +23,15 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# Note to SBo admins: Please don't remove this because nothing depends
+# on it. It contains useful tools all by itself (it isn't just a
+# shared library). Take pity on those who have to deal with Microsoft
+# products for a living...
+
+# 20211019 bkw:
+# - upgrade to 0.6.76
+# - build both python 2 and 3 modules
+# - get rid of .la files
 # 20201025 bkw: upgrade to 0.6.75
 # 20200224 bkw: upgrade to 0.6.74
 # 20180917 bkw: upgrade to 0.6.72
@@ -36,10 +45,13 @@
 # - upgrade to 0.6.63
 # - make install-strip instead of slow find stuff
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=libpst
-VERSION=${VERSION:-0.6.75}
+VERSION=${VERSION:-0.6.76}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -49,7 +61,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -80,35 +96,62 @@ chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# 20180917 bkw: libpst supposedly supports python3 now, but python3
-# builds fail. Not tried to diagnose it, just reverting to python2,
-# like previous versions of libpst used.
-# ./configure --help claims that I can set PYTHON_VERSION in the environment
-# and it'll use that, but it doesn't work. So I have to use this abomination:
-sed -i 's,\<python3\..\>,,g' m4/ax_python.m4
+buildit() {
+  autoreconf -if
 
-autoreconf -if
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  ./configure \
+    --prefix=/usr \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --mandir=/usr/man \
+    --enable-dii \
+    --disable-static \
+    --enable-libpst-shared \
+    --enable-python \
+    --build=$ARCH-slackware-linux
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --mandir=/usr/man \
-  --enable-dii \
-  --disable-static \
-  --enable-libpst-shared \
-  --enable-python \
-  --build=$ARCH-slackware-linux
+  make
+  # ./configure options --docdir and --htmldir have no effect,
+  # it is necessary to override "htmldir" and "htmldeveldir"
+  make install-strip DESTDIR=$PKG \
+    htmldir=/usr/doc/$PRGNAM-$VERSION \
+    htmldeveldir=/usr/doc/$PRGNAM-$VERSION/devel
+}
 
-make
-# ./configure options --docdir and --htmldir have no effect,
-# it is necessary to override "htmldir" and "htmldeveldir"
-make install-strip DESTDIR=$PKG \
-  htmldir=/usr/doc/$PRGNAM-$VERSION \
-  htmldeveldir=/usr/doc/$PRGNAM-$VERSION/devel
+# 20211019 bkw: python3 builds work now. Include support for both
+# python versions, 2 and 3. Unfortunately this means building the
+# entire project twice (keeping only the python2 stuff from the
+# first build). autotools doesn't make it easy or even necessarily
+# possible to build only part of a project :(
+
+# Python 2 build. If python2 ever really does go away, this code will
+# silently omit python2 support from the package.
+if type -p python2 &>/dev/null; then
+  PY2VER="$( python2 --version 2>&1 | cut -d' ' -f2 | cut -d. -f1,2 )"
+
+  # ./configure --help claims that I can set PYTHON_VERSION in the environment
+  # and it'll use that, but it doesn't work. So I have to use this abomination:
+  sed -i.bak 's,\<python3\..\>,python'$PY2VER',g' m4/ax_python.m4
+
+  buildit
+
+  mv $PKG/usr/lib$LIBDIRSUFFIX/python$PY2VER $PKG/.keep.python2
+  rm -rf $PKG/*
+
+  # put everything back the way it was.
+  make distclean
+  mv m4/ax_python.m4.bak m4/ax_python.m4
+fi
+
+# Python 3 build
+buildit
+[ -e $PKG/.keep.python2 ] && \
+  mv $PKG/.keep.python2 $PKG/usr/lib$LIBDIRSUFFIX/python$PY2VER
 
 gzip -9 $PKG/usr/man/man?/*.?
+
+rm -f $PKG/usr/lib*/*.la $PKG/usr/lib*/python*/*/*.la
 
 # Package documentation has aready been copied
 # into $PKG/usr/doc/$PRGNAM-$VERSION by "make install"
@@ -118,4 +161,4 @@ mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

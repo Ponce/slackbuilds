@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # GCC package build script (written by volkerdi@slackware.com)
 #
 # Copyright 2003, 2004  Slackware Linux, Inc., Concord, California, USA
@@ -53,11 +53,14 @@
 # efficient on modern CPUs running in 32-bit mode than the alternate i586
 # instructions.  No need to throw i586 CPUs under the bus (yet).
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=gcc5
 VERSION=${VERSION:-5.5.0}
 MAJVER=$(echo ${VERSION} |cut -d. -f1)
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 # Automatically determine the architecture we're building on:
 if [ -z "$ARCH" ]; then
@@ -70,7 +73,32 @@ if [ -z "$ARCH" ]; then
   export ARCH
 fi
 
-CWD=$(pwd)
+if [ "$ARCH" = "x86_64" ]; then
+  if [ -f /usr/lib/libc.a ]; then
+    # If we find a 32bit C library on 64bit Slackware, assume multilib:
+    GCC_ARCHOPTS="--enable-multilib"
+    MULTILIB="YES"
+  else
+    GCC_ARCHOPTS="--disable-multilib"
+    MULTILIB="NO"
+  fi
+else
+  GCC_ARCHOPTS="--with-arch=$ARCH"
+  MULTILIB="NO"
+fi
+
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  if [ ${MULTILIB} = "YES" ]; then
+    echo "$PRGNAM-${VERSION}_multilib-$ARCH-$BUILD$TAG.$PKGTYPE"
+  else
+    echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  fi
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -122,25 +150,13 @@ LANGS=${LANGS:-'c,c++,java'}
 
 echo "Building these compilers: $LANGS"
 
+set -e
+
 case "$ARCH" in
     arm*) TARGET=$ARCH-slackware-linux-gnueabi ;;
     *)    TARGET=$ARCH-slackware-linux ;;
 esac
 
-if [ "$ARCH" = "x86_64" ]; then
-  if [ -f /usr/lib/libc.a ]; then
-    # If we find a 32bit C library on 64bit Slackware, assume multilib:
-    GCC_ARCHOPTS="--enable-multilib"
-    MULTILIB="YES"
-  else
-    GCC_ARCHOPTS="--disable-multilib"
-    MULTILIB="NO"
-  fi
-else
-  GCC_ARCHOPTS="--with-arch=$ARCH"
-  MULTILIB="NO"
-fi
- 
 # Clear the build locations:
 rm -fr $TMP/fastjar-* $TMP/gcc-$VERSION $TMP/gcc.build.lnx $TMP/gcc.build.log $TMP/package-$PRGNAM
 
@@ -198,6 +214,12 @@ ANTLJAR=$(echo $CWD/antlr-*.jar | tail -1)
   # Fix build with glibc 2.28, which no longer makes available header file <sys/ustat.h>
   cat $CWD/patches/glibc2.28-ustat.diff | patch -p0 --verbose || exit 1
 
+  # Fix build with glibc 2.30
+  cat $CWD/patches/glibc2.30-ipc_perm.diff | patch -p0 --verbose || exit 1
+
+  # Recent linux kernels have romved the Cyclades driver
+  cat $CWD/patches/kernel-5.12.diff | patch -p1 --verbose || exit 1
+
   # Fix perms/owners
   chown -R root:root .
   find . -perm 777 -exec chmod 755 {} \;
@@ -206,9 +228,9 @@ ANTLJAR=$(echo $CWD/antlr-*.jar | tail -1)
   find . -perm 664 -exec chmod 644 {} \;
   mkdir -p $PKG/usr/doc/gcc-$VERSION
   cp -a \
-    COPYING* ChangeLog* FAQ INSTALL \
+    COPYING* ChangeLog* INSTALL \
     LAST_UPDATED MAINTAINERS NEWS \
-    README* *.html \
+    README* \
   $PKG/usr/doc/gcc-$VERSION
 
   # We will keep part of these, but they are really big...
@@ -414,7 +436,8 @@ ANTLJAR=$(echo $CWD/antlr-*.jar | tail -1)
      $GCC_ARCHOPTS \
      --target=${TARGET} \
      --build=${TARGET} \
-     --host=${TARGET} || exit 1
+     --host=${TARGET} \
+     CXX='g++ -std=c++14' || exit 1
      #--enable-java-awt=gtk \
      #--disable-gtktest \
 
@@ -526,12 +549,12 @@ ln -s ../../../bin/ecj $PKG/usr/lib$LIBDIRSUFFIX/jvm/bin/javac
 # Don't package libffi stuff anymore.  GCC will link the internal version
 # statically, and we'll need a newer one elsewhere.
 find . -name "ffi*.h" | xargs rm -f
-find . -name "libffi*" | xargs rm -f
-rm -f usr/man/man3/ffi*
-rm -f usr/info/libffi*
+find . -name "libffi*" | xargs rm -fR
+rm -f usr/man/man3/ffi* || true
+rm -f usr/info/libffi* || true
 # Install a proper pkgconfig file for libgcj:
-rm $PKG/usr/lib${LIBDIRSUFFIX}/gcc/${TARGET}/${VERSION}/pkgconfig/libgcj*pc
-rm $PKG/usr/lib${LIBDIRSUFFIX}/gcc/${TARGET}/${VERSION}/32/pkgconfig/libgcj*pc
+rm -f $PKG/usr/lib${LIBDIRSUFFIX}/gcc/${TARGET}/${VERSION}/pkgconfig/libgcj*pc
+rm -f $PKG/usr/lib${LIBDIRSUFFIX}/gcc/${TARGET}/${VERSION}/32/pkgconfig/libgcj*pc || true
 mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig
 cat $CWD/libgcj-5.pc \
   | sed -e "s,@LIBDIRSUFFIX@,${LIBDIRSUFFIX}," \
@@ -555,15 +578,15 @@ cat $CWD/libgcj-5.pc \
   strip --strip-unneeded usr/bin/* 2> /dev/null
   find . | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
   find . | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
-)
+) || true
 
 # Remove localizations overlapping with Slackware's gcc
 rm -rf $PKG/usr/share/locale
 
 ( cd $PKG
   if [ ${MULTILIB} = "YES" ]; then
-    /sbin/makepkg -l y -c n $OUTPUT/${PRGNAM}-${VERSION}_multilib-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+    /sbin/makepkg -l y -c n $OUTPUT/${PRGNAM}-${VERSION}_multilib-$ARCH-$BUILD$TAG.$PKGTYPE
   else
-    /sbin/makepkg -l y -c n $OUTPUT/${PRGNAM}-${VERSION}-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+    /sbin/makepkg -l y -c n $OUTPUT/${PRGNAM}-${VERSION}-$ARCH-$BUILD$TAG.$PKGTYPE
   fi
 )

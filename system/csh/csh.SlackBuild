@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for csh
 
@@ -6,15 +6,22 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20210827 bkw:
+# - update to latest debian patch (6), add deb version to VERSION.
+# - add -current fix for recent glibc.
+
 # 20170621 bkw:
 # - update to latest debian patch (-2.2, needed for -current).
 # - quit compiling with -Werror (also needed for -current).
 # - BUILD=2.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=csh
-VERSION=${VERSION:-20110502}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-20110502_6}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -24,7 +31,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -45,11 +56,12 @@ fi
 
 set -e
 
-DEBVER=2.2
+MAINVER="${VERSION%_*}"  # 123_4 => 123
+DEBVER="${VERSION#*_}"   # 123_4 => 4
 
 # Grr.
-TARNAM="${PRGNAM}_${VERSION}.orig"
-DIRNAM="${PRGNAM}-${VERSION}.orig"
+TARNAM="${PRGNAM}_${MAINVER}.orig"
+DIRNAM="${PRGNAM}-${MAINVER}.orig"
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -57,17 +69,14 @@ cd $TMP
 rm -rf $DIRNAM
 tar xvf $CWD/$TARNAM.tar.gz
 cd $DIRNAM
-tar xvf $CWD/${PRGNAM}_${VERSION}-$DEBVER.debian.tar.[xg]z
+tar xvf $CWD/${PRGNAM}_${MAINVER}-$DEBVER.debian.tar.[xg]z
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# Apply all of Debian's patches.
+# Apply all of Debian's patches. Except one...
 for diff in debian/patches/*.diff; do
-  patch -p1 < $diff
+  [ "$( basename $diff )" != "09_sys_signame.diff" ] && patch -p1 < $diff
 done
 
 # My own patch, keeps csh.h from defining its own (tiny) BUFSIZ. Might
@@ -75,8 +84,15 @@ done
 # to set a giant $LS_OPTIONS value without "Word too long" error.
 patch -p1 < $CWD/bufsiz.diff
 
+# 20210827 bkw: my own patch, glibc >= 2.32 no longer exports
+# sys_siglist so we have to use sigdescr_np() instead. Ditto
+# sys_signame and sigabbrev_np(). See glibc changelog:
+# https://sourceware.org/pipermail/libc-announce/2020/000029.html
+# This patch replaces Debian's 09_sys_signame.diff.
+patch -p1 < $CWD/glibc-2.32-sys_siglist.diff
+
 # use Slackware standard flags
-sed -i "1iCFLAGS=$SLKCFLAGS" Makefile
+sed -i "1iCFLAGS=$SLKCFLAGS -fcommon" Makefile
 
 # The LIBC= isn't even used, but Slackware64's pmake is broken: it has
 # /usr/lib/libc.a hard-coded, and pmake wants to build that (and can't),
@@ -110,4 +126,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for zathura
 
@@ -23,65 +23,25 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# 20180909 bkw:
-# - Re-enable building with synctex, since texlive has been fixed. This
-#   requires a patch, since this version of zathura was written for an
-#   older version of texlive.
+# 20210801 bkw:
+# - update for v0.4.8 and -current. build uses meson now, so this script
+#   can no longer build old zathura versions.
+# - removed dlopen hack and synctex fix, since they're no longer needed.
+# - this changelog was getting long, so move to ChangeLog.old.
 
-# 20180903 bkw:
-# - Disable building with synctex, since it currently doesn't work due
-#   to a bug in the texlive package. Will be re-enabled when the texlive
-#   issue is fixed.
-# - Really get rid of color output from the Makefile. I know it's cute,
-#   but it confuses less when redirecting to a file.
-
-# 20180102 bkw:
-# - Updated for v0.3.8. Have to do some fudging to get it to build with
-#   Slack 14.2's older glib2: upstream claims they need 2.50, but the
-#   only thing they seem to need it for is the --dependency-file option
-#   to glib-compile-resources, which turns out to be unneeded.
-
-# 20170711 bkw:
-# - BUILD=2
-# - Include API docs in package
-# - Switch to github URLs since upstream's site has been broken for 3-4
-#   days now. Side effect is, it makes it easier for my update script to
-#   let me know when there's a new release. This means adding the built
-#   man pages to SBo git (otherwise I'd have Sphinx as a dep, yuck).
-
-# 20170125 bkw:
-# - Updated for v0.3.7, poppler plugin v0.2.7
-
-# 20160725 bkw:
-# - Updated for v0.3.6
-
-# 20150511 bkw:
-# - Version bump 0.3.3. The poppler plugin is still on 0.2.5.
-# - Make the poppler plugin's pdf.so a symlink. Will do the same
-#   for zathura-pdf-mupdf, to allow switching between the two without
-#   reinstalling packages. This wouldn't have worked with older versions,
-#   due to changes in glib's g_file_test() between glib 1.x and 2.x.
-# - Upstream started using -fdiagnostics-color=always, which is only
-#   supported in newer gcc versions. Get rid of it.
-
-# Updated 20130617 by B. Watson <yalhcru@gmail.com>:
-# - Updated for v0.2.3
-
-# Updated 20120721 by B. Watson <yalhcru@gmail.com>:
-# - Updated for v0.2.0
-# - generated man pages now included by upstream, get rid of ours
-
-# Updated 20120312 by B. Watson <yalhcru@gmail.com>:
-# - Updated for v0.1.1, including poppler plugin
-# - Restore missing .desktop file and AUTHORS doc
-# - Add an icon
-# - Include generated man pages
-# - fix homepage URL
+cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=zathura
-VERSION=${VERSION:-0.3.8}
+VERSION=${VERSION:-0.4.8}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+# zathura no longer includes PDF support in the core. Instead it uses
+# plugins. This build includes the default PDF plugin, without which zathura
+# is completely useless.
+PLUGIN=$PRGNAM-pdf-poppler
+PLUGINVER=${PLUGINVER:-0.3.0}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -91,7 +51,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -110,13 +74,13 @@ else
   LIBDIRSUFFIX=""
 fi
 
-set -eu
+set -e
 
-# zathura no longer includes PDF support in the core. Instead it uses
-# plugins. This build includes the default PDF plugin, without which zathura
-# is completely useless.
-PLUGIN=$PRGNAM-pdf-poppler
-PLUGINVER=${PLUGINVER:-0.2.8}
+fixperms() {
+  chown -R root:root .
+  find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+          \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+}
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -124,124 +88,74 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
-chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+fixperms
 
-# Work around a bug in Slackware's ghostscript.
-# http://bugs.ghostscript.com/show_bug.cgi?id=692891
-#
-# Supposedly this was fixed, but I'm getting stack traces that look just
-# like those. The trouble is, if any of the plugins depends on libgs.so,
-# that library gets loaded during zathura's "scan for plugins" phase.
-# If libjpeg.so wasn't already loaded, it gets loaded and mangled by
-# libgs. This happens *before* zathura knows which plugin matches the file
-# we're trying to view. Now, the plugin is chosen based on the file's
-# mime type. If said plugin *isn't* the one using libgs, but it *does*
-# use libjpeg, *boom* segfault.
-#
-# What I found is that the postscript plugin uses libsceptre, which uses
-# libgs... and the mupdf and comicbook plugins use libjpeg.  The end result
-# is that the mupdf and cb plugins crash the first time they try to load
-# a jpeg from the pdf/cbr, *but* only if the ps plugin is installed!
-# Both plugins work fine if the ps plugin is removed.
-#
-# I found that 'export LD_PRELOAD=/usr/lib/libjpeg.so' stops the
-# segfaulting, while not affecting the ps plugin. The patch below is
-# basically just the C equivalent: use dlopen() to load libjpeg.so before
-# scanning for plugins. Yes, it's a hack, that depends on implementation
-# specific details, but the alternative would be to try and talk Pat V
-# into patching and rebuilding his ghostscript and/or libsceptre packages,
-# which he won't be doing this late in the release cycle (I wouldn't either).
+mkdir build
+cd build
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  meson .. \
+    --buildtype=release \
+    --infodir=/usr/info \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    -Dstrip=true
+  "${NINJA:=ninja}"
+  DESTDIR=$PKG $NINJA install
+cd ..
 
-patch -p1 < $CWD/dlopen_hack.diff
-
-# synctex API in recent texlive has changed from whatever version
-# zathura was developed with. This is a monkey patch, with me as
-# the monkey: monkey see someone else's patch for something else here:
-# https://bugs.debian.org/cgi-bin/bugreport.cgi?att=1;bug=896566;filename=synctex2;msg=10
-# ...and monkey do the same thing to zathura.
-# A while after I did this, I found someone else's patch:
-# http://pk.archive.ubuntu.com/ubuntu/ubuntu/pool/universe/z/zathura/zathura_0.3.9-2.debian.tar.xz
-# ...the portion of the patch that alters synctex.c looks identical to
-# the one I came up with, meaning I could have saved myself some work...
-patch -p1 < $CWD/synctex_fix.diff
-
-sed -i "s/-pedantic/$SLKCFLAGS/" config.mk
-sed -i '/--dependency-file/d' Makefile
-
-# 20170711 bkw: git tarballs don't include prebuilt man pages, and I do NOT
-# want Sphinx and its 15+ deps as a dep for this build. So:
-cp -r $CWD/man doc/_build
-
-make \
-  LIBDIR=/usr/lib$LIBDIRSUFFIX \
-  MANPREFIX=/usr/man \
-  DESTDIR=$PKG \
-  RSTTOMAN="" \
-  COLOR=0 \
-  GLIB_VERSION_CHECK=0 \
-  VERBOSE=1 \
-  all \
-  install
-
-# Check & see if synctex was built in, for slack-desc purposes.
-WITH=WITHOUT
-if ldd $PKG/usr/bin/$PRGNAM | grep -q libsynctex; then
-  WITH=WITH
-fi
-
-gzip $PKG/usr/man/man?/*.?
+# man pages taken from Debian. I did this to avoid a dependency
+# on Sphinx (and its tree of 13 deps).
+for i in $CWD/man/*.*; do
+  dest="$PKG/usr/man/man$( echo $i | sed 's,.*\.,,' )"
+  mkdir -p "$dest"
+  gzip -9c < $i > "$dest/$( basename "$i" )".gz
+done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS LICENSE README $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS LICENSE README.md $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 # Include the API docs. Sphinx would be needed to build HTML or PDF docs, but
 # the doc sources are RST, which are perfectly human-readable already (though
 # less easy to navigate).
-cd doc
-rm -rf installation man _build [A-Z]* *.mk *.py *.txt
-cp -a * $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a doc/api $PKG/usr/doc/$PRGNAM-$VERSION
 
 # Now build the plugin.
 cd $TMP
-
-# Hack, lets #include <zathura/document.h> in pdf.h work with an uninstalled
-# copy of zathura by saying "-I../zathura"
-rm -f $PRGNAM
-ln -s $PRGNAM-$VERSION $PRGNAM
-
 rm -rf $PLUGIN-$PLUGINVER
 tar xvf $CWD/$PLUGIN-$PLUGINVER.tar.gz
 cd $PLUGIN-$PLUGINVER
-chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+fixperms
 
-# ZATHURA_VERSION_CHECK=0 is required because zathura.pc isn't installed.
+export PKG_CONFIG_PATH=$PKG/usr/lib$LIBDIRSUFFIX/pkgconfig:$PKG_CONFIG_PATH
 
-PLUGDIR=/usr/lib$LIBDIRSUFFIX/$PRGNAM
-sed -i "s/-fPIC/$SLKCFLAGS/" config.mk
-make install \
-  VERBOSE=1 \
-  ZATHURA_INC=-I../zathura \
-  PLUGINDIR=$PLUGDIR/pdf-poppler \
-  DESTDIR=$PKG \
-  ZATHURA_GTK_VERSION=3 \
-  ZATHURA_VERSION_CHECK=0
-strip $PKG/$PLUGDIR/pdf-poppler/*.so
+mkdir build
+cd build
+  CFLAGS="$SLKCFLAGS -I$PKG/usr/include" \
+  CXXFLAGS="$SLKCFLAGS -I$PKG/usr/include" \
+  meson .. \
+    --buildtype=release \
+    --infodir=/usr/info \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    -Dstrip=true \
+    -Dplugindir=/usr/lib$LIBDIRSUFFIX/$PRGNAM/pdf
+  "${NINJA:=ninja}"
+  DESTDIR=$PKG $NINJA install
+cd ..
 
-ln -s pdf-poppler/pdf.so $PKG/$PLUGDIR/pdf.so
-
-# icon converted from https://pwmt.org/img/fav.ico
-mkdir -p $PKG/usr/share/pixmaps
-cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
-echo "Icon=$PRGNAM" >> $PKG/usr/share/applications/$PRGNAM.desktop
+ln -s pdf/libpdf-poppler.so $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM/pdf.so
 
 mkdir -p $PKG/install
-sed "s,@WITH@,$WITH," $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

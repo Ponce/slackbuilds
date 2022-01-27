@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for unac
 
@@ -6,10 +6,22 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20210819 bkw:
+# - updated to match debian's patchlevel 9.
+# - add a few more ligatures.
+
+# Note to self: don't try to update this for Unicode standard 13.0.0.
+# It'll compile and run, but the code assumes the codepoints will fit
+# in an unsigned short (16 bits), which is no longer true in the new
+# standard.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=unac
-VERSION=${VERSION:-1.8.0}
+VERSION=${VERSION:-1.8.0_9}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -19,7 +31,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -40,8 +56,13 @@ fi
 
 set -e
 
-TARBALL=${PRGNAM}_${VERSION}.orig.tar.gz
-DIRNAME=${PRGNAM}-${VERSION}.orig
+# The original upstream hasn't maintained this since 2004, but
+# the Debian maintainers have been keeping it up to date.
+MAINVER="${VERSION//_*}"  # e.g. 1.8.0_9 => 1.8.0
+DEBVER="${VERSION//*_}"   # e.g. 1.8.0_9 => 9
+TARBALL=${PRGNAM}_${MAINVER}.orig.tar.gz
+DEBTAR=${PRGNAM}_${MAINVER}-${DEBVER}.debian.tar.xz
+DIRNAME=${PRGNAM}-${MAINVER}.orig
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -49,21 +70,19 @@ cd $TMP
 rm -rf $DIRNAME
 tar xvf $CWD/$TARBALL
 cd $DIRNAME
+tar xvf $CWD/$DEBTAR
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# patch taken from http://http.debian.net/debian/pool/main/u/unac/unac_1.8.0-6.diff.gz
-# (yes, it needs -p2)
-patch -p2 < $CWD/size_t.diff
+for i in $( cat debian/patches/series ); do
+  patch -p1 < debian/patches/$i
+done
 
-# patch by slackbuild author, add support for OE ligature
-patch -p1 < $CWD/oe_ligature.diff
+# patch by slackbuild author, add support for OE ligature, German sharp S,
+# and Hwair.
+patch -p1 < $CWD/ligatures.diff
 
-touch config.rpath # shut up, autocrap
 autoreconf -if
 
 CFLAGS="$SLKCFLAGS" \
@@ -79,11 +98,12 @@ CXXFLAGS="$SLKCFLAGS" \
   --enable-shared \
   --build=$ARCH-slackware-linux
 
-# this is needed for the OE ligature also
+# this is needed for the ligatures also
 make -B $PRGNAM.c
 
 make
 make install-strip DESTDIR=$PKG
+rm -f $PKG/usr/lib$LIBDIRSUFFIX/*.la
 gzip $PKG/usr/man/man?/*.?
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
@@ -94,4 +114,4 @@ mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

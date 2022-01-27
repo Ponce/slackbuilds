@@ -17,3 +17,6 @@ Porting changes from the original:
 - Use /usr/share for the data files, instead of the current directory.
 
 - Minor compile/linking fixes (see the SlackBuild).
+
+- Use a Makefile rather than scons. The SConstruct no longer works with
+  recent versions of scons.

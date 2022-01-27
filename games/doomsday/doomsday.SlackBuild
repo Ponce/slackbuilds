@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for doomsday
 
@@ -24,6 +24,11 @@
 
 # Now maintained by B. Watson.
 
+# 20211102 bkw: someone else updated this for v2.3.1 BUILD=1.
+# - BUILD=2.
+# - new-style icons.
+# - binaries in /usr/games.
+
 # 20170207 bkw:
 # - Take over maintenance, BUILD=2
 # - Remove OpenAL and fmodapi from REQUIRES, since they are not
@@ -44,11 +49,13 @@
 #         that, do all of the above, then hand off maintenance to someone
 #         who can afford a shinier newer video card than I can.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=doomsday
-SRCNAM=${PRGNAM}-stable
-VERSION=${VERSION:-1.15.8}
+VERSION=${VERSION:-2.3.1}
 BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -58,7 +65,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -82,35 +93,67 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $SRCNAM-$VERSION
-tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
-cd $SRCNAM-$VERSION
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-cd $PRGNAM
-
-qmake   # create Makefile
-make    # Build
-make INSTALL_ROOT=$PKG install  # Install engine
+# build amethyst
+mkdir -p build-amethyst
+cd build-amethyst
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=Release \
+    ../doomsday/tools/amethyst
+  make
+  make install/strip DESTDIR=$PKG
 cd ..
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install/strip DESTDIR=$PKG
+cd ..
 
-# move man pages in right place
-mkdir -p $PKG/usr/man
-mv $PKG/usr/share/man/man6 $PKG/usr/man
+mv $PKG/usr/bin $PKG/usr/games
+
+DESKDIR=$PKG/usr/share/applications
+chmod -x $DESKDIR/*
+sed -i -e 's,/bin/,/games/,g' \
+       -e '/^Encoding/d' \
+       $DESKDIR/*
+
+mkdir -p $PKG/usr/share/pixmaps
+convert -resize 48x48 \
+  $PKG/usr/share/icons/hicolor/256x256/apps/net.dengine.Doomsday.png \
+  $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# duplicate PNG files
+rm -f $PKG/usr/share/doomsday/deng-logo-256.png
+ln -s ../icons/hicolor/256x256/apps/net.dengine.Doomsday.png \
+      $PKG/usr/share/doomsday/deng-logo-256.png
+
+# already provided by the assimp package
+rm -fR $PKG/usr/include/assimp
+
+# manually install man pages
 rm -rf $PKG/usr/share/man
+mkdir -p $PKG/usr/man/man6
+for i in doomsday/doc/*.6; do
+  gzip -9c < $i > $PKG/usr/man/man6/$( basename $i ).gz
+done
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKG/usr/doc
+mv $PKG/usr/share/doc $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a README.md $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
@@ -119,4 +162,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

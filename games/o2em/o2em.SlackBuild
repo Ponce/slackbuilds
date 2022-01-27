@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for o2em
 
@@ -6,10 +6,20 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211102 bkw: BUILD=2
+# - fix -current build.
+# - binaries in /usr/games.
+# - man page in section 6.
+# - /usr/share/o2em => /usr/share/games/o2em.
+# - convert docs to utf-8.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=o2em
 VERSION=${VERSION:-1.18}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -19,7 +29,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -45,11 +59,8 @@ rm -rf $SRC
 unzip -L $CWD/$SRC.zip
 cd $SRC
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 # Patch does this:
 # make makefile.linux use allegro-config to find cflags/libs for allegro
@@ -61,26 +72,26 @@ patch -p1 < $CWD/compile_fix.diff
 patch -p1 < $CWD/wordsize.diff
 
 cd src
-make -f makefile.linux SLKCFLAGS="$SLKCFLAGS"
+make -f makefile.linux SLKCFLAGS="$SLKCFLAGS -fcommon"
 
-mkdir -p $PKG/usr/bin $PKG/usr/libexec $PKG/usr/share/pixmaps
-install -s -m0755 -oroot -groot dis48 $PKG/usr/bin
+mkdir -p $PKG/usr/games $PKG/usr/libexec \
+         $PKG/usr/share/pixmaps $PKG/usr/share/icons/hicolor/64x64/apps
+install -s -m0755 -oroot -groot dis48 $PKG/usr/games
 install -s -m0755 -oroot -groot $PRGNAM $PKG/usr/libexec/$PRGNAM.bin
-install -m0755 -oroot -groot $CWD/$PRGNAM.sh $PKG/usr/bin/$PRGNAM
-install -m0644 -oroot -groot $PRGNAM.png $PKG/usr/share/pixmaps
+install -m0755 -oroot -groot $CWD/$PRGNAM.sh $PKG/usr/games/$PRGNAM
+install -m0644 -oroot -groot $PRGNAM.png $PKG/usr/share/icons/hicolor/64x64/apps
+ln -s ../icons/hicolor/64x64/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
 # There is no .desktop file because the emulator lacks a UI (if we
 # launch it from the K menu, it prints an error on stdout and exits),
 # and because ".bin" isn't much of a MIME type so we can't really
 # do association (there's no magic header for the ROMs either).
 
-mkdir -p $PKG/usr/man/man1
-gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+mkdir -p $PKG/usr/man/man6
+gzip -9c < $CWD/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
 
-mkdir -p $PKG/usr/share/$PRGNAM/{bios,voice}
-if [ -e "$CWD/o2mainsamp.zip" ]; then
-  unzip -L $CWD/o2mainsamp.zip -d $PKG/usr/share/$PRGNAM/voice
-fi
+mkdir -p $PKG/usr/share/games/$PRGNAM/{bios,voice}
+unzip -L $CWD/o2mainsamp.zip -d $PKG/usr/share/games/$PRGNAM/voice
 
 if [ -e $CWD/odyssey2.zip ]; then
   unzip $CWD/odyssey2.zip
@@ -92,19 +103,25 @@ elif [ -e $CWD/o2rom.bin ]; then
 fi
 
 if [ -n "$ROMFILE" ]; then
-  cat $ROMFILE > $PKG/usr/share/$PRGNAM/bios/o2rom.bin
+  cat $ROMFILE > $PKG/usr/share/games/$PRGNAM/bios/o2rom.bin
+  INCROM="includes"
+else
+  INCROM="does NOT include"
 fi
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cd ../docs
 for file in *; do
-  sed 's/\r//g' < $file > $PKG/usr/doc/$PRGNAM-$VERSION/$file
+  sed 's/\r//g' < $file \
+    | iconv -f iso-8859-1 -t utf-8 \
+    > $PKG/usr/doc/$PRGNAM-$VERSION/$file
 done
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s,@INCROM@,$INCROM," \
+  $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

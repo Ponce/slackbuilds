@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for jfsw
 
@@ -6,6 +6,19 @@
 # Updated for Slackware 14.2 with the help of orbea <ovariegata@yahoo.com>
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20211103 bkw:
+# - updated for 20210725_716e1e3 (latest git).
+# - combine all the source tarballs into one (see git2tarxz.sh).
+# - get rid of options for building with SDL1 and without fluidsynth.
+# - get rid of fixsegfault.diff, upstream fixed the bug.
+# - rebase the remaining patches (dont_use_jack.diff, twin_dragon_grp.diff)
+#   on this version. can't build the old versions any more, sorry.
+# - install the binary only as 'jfsw' (not 'sw'). this is because
+#   eduke32 now supports Shadow Warrior, and its binary is also 'sw'.
+#   which will be renamed to eduke32-sw or edsw or something like that.
+# - optionally (TOOLS=yes) install the tools (kextract, kgroup, etc).
+# - new-style icons.
 
 # 20180710 bkw: BUILD=2
 # - updated for 20180424_8fc2d54 (latest git).
@@ -23,23 +36,13 @@
 # - allow fluidsynth builds to work even if fluidsynth built with JACK.
 # - add SDL2=no and FLUID=no build options.
 
-# When updating to the latest commit of jfsw, we gotta make sure we
-# get the correct commits of the other 3 sources (jfaudiolib, jfbuild,
-# jfmact). To do this:
-#   git clone https://github.com/jonof/jfsw.git jfsw.tmp
-#   cd jfsw.tmp
-#   git submodule init
-#   git submodule update
-# Fortunately only the .info file needs to be updated. This script
-# parses it instead of having the commit hashes hardcoded here too.
-# VERSION is duplicated as usual, but here it only serves to name the
-# package (you could build just fine with any VERSION so long as the
-# .info file is correct).
+cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=jfsw
-VERSION=${VERSION:-20180424_8fc2d54}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-20210725_716e1e3}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -49,7 +52,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -70,136 +77,110 @@ fi
 
 set -e
 
-# We got 4 source tarballs to extract, so create an enclosing $PRGNAM
-# dir to put them all in (for ease of cleanup, if nothing else). When
-# we're ready to build, the source will all be in $TMP/$PRGNAM/$PRGNAM.
 rm -rf $PKG
-rm -rf $TMP/$PRGNAM
-mkdir -p $TMP/$PRGNAM $PKG $OUTPUT
-cd $TMP/$PRGNAM
-
-# 20180710 bkw: this is an unusual thing for a SlackBuild to do:
-# parse its own .info file. Done this way to avoid duplicating
-# all those full-length git hashes in both files.
-if [ ! -e "$CWD/$PRGNAM.info" ]; then
-  echo "$PRGNAM.info not found, where did it go?" 1>&2
-  exit 1
-fi
-
-# For paranoia's sake, don't actually source the entire .info file, just
-# grab the DOWNLOAD= assignment. This rather cryptic sed command means
-# "start printing lines when you hit one that starts with DOWNLOAD,
-# and exit when you hit one that ends with gz and a double-quote
-# (plus possible trailing whitespace)". Result is the multi-line DOWNLOAD
-# assigment only.
-DLFRAG="$( mktemp ./tmp.info.XXXXXX )"
-sed -n '/^DOWNLOAD/,$p;/gz" *$/q' < "$CWD/$PRGNAM.info" > $DLFRAG
-source $DLFRAG
-
-for URL in $DOWNLOAD; do
-  SRCNAM="$( basename "$URL" .tar.gz )"
-  PNAM=$(echo $SRCNAM | sed -e 's/-.*//')
-  [ "$PNAM" = "$PRGNAM" ] || DIRS="$TMP/$PRGNAM/$PNAM $DIRS"
-  rm -rf $SRCNAM $PNAM
-  tar xvf $CWD/$SRCNAM.tar.gz
-  mv $SRCNAM $PNAM
-done
-
-cd $PRGNAM
-mv $DIRS .
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \+ -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
-
-# 20180711 bkw: how to trigger a known segfault:
-# <orbea> make a save game, load that save game, die while holding the
-#         fire button
-# I came up with a band-aid to work around the segfault. Stops the
-# fire button from working the same as a Y keypress (or at all), in Y/N
-# prompts. Patch was sent upstream: https://github.com/jonof/jfsw/issues/14
-patch -p1 < $CWD/patches/fixsegfault.diff
-
-# 20180712 bkw: one liner attempt to get SDL (1.2 only) CD-audio support
-# working.  It turns out there's something worse wrong, I can't even get
-# the example code from libsdl.org to play a CD (it'll list the tracks,
-# but SDL_CDPlayTracks() doesn't work, the drive won't even spin up).
-# Since this is SDL 1.2, not 2.x, any attempt to ask for help from an
-# SDL developer or expert is going to be answered with "port your code to
-# SDL 2.x!", so I'm just documenting CD support in jfsw as being broken.
-#patch -p1 < $CWD/patches/sdl_cdrom_fix.diff
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 # 20180712 bkw: if fluidsynth happens to have been built with optional
 # JACK support, it'll be the default driver and jfsw will try to use it.
-# This doesn't actually work, so:
+# This doesn't actually work.
+# 20211029 bkw: Slackware has fluidsynth now, it isn't built
+# with jack. But I'm leaving this in, because there might be a
+# fluidsynth-jack build after 15.0 releases.
 patch -p1 < $CWD/patches/dont_use_jack.diff
-
-# 20180712 bkw: we have sdl.pc (not sdl1.pc) for SDL 1.2.x:
-patch -p1 < $CWD/patches/sdl1_fix.diff
-
-# 20180712 bkw: upstream doesn't provide a way to override autodetection
-# of SDL2 and fluidsynth, so I do it with a couple of patches:
-[ "${SDL2:-yes}" = "no" ] && patch -p1 < $CWD/patches/disable_sdl2.diff
-[ "${FLUID:-yes}" = "no" ] && patch -p1 < $CWD/patches/disable_fluid.diff
-
-# 20180711 bkw: The -Wno-return-type isn't needed for gcc but does no
-# harm. Left in place in case someone wants to build this with clang
-# (add a CC=clang arg to the make command, or 'export CC=clang').
-
-# 20180711 bkw: JFAUDIOLIB_USE_SDLMIXER=1 doesn't work (build fail due
-# to missing driver_sdlmixer.c). Maybe someday it'll work and then we
-# hear the demo music without having to install fluidsynth?
-
-# 20200416 bkw: fluidsynth 2.x works OK, but the version check in the
-# source doesn't like its version number.
-sed -i '/^#error.*Fluid/d' jfaudiolib/src/driver_fluidsynth.c
 
 # 20200428 bkw: add Twin Dragon td.grp to the list of supported GRP
 # files. Need this for the jfsw_twin_dragon build.
-patch -p1 < $CWD/twin_dragon_grp.diff
+patch -p1 < $CWD/patches/twin_dragon_grp.diff
 
-make \
-  RELEASE=1 \
-  PREFIX=/usr/share/games/$PRGNAM \
-  CFLAGS="$SLKCFLAGS -Wno-return-type" \
-  CXXFLAGS="$SLKCFLAGS"
+# 20211030 bkw: make the default video mode 24bpp, in the absence of a
+# config file. This is needed to make the HRP work OOTB. Specifically,
+# the launcher (on my system anyway) doesn't offer any 24bpp modes by
+# default, only 8 and 32. And the HRP *has to have* 24 (no, 32 won't
+# work). It's 2021, I don't think anyone's still using anything that
+# doesn't support 24bpp (at least not in a desktop/laptop PC running
+# Slackware). Thanks again to orbea for figuring this out.
+sed -i '/ScreenBPP *= *8/s,8,24,' src/config.c
 
-# Document what the binary package needs in its slack-desc.
-BIN_NAME=sw
-SDLVER=1.2
-WITHFLUID=without
-ldd $BIN_NAME | grep -q libSDL2 && SDLVER=2.0
-ldd $BIN_NAME | grep -q libfluidsynth && WITHFLUID=with
+install_exe() {
+  install -s -m0755 -oroot -groot "$@"
+}
+
+runmake() {
+  echo "===> running: make " $@
+  make "$@" \
+    RELEASE=1 \
+    DATADIR=/usr/share/games/$PRGNAM \
+    CFLAGS="$SLKCFLAGS" \
+    CXXFLAGS="$SLKCFLAGS"
+}
+
+runmake
 
 # no 'make install' target
 mkdir -p $PKG/usr/games
-install -s -m0755 -oroot -groot $BIN_NAME $PKG/usr/games
-ln -s $BIN_NAME $PKG/usr/games/$PRGNAM
+install_exe sw $PKG/usr/games/$PRGNAM
+install_exe build $PKG/usr/games/$PRGNAM-build
 
-# Data directory included in package, even though we don't include data file.
-# Why? Because the user might be grabbing sw.grp from a retail CD-ROM, and
-# if this dir doesn't exist, he might get confused...
+# just for shiggles, include kenbuild in the package:
+make -C jfbuild
+mkdir -p $PKG/usr/libexec/$PRGNAM $PKG/usr/share/games/kenbuild
+install_exe jfbuild/kenbuild-data/game $PKG/usr/libexec/$PRGNAM/kenbuild
+install -m0755 -oroot -groot $CWD/kenbuild.sh $PKG/usr/games/kenbuild
+cp jfbuild/kenbuild-data/*.{map,h,dat} $PKG/usr/share/games/kenbuild
+
+if [ "${TOOLS:-no}" = "yes" ]; then
+  runmake -C jfbuild utils
+  # the set of available tools changes sometimes, don't let the build
+  # fail because one tool is gone in a new release.
+  for i in arttool kextract kgroup transpal wad2art wad2map; do
+    if [ -x jfbuild/$i ]; then
+      install_exe jfbuild/$i $PKG/usr/games/$i
+    else
+      echo "!!! $i didn't get built, investigate!"
+    fi
+  done
+fi
+
+# Data directory included in package, even though we don't include
+# data files. Why? Because the user might be grabbing sw.grp from
+# a retail CD-ROM, and if this dir doesn't exist, he might get
+# confused...
 mkdir -p $PKG/usr/share/games/$PRGNAM
 
-# Icon taken from the highres pack, highres/screen/menu/2870.png
-mkdir -p $PKG/usr/share/pixmaps
-cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+# There's an .ico icon, but it maxes out at 48x48.
+# This icon made from highres/screen/menu/2324.png in the highres pack,
+# by copying just the yinyang logo.
+for px in 16 32 48 64 128; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  convert -resize $size $CWD/$PRGNAM.png $dir/$PRGNAM.png
+done
 
-mkdir -p $PKG/usr/share/applications
-cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+DESKTOPDIR=$PKG/usr/share/applications
+mkdir -p $DESKTOPDIR
+for i in $CWD/desktop/*.desktop; do
+  cat $i > $DESKTOPDIR/$( basename $i )
+done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a GNU.TXT readme.txt releasenotes.html $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a GPL.TXT README.md releasenotes.html $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README_SBo.txt
 
 mkdir -p $PKG/install
-sed -e "s,@WITHFLUID@,$WITHFLUID," \
-    -e "s,@SDLVER@,$SDLVER, " \
-    $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

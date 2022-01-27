@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for lmpc
 
@@ -23,6 +23,13 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20211022 bkw: BUILD=2
+# - fix -current build (udemy.h)
+# - get rid of PDF docs. Sorry, but I don't love tex enough to debug
+#   whatever's broken them on -current. Read the HTML docs instead.
+# - remove useless INSTALL from docdir.
+# - rearrange docs slightly, simplify copying them.
+
 # 20200416 bkw:
 # - take over maintenance
 # - TODO: find out what repo "1b70022" came from. It's newer than
@@ -32,10 +39,13 @@
 # - add -j1 to make command :(
 # - binaries in /usr/games
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=lmpc
 VERSION=${VERSION:-1b70022}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -45,7 +55,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -81,6 +95,22 @@ CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure --prefix=/usr --bindir=/usr/games
 
+# 20211022 bkw: the PDF docs fail to build with -current's texlive.
+# I didn't figure out how to fix it after an hour, so I punt instead.
+# Upstream didn't give us a way to disable building the PDFs, so dike
+# it out. We still make the HTML docs; I don't think anyone's going to
+# care too much. If you do care, fix it and send me a patch (or live
+# with it; don't ask me to fix this for you).
+sed -i '/^DEFAULT_TARGET_document/s,\<doc\>,html,' \
+       spec/Makefile \
+       spec/*/Makefile \
+       doc/Makefile \
+
+# 20211022 bkw: for some reason, this file doesn't get built before
+# the targets that need it. Wasn't a problem in 14.2's make. *Shrug*.
+make -C src -j1 udemy.h
+
+# 20211022 bkw: We still need the -j1, sorry.
 make -j1
 make install-strip DESTDIR=$PKG
 
@@ -88,46 +118,31 @@ make install-strip DESTDIR=$PKG
 install -m755 bin/dema $PKG/usr/games/dema
 install -m755 bin/dm2cat $PKG/usr/games/dm2cat
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a COPYING COPYING.LIB INSTALL README.base $PKG/usr/doc/$PRGNAM-$VERSION
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a COPYING COPYING.LIB README.base $PKGDOC
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/doc
-cp -a doc/lmpc.html doc/lmpc.pdf $PKG/usr/doc/$PRGNAM-$VERSION/doc
+mkdir -p $PKGDOC/spec/misc
+cp -a doc/lmpc.html $PKGDOC
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/spec
-cp -a \
-	spec/dem-q1/dem.html \
-	spec/dem-q1/dem.pdf \
-	spec/dm2-q2/dm2.html \
-	spec/dm2-q2/dm2.pdf \
-	spec/dmo-dn/dmo.html \
-	spec/dmo-dn/dmo.pdf \
-	spec/faq/faq.html \
-	spec/faq/faq.pdf \
-	spec/lmp-d1/lmp.html \
-	spec/lmp-d1/lmp.pdf \
-	spec/qwd-qw/qwd.html \
-	spec/qwd-qw/qwd.pdf \
-	$PKG/usr/doc/$PRGNAM-$VERSION/spec
+# These are useless.
+rm -f spec/*/index*.html spec/misc/*.{txt,in}
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/misc
-cp -a spec/misc/cd.dem \
-	spec/misc/cd.html \
-	spec/misc/cd.txt \
-	spec/misc/ers \
-	spec/misc/ers.html \
-	spec/misc/mulder \
-	spec/misc/mulder.html \
-	spec/misc/procdm2.* \
-	spec/misc/qfont.dem \
-	spec/misc/qfont.html \
-	spec/misc/qfont.pcx \
-	$PKG/usr/doc/$PRGNAM-$VERSION/misc
+# Skip misc/ and main/ here.
+cp -a spec/[^m]*/*.html $PKGDOC/spec
 
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# No executable scripts in doc dir, please.
+chmod -x spec/misc/*
+
+# This list of files was chosen by the previous maintainer. He
+# also had cd.txt, which looks like an error (none of the other .txt
+# files were copied).
+cp -a spec/misc/{cd.,ers,mulder,procdm2.,qfont.}* $PKGDOC/spec/misc
+
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

@@ -2,13 +2,8 @@
 ..   rst2man.py commandergenius.rst > commandergenius.6
 .. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 1.9.8.7-Beta
-.. |dotlessversion| replace:: 1987beta
+.. |version| replace:: 3.0.8
 .. |date| date::
-
-.. converting from pod:
-.. s/B<\([^>]*\)>/**\1**/g
-.. s/I<\([^>]*\)>/*\1*/g
 
 ===============
 commandergenius
@@ -46,7 +41,7 @@ fan-made mods.
 This man page is a brief summary. Full documentation can be found
 in:
 
-/usr/doc/commandergenius-|dotlessversion|/README
+/usr/doc/commandergenius-|version|/README.md
 
 OPTIONS
 =======
@@ -96,7 +91,7 @@ FILES
 COPYRIGHT
 =========
 
-See the file /usr/doc/commandergenius-|dotlessversion|/COPYRIGHT for license information.
+See the file /usr/doc/commandergenius-|version|/COPYRIGHT for license information.
 
 AUTHORS
 =======

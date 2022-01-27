@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for zoom
 
@@ -6,12 +6,27 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211011 bkw: BUILD=2
+# - binary in /usr/games.
+# - update man page.
+# - do NOT move man page to section 6, there's already a zoom(6), which
+#   is part of xscreensaver.
+# - finally noticed that the Linux build of zoom does *not* play
+#   TADS, HUGO, or Glulx games. The Mac OSX Cocoa build does, but the
+#   extra code is in Objective C and doesn't look like it's portable
+#   to non-Mac platforms. So update README, slack-desc, and the man
+#   page to reflect that this is a Z-Code-only interpreter.
+# - add a few bugfix patches from Debian.
+# - new-style icons.
 # 20170621 bkw: fix build for -current
+
+cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=zoom
 VERSION=${VERSION:-1.1.5}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -21,7 +36,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -45,26 +64,32 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# gcc7 hates all the inline functions in interp.c.
-patch -p1 < $CWD/no_inline.diff
+# 20211011 bkw: replace my old no_inline.patch with Debian's.
+# config_xft.diff, remove_rice.diff, zoomrc_in_etc.diff are mine. The
+# rest of patches/ came from Debian's zoom-player patchlevel 6.
+# This includes a couple of fixes for crashing bugs.
+for i in $( cat $CWD/patches/series ); do
+  echo "=== applying $i"
+  patch -p1 < $CWD/patches/$i
+done
 
-# We don't need -funroll-loops and friends. They break the build on -current.
-patch -p1 < $CWD/remove_rice.diff
-
-# Modern Xft doesn't ship a xft-config script, hack the configure script
-# to use pkg-config.
-patch -p1 < $CWD/config_xft.diff
+# 20211011 bkw: note to self: --enable-new-terp defines HAVE_COMPUTED_GOTOS
+# in config.h. Supposedly this might be faster on some architectures, and
+# slower on others. I don't enable this feature because:
+# - The games already run fast enough.
+# - The Debian packagers didn't enable it, so it's not likely to be
+#   well-tested.
+# - I'd have to spend time/effort trying to figure out how to benchmark
+#   the interpreter to see if it even made a difference.
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
+  --bindir=/usr/games \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --mandir=/usr/man \
@@ -74,36 +99,47 @@ CXXFLAGS="$SLKCFLAGS" \
 make
 make install-strip DESTDIR=$PKG
 
-# enable antialiasing by default. The comment in the config file
-# doesn't seem to apply (it was written years ago).
-sed -i '/antialias/s,no,yes,' $PKG/usr/share/$PRGNAM/${PRGNAM}rc
-mv $PKG/usr/share/$PRGNAM/${PRGNAM}rc $PKG/usr/share/$PRGNAM/${PRGNAM}rc.new
+# Move config file to /etc, since we patched it for that.
+mkdir -p $PKG/etc/$PRGNAM
+mv $PKG/usr/share/$PRGNAM/${PRGNAM}rc $PKG/etc/$PRGNAM/${PRGNAM}rc.new
 
 # If zoom is run with no arguments, it shows a menu of games from its
 # default location. Let's make this the same location inform installs
-# its example games to.
+# its example games to (also, zork installs its games here).
 mkdir -p $PKG/usr/share/zcode
 ln -s ../zcode $PKG/usr/share/$PRGNAM/games
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 rm -f manual/Makefile*
-cp -a \
-  AUTHORS COPYING ChangeLog NEWS README THANKS TODO manual \
+cp -a AUTHORS COPYING ChangeLog NEWS README THANKS TODO manual \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
+# Icons extracted from src/macos/zoom-app.icns with icns2png from
+# the libicns package. There was no 48x48 or 64x64, so I scaled
+# the 128x128 one down with convert(1). I didn't include the 512x512
+# or 256x256 icons, AFAIK nothing uses icons that large (yet?).
+for i in $CWD/icons/*.png; do
+  px=$( basename $i | cut -d. -f1 )
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  cat $i > $dir/$PRGNAM.png
+done
+
 mkdir -p $PKG/usr/share/pixmaps/
-cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+ln -s ../icons/hicolor/64x64/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
 mkdir -p $PKG/usr/share/applications/
 cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
 
 mkdir -p $PKG/usr/man/man1
-sed "s,@VERSION@,$VERSION,g" < $CWD/$PRGNAM.1 | gzip -9c > $PKG/usr/man/man1/$PRGNAM.1.gz
+sed "s,@VERSION@,$VERSION,g" < $CWD/$PRGNAM.1 \
+    | gzip -9c > $PKG/usr/man/man1/$PRGNAM.1.gz
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

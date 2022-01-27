@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for SLADE
 
@@ -23,7 +23,15 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# 20201109 bkw: update for v3.2.12a
+# 20211118 bkw:
+# - update for v3.2.0_b3. normally won't package a beta, but
+#   3.1.12a and 3.1.13 won't build, and life is too short.
+# - our wxGTK3 now has wxWebView, get rid of -DNO_WEBVIEW.
+# - /usr/share/slade3 moved to /usr/share/games/slade3.
+# - new- and old-style icons.
+# - add p7zip dep (the build process recompresses the .pk3).
+
+# 20201109 bkw: update for v3.1.12a
 # 20200416 bkw:
 # - take over maintenance
 # - update for v3.1.11
@@ -31,10 +39,13 @@
 # - install icon in right place, symlink to old location
 # - get rid of our .desktop file (upstream provides one now)
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=SLADE
-VERSION=${VERSION:-3.1.12a}
+VERSION=${VERSION:-3.2.0_b3}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -44,7 +55,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -78,42 +93,65 @@ find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
 # 20200416 bkw: game binaries do not belong in /usr/bin.
 sed -i 's,\<bin\>,games,' src/CMakeLists.txt
 
+# 20211118 bkw: pk3 file belongs in /usr/share/games/slade3.
+sed -i '/auto *dir_slade_pk3/s,=.*,= string("/usr/share/games/slade3/slade.pk3");,' \
+       src/Archive/ArchiveManager.cpp
+sed -i 's,share/slade3,share/games/slade3,' src/CMakeLists.txt
+
+# 20211118 bkw: I was gonna change the category in the .desktop file,
+# but looking at the spec, I don't see a GameEditor or similar.
+sed -i -e 's,  *$,,' -e 's,^Exec=,&/usr/games/,' *.desktop
+
 # 20200416 bkw: don't depend on unstable /usr/bin/wx-config symlink.
 # stupid thing insists on searching for wx-config in PATH, instead of
 # allowing us to explicitly give a full path and name for the script, so:
-WXCONF=/usr/lib$LIBDIRSUFFIX/wx/config/gtk2-unicode-3.0
+WXCONF=/usr/lib$LIBDIRSUFFIX/wx/config/gtk3-unicode-3.0
 WXTMP=$( pwd )/wxtmp
 mkdir -p $WXTMP
 ln -s $WXCONF $WXTMP/wx-config
 
-# 20200416 bkw: our wxGTK3 package doesn't include wxWebView, and it's built
-# with gtk+-2, not 3. This stuff isn't autodetected so we help it along.
+# Note to self: don't try this:
+#    -DCMAKE_C_COMPILER=clang \
+#    -DCMAKE_CXX_COMPILER=clang++ \
+# It might compile OK but it will fail to run due to C++ ABI
+# version differences between the slade binary and the wx libraries.
+# We'd have to compile wxGTK3 with clang++ to make it work (and that
+# would break everything else using g++ and wxGTK3!)
+
+# Also, this build isn't ccache-able due to using precompiled headers
+# with g++ (see overly detailed discussion in games/mame). It's possible
+# to disable PCH, thus:
+#    -DNO_COTIRE=ON \
+# but this makes the build take 3x as long, if it's not cached. Since
+# a non-ccached build with cotire only takes me 5 minutes, I won't go
+# to extreme lengths here like I did for mame.
+
+mkdir -p build
 cd build
   cmake \
     -DWITH_WXPATH=$WXTMP \
-    -DNO_WEBVIEW=ON \
-    -DWX_GTK3=OFF \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_BUILD_TYPE=Release ..
-  make
+  make VERBOSE=1
   make install/strip DESTDIR=$PKG
 cd ..
 
-mkdir -p $PKG/usr/share/icons/hicolor/128x128/apps \
-         $PKG/usr/share/pixmaps
+iconname=$( grep '^Icon=' $PKG/usr/share/applications/*.desktop | cut -d= -f2 )
+rm -rf $PKG/usr/share/icons
+for px in 16 32 48 64 128; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  convert -resize $size dist/res/logo_icon.png $dir/$iconname.png
+done
 
-# 20200416 bkw: don't want to hardcode the icon name here.
-cd $PKG/usr/share/icons
-  icon="$( /bin/ls *$PRGNAM.png | head -1 )"
-  mv $icon hicolor/128x128/apps
-  ln -s hicolor/128x128/apps/$icon .
-  ln -s ../icons/hicolor/128x128/apps/$icon ../pixmaps/$PRGNAM.png
-cd -
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$iconname.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a README* gpl-2.0.txt $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README.md LICENSE* $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
@@ -121,4 +159,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

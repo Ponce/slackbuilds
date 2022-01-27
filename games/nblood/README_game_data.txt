@@ -34,8 +34,9 @@ tracks and convert them to ogg or flac. Follow the instructions in
 rednukem
 ========
 
-The rednukem binary only plays Duke Nukem 3D: Atomic Edition v1.5 and
-possibly (untested) the Plutonium Pak.
+The rednukem binary plays Duke Nukem 3D: Atomic Edition v1.5 and
+possibly (untested) the Plutonium Pak. It does *not* play the
+shareware Duke Nukem 3D.
 
 For Atomic Edition, all you need is the DUKE3D.GRP file from the install
 CD (mine's in atominst/ on the CD) or an installed copy of the game. It's
@@ -43,6 +44,12 @@ CD (mine's in atominst/ on the CD) or an installed copy of the game. It's
 Copy this file to /usr/share/games/eduke32/ (no, that's not a typo,
 rednukem uses eduke32's data directory). The filename actually doesn't
 matter, rednukem uses the checksum to detect it.
+
+rednukem may also be able to play the Duke Nukem 3D addons such as
+"Duke it out in D.C.", "Life's a Beach", or "Nuclear Winter". Also
+possibly other games such as "Nam", "Napalm", "WWII GI", "Platoon
+Leader", "Redneck Rampage", and "Redneck Rampage Rides Again". None of
+these have been tested by the SlackBuild author.
 
 
 pcexhumed

@@ -1,8 +1,10 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for Free Pascal
 
-# Written by Andre Barboza <bmg.andre@gmail.com>
+# Written by Andre Barboza <email removed>.
+# Modified by the SlackBuilds.org project.
+# Now maintained by B. Watson <yalhcru@gmail.com>.
 
 # Redistribution and use of this script, with or without modification, is
 # permitted provided that the following conditions are met:
@@ -20,14 +22,23 @@
 # WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-# Modified by the SlackBuilds.org project.
+
+# 20210904 bkw:
+# - take over maintenance.
+# - update for v3.2.2.
+# - install the IDE's data files to fpc base dir, not /usr/bin (ugh).
+# - include man page for instantfpc/ifpc.
+# - TODO: find out why exiting fp (the IDE) leaves the cursor blinking.
+#   It's *very* annoying but not a showstopper.
+
+cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=fpc
-VERSION=${VERSION:-3.0.4}
-BINVERSION=${BINVERSION:-3.0.4}
+VERSION=${VERSION:-3.2.2}
+BINVER=${BINVER:-3.2.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -37,7 +48,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -59,35 +74,50 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$BINVERSION ${PRGNAM}build-$VERSION
-mkdir $PRGNAM-$BINVERSION ${PRGNAM}build-$VERSION
-cd $TMP/$PRGNAM-$BINVERSION
-tar xvf $CWD/$PRGNAM-$BINVERSION.$ARCH-linux.tar --strip-components=1
+rm -rf $PRGNAM-$BINVER ${PRGNAM}build-$VERSION
+mkdir $PRGNAM-$BINVER ${PRGNAM}build-$VERSION
+cd $TMP/$PRGNAM-$BINVER
+tar xvf $CWD/$PRGNAM-$BINVER.$ARCH-linux.tar --strip-components=1
 cd $TMP/${PRGNAM}build-$VERSION
 tar xvf $CWD/${PRGNAM}build-$VERSION.tar.gz
 
-# Unpack binary files.
+# Unpack binary files. This is the bootstrap compiler; these binaries
+# don't get installed as part of the package.
 (
-  mkdir -p $TMP/$PRGNAM-$BINVERSION/binary
-  cd $TMP/$PRGNAM-$BINVERSION/binary
-  tar xvf $TMP/$PRGNAM-$BINVERSION/binary.$ARCH-linux.tar
+  mkdir -p $TMP/$PRGNAM-$BINVER/binary
+  cd $TMP/$PRGNAM-$BINVER/binary
+  tar xvf $TMP/$PRGNAM-$BINVER/binary.$ARCH-linux.tar
 
-  cd  $TMP/$PRGNAM-$BINVERSION
-  tar xvf $TMP/$PRGNAM-$BINVERSION/binary/base.$ARCH-linux.tar.gz
-  tar xvf $TMP/$PRGNAM-$BINVERSION/binary/utils.$ARCH-linux.tar.gz
+  cd  $TMP/$PRGNAM-$BINVER
+  tar xvf $TMP/$PRGNAM-$BINVER/binary/base.$ARCH-linux.tar.gz
+  tar xvf $TMP/$PRGNAM-$BINVER/binary/utils.$ARCH-linux.tar.gz
 
-  cd $TMP/$PRGNAM-$BINVERSION/bin
+  cd $TMP/$PRGNAM-$BINVER/bin
   if [ "$ARCH" = "x86_64" ]; then
-    ln -s ../lib/fpc/$BINVERSION/ppcx64
+    ln -s ../lib/fpc/$BINVER/ppcx64
   else
-    ln -s ../lib/fpc/$BINVERSION/ppc386
+    ln -s ../lib/fpc/$BINVER/ppc386
   fi
 )
 
-export PATH="$TMP/$PRGNAM-$BINVERSION/bin":$PATH
-echo $PATH
+export PATH="$TMP/$PRGNAM-$BINVER/bin":$PATH
+echo "=== PATH is $PATH"
 
 cd $TMP/${PRGNAM}build-$VERSION/${PRGNAM}build-$VERSION
+
+# it's => its. It's one of my pet peeves; its occurrence annoys me.
+sed -i "s,\\(as\\|control\\) it's,\\1 its," install/man/man?/*.?
+
+# 20210905 bkw: patch taken from Debian with many thanks. Installs the
+# IDE's data files somewhere besides /usr/bin, and patches the IDE to
+# look for them there.
+patch -p1 < $CWD/fix-IDE-data-file-location.patch
+
+# 20210905 bkw: don't let the NOGDB=1 scare you. During the compile
+# we get this message:
+# Compiling IDE with GDB/MI debugger support, LibGDB is not needed
+# ...and it appears that the IDE does indeed have its debugging
+# support enabled.
 make build NOGDB=1
 make -j1 NOGDB=1 PREFIX=$PKG/usr install
 
@@ -106,10 +136,23 @@ mv $PKG/usr/share/doc $PKG/usr/doc
 rmdir $PKG/usr/share
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# 20210905 bkw: fancier than the template, but quite a bit faster and less
+# resource-intensive.
+find $PKG -type f -a -perm /111 | \
+  xargs file -m /etc/file/magic/elf | \
+  grep -e "executable" -e "shared object" | grep ELF | \
+  cut -f 1 -d : | \
+  xargs strip --strip-unneeded 2> /dev/null || true
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
+# we include one man page borrowed from Debian and edited for
+# grammar and accuracy.
+cat $CWD/instantfpc.1 > $PKG/usr/man/man1/instantfpc.1
+
+gzip $PKG/usr/man/man?/*.*
+
+# no idea why Debian renames instantfpc => ifpc, so support both names.
+ln -s instantfpc.1.gz $PKG/usr/man/man1/ifpc.1.gz
+ln -s instantfpc $PKG/usr/bin/ifpc
 
 # Create compiler config file.
 mkdir -p $PKG/etc $PKG/usr/lib$LIBDIRSUFFIX/fpc/$VERSION/ide/text
@@ -118,10 +161,11 @@ $PKG/usr/lib$LIBDIRSUFFIX/fpc/$VERSION/samplecfg \
   $PKG/etc
 
 # Clean up the configs by removing our package directory.
-sed -i -e "s:$PKG::g" $PKG/etc/fpc.cfg
-sed -i -e "s:$PKG::g" $PKG/etc/fppkg.cfg
-sed -i -e "s:$PKG::g" $PKG/etc/fppkg/default
-sed -i -e "s:$PKG::g" $PKG/usr/lib$LIBDIRSUFFIX/fpc/$VERSION/ide/text/fp.cfg
+sed -i -e "s:$PKG::g" \
+  $PKG/etc/fpc.cfg \
+  $PKG/etc/fppkg.cfg \
+  $PKG/etc/fppkg/default \
+ $PKG/usr/lib$LIBDIRSUFFIX/fpc/$VERSION/ide/text/fp.cfg
 mv $PKG/etc/fpc.cfg $PKG/etc/fpc.cfg.new
 
 mkdir -p $PKG/install
@@ -131,10 +175,7 @@ cat $CWD/doinst.sh > $PKG/install/doinst.sh
 cd $PKG
 # fix permissions for program docs and demos.
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

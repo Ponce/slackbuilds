@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for vera
 
@@ -6,16 +6,33 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211015 bkw: BUILD=2
+# - fix character encoding and formatting.
+# - fix info node structure and dir entry.
+# - add HTML version of the acronym list.
+# - stop splitting vera.info into multiple info files.
+# - doinst.sh properly installs vera.info in Info dir.
+# - douninst.sh properly removes vera.info from Info dir.
+# - add vera standalone lookup tool from contrib/.
+# - add man page for same.
+
 # 20201024 bkw: updated for v1.24
+
+cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=vera
 VERSION=${VERSION:-1.24}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 ARCH=noarch
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -35,26 +52,53 @@ find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
 # Fix TL;DR and BP;DR entries.
 patch -p1 < $CWD/semicolons.diff
 
-makeinfo --force $PRGNAM.texi
+# vera.h includes a non-ASCII character encoded as iso-8859-1. It's
+# a multiplication sign. Replace with ASCII letter x. Also replace
+# all [[ and ]] with [ and ]. Also, vera.c's first entry is missing
+# the @item.
+patch -p1 < $CWD/utf8_and_double_brackets.diff
+
+# Next 2 are from Debian:
+
+# This one is actually harmful IMO. It gets rid of the 'Up: Top'
+# links at the start of each letters' worth of acronyms.
+#patch -p1 < $CWD/01_texinfo_node_menu.diff
+
+# This one makes vera show up in the info directory (so if you just
+# type "info", it shows up under Dictionaries in the index).
+patch -p1 < $CWD/02_direntry.diff
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+makeinfo --force --no-split $PRGNAM.texi
+makeinfo --force --no-split --html -o $PKGDOC/$PRGNAM.html $PRGNAM.texi
 
 mkdir -p $PKG/usr/info
-for i in $PRGNAM.info*; do
-  gzip -9c < $i > $PKG/usr/info/$i.gz
-done
+gzip -9c < $PRGNAM.info > $PKG/usr/info/$PRGNAM.info.gz
 
 # Generate wtf(6) database from VERA contents.
-# Yes, this conflicts with bsd-games, but it's not like it's going to break
-# anyone's system. As shipped, /usr/share/misc/acronyms is about useless.
+# Yes, this conflicts with bsd-games, but it's not like it's
+# going to break anyone's system. The /usr/share/misc/acronyms from
+# bsd-games-2.17-x86_64-3 has 590 entries. The acronyms installed by
+# this package includes all of those, plus 12,666 more.
 mkdir -p $PKG/usr/share/misc
 perl $CWD/mkwtfdb.pl > $PKG/usr/share/misc/acronyms
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a changelog README $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# 20211016 bkw: include standalone 'vera' lookup tool. Note
+# that this tool requires vera.info.gz to have been built with
+# --no-split (as we actually do, above).
+mkdir -p $PKG/usr/games $PKG/usr/man/man6
+sed -i 's,/usr/share,/usr,' contrib/$PRGNAM.pl
+install -m0755 contrib/$PRGNAM.pl $PKG/usr/games/$PRGNAM
+gzip -9c < $CWD/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
+
+cp -a changelog README $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/douninst.sh > $PKG/install/douninst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

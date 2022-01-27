@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for qzdl
 #
@@ -26,16 +26,24 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20211209 bkw:
+# - update for latest git, 3.2.2.3+20211008_9c76408. needed for building
+#   on -current.
+# - new-style icons.
+
 # 20200416 bkw:
 # - take over maintenance
 # - binaries in /usr/games
 # - symlink icon to /usr/share/icons
 # - various tweaks
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=qzdl
-VERSION=${VERSION:-3.2.2.3}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-3.2.2.3+20211008_9c76408}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -45,7 +53,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -70,33 +82,55 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
 cd $PRGNAM-$VERSION
 chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --build=$ARCH-slackware-linux \
-  --disable-updater
+# 20211209 bkw: FETCHCONTENT_FULLY_DISCONNECTED stops it trying
+# to do a git clone of its dependency 'inih'. Means we have to
+# already have inih source in our tarball; see git2tarxz.sh.
+mkdir -p build
+cd build
+  cmake \
+    -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+    -DMAN_INSTALL_DIR=/usr/man \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+cd ..
 
-make
-
+# no install or install/strip targets.
 mkdir -p $PKG/usr/games
-install -s -m0755 zdl $PKG/usr/games
+install -s -m0755 build/zdl $PKG/usr/games
 ln -s zdl $PKG/usr/games/$PRGNAM
 
-mkdir -p $PKG/usr/share/applications \
-         $PKG/usr/share/pixmaps \
-         $PKG/usr/share/icons/hicolor/scalable/apps
+HICOLOR=$PKG/usr/share/icons/hicolor
+PIXMAPS=$PKG/usr/share/pixmaps
+APPS=$PKG/usr/share/applications
 
-cp $CWD/qzdl.desktop $PKG/usr/share/applications
-cp -a res/zdl3.svg $PKG/usr/share/pixmaps
-ln -s ../../../../pixmaps/zdl3.svg $PKG/usr/share/icons/hicolor/scalable/apps
+mkdir -p $APPS $PIXMAPS $HICOLOR/{48x48,scalable}/apps
+
+cp $CWD/qzdl.desktop $APPS
+cp -a res/zdl3.svg $HICOLOR/scalable/apps
+for px in 16 32 48 64 128; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  if [ -e res/zdl3-$size.png ]; then
+    echo "=== copy $size"
+    cp -a res/zdl3-$size.png $dir/$PRGNAM.png
+  else
+    echo "=== convert $size"
+    convert -resize $size res/zdl3-1024x1024.png $dir/$PRGNAM.png
+  fi
+done
+
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PIXMAPS/$PRGNAM.png
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a AUTHORS CHANGELOG LICENSE README $PKG/usr/doc/$PRGNAM-$VERSION
@@ -106,4 +140,4 @@ mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

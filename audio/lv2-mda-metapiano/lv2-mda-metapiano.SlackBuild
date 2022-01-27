@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for lv2-mda-metapiano
 
@@ -6,10 +6,18 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211202 bkw: BUILD=2
+# - actually use SLKCFLAGS.
+# - fix homepage.
+# - use upstream's release tarball.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=lv2-mda-metapiano
 VERSION=${VERSION:-0.0.2}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -19,7 +27,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -40,28 +52,45 @@ fi
 
 set -e
 
+# upstream's tarball and directory name include these:
+GITVER=${GITVER:-1a272c3}
+GITNAM="lv2-mdametapiano"
+TARNAM=$GITNAM-$VERSION-$GITVER
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+rm -rf $TARNAM
+
+# we get 2 different filenames depending on whether the download was
+# done with a client that does or does not respect the Content-disposition
+# HTTP header. Browsers usually do, wget doesn't, unless it's instructed
+# to (via command line option or wgetrc). handle both filenames here.
+# for github, there's a "magic" URL that gives us the same filename
+# either way, but this isn't a github project.
+
+for i in $VERSION $TARNAM; do
+  [ -e $CWD/$i.tar.gz ] && tar xvf $CWD/$i.tar.gz && break
+done
+
+cd $TARNAM
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-INSTALL_DIR=$PKG/usr/lib$LIBDIRSUFFIX/lv2
-make TYPE=mdaPiano
-make TYPE=mdaPiano install INSTALL_DIR=$INSTALL_DIR
-make clean
-make TYPE=mdaEPiano
-make TYPE=mdaEPiano install INSTALL_DIR=$INSTALL_DIR
+# sneak our flags in as "warnings". -Wl,-s strips the libs.
+runmake() {
+  make \
+       TYPE=$1 \
+       WARNINGS="$SLKCFLAGS -Wl,-s"
+  make install \
+       TYPE=$1 \
+       INSTALL_DIR=$PKG/usr/lib$LIBDIRSUFFIX/lv2
+  make clean
+}
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+runmake mdaPiano
+runmake mdaEPiano
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a LICENSE README.md $PKG/usr/doc/$PRGNAM-$VERSION
@@ -71,4 +100,4 @@ mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

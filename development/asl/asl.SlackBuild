@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for asl
 # Originally written by Oleg O. Chukaev <email removed>
@@ -7,6 +7,8 @@
 # Original version had no license. Modified version released under the
 # WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20210829 bkw: update for 142_bld207.
+# - docs won't build on -current's texlive, use prebuilt (on 14.2).
 # 20201106 bkw: update for 142_bld178.
 # 20191202 bkw: update for 142_bld150.
 # 20180911 bkw: update for 142_bld137.
@@ -25,12 +27,15 @@
 # - nitpick README and slack-desc
 # - run test suite, include results in doc dir
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=asl
 SRCNAM=asl-current
-VERSION=${VERSION:-142_bld178}
+VERSION=${VERSION:-142_bld207}
 SRCVER=$(echo $VERSION | tr _ -)
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -40,7 +45,14 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -78,6 +90,9 @@ sed -e "/^CFLAGS/s,=.*,= $SLKCFLAGS," \
     < Makefile.def.tmpl \
     > Makefile.def
 
+BUILD_DOCS="${BUILD_DOCS:-no}"
+[ "$BUILD_DOCS" = "no" ] && sed -i '/^all:/s, *docs,,' Makefile
+
 # Slackware standard is still non-utf8 locales in 14.2.
 UTF8="${UTF8:-no}"
 [ "$UTF8" = "yes" ] && \
@@ -96,44 +111,52 @@ mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 [ "${TESTS:-yes}" = "yes" ] && \
   make -j1 test > $PKG/usr/doc/$PRGNAM-$VERSION/test_suite.log 2>&1
 
-# Don't use 'make docs', we don't need to waste time converting the
-# same documentation into multiple formats (html, ps, pdf, plain text)
-# unless the user really wants to. Also, "make docs" followed by "make
-# install" results in a mess, the /usr/doc dir ends up containing all
-# the converted formats, plus the TeX source, plus all the temporary
-# files created during the doc build. The stuff below is more work than
-# I really wanted to do, but...
+# 20210829 bkw: docs won't build on -current (aka 15.0rc1). I don't
+# speak TeX and don't have time to learn it, so I prebuilt the docs
+# on a 14.2 box and made a tarball.
+if [ "$BUILD_DOCS" = "no" ]; then
+  tar xvf $CWD/$PRGNAM-doc-$VERSION.tar.xz
+  install -m0644 -oroot -groot $PRGNAM-doc-$VERSION/* $PKG/usr/doc/$PRGNAM-$VERSION
+else
+  # Don't use 'make docs', we don't need to waste time converting the
+  # same documentation into multiple formats (html, ps, pdf, plain text)
+  # unless the user really wants to. Also, "make docs" followed by "make
+  # install" results in a mess, the /usr/doc dir ends up containing all
+  # the converted formats, plus the TeX source, plus all the temporary
+  # files created during the doc build. The stuff below is more work than
+  # I really wanted to do, but...
 
-DOCTYPES="${DOCTYPES:-html}"
+  DOCTYPES="${DOCTYPES:-html}"
 
-for doctype in $DOCTYPES; do
-  for lang in EN DE; do
-    case "$doctype" in
-      html)
-        make tex2html
-        make -C doc_$lang as.html TEX2HTML=../tex2html
-        cat doc_$lang/as.html > $PKG/usr/doc/$PRGNAM-$VERSION/as-$lang.html
-        ;;
-      pdf)
-        make -C doc_$lang as.pdf TEX2HTML=../tex2html
-        cat doc_$lang/as.pdf > $PKG/usr/doc/$PRGNAM-$VERSION/as-$lang.pdf
-        ;;
-      ps)
-        make -C doc_$lang as.ps TEX2HTML=../tex2html
-        cat doc_$lang/as.ps > $PKG/usr/doc/$PRGNAM-$VERSION/as-$lang.ps
-        ;;
-      txt)
-        make tex2doc
-        make -C doc_$lang as.doc TEX2DOC=../tex2doc
-        cat doc_$lang/as.doc > $PKG/usr/doc/$PRGNAM-$VERSION/as-$lang.txt
-        ;;
-      *)
-        echo "Unknown value for DOCTYPES, valid types are: html pdf ps txt" 1>&2
-        exit 1
-        ;;
-    esac
+  for doctype in $DOCTYPES; do
+    for lang in EN DE; do
+      case "$doctype" in
+        html)
+          make tex2html
+          make -C doc_$lang as.html TEX2HTML=../tex2html
+          cat doc_$lang/as.html > $PKG/usr/doc/$PRGNAM-$VERSION/as-$lang.html
+          ;;
+        pdf)
+          make -C doc_$lang as.pdf TEX2HTML=../tex2html
+          cat doc_$lang/as.pdf > $PKG/usr/doc/$PRGNAM-$VERSION/as-$lang.pdf
+          ;;
+        ps)
+          make -C doc_$lang as.ps TEX2HTML=../tex2html
+          cat doc_$lang/as.ps > $PKG/usr/doc/$PRGNAM-$VERSION/as-$lang.ps
+          ;;
+        txt)
+          make tex2doc
+          make -C doc_$lang as.doc TEX2DOC=../tex2doc
+          cat doc_$lang/as.doc > $PKG/usr/doc/$PRGNAM-$VERSION/as-$lang.txt
+          ;;
+        *)
+          echo "Unknown value for DOCTYPES, valid types are: html pdf ps txt" 1>&2
+          exit 1
+          ;;
+      esac
+    done
   done
-done
+fi
 
 # 20191202 bkw: even after all that, I have to do this:
 rm -f $PKG/usr/doc/$PRGNAM-$VERSION/*.tex
@@ -149,4 +172,4 @@ sed -e "s,@UTF8@,$UTF8," \
     > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

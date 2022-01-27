@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for klick
 
@@ -6,12 +6,23 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211129 bkw: BUILD=2
+# - fix build on -current. see Makefile.
+# - autodetect rubberband and liblo.
+# - enable terminal support.
+# - add missing klick.pod (source for the man page).
+# - dynamic slack-desc.
+# - include klick2ardour.py, in case someone has a use for it.
+
 # 20170620 bkw: add -fpermissive to cflags, for -current's gcc7.
+
+cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=klick
 VERSION=${VERSION:-0.12.2}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -21,7 +32,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -49,21 +64,22 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-OPTS="RUBBERBAND=${RUBBERBAND:-no} OSC=${LIBLO:-yes}"
+RUBBERBAND=${RUBBERBAND:-yes}
+LIBLO=${LIBLO:-yes}
+pkg-config --exists rubberband || RUBBERBAND="no"
+pkg-config --exists liblo || LIBLO="no"
 
-# hate scons. This mess forces CFLAGS.
-SCONSCFLAGS=$( echo "$SLKCFLAGS -fpermissive" | sed "s/\([^ ]\+\)/'\1', /g" )
-sed -i "s/'-O2', /$SCONSCFLAGS/" SConstruct
+# 20211129 bkw: wrote a Makefile because the SConstruct is too old
+# for scons-4.0.1 and I hate scons anyway.
+make -f $CWD/Makefile RUBBERBAND=$RUBBERBAND OSC=$LIBLO SLKCFLAGS="$SLKCFLAGS"
 
-scons $OPTS PREFIX=/usr
-scons $OPTS PREFIX=/usr DESTDIR=$PKG install
-strip $PKG/usr/bin/$PRGNAM
+mkdir -p $PKG/usr/bin $PKG/usr/share/$PRGNAM/samples
+install -oroot -groot -s -m0755 $PRGNAM $PKG/usr/bin
+install -oroot -groot -m0755 $CWD/klick2ardour.py $PKG/usr/bin
+install -oroot -groot -m0644 samples/* $PKG/usr/share/$PRGNAM/samples
 
 # man page written for this SlackBuild (from --help output)
 mkdir -p $PKG/usr/man/man1
@@ -73,8 +89,13 @@ mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a COPYING NEWS README doc/manual.html $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
+L=no; R=no
+objdump -p $PKG/usr/bin/$PRGNAM > otmp
+grep -q 'NEEDED.*liblo' otmp && L=yes
+grep -q 'NEEDED.*librubberband' otmp && R=yes
+
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s,@L@,$L," -e "s,@R@,$R," $CWD/slack-desc > $PKG/install/slack-desc
 
 # Only add capability stuff if not disabled:
 if [ "${SETCAP:-yes}" = "yes" ]; then
@@ -85,4 +106,4 @@ if [ "${SETCAP:-yes}" = "yes" ]; then
 fi
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

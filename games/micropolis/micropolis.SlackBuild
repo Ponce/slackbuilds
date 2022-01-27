@@ -1,11 +1,11 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for Micropolis
 
 # Now maintained by B. Watson <yalhcru@gmail.com>, please don't bother
 # Chess with questions about this build (bother me instead)
 
-# Copyright 2008-2009 Chess Griffin <chess@chessgriffin.com>
+# Copyright 2008-2009 Chess Griffin <email removed>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,10 +25,15 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20211022 bkw: BUILD=4, new-style icons.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=micropolis
 VERSION=${VERSION:-20100418}
-BUILD=${BUILD:-3}
+BUILD=${BUILD:-4}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -38,12 +43,18 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 DOCS="COPYING README"
+DOCDIR=/usr/doc/$PRGNAM-$VERSION
+PKGDOC=$PKG/$DOCDIR
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
@@ -65,11 +76,8 @@ rm -rf $PRGNAM
 tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
 cd $PRGNAM
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 # Force our CFLAGS
 find . -iname \*makefile\* -o -iname \*.mk \
@@ -78,24 +86,48 @@ find . -iname \*makefile\* -o -iname \*.mk \
 # comment out the next line to disable the airplane crash disaster
 sed -i -e 's/-DNO_AIRCRASH//' src/sim/makefile
 
-make -j1 PREFIX=/usr DOCDIR=/usr/doc/$PRGNAM-$VERSION SLKCFLAGS="$SLKCFLAGS -DTCL_IEEE_FP_MATH"
-make -j1 install PREFIX=/usr DOCDIR=/usr/doc/$PRGNAM-$VERSION DESTDIR=$PKG
+run_make() {
+  make -j1 \
+    PREFIX=/usr \
+    DOCDIR=$DOCDIR \
+    DATADIR=/usr/share/games/$PRGNAM \
+    BINDIR=/usr/games \
+    SLKCFLAGS="$SLKCFLAGS -DTCL_IEEE_FP_MATH" \
+    DESTDIR=$PKG \
+    "$@"
+}
+
+# 20211022 bkw: Makefile already strips the one binary (sim).
+run_make
+run_make install
+
+# 20211022 bkw: Upstream's icon is an oddball size: 58x67. This icon
+# was made by cropping the bottom 3 lines from the original, making
+# the grey background color transparent, and centering it in a 64x64
+# canvas.
+for px in 16 32 48 64; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  convert -resize $size $CWD/$PRGNAM.png $dir/$PRGNAM.png
+done
+
+rm $PKG/usr/share/pixmaps/*
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
 # Make .desktop file pass desktop-file-validate
-sed -i -e \
-  '/^Encoding/d' -e 's/\.png$//' \
-  $PKG/usr/share/applications/$PRGNAM.desktop
+sed -i -e '/^Encoding/d' \
+       -e 's/\.png$//' \
+       -e '/^Exec=/s,=,=/usr/games/,' \
+    $PKG/usr/share/applications/$PRGNAM.desktop
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+mkdir -p $PKGDOC
+cp -a $DOCS $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

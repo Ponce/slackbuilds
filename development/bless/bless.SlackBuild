@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for bless
 
@@ -6,10 +6,21 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211210 bkw: BUILD=2
+# - add patch from Debian's 0.6.0-7 to fix saving preferences.
+# - don't include useless skeleton of bless-manual.omf in package.
+# - don't use gconf from help_script.sh, it broke. just open the
+#   HTML help with xdg-open.
+# - fix the 'select layout' dialog, now you can see & load system layouts.
+# - new-style icon (singular, 48x48).
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=bless
 VERSION=${VERSION:-0.6.0}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 # Compiled .net code is "anycpu" by default.
 # I see no reason to use lib64 for this. It would mean having separate
@@ -20,7 +31,11 @@ TAG=${TAG:-_SBo}
 
 ARCH=noarch
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -48,18 +63,18 @@ find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
 #   the file, which a hex editor shouldn't do in its default mode.
 # - It ships with 3 .layout files that get installed in /usr/share, but
 #   the layout dialog is broken: you can't choose between the
-#   "system" layouts, though you can load them if you copy them to
-#   ~/.config/bless/layouts. (But, they don't appear to *do* anything...)
+#   "system" layouts... now I've fixed this, at least.
 # - Finally, and maybe this is just my own personal bias, I don't see an
 #   obvious way to change the white background to black (if the .layout
 #   files are capable of it, great, but I tried really hard to get them
 #   to work and they don't seem to behave the way the docs say they do).
 #   This means I won't be using this application very much, as it hurts
 #   my eyes to look at it for more than a few minutes.
-# If it's so awful, why am I writing a SlackBuild for it? Because it's
-# a GUI hex editor that (a) uses GTK, and (b) doesn't require KDE and
-# its horde of daemons. Someone is going to be glad it's here. People
-# who grew up using GUIs are going to prefer this to a textmode app.
+# If it's so awful, why am I writing a SlackBuild for it? Because
+# it's a GUI hex editor that (a) uses GTK, (b) doesn't suck quite
+# as hard as ghex, and (c) doesn't require KDE and its horde of
+# daemons. Someone is going to be glad it's here. People who grew up
+# using GUIs are going to prefer this to a textmode app.
 # Here endeth the rant.
 
 # Patch from Debian. Might not be needed with newer versions of mono,
@@ -71,6 +86,9 @@ patch -p1 < $CWD/patches/force_gtk_action_namespace.patch
 # Fixes "not enough space" error when trying to save.
 patch -p1 < $CWD/patches/fix_save.patch
 
+# Similar-named patch from Debian. This one fixes saving preferences.
+patch -p1 < $CWD/patches/fix_save_behaviour.patch
+
 # Patch from: https://bugs.launchpad.net/ubuntu/+source/bless/+bug/1622951
 # Fixes broken preferences saving.
 patch -p1 < $CWD/patches/fixxmltextwriter.patch
@@ -81,6 +99,12 @@ patch -p1 < $CWD/patches/fixxmltextwriter.patch
 # set the default via Edit/Preferences, but it doesn't remember the last
 # state if you just press Insert to toggle it.
 patch -p1 < $CWD/patches/default_overwrite.patch
+
+patch -p1 < $CWD/patches/disambiguate-system.range-and-gtk.range.patch
+
+# 20211210 bkw: make it look in the right place for its own layout files.
+sed -i '/FileResourcePath\.GetDataPath("data")/s,"data",".",' \
+       src/gui/dialogs/LayoutSelectionDialog.cs
 
 # Grr. The configure script doesn't allow setting CS or MCS or CSC or
 # anything to override the compiler (like normal stuff does with CC).
@@ -109,7 +133,7 @@ make install DESTDIR=$PKG
 # --docdir is ignored.
 mkdir -p $PKG/usr/doc/
 mv $PKG/usr/share/doc/$PRGNAM $PKG/usr/doc/$PRGNAM-$VERSION
-rm -rf $PKG/usr/share/doc
+rm -rf $PKG/usr/share/doc $PKG/usr/share/omf
 
 # The help script needed help.
 PKGHELP=$PKG/usr/share/$PRGNAM/help_script.sh
@@ -120,6 +144,16 @@ chmod 755 $PKGHELP
 mkdir -p $PKG/usr/man/man1
 gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
 
+HICOLOR=$PKG/usr/share/icons/hicolor/48x48/apps
+PIXMAPS=$PKG/usr/share/pixmaps
+rm -f $PIXMAPS/*
+mkdir -p $HICOLOR
+mv $PKG/usr/share/$PRGNAM/bless-48x48.png $HICOLOR/$PRGNAM.png
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/$PRGNAM/bless-48x48.png
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PIXMAPS/$PRGNAM.png
+
+sed -i '/Icon=/s,=.*,=bless,' $PKG/usr/share/applications/$PRGNAM.desktop
+
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
@@ -127,4 +161,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

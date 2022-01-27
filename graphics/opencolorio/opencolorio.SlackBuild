@@ -1,8 +1,8 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for opencolorio
 
-# Copyright 2015-2019 Christoph Willing  Brisbane, Australia
+# Copyright 2015-2022 Christoph Willing  Brisbane, Australia
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,12 +22,14 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=opencolorio
 SRCNAM=OpenColorIO
-VERSION=${VERSION:-1.1.1}
+VERSION=${VERSION:-2.1.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
-PYTHON_VERSIONS=${PYTHON_VERSIONS:-"2 3"}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -37,7 +39,14 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -61,53 +70,47 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 
-for v in $PYTHON_VERSIONS ; do
-  if [ $(which python$v 2>/dev/null) ]; then
-    PY_INCLUDE_DIR=$(pkg-config --cflags-only-I python$v |sed -e 's/-I//')
-    PY_SITEDIR=$(python$v -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())")
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+sed -i -e 's/-Wall -Wextra/-Wextra/' CMakeLists.txt
+sed -i -e 's/lib$/${CMAKE_INSTALL_LIBDIR}/g' src/OpenColorIO/CMakeLists.txt
+sed -i -e 's/lib$/${CMAKE_INSTALL_LIBDIR}/g' src/libutils/oglapphelpers/CMakeLists.txt
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-    cd $TMP
-    rm -rf $SRCNAM-$VERSION
-    tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
-    cd $SRCNAM-$VERSION
-    sed -i -e 's/-Wall -Wextra/-Wextra/' CMakeLists.txt
-    chown -R root:root .
-    find -L . \
-     \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-      -o -perm 511 \) -exec chmod 755 {} \; -o \
-     \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-      -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS -Wno-error=deprecated-declarations -Wno-error=cast-function-type" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=lib${LIBDIRSUFFIX} \
+    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+    -DOCIO_BUILD_STATIC:BOOL=OFF \
+    -DCMAKE_BUILD_TYPE=Release ..
 
-    mkdir -p build
-    cd build
-      cmake \
-        -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
-        -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS -Wno-error=deprecated-declarations -Wno-error=cast-function-type" \
-        -DCMAKE_INSTALL_PREFIX=/usr \
-        -DLIB_SUFFIX=${LIBDIRSUFFIX} \
-        -DPYTHON=python$v \
-        -DPYTHON_INCLUDE_DIR:PATH=$PY_INCLUDE_DIR \
-        -DPYTHON_LIBRARY:PATH=$PY_SITEDIR \
-        -DOCIO_BUILD_STATIC:BOOL=OFF \
-        -DOCIO_BUILD_JNIGLUE:BOOL=OFF \
-        -DCMAKE_BUILD_TYPE=Release ..
-
-      make
-      make install DESTDIR=$PKG
-  fi
-done
+  make
+  make install DESTDIR=$PKG
 
 cd ..
+
+rm -rf $PKG/$TMP
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a INSTALL LICENSE README.md $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a *.md $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

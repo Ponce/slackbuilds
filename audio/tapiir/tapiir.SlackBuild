@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for tapiir
 
@@ -6,10 +6,18 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211130 bkw: BUILD=2
+# - new-style icons.
+# - fix typos and paths in man page.
+# - add realtime capabilities.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=tapiir
 VERSION=${VERSION:-0.7.3}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -19,7 +27,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -40,22 +52,30 @@ fi
 
 set -e
 
+# 20211130 bkw: tar command uses --no-same-permissions because the
+# tarball contains setgid dirs, and GNU chmod won't clear the setgid
+# bit with a numeric mode (really!).
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tgz
+tar xvf $CWD/$PRGNAM-$VERSION.tgz --no-same-permissions
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 if [ "${ALSA:-yes}" = "no" ]; then
   ALSA_OPT="--without-alsa"
 fi
+
+# 20211130 bkw: clean up man page
+sed -i -e 's/maximun/maximum/g' \
+       -e 's/minimun/minimum/g' \
+       -e "s,/usr/share/doc/tapiir,/usr/doc/$PRGNAM-$VERSION," \
+       -e 's/on debian systems //' \
+       doc/$PRGNAM.1
 
 # Prevent segfaults when running "tapiir --alsa --help"
 patch -p1 < $CWD/alsaio_help_fix_segfault.diff
@@ -90,41 +110,46 @@ sed 's/@ARG@/jack/g' $CWD/$PRGNAM.sh > $PKG/usr/bin/${PRGNAM}_jack
   sed 's/@ARG@/alsa/g' $CWD/$PRGNAM.sh > $PKG/usr/bin/${PRGNAM}_alsa
 chmod 0755 $PKG/usr/bin/${PRGNAM}_*
 
-mkdir -p $PKG/usr/man/man1
-gzip -9c doc/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+PKGMAN1=$PKG/usr/man/man1
+mkdir -p $PKGMAN1
+gzip -9c doc/$PRGNAM.1 > $PKGMAN1/$PRGNAM.1.gz
 
-cd $PKG/usr/man/man1
-ln -s $PRGNAM.1.gz ${PRGNAM}_jack.1.gz
-[ "$ALSA" != "no" ] && ln -s ${PRGNAM}.1.gz ${PRGNAM}_alsa.1.gz
-cd -
+ln -s $PRGNAM.1.gz $PKGMAN1/${PRGNAM}_jack.1.gz
+[ "$ALSA" != "no" ] && ln -s ${PRGNAM}.1.gz $PKGMAN1/${PRGNAM}_alsa.1.gz
 
-mkdir -p $PKG/usr/share/applications
-cat $CWD/${PRGNAM}_jack.desktop \
-  > $PKG/usr/share/applications/${PRGNAM}_jack.desktop
+PKGAPPS=$PKG/usr/share/applications
+mkdir -p $PKGAPPS
+cat $CWD/${PRGNAM}_jack.desktop > $PKGAPPS/${PRGNAM}_jack.desktop
 [ "$ALSA" != "no" ] && \
-  cat $CWD/${PRGNAM}_alsa.desktop \
-  > $PKG/usr/share/applications/${PRGNAM}_alsa.desktop
+  cat $CWD/${PRGNAM}_alsa.desktop > $PKGAPPS/${PRGNAM}_alsa.desktop
+
+for px in 16 32 48 64 96; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  convert -resize $size $CWD/$PRGNAM.png $dir/$PRGNAM.png
+done
+
 mkdir -p $PKG/usr/share/pixmaps
-cat doc/images/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  doc/examples doc/images AUTHORS doc/*.html doc/*.txt \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-
-# Fix docs permissions, they are awful. The funky u+rwx,etc stuff is needed
-# because GNU's chmod won't clear the setgid bit with a numeric mode! Really!
-# (Why does upstream ship with setgid bits on the docs? I dunno, but this is
-# pretty much unmaintained, so they're never going to fix it)
-find $PKG/usr/doc -type f -a -name "Makefile*" -exec rm {} \;
-find $PKG/usr/doc -type d -exec chmod u=rwx,g=rx,o=rx,a-st {} \;
-find $PKG/usr/doc -type f -exec chmod u=rw,g=r,o=r,a-st {} \;
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC/{examples,images}
+cp -a doc/examples/*.mtd $PKGDOC/examples
+cp -a doc/images/*.png $PKGDOC/images
+cp -a AUTHORS doc/*.html doc/*.txt $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
+if [ "${SETCAP:-yes}" = "yes" ]; then
+  cat $CWD/setcap.sh >> $PKG/install/doinst.sh
+  chown root:audio $PKG/usr/bin/$PRGNAM
+  chmod 0750 $PKG/usr/bin/$PRGNAM
+fi
+
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

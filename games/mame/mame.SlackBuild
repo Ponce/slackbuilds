@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for mame
 
@@ -8,6 +8,18 @@
 # which was originally adapted from sdlmame.SlackBuild by B. Watson.
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20211115 bkw:
+# - updated for v0.237 on -current aka 15.0rc1.
+# - new-style icons.
+# - update mame.ini (lots of new options, some old ones went away).
+# - include the new support stuff (hash, language, etc)
+# - rename mame's 'split' to 'mame-split' to avoid potential conflict
+#   with coreutils (if someone has /usr/games before /usr/bin in $PATH).
+# - include ini/{examples,presets} in the package (in the doc dir).
+# - make ccache work! finally! see README_ccache.txt if you care.
+# - make GroovyMAME support work again (upstream switched to github).
+# - remove gcc9 stuff. it was specific to Slackware 14.2.
 
 # 20191208 bkw: Updated for v0.214, after long hiatus. This isn't
 # actually the latest version, but it's the latest version that will
@@ -26,10 +38,13 @@
 # 20180928 bkw: Updated for v0.202.
 # 20180830 bkw: Updated for v0.201.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=mame
-VERSION=${VERSION:-0.214}
+VERSION=${VERSION:-0.237}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -39,7 +54,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-${PRGNAM}
 OUTPUT=${OUTPUT:-/tmp}
@@ -80,6 +99,15 @@ if [ -n "$MISSING" ]; then
   exit 1
 fi
 
+# 20211112 bkw: GroovyMAME support has changed, see README_groovy.txt.
+# This part of it has to run in $CWD.
+GROOVY="${GROOVY:-no}"
+
+if [ "$GROOVY" = "update" ]; then
+  sh mkgroovy.sh $VERSION
+  GROOVY=yes
+fi
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
@@ -94,9 +122,17 @@ find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
 
 # OK, building modern mame is a bit of a PITA. It uses genie (written
 # in lua, a fork of premake), but you don't get to run genie directly,
-# you got a main makefile that builds lua, then builds genie, then runs
-# genie with arguments based on the options in the main makefile. Also,
-# it uses python to convert XML layout files to C++ code.
+# you got a main makefile that builds lua, then builds genie,
+# then runs genie with arguments based on the options in the main
+# makefile... and genie generates a bunch of makefiles, then runs make
+# on those. Also, it uses python3 to convert XML layout files to
+# C++ code.
+
+# During the Slackware 14.2 cycle, I used to do this:
+# LDOPTS="-fuse-ld=gold -static-libstdc++ -static-libgcc" \
+# This allowed installing Pat's unsupported gcc9 package,
+# building mame with it, then restoring the original gcc
+# version and mame would still run.
 
 # Where possible, use system libraries instead of building the ones
 # bundled with the mame source. However, SBo's lua is (still!) too old
@@ -111,15 +147,6 @@ find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
 # tree. Using an external portmidi dep would make mame require Oracle's
 # JDK! In case you're wondering, only the C code in the bundled portmidi
 # is built (no Java needed).
-
-# The OVERRIDE_CC and OVERRIDE_CXX are there because mame's build
-# ignores $PATH when searching for gcc/g++, and won't find my ccache
-# symlinks in /usr/local/bin. On a normal (non-ccache-using) system,
-# these options do nothing (they use the compilers in /usr/bin, which
-# is the default anyway) and you can forget about them... or, if you use
-# distcc, this will allow it to actually work. (Mini-rant: PATH has been
-# a standard mechanism on both Unix and DOS/Windows systems for what,
-# 30 or 40 years now? Come on people...)
 
 # Version-specific patches & sed fixes. We do it this way to keep this
 # script compatible with older versions.
@@ -154,32 +181,41 @@ sed -i 's,\.;ini,/etc,' src/osd/sdl/sdlmain.cpp
 # stuff above.
 #SDL_INI_PATH='$$HOME/.mame;/etc' \
 
-# Previous versions of mame used qt4 for the debugger GUI. Now it's
-# qt5, so I've made it optional (Slackware 14.2 still only has qt4).
-if [ "${QTDEBUG:-no}" = "yes" ]; then
+# 20211110 bkw: undocumented option. keep this Just In Case.
+if [ "${QTDEBUG:-yes}" = "yes" ]; then
   QTOPT=1
-  WITHQT="with"
 else
   QTOPT=0
-  WITHQT="without"
 fi
 
-# Now, let's check for GroovyMAME. All the user has to do is place
-# the .diff in the SlackBuild's directory. The filename always starts
-# with the MAME version number, minus its dots. If we find multiple
-# files matching this, sort them lexically and use the last (hopefully
-# this is the one with the highest version number).
-GROOVYDIFF="$( ls $CWD/${VERSION/./}_groovymame_*.diff 2>/dev/null | tail -1 )"
-if [ -e "$GROOVYDIFF" ]; then
-  GROOVYVER="$( basename $GROOVYDIFF .diff | cut -d_ -f3- | sed 's,-,_,g' )"
+# 20211112 bkw: the rest of the GroovyMAME stuff.
+# The diffs look to be close to half a meg, so they're compressed.
+if [ "$GROOVY" = "yes" ]; then
+  GROOVYDIFF="$( /bin/ls $CWD/gm${VERSION/./}*.diff.xz 2>/dev/null | tail -1 )"
+  if [ -e "$GROOVYDIFF" ]; then
+    GROOVYVER="$( basename $GROOVYDIFF .diff.xz )"
+    echo "=== GROOVYDIFF $GROOVYDIFF"
+    echo "=== GROOVYVER $GROOVYVER"
 
-  # .diffs are shipped with CRLF endings, fix:
-  sed 's,\r,,g' "$GROOVYDIFF" > groovy.diff
+    # The "-f -Z" is necessary to make sure the patched files end up
+    # with the same timestamp every time the script is run. ccache
+    # needs this because the include_file_mtime doesn't seem to
+    # play nice with precompiled headers, even though it's supposed to.
+    # When the patch is generated, we have to add timestamps to make
+    # this work (see mkgroovy.sh for details).
 
-  patch -p0 < groovy.diff
-
-  echo "GROOVYDIFF $GROOVYDIFF"
-  echo "GROOVYVER $GROOVYVER"
+    xzcat "$GROOVYDIFF" | patch -p1 -f -Z
+  else
+    cat <<EOF
+***
+GroovyMAME support was requested, but I don't have a GroovyMAME patch
+for MAME $VERSION. Try running this script with GROOVY=update in the
+environment, or wait a few days for the GroovyMAME author to release
+an update. See README_groovy.txt for more information.
+***
+EOF
+    exit 1
+  fi
 fi
 
 # Build option notes:
@@ -188,31 +224,53 @@ fi
 
 # Using ld.gold is *much* faster, and I see no disadvantage to it.
 
-# The static libstdc++ and libgcc args allow building a version of mame
-# that requires gcc9 (README_gcc9.txt), then running it on a system that
-# doesn't have gcc9 installed. This does make the binary slightly larger,
-# but it's already around 250MB so it's not going to matter much.
-
 # The point of the OVERRIDE_CC and friends is to make the build use $PATH
 # to find gcc (so ccache will be found if it's using the symlink method).
+
+# 20211109 bkw: N.B. upstream requires python 3, but they default to
+# /usr/bin/python as the executable, so I still have to override it.
+# The -S means the same thing in python3 as it did it 2: disable use
+# of site packages. We needed it with py2 because otherwise the build
+# would fail if PyXML happened to be installed. Probably don't need it
+# with py3, but it won't hurt anything either.
+
+# 20211111 bkw: make ccache handle precompiled headers
+export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
+
+# 20211111 bkw: undocumented option, build a mame that only supports
+# pac-man and its clones. used for testing only.
+if [ "${PACONLY:-no}" = "yes" ]; then
+  PACOPT="SOURCES=src/mame/drivers/pacman.cpp"
+fi
+
+# 20211111 bkw: build with ccache by default, now that it works.
+if [ "${USE_CCACHE:-yes}" = "yes" ]; then
+  CC="/usr/bin/ccache /usr/bin/clang"
+  CXX="/usr/bin/ccache /usr/bin/clang++"
+else
+  CC="${CC:-$( which gcc )}"
+  CXX="${CXX:-$( which g++ )}"
+fi
 
 make USE_QTDEBUG=$QTOPT \
      USE_SYSTEM_LIB_EXPAT=1 \
      USE_SYSTEM_LIB_ZLIB=1 \
      USE_SYSTEM_LIB_JPEG=1 \
      USE_SYSTEM_LIB_FLAC=1 \
-     PYTHON_EXECUTABLE="/usr/bin/python -S" \
+     PYTHON_EXECUTABLE="/usr/bin/python3 -S" \
      OPT_FLAGS="$SLKCFLAGS" \
-     LDOPTS="-fuse-ld=gold -static-libstdc++ -static-libgcc" \
-     OVERRIDE_CC="$( which gcc )" \
-     OVERRIDE_CXX="$( which g++ )" \
-     CC="$( which gcc )" \
-     CXX="$( which g++ )" \
+     LDOPTS="-fuse-ld=gold" \
+     OVERRIDE_CC="$CC" \
+     OVERRIDE_CXX="$CXX" \
+     CC="$CC" \
+     CXX="$CXX" \
      ARCH="" \
+     PRECOMPILE=1 \
      VERBOSE=1 \
      NOWERROR=1 \
      TOOLS=1 \
      TARGET=$PRGNAM \
+     $PACOPT \
      SUBTARGET=$PRGNAM
 
 # No 'make install' target, do it manually.
@@ -220,21 +278,42 @@ mkdir -p $PKG/usr/games $PKG/etc $PKG/usr/man/man6 $PKG/usr/man/man1 \
          $PKG/usr/share/applications $PKG/usr/share/pixmaps
 
 # Deal with upstream's executable-naming silliness.
-[ -e ${PRGNAM}64 ] && mv ${PRGNAM}64 $PRGNAM
-[ -e ${PRGNAM}32 ] && mv ${PRGNAM}32 $PRGNAM
+for i in tiny 32 64; do
+  [ -e ${PRGNAM}$i ] && mv ${PRGNAM}$i $PRGNAM
+done
 
 # .desktop borrowed from Ludovic Lechapt's Debian package.
-# Icon extracted from src/mame/osd/windows/mame/mame.ico with icotool.
 cat $CWD/desktop/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
-cat $CWD/desktop/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# Icon extracted from src/mame/osd/windows/mame/mame.ico with icotool.
+for px in 16 32 48 64 128; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  convert -resize $size $CWD/desktop/$PRGNAM.png $dir/$PRGNAM.png
+done
+
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
 cat $CWD/$PRGNAM.ini > $PKG/etc/$PRGNAM.ini.new
 
-# Install the binaries:
-install -s -m0755 -oroot -groot \
-  $PRGNAM castool chdman floptool imgtool jedutil \
-  ldresample ldverify nltool nlwav pngcmp regrep \
-  romcmp split src2html srcclean unidasm \
-  $PKG/usr/games/
+# This one *must* exist.
+install -s -m0755 -oroot -groot $PRGNAM $PKG/usr/games/
+
+# 20211110 bkw: removed src2html (no longer exists) and renamed split
+# to mame-split since we have a split command in coreutils already.
+# Also, in case upstream drops another of these utilities, check for
+# existence before trying to install (because it takes hours to
+# compile).
+# Install the tools:
+for i in castool chdman floptool imgtool jedutil \
+         ldresample ldverify nltool nlwav pngcmp \
+         regrep romcmp srcclean unidasm
+do
+  [ -e $i ] && install -s -m0755 -oroot -groot $i $PKG/usr/games/
+done
+
+[ -e split ] && install -s -m0755 -oroot -groot $i $PKG/usr/games/$PRGNAM-split
 
 ln -s $PRGNAM $PKG/usr/games/mess
 
@@ -245,24 +324,31 @@ install -m0644 -oroot -groot docs/man/*.6 $PKG/usr/man/man6
 gzip -9 $PKG/usr/man/man?/*.?
 
 # Create empty dirs for the user to populate with ROMs and such.
-for i in roms samples ctrlr font cheat; do
-  mkdir -p $PKG/usr/share/games/$PRGNAM/$i
-done
+SHAREDIR=$PKG/usr/share/games/$PRGNAM
+mkdir -p $SHAREDIR/{roms,font,cheat}
 
-# Install the artwork and bgfx stuff (needed for 'video bgfx' in mame.ini).
-cp -a artwork bgfx $PKG/usr/share/games/$PRGNAM
+# Install the support stuff.
+cp -a artwork bgfx plugins samples hash ctrlr $SHAREDIR
+
+# 20211110 bkw: also the translations (but not the .po files, those are
+# the sources for the .mo files, which are what mame actually needs).
+cp -p --parents language/*/*.mo $SHAREDIR
 
 # CONTRIBUTING.md is a 1-byte placeholder, and we don't need a shell script.
 rm -f docs/CONTRIBUTING.md docs/update.sh
 
-mkdir -p $PKG/usr/doc/${PRGNAM}-$VERSION
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
 # can't just "cp docs/* ..." because man/ is a dir, set -e kills the script
-cp docs/L* docs/*.* $PKG/usr/doc/${PRGNAM}-$VERSION
-cp -a docs/swlist $PKG/usr/doc/${PRGNAM}-$VERSION
-cat $CWD/${PRGNAM}.SlackBuild > $PKG/usr/doc/${PRGNAM}-$VERSION/${PRGNAM}.SlackBuild
+cp docs/L* docs/*.* $PKGDOC
+cp -a docs/swlist docs/legal $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+# in case someone finds these useful...
+cp -a ini/examples ini/presets $PKGDOC
 
 mkdir -p $PKG/install
-sed "s,@WITHQT@,$WITHQT," $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/slack-desc > $PKG/install/slack-desc
 
 [ -n "$GROOVYVER" ] && \
   sed -i "19s,\$, This package was patched with GroovyMAME $GROOVYVER.," \
@@ -271,4 +357,4 @@ sed "s,@WITHQT@,$WITHQT," $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/${PRGNAM}-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

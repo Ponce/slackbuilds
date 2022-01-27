@@ -18,9 +18,6 @@ VERSION="1.8.09"
 DOWNLOAD="https://slackware.uk/~urchlay/src/g1.8.09.tar.gz"
 MD5SUM="ddc1dd8aef254312031184be6dec21e6"
 
-Note that SDL2 is not required for 1.8.09 (you can remove it from REQUIRES
-in the .info file, if you like).
-
 For 1.9.1:
 
 VERSION="1.9.1"

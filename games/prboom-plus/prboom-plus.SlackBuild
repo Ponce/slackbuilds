@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for prboom-plus
 
@@ -7,13 +7,13 @@
 # Original had no license. Modified version released under the WTFPL. See
 # http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211027 bkw:
+# - update for v2.6.1um.
+# - band-aid for segfaults on -current (see below). this isn't
+#   a side-effect of the version upgrade: it happens on 2.6um also.
+
 # 20210223 bkw: update for v2.6um. Upstream switched to cmake,
-# so we can't build previous versions any more. A note to myself:
-# SDL2 really is required. SDL2_(net|mixer|image) are technically
-# optional. But I'm keeping them listed as requirements because users
-# will get annoyed if they accidentally build a Doom engine that's
-# incapable of playing music, or joining multiplayer games, or using
-# HQ textures.
+# so we can't build previous versions any more.
 
 # 20200416 bkw:
 # - take over maintenance
@@ -23,10 +23,13 @@
 # - install desktop, icon, bash completion
 # - game binaries in /usr/games
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=prboom-plus
-VERSION=${VERSION:-2.6um}
+VERSION=${VERSION:-2.6.1um}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -36,7 +39,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -57,17 +64,6 @@ fi
 
 set -e
 
-# If modern cmake is missing, the error message from the old 14.2 cmake
-# doesn't really make it clear why it fails, so add this check to avoid
-# receiving "why won't this build?" emails. This stanza can go away after
-# 15.0 is released.
-if ! [ -x /opt/cmake-202x/bin/cmake ]; then
-  echo "*** Missing required dependency: cmame-202x. Aborting." 1>&2
-  exit 1
-fi
-
-export PATH=/opt/cmake-202x/bin:$PATH
-
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
@@ -84,9 +80,28 @@ find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
 sed -i '/install/s,/bin,/games,' src/CMakeLists.txt
 sed -i '/^set(CMAKE_INSTALL_DOCDIR/d' CMakeLists.txt
 
+MIXEROPT=ON
+if [ "${BANDAID:-yes}" = "yes" ]; then
+  # 20211027 bkw: Band-aid. The game segfaults when the midi backend
+  # is set to "sdl". Adding -DWITH_MIXER=OFF stops it segfaulting, but
+  # it sounds *horrible*. So this bit of sed changes the default sound
+  # backend to "opl2", which doesn't sound as nice, but allows the game
+  # to run. Also it increases the default volume, since the opl2 synth
+  # is quieter.
+  MIXEROPT=OFF
+  sed -i -e '/"snd_midiplayer"/s,"sdl","opl2",' \
+         -e '/"music_volume"/s,8,12,' \
+         src/m_misc.c
+
+  # 2nd half of the band-aid: prevent the user from choosing SDL MIDI
+  # from the menu.
+  sed -i '/"snd_midiplayer"/s,midiplayers,&+1,' src/m_menu.c
+fi
+
 mkdir -p build
 cd build
   cmake \
+    -DWITH_MIXER=$MIXEROPT \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
@@ -116,4 +131,4 @@ mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

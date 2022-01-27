@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for lingot
 
@@ -6,10 +6,21 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211129 bkw:
+# - updated for v1.1.1.
+# - use upstream's man page (identical to the one we used to have here).
+# - *fix* upstream's man page.
+# - get rid of format_string.diff (no longer applies).
+# - lower the default minimum frequency and raise the default
+#   max frequency.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=lingot
-VERSION=${VERSION:-0.9.1}
+VERSION=${VERSION:-1.1.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -19,7 +30,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -47,25 +62,42 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# Slackware doesn't set up the ALSA plughw:0 device by default, so make lingot
-# use hw:0 as its default ALSA device.
-sed -i 's,plug\(hw:0\),\1,g' README src/*.c
+# make the .desktop validate
+sed -i 's,\.svg,,' *.desktop
 
-# Fix a format string error (unlikely but possible segfault/exploit),
-# patch borrowed from Debian.
-patch -p1 < $CWD/format_string.diff
+# man page hasn't been updated for new conf file location. also
+# fix "-c config" formatting error.
+sed -i -e 's,\\c$,c,' \
+       -e 's,~/.lingot,~/.config/lingot,' \
+       $PRGNAM.1
+
+# Default minimum frequency is E2 (82.407Hz), which is the low E on a
+# guitar in standard tuning. This kinda sucks: some of us play bass.
+# Or 7- or 8-string guitar. Or 6-string guitar in drop-D or open
+# D/G/etc tunings. Make it default to A0, which is 1 full step lower
+# than the low B on a 5-string bass guitar. Also raise the max. This
+# just changes the defaults; users can adjust as desired from the GUI.
+# Unfortunately, lingot can't actually display the 0 octave, so this
+# still only gets us down to C1 (1/2 step too high for a 5-string
+# bass). Also your audio interface might be cutting off the lows, I've
+# got a cheap one that sharply drops off around 40Hz.
+
+sed -i -e '/->min_frequency *=/s,=.*,= 27.5;  // Hz (A0),' \
+       -e '/->max_frequency *=/s,=.*,= 880.0; // Hz (A5),' \
+       src/lingot-config.c
+
+[ "${JACK:-yes}"  = "no" ] && EXTRA+="--without-jack "
+[ "${PULSE:-yes}" = "no" ] && EXTRA+="--without-pulseaudio "
+[ "${OSS:-no}"    = "no" ] && EXTRA+="--without-oss "
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
+  $EXTRA \
   --prefix=/usr \
-  --enable-jack=${JACK:-yes} \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --localstatedir=/var \
@@ -76,23 +108,36 @@ CXXFLAGS="$SLKCFLAGS" \
 make
 make install-strip DESTDIR=$PKG
 
-# man page from Debian
-mkdir -p $PKG/usr/man/man1
-gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+gzip -9 $PKG/usr/man/man1/$PRGNAM.1
 
-# These are not documentation..
-rm -f $PKG/usr/doc/$PRGNAM-$VERSION/intltool*
+rm -f $PKG/usr/lib*/*.la
 
-# At least one of the doc files is a zero-length placeholder.
-find $PKG/usr/doc/$PRGNAM-$VERSION -type f -a -size 0 -print0 | \
-  xargs -0 rm -f
+svgicon="$( /bin/ls icons/*.svg | head -1 )"
+iconname="$( basename $svgicon .svg )"
+for px in 16 32 48 64 128; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  convert -resize $size $svgicon $dir/$iconname.png
+done
+
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$iconname.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
 # `make install' puts the docs in --docdir, just add the SlackBuild
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+P=no; J=no; O=no
+strings $PKG/usr/lib*/lib$PRGNAM.so | grep -q /dev/dsp && O=yes
+objdump -p $PKG/usr/lib*/lib$PRGNAM.so | grep NEEDED > otmp
+grep -q libpulse otmp && P=yes
+grep -q libjack  otmp && J=yes
+
+sed -e "s,@P@,$P," -e "s,@J@,$J," -e "s,@O@,$O," $CWD/slack-desc \
+    > $PKG/install/slack-desc
 
 if [ "${SETCAP:-yes}" = "yes" ]; then
   cat $CWD/setcap.sh >> $PKG/install/doinst.sh
@@ -101,4 +146,4 @@ if [ "${SETCAP:-yes}" = "yes" ]; then
 fi
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

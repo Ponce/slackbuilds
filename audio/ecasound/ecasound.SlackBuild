@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for ecasound
 
@@ -6,6 +6,7 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211128 bkw: BUILD=2, add python3 support.
 # 20200117 bkw: Updated for v2.9.3.
 # 20191202 bkw:
 # - Updated for v2.9.2.
@@ -13,10 +14,13 @@
 #   they're no longer needed. This means you can no longer build
 #   2.9.1 with this script.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=ecasound
 VERSION=${VERSION:-2.9.3}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -26,7 +30,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -57,31 +65,48 @@ chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# Figure out the version number part of the python lib dir:
-PYVER=$( python -c 'import sys; print "%d.%d" % sys.version_info[0:2]' )
-
 # --disable-static and --enable-shared are accepted, but ignored.
 # This is deliberate: upstream doesn't want shared libs. See:
 # http://www.eca.cx/ecasound-list/2002/10/0031.html
 
-CFLAGS="-g $SLKCFLAGS" \
-CXXFLAGS="-g $SLKCFLAGS" \
-./configure \
-  --enable-python-force-site-packages \
-  --disable-arts \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --with-python-modules=/usr/lib$LIBDIRSUFFIX/python$PYVER \
-  --enable-python-force-site-packages \
-  --disable-all-static \
-  --build=$ARCH-slackware-linux
+setpyver() {
+  PYVER=$( python -c 'import sys; print("%d.%d" % sys.version_info[0:2])' )
+  echo "=== PYVER='$PYVER'"
+}
 
+conf() {
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  ./configure \
+    --disable-arts \
+    --prefix=/usr \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --docdir=/usr/doc/$PRGNAM-$VERSION \
+    --with-python-modules=/usr/lib$LIBDIRSUFFIX/python$PYVER \
+    --enable-python-force-site-packages \
+    --disable-all-static \
+    --build=$ARCH-slackware-linux
+}
+
+# first time around, build everything, with python2 support.
+setpyver
+conf
 make
 make install-strip DESTDIR=$PKG
+
+# 2nd build, python3 support only. configure has "python" hardcoded as
+# the executable (can't pass python3), so fake it out with $PATH.
+mkdir pytmp
+ln -s /usr/bin/python3 pytmp/python
+export PATH=$(pwd)/pytmp:$PATH
+
+setpyver
+make clean
+conf
+make -C pyecasound install DESTDIR=$PKG
 
 # Per -current guidelines (and does no harm on 14.2):
 rm -f $PKG/usr/lib$LIBDIRSUFFIX/*.la
@@ -102,9 +127,8 @@ find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  AUTHORS BUGS COPYING* INSTALL README RELNOTES TODO \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS BUGS COPYING* INSTALL README RELNOTES TODO \
+      $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
@@ -119,4 +143,4 @@ if [ "${SETCAP:-yes}" = "yes" ]; then
 fi
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

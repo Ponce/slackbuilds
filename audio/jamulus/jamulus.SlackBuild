@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for jamulus
 
@@ -6,18 +6,21 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-# Possible TODOs:
-# - write a man page
-# - have slack-desc show whether or not SERVERONLY=yes
+# 20211207 bkw:
+# - update for v3.8.1.
+# - add 'headless' option to SERVERONLY=yes config.
+# - new-style icons.
+# - man page.
+# - dynamic slack-desc.
+
+cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=jamulus
-VERSION=${VERSION:-3.4.3}
+VERSION=${VERSION:-3.8.1}
 BUILD=${BUILD:-1}
 
 TAG=${TAG:-_SBo}
-
-# I hate capitalized package names, so:
-SRCNAM=Jamulus
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -27,7 +30,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -50,7 +57,7 @@ set -e
 
 # Check this before doing anything else.
 if [ "${SERVERONLY:-no}" = "yes" ]; then
-  EXTRACONF="CONFIG+=nosound"
+  EXTRACONF="CONFIG+=nosound CONFIG+=headless"
 elif ! pkg-config --exists jack; then
   cat <<EOF
 
@@ -70,55 +77,78 @@ EOF
   exit 1
 fi
 
+TARVER=r"${VERSION//./_}"
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $SRCNAM$VERSION
-tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
-cd $SRCNAM$VERSION
+rm -rf $PRGNAM-$TARVER
+tar xvf $CWD/$PRGNAM-$TARVER.tar.gz
+cd $PRGNAM-$TARVER
 chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# permissions are gross, nonstandard find needed here:
-find -L .  -type d -a -exec chmod 755 {} \+ -o \
-           -type f -a \! -perm 644 -a -exec chmod 644 {} \+
-
-# jamulus can be built with either qt4 or qt5. Let's stick with
-# qt4 until Slackware starts shipping qt5... for paranoia's sake,
-# remove all references to qt5 and/or qt3 from the environment.
-unset QTDIR
-unset QT5DIR
-PATH=/bin:/sbin:/usr/bin:/usr/sbin
-source /etc/profile.d/qt4.sh
-QTDIR=$QT4DIR
-export QTDIR QT5DIR
-
-qmake "CONFIG+=noupcasename" $EXTRACONF \
+qmake-qt5 \
+  "CONFIG+=noupcasename" \
+  $EXTRACONF \
   QMAKE_CFLAGS="$SLKCFLAGS" QMAKE_CXXFLAGS="$SLKCFLAGS" \
-  $SRCNAM.pro
+  PREFIX=/usr \
+  Jamulus.pro
 make clean
 make
+make install INSTALL_ROOT=$PKG
 
-# No 'make install' target, so:
-mkdir -p $PKG/usr/bin $PKG/usr/share/applications $PKG/usr/share/pixmaps
-install -s -m0755 $PRGNAM $PKG/usr/bin/
-install -m0644 src/res/$PRGNAM.desktop $PKG/usr/share/applications/
+# binary already stripped.
 
-# The png icons provided are tiny, but the OSX icon is big enough
-# to actually see, so I extracted the 256x256 version & include
-# it with the build.
-cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+# Man page borrowed from Debian and modified slightly (since they
+# don't use 'noupcasename', their binary is called Jamulus).
+# Had to make the man page a "1x" instead of "1": It uses BSD macros
+# (see groff_mdoc(7)). If I made it a "1" man page, it would say
+# "BSD General Commands Manual" unconditionally (no way to force it
+# to say "SlackBuilds.org" or even "General Commands Manual").
+mkdir -p $PKG/usr/man/man1
+gzip -9c < $CWD/$PRGNAM.1x > $PKG/usr/man/man1/$PRGNAM.1x.gz
+
+if [ "${SERVERONLY:-no}" != "yes" ]; then
+  # 'make install' puts the SVG icons in the wrong place. also the only
+  # png icon provided is 512x512, ludicrously large.
+  HICOLOR=$PKG/usr/share/icons/hicolor/
+  mkdir -p $HICOLOR/scalable/apps
+  mv $HICOLOR/512x512/apps/*.svg $HICOLOR/scalable/apps
+
+  CVT="convert -background none"
+  for px in 16 32 48 64 128; do
+    size=${px}x${px}
+    dir=$HICOLOR/$size/apps
+    mkdir -p $dir
+    $CVT -resize $size distributions/$PRGNAM.svg $dir/$PRGNAM.png
+    $CVT -resize $size distributions/$PRGNAM-server.svg $dir/$PRGNAM-server.png
+  done
+
+  mkdir -p $PKG/usr/share/pixmaps
+  ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+fi
 
 # NEWS is a 0-byte placeholder in 3.4.3.
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS COPYING ChangeLog $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  COPYING ChangeLog CONTRIBUTING.md README.md \
+  SECURITY.md RELEASE-PROCESS.md TRANSLATING.md \
+  $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 # Include our own (hopefully) helpful hints for servers.
 cat $CWD/SERVER.txt > $PKG/usr/doc/$PRGNAM-$VERSION/SERVER.txt
 
+if objdump -p $PKG/usr/bin/$PRGNAM | grep -q 'NEEDED.*libjack'; then
+  DESC="full client and server"
+else
+  DESC="headless server only"
+fi
+
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@DESC@,$DESC," $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 # Only add capability stuff if not disabled:
@@ -132,4 +162,4 @@ if [ "${SERVERONLY:-no}" != "yes" ]; then
 fi
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

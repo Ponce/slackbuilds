@@ -1,9 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for nvidia-driver
 
 # Copyright 2012-2019 Edward W. Koenig, Vancouver, WA, US
-# Copyright 2020 Lenard Spencer, Orlando, FL, USA
+# Copyright 2020, 2021 Lenard Spencer, Orlando, FL, USA
 #
 # All rights reserved.
 #
@@ -24,14 +24,13 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# see changelog.txt
+cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=nvidia-driver
-VERSION=${VERSION:-460.67}
+VERSION=${VERSION:-470.63.01}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
-
-CURRENT=${CURRENT:-no}
+PKGTYPE=${PKGTYPE:-tgz}
 
 set -e
 
@@ -43,7 +42,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -57,6 +55,14 @@ if [ "$ARCH" = "x86_64" ]; then
 else
   echo "$ARCH is not supported."
   exit 1
+fi
+
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION$MULTI-$TARGET-$BUILD$TAG.$PKGTYPE"
+  exit 0
 fi
 
 # There are a couple of unresolved issues with nvidia-installer, so we
@@ -77,7 +83,7 @@ mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/{drivers,extensions} \
   $PKG/etc/OpenCL/vendors/ $PKG/usr/{bin,doc,man/man1,sbin} \
   $PKG/usr/share/{applications,nvidia,pixmaps,egl/egl_external_platform.d} \
   $PKG/usr/include/GL $PKG/etc/vulkan/{icd.d,implicit_layer.d} $PKG/etc/X11/xorg.conf.d \
-  $PKG/etc/X11/glvnd/egl_vendor.d
+  $PKG/etc/X11/glvnd/egl_vendor.d $PKG/lib/firmware/nvidia $PKG/var/log
 
 if [ "$COMPAT32" = "yes" ]; then
   mkdir -p $PKG/usr/lib/tls
@@ -104,7 +110,7 @@ find -L . \
 
 # Compiling the various open source apps instead of using the precompiled binaries
 # Compiling nvidia-installer from source
-if [ "$CURRENT" = "no" ]; then
+
 cd $TMP/nvidia-installer-$VERSION
 
 # Let's try to remove the conflicting files and GPU detection
@@ -128,7 +134,6 @@ cd -
 # to the driver source tree for use
 mv -f $PKG/usr/bin/nvidia-installer $TMP/$SRCNAM
 mv -f $PKG/usr/man/man1/nvidia-installer.1.gz $TMP/$SRCNAM
-fi
 
 if [ "${COMPAT32}" = "yes" ]; then
     COMP32="--install-compat32-libs --compat32-prefix=$PKG/usr"
@@ -156,42 +161,25 @@ cd $TMP/$SRCNAM
   --log-file-name=$PKG/var/log/nvidia-installer.log \
   --egl-external-platform-config-path=$PKG/usr/share/egl/egl_external_platform.d \
   --no-nvidia-modprobe \
+  --no-systemd \
   $COMP32
 
-  # Move ICDs to $PKG and cleanup (no switch option in installer?)
+# Starting with the 465 driver, the installer now places a version-specific
+# binary blob in /lib/firmware/nvidia.  For sanity's sake, we will move
+# it into our package:
+mv /lib/firmware/nvidia/$VERSION $PKG/lib/firmware/nvidia
+
+# Move ICDs to $PKG and cleanup (no switch option in installer?)
+# (This is why there should not be a driver already installed)
 mv /etc/OpenCL/vendors/nvidia.icd $PKG/etc/OpenCL/vendors/nvidia.icd
 mv /etc/vulkan/icd.d/nvidia_icd.json $PKG/etc/vulkan/icd.d/nvidia_icd.json
 mv /etc/vulkan/implicit_layer.d/nvidia_layers.json $PKG/etc/vulkan/implicit_layer.d/nvidia_layers.json
-# In current, mesa now puts an entry into this directory, so we
-# leave it alone if it is not empty
-if [ -z "$(ls -A /etc/OpenCL/vendors)" ]; then
-  rm -rf /etc/OpenCL
-fi
-# just in case any other programs make an entry here
-if [ -z "$(ls -A /etc/vulkan)" ]; then
-  rm -rf /etc/vulkan
-fi
 
-if [ "$CURRENT" = "yes" ]; then
-# libOpenCL.so is now included in current (in ocl-icd),
+# libOpenCL.so is now included in 15.0 (in ocl-icd),
 # so we don't need this one.
-    rm -f $PKG/usr/lib${LIBDIRSUFFIX}/libOpenCL.so.1.0.0
-    if [ "${COMPAT32}" = "yes" ]; then
-        rm -f $PKG/usr/lib/libOpenCL.so.1.0.0
-    fi
-else
-# Bash script to cleanly install (in doinst.sh) and uninstall the nvidia
-# files so we don't stomp on any overlapping xorg files.
-# Note: switching can be problematic ;-)
-    mkdir -p  $PKG/var/log/nvidia/{32,64}
-    install -m 0755 $CWD/nvidia-switch $PKG/usr/sbin/
-    sed -i s/PKGVERSION/$VERSION/g $PKG/usr/sbin/nvidia-switch
-    sed -i s/LIBDIRSUFFIX/$LIBDIRSUFFIX/g $PKG/usr/sbin/nvidia-switch
-    if [ ${COMPAT32} = "yes" ]; then
-        sed -i s/LIB32FLAG/yes/g $PKG/usr/sbin/nvidia-switch
-    else
-        sed -i s/LIB32FLAG/no/g $PKG/usr/sbin/nvidia-switch
-    fi
+rm -f $PKG/usr/lib${LIBDIRSUFFIX}/libOpenCL.so.1.0.0
+if [ "${COMPAT32}" = "yes" ]; then
+    rm -f $PKG/usr/lib/libOpenCL.so.1.0.0
 fi
 
 # Compile utilites from source, replacing the precompiled versions
@@ -285,11 +273,6 @@ fi
 
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
-# 14.2 needs nvidia-switch, -current does not
-if [ "$CURRENT" = "no" ]; then
-  echo -e "usr/sbin/nvidia-switch --install\n" >> $PKG/install/doinst.sh
-fi
-
 # Add rc.nvidia-persistenced:
 if [ "${PERSISTENCED:-no}" = "yes" ]; then
   cd $TMP
@@ -337,4 +320,4 @@ fi
 
 # Flag multlib as needed and build package.
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION$MULTI-$TARGET-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION$MULTI-$TARGET-$BUILD$TAG.$PKGTYPE

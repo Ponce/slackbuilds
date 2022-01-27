@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for imv
 
@@ -6,10 +6,22 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20210909 bkw:
+# - update for v4.3.0.
+# - upstream switched to meson, can't build old versions with this script.
+# - meson autodetects all the optional libs properly, get rid of the
+#   messy shell script code that used to do it.
+# - add new optional dep libheif.
+# - get rid of squelch_libtiff_warnings.diff (upstream fixed it).
+# - rework README.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=imv
-VERSION=${VERSION:-4.1.0}
+VERSION=${VERSION:-4.3.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -19,7 +31,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -50,67 +66,36 @@ chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# libtiff complains "not a TIFF image" for every non-TIFF image imv
-# loads. patch disables libtiff warnings, and also moves libtiff to
-# the end of the backend list, so it'll get tried last (after all the
-# other backends have decided they can't handle the file).
-patch -p1 < $CWD/squelch_libtiff_warnings.diff
+# meson takes an option to say where to install the config file, but
+# it doesn't actually change where the binary looks for it.
+sed -i -e 's,/etc/imv_config,/etc/imv/imv_config,' \
+       -e '/\/usr\/local\/etc/d' \
+    src/imv.c doc/imv.1.txt
 
-# missing an include...
-sed -i '1i#include <string.h>' src/backend_freeimage.c
-
-# look in the right place for the config file.
-sed -i 's,/usr/local/etc/,/etc/imv/,' src/imv.c
-
-# No autodetection for optional deps. Help it out a little.
-# libpng, libtiff, libjpeg-turbo are always included.
-# librsvg never included, 14.2's is too old, and the minimum supported
-# version requires rust, meaning I don't love it enough to include a
-# static build here. I'm not just assuming it's too old because the
-# docs say so, I actually tried it. Sigh.
-W=x11; F=no; G=no; WS=no
-pkg-config --exists wayland-client && W=all && WS=yes
-[ -e /usr/include/FreeImage.h ] && F=yes
-pkg-config --exists libnsgif && G=yes
-
-cat >config.mk <<EOF
-# Core Slackware stuff:
-BACKEND_LIBTIFF=yes
-BACKEND_LIBPNG=yes
-BACKEND_LIBJPEG=yes
-
-# Core Slackware 14.2, but too old to use, sorry.
-BACKEND_LIBRSVG=no
-
-# Optional SBo packages (FreeImage, libnsgif):
-BACKEND_FREEIMAGE=$F
-BACKEND_LIBNSGIF=$G
-
-# Optional: window system (x11, wayland, or 'all' for both)
-WINDOWS=$W
-EOF
-
-make \
+mkdir build
+cd build
   CFLAGS="$SLKCFLAGS" \
-  PREFIX=/usr \
-  CONFIGPREFIX=/etc/$PRGNAM
-
-make install \
-  DESTDIR=$PKG \
-  PREFIX=/usr \
-  CONFIGPREFIX=/etc/$PRGNAM \
-  MANPREFIX=/usr/man \
-  INSTALL_PROGRAM="install -s -m0755"
+  CXXFLAGS="$SLKCFLAGS" \
+  meson .. \
+    --buildtype=release \
+    --infodir=/usr/info \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --prefix=/usr \
+    --sysconfdir=/etc/$PRGNAM \
+    -Dstrip=true
+  "${NINJA:=ninja}"
+  DESTDIR=$PKG $NINJA install
+cd ..
 
 gzip -9 $PKG/usr/man/man?/*.?
+mv $PKG/etc/$PRGNAM/${PRGNAM}_config $PKG/etc/$PRGNAM/${PRGNAM}_config.new
 
-( cd $PKG/etc/$PRGNAM; mv ${PRGNAM}_config ${PRGNAM}_config.new )
-
-# make install doesn't install the .desktop file. Also there's no icon
-# so we have to include one, below.
+# Slackware doesn't have an icon called multimedia-photo-viewer...
 mkdir -p $PKG/usr/share/applications
-sed "s,multimedia-photo-viewer,$PRGNAM," files/$PRGNAM.desktop > \
-    $PKG/usr/share/applications/$PRGNAM.desktop
+sed -i "s,multimedia-photo-viewer,$PRGNAM," \
+    $PKG/usr/share/applications/*.desktop
 
 # Icon came from Debian moka-icon-theme package. I have no idea
 # what the default icon theme is in Debian (equivalent of hicolor in
@@ -128,12 +113,19 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 
+# update slack-desc to say which optional deps are included
+F=no; G=no; H=no
+ldd $PKG/usr/bin/$PRGNAM-x11 > lddtmp
+grep -q 'libfreeimage' lddtmp && F=yes
+grep -q 'libnsgif' lddtmp && G=yes
+grep -q 'libheif' lddtmp && H=yes
+
 sed -e "s,@F@,$F," \
     -e "s,@G@,$G," \
-    -e "s,@W@,$WS," \
+    -e "s,@H@,$H," \
     $CWD/slack-desc > $PKG/install/slack-desc
 
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

@@ -1,8 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 
-# Originally written by hollywoodb (hollywoodb@fastmail.fm)
-# Maintained 2011-2016 by sero (firebird209 at gmail dot com)
-# Maintained 2017-2021 by Benjamin Trigona-Harany <slackbuilds@jaxartes.net>
+# Originally written by hollywoodb (email removed)
+# Maintained 2011-2016 by sero (email removed)
+# Maintained 2017-2021 by Benjamin Trigona-Harany (email removed)
+# Maintained 2021-? by B. Watson <yalhcru@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,10 +23,28 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20211019 bkw:
+# - take over maintenance.
+# - update for v3.3.
+# - always docs/manpages, now that Slackware has rubygem-asciidoctor.
+# - add doinst.sh, since we have .desktop and icons.
+# - include old-style icon.
+# - mention optional lua deps.
+# - mention the fact that Tcl and Guile are supported scripting langs.
+# - get rid of external stylesheets/fonts/JS in HTML docs, as this
+#   is a privacy issue.
+
+# I considered including the contents of Debian's weechat-scripts
+# package here, but weechat's set up to download scripts from a remote
+# server, not a local directory, so probly nobody'd ever use them.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=weechat
-VERSION=${VERSION:-3.1}
+VERSION=${VERSION:-3.3}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -35,7 +54,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -63,11 +86,36 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# 20211019 bkw: patch from Debian: Build html documentation without
+# requiring data (javascript, fonts) on external websites (potential
+# privacy breach). Patch was slightly modified for Slackware.
+patch -p1 < $CWD/01_fix_asciidoctor_options.patch
+
+# 20211019 bkw: hardcoded paths suck.
+DOC=/usr/doc/$PRGNAM-$VERSION
+PKGDOC=$PKG/$DOC
+sed -i \
+  '/install(/s,\(DESTINATION\) *\$.DATAROOTDIR.*,\1 '$DOC'/html),' \
+  doc/*/CMakeLists.txt
+
+# 20211019 bkw:
+# -DENABLE_PHP=OFF because Slackware's php isn't built with --enable-embed.
+# -DENABLE_JAVASCRIPT=OFF because neither SBo nor Slackware provides a
+# v8 package. Looks like this is where you'd get the source: https://v8.dev/
+
+# lua isn't auto-disabled if it's missing, so help it out a little.
+LUAOPT=OFF; WITHLUA=WITHOUT
+for i in lua5.3 lua5.2 lua; do
+  if [ -x /usr/bin/$i ]; then
+    LUAOPT=ON; WITHLUA=WITH
+  fi
+done
+
+# Everything else is autodetected and/or included in a full Slackware
+# install.
 
 mkdir build
 cd build
@@ -75,38 +123,29 @@ cd build
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DENABLE_MAN=OFF \
-    -DENABLE_LUA=OFF \
+    -DENABLE_LUA="$LUAOPT" \
     -DENABLE_JAVASCRIPT=OFF \
     -DENABLE_PHP=OFF \
-    -DENABLE_PYTHON=ON \
-    -DENABLE_DOC=${DOC:-OFF} \
-    -DENABLE_MAN=${DOC:-OFF} \
+    -DENABLE_DOC=ON \
+    -DENABLE_MAN=ON \
+    -DMANDIR=/usr/man \
     -DLIBDIR=/usr/lib${LIBDIRSUFFIX} \
     -DCMAKE_BUILD_TYPE=Release \
     ..
-  make install DESTDIR=$PKG
+  make install/strip DESTDIR=$PKG
 cd ..
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+gzip -9 $PKG/usr/man/man1/* $PKG/usr/man/*/man1/*
 
-if [ -e $PKG/usr/share/man ]; then
-  mv $PKG/usr/share/man $PKG/usr/man
-  find $PKG/usr/man -type f -exec gzip -9 {} \;
-fi
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/32x32/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-if [ -e $PKG/usr/share/doc/$PRGNAM ]; then
-  mv $PKG/usr/share/doc/$PRGNAM $PKG/usr/doc/$PRGNAM-$VERSION/html
-fi
-cp -a \
-  AUTHORS.adoc COPYING ChangeLog.adoc README.adoc ReleaseNotes.adoc \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cp -a *.adoc COPYING $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@WITHLUA@,$WITHLUA," $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

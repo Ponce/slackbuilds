@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for SLiM
 
@@ -27,26 +27,36 @@
 #
 # Maintained by David Spencer <baildon.research@googlemail.com>
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=slim
 VERSION=${VERSION:-1.3.6}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+    i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
 fi
 
-CWD=$(pwd)
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
@@ -74,16 +84,21 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Correct the path used for suspend:
-patch -p0 < $CWD/slim.conf.patch
-# disable slimlock build
-patch -p0 < $CWD/CMakeLists.txt.patch
+# Correct the path used for suspend and a few things about sessions
+patch -p1 < $CWD/patches/slim-1.3.6-config.diff
 # Fix for freetype-2.5.5 headers
-patch -p1 < $CWD/slim-1.3.6_freetype-2.5.1.diff
+patch -p1 < $CWD/patches/slim-1.3.6_freetype-2.5.1.diff
+# Fixes for slim libraries
+patch -p1 < $CWD/patches/slim-1.3.6-libslim-cmake-fixes.patch
+# Honour our FLAGS
+patch -p1 < $CWD/patches/slim-1.3.6-honour-cflags.patch
+# Fix for the latest gcc
+patch -p1 < $CWD/patches/slim-1.3.6-gcc11.patch
+# Fix a bug
+patch -p1 < $CWD/patches/slim-1.3.6-envcpy-bad-pointer-arithmetic.patch
 
 # Fix location of man-pages
 sed "s/share\/man/man/" -i CMakeLists.txt
-sed -i "s/DESTINATION lib/DESTINATION lib${LIBDIRSUFFIX}/" CMakeLists.txt
 
 mkdir -p build
 cd build
@@ -91,6 +106,8 @@ cd build
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLIB_SUFFIX=$LIBDIRSUFFIX \
+    -DUSE_PAM=yes \
     -DUSE_CONSOLEKIT=no \
     -DCMAKE_BUILD_TYPE=Release ..
   make
@@ -105,7 +122,7 @@ tar xvf $CWD/slackware-black.tar.bz2 -C $PKG/usr/share/slim/themes
 
 # Add a logrotate file
 mkdir -p $PKG/etc/logrotate.d
-cat $CWD/slim.logrotate > $PKG/etc/logrotate.d/slim.new
+cat $CWD/files/slim.logrotate > $PKG/etc/logrotate.d/slim.new
 
 # Kill the incorrectly-placed (and useless anyway) systemd stuff
 rm -rf $PKG/usr/usr
@@ -113,14 +130,16 @@ rm -rf $PKG/usr/usr
 # Kill systemd stuff
 rm -rf $PKG/lib
 
+install -m 0644 -D $CWD/files/Xsession $PKG/usr/share/slim/Xsession
+install -m 0644 -D $CWD/files/slim.pam $PKG/etc/pam.d/slim/slim.pam
+install -m 0644 -D $CWD/files/slimlock.pam $PKG/etc/pam.d/slimlock/slimlock.pam
+install -m 0644 -D slimlock.conf $PKG/etc/slimlock.conf
+
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-
-# Remove slimlock as we don't build it
-rm $PKG/usr/man/man1/slimlock.1.gz
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a ChangeLog COPYING INSTALL README THEMES TODO xinitrc.sample $PKG/usr/doc/$PRGNAM-$VERSION
@@ -132,4 +151,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

@@ -1,8 +1,8 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for opencpn
 
-# Copyright 2019 Matt Dinslage, Springfield, MO
+# Copyright 2021 Matt Dinslage, Springfield, MO
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,11 +22,13 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=opencpn
-VERSION=${VERSION:-5.0.0}
+VERSION=${VERSION:-5.2.4}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
-
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -36,7 +38,14 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -61,7 +70,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/OpenCPN-$VERSION.tar.gz || tar xvf $CWD/v$VERSION.tar.gz
+tar xvf $CWD/OpenCPN-$VERSION.tar.gz
 cd OpenCPN-$VERSION
 chown -R root:root .
 find -L . \
@@ -70,19 +79,14 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Apply patches to fix following issues...
-# Honor MANDIR
-# Honor LIBSUFFIXDIR
-# Fix building with newer cmake versions
-for patch in $CWD/patches/* ; do
-  patch -p1 < $patch
-done
-
-# opencpn does not have specific checks for Slackware so it
-# defautls to a i386 arch.  Change this for x86_64
+# Fix LIBDIR
 if [ "$ARCH" = "x86_64" ]; then
- sed -i '0,/i386/s//x86_64/' CMakeLists.txt
+  sed -i '0,/"i386"/{s/"i386"/"x86_64"/}' cmake/GetArch.cmake
+  sed -i '0,/"lib"/{s/"lib"/"lib64"/}' cmake/GetArch.cmake
 fi
+
+# Fix MANDIR
+sed -i 's,${PREFIX_DATA}/man/man1,/usr/man/man1,g' CMakeLists.txt
 
 mkdir -p build
 cd build
@@ -91,6 +95,8 @@ cd build
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+    -DOPCPN_FORCE_GTK3=ON \
+    -DwxWidgets_CONFIG_EXECUTABLE=/usr/bin/wx-config \
     -DBUNDLE_GSHHS=CRUDE \
     -DBUNDLE_TCDATA=ON \
     -DBUNDLE_DOCS=ON \
@@ -98,6 +104,9 @@ cd build
   make
   make install DESTDIR=$PKG
 cd ..
+
+# Don't ship .la files:
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -111,21 +120,18 @@ mv $PKG/usr/share/doc/$PRGNAM/* $PKG/usr/doc/$PRGNAM-$VERSION
 rm -rf $PKG/usr/share/doc
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
-# Add an icon to /usr/share/pixmaps so menu launcher has icon
+rm -r $PKG/usr/share/icons/hicolor/*
+mkdir -p $PKG/usr/share/icons/hicolor/scalable/apps
+cp $TMP/OpenCPN-$VERSION/src/bitmaps/other_svg_src/opencpn_logo.svg \
+   $PKG/usr/share/icons/hicolor/scalable/apps/opencpn.svg
+
 mkdir -p $PKG/usr/share/pixmaps
 convert $PKG/usr/share/icons/hicolor/scalable/apps/opencpn.svg -resize 256x256 \
         $PKG/usr/share/pixmaps/opencpn.png
-
-# OpenCPN only looks for plugins in the "lib" directories.  We
-# have to set an evnironment variable in order for OpenCPN to
-# find plugins in "lib64"
-if [ "$ARCH" = "x86_64" ]; then
-  sed -i 's,Exec=opencpn,Exec=env OPENCPN_PLUGIN_DIRS="/usr/lib64/opencpn" opencpn,g' $PKG/usr/share/applications/opencpn.desktop
-fi
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

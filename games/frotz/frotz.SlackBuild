@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #
 # Slackware build script for frotz
 
@@ -8,6 +8,12 @@
 
 # Original had no license. This modified version is released under the
 # WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20211007 bkw:
+# - updated for v2.53.
+# - add optional xfrotz.
+# - expand README.
+# - make slack-desc reflect build options (libmodplug and xfrotz).
 
 # 20210215 bkw: fix building without libmodplug. BUILD=2.
 
@@ -25,10 +31,13 @@
 # - updated for Slackware 14 and frotz 2.43d.
 # - include dumb terminal frotz in build.
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=frotz
-VERSION=${VERSION:-2.52}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-2.53}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -38,7 +47,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -77,23 +90,6 @@ sed -i -e 's,invocatio$,&n.,' \
 # Document location of config file:
 sed -i 's,frotz\.conf,/etc/&,' doc/$PRGNAM.6
 
-# sfrotz aborts with a "malloc(): memory corruption" error when given
-# a long pathname on the command line. Example:
-
-# $ sfrotz "/export/home/urchlay/interactive_fiction/infocom_collection/The Hitchhikers Guide To The Galaxy (1985)/The Hitchhiker's Guide To The Galaxy R31-871119.z5"
-
-# With a somewhat shorter pathname, the program might not abort, but
-# it will end up with gibberish at the end of f_setup.script_name,
-# which would prevent it from auto-loading scripts (if present).
-
-# I don't fully understand why, but the new_basename() and
-# new_dirname() fuctions in sf_util.c are the culprits. They look OK
-# to me, but getting rid of the calls to free() causes the aborts to
-# go away. Since each function gets called only once (at startup),
-# this doesn't constitute a memory leak worth worrying about.
-
-patch -p1 < $CWD/sfrotz.memcorrupt.diff
-
 run_make() {
   make \
     PREFIX=/usr \
@@ -101,19 +97,36 @@ run_make() {
     MANDIR=/usr/man \
     MAN_PREFIX=/usr \
     BINDIR=/usr/games \
+    MKFONTDIR=/bin/true \
+    X11_FONTDIR=$PKG/usr/share/fonts/misc \
     DESTDIR=$PKG \
     $1
 }
 
 # No autodetection for libmodplug or SDL2_mixer, help it out.
-maintarg="nosound"
-pkg-config --exists libmodplug && maintarg="$PRGNAM"
+maintarg="nosound"; MP=no
+if pkg-config --exists libmodplug; then
+  maintarg="$PRGNAM"
+  MP=yes
+fi
+# on post-14.2 -current and 15.0, sdl2 is part of a full install:
 pkg-config --exists sdl2 SDL2_mixer && extra="clean sdl install_sdl"
 
 sed -i "s,-O3.*,$SLKCFLAGS," Makefile
 for target in $maintarg install clean dumb install_dumb $extra; do
   run_make $target
 done
+
+# I have no idea why anyone would want this, but in case they do:
+XF=no
+if [ "${XFROTZ:-no}" = "yes" ]; then
+  XF=yes
+  run_make clean
+  run_make x11
+  run_make install_x11
+  mv $PKG/usr/bin/xfrotz $PKG/usr/games
+  rmdir $PKG/usr/bin
+fi
 
 strip $PKG/usr/games/*
 gzip -9 $PKG/usr/man/man?/*.*
@@ -123,7 +136,14 @@ gzip -9 $PKG/usr/man/man?/*.*
 mkdir -p $PKG/usr/share/applications \
          $PKG/usr/share/pixmaps \
          $PKG/usr/share/icons/hicolor/32x32/apps
-install -m0644 -oroot -groot $CWD/*.desktop $PKG/usr/share/applications
+
+for i in $PKG/usr/games/*; do
+  bin="$( basename $i )"
+  if [ -e $CWD/$bin.desktop ]; then
+    install -m0644 -oroot -groot $CWD/$bin.desktop $PKG/usr/share/applications
+  fi
+done
+
 cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
 ln -s ../../../../pixmaps/$PRGNAM.png \
       $PKG/usr/share/icons/hicolor/32x32/apps/$PRGNAM.png
@@ -145,8 +165,10 @@ cp -a AUTHORS CO* ChangeLog DUMB HOW_TO_PLAY README* TODO *.lsm \
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s,@MP@,$MP," \
+    -e "s,@XF@,$XF," \
+  $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

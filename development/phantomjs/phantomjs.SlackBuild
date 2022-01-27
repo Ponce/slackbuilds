@@ -1,8 +1,8 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for phantomjs
 
-# Copyright 2012-2016 Heinz Wiesinger, Amsterdam, The Netherlands
+# Copyright 2012-2021 Heinz Wiesinger, Amsterdam, The Netherlands
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -11,21 +11,24 @@
 # 1. Redistributions of this script must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 #
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
-# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
-# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=phantomjs
-VERSION=${VERSION:-1.9.8}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-2.1.1}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -35,7 +38,14 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -60,7 +70,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-unzip $CWD/$PRGNAM-$VERSION-source.zip
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
@@ -69,34 +79,39 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# strip MAKEFLAGS usage
-sed -i "s|-j\$COMPILE_JOBS||" src/qt/preconfig.sh
-sed -i "s|export MAKEFLAGS=||" src/qt/preconfig.sh
+# Patches from arch
+patch -p1 -i $CWD/patches/fix-missing-webkit-include-files.patch
 
-# Don't use unsupported -fuse-ld=gold flag
-sed -i "6,11d" src/qt/src/3rdparty/webkit/Source/common.pri
+# Patches from debian
+patch -p1 -i $CWD/patches/build-no-ghostdriver.patch
+patch -p1 -i $CWD/patches/build-qt-components.patch
+patch -p1 -i $CWD/patches/build-qt55-evaluateJavaScript.patch
+patch -p1 -i $CWD/patches/build-qt55-no-websecurity.patch
+patch -p1 -i $CWD/patches/build-qt55-print.patch
+patch -p1 -i $CWD/patches/unlock-qt.patch
 
-# Fix alsa test
-sed -i "s|SND_LIB_MINOR == 0 \&\& SND_LIB_SUBMINOR >= 10|SND_LIB_MINOR == 1 \&\& SND_LIB_SUBMINOR >= 0|" \
-  src/qt/config.tests/unix/alsa/alsatest.cpp
+# Point to our qmake (adapted from debian patch)
+patch -p1 -i $CWD/patches/build-qtpath.patch
 
-# Fix gcc 5 detection in qt's configure script
-patch -p1 -d src/qt -i $CWD/qt-gcc5.patch
+python2 build.py \
+  --skip-git \
+  --skip-qtbase \
+  --skip-qtwebkit \
+  --confirm \
+  --release
 
-cd src/qt
-  ./preconfig.sh
-cd -
+mkdir -p $PKG/usr/{bin,lib$LIBDIRSUFFIX/phantomjs,share/phantomjs}
 
-src/qt/bin/qmake
-  QMAKE_CFLAGS+="$SLKCFLAGS" \
-  QMAKE_CXXFLAGS+="$SLKCFLAGS" \
-  PREFIX=/usr
+# Our phantomjs is linked against system Qt, which uses the X11 QPA
+# by default and prevents phantomjs from running headlessly. To
+# work around that we provide a thin wrapper that switches phantomjs
+# to the "offscreen" QPA
+sed "s|LIBDIRSUFFIX|$LIBDIRSUFFIX|" $CWD/phantomjs > $PKG/usr/bin/phantomjs
+install -m 755 bin/phantomjs $PKG/usr/lib$LIBDIRSUFFIX/phantomjs/
 
-make
+chmod 755 $PKG/usr/bin/phantomjs
 
-mkdir -p $PKG/usr/bin
-
-install -m 755 bin/phantomjs $PKG/usr/bin/
+cp -r examples $PKG/usr/share/phantomjs/
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -109,4 +124,4 @@ mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

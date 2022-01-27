@@ -1,8 +1,8 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for xen
 
-# Copyright 2010, 2011, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020  Mario Preksavec, Zagreb, Croatia
+# Copyright 2010, 2021  Mario Preksavec, Zagreb, Croatia
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,14 +22,17 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-PRGNAM=xen
-VERSION=${VERSION:-4.13.1}
-BUILD=${BUILD:-3}
-TAG=${TAG:-_SBo}
+cd $(dirname $0) ; CWD=$(pwd)
 
-SEABIOS=${SEABIOS:-1.12.1}
-OVMF=${OVMF:-20190606_20d2e5a125}
-IPXE=${IPXE:-1dd56dbd11082fb622c2ed21cfaced4f47d798a6}
+PRGNAM=xen
+VERSION=${VERSION:-4.15.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+SEABIOS=${SEABIOS:-1.14.0}
+OVMF=${OVMF:-20200807_a3741780fe}
+IPXE=${IPXE:-3c040ad387099483102708bb1839110bc788cefb}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -39,17 +42,25 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
+    cat << EOF
+
+  *** Xen x86/32 target no longer supported!
+
+EOF
+    exit
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
@@ -93,11 +104,6 @@ esac
 case "${USE_LIBSSH:-no}" in
   yes) CONF_QEMUU+=" --enable-libssh" ;;
     *) CONF_QEMUU+=" --disable-libssh" ;;
-esac
-
-case "${USE_BLUEZ:-no}" in
-  yes) CONF_QEMUU+=" --enable-bluez" ;;
-    *) CONF_QEMUU+=" --disable-bluez" ;;
 esac
 
 case "${USE_GTK:-no}" in
@@ -169,6 +175,21 @@ if [ "$(ldd --version | awk '{print $NF; exit}')" = "2.27" ]; then
   ( cd tools/qemu-xen && patch -p1 <$CWD/patches/glibc-memfd_fix_configure_test.patch )
 fi
 
+# Fix ovmf firmware build
+( cd tools/firmware/ovmf-dir-remote && \
+  patch -p1 <$CWD/patches/0001-BaseTools-fix-ucs-2-lookup-on-python-3.9.patch
+  patch -p1 <$CWD/patches/0002-BaseTools-Work-around-array.array.tostring-removal-i.patch
+  patch -p1 <$CWD/patches/0003-BaseTools-replace-deprecated-fromstring-and-tostring.diff
+  patch -p1 <$CWD/patches/edk2-ovmf-202105-werror.patch
+)
+
+# Fix binutils-2.36 build
+if [ "$(objcopy --version | awk '{print $NF; exit}' | cut -d- -f1)" = "2.36" ]; then
+  patch -p1 <$CWD/patches/qemu-xen-no-pie.diff
+fi
+
+patch -p1 <$CWD/patches/tools-ipxe-update-for-fixing-build-with-GCC11.diff
+
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -189,6 +210,9 @@ make install-xen \
   mandir=/usr/man \
   MANDIR=/usr/man \
   DESTDIR=$PKG
+
+echo CONFIG_GOLANG=n >> xen/.config
+echo CONFIG_GOLANG=n > tools/.config
 
 make install-tools \
   docdir=/usr/doc/$PRGNAM-$VERSION \
@@ -254,4 +278,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

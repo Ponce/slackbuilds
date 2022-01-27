@@ -52,7 +52,7 @@ must run it with root privileges (e.g. with su or sudo).
 
 You can find a collection of Maelstrom add-on zip files here:
 
-	http://www.devolution.com/~slouken/Maelstrom/add-ons.html
+	https://www.libsdl.org/projects/Maelstrom/add-ons.html
 EOF
 	exit 1;
 }

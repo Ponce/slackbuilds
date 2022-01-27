@@ -1,0 +1,172 @@
+#!/bin/bash
+
+# SlackBuild script for vwm.
+
+# Originally written by Pierre Cazenave <email removed>
+# Previously maintained by Gerardo Zamudio.
+# Now maintained by B. Watson <yalhcru@gmail.com>.
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20211118 bkw:
+# - relicense as WTFPL, with permission from Pierre.
+# - Move to system/ category.
+
+# 20210908 bkw:
+# - Update this stale build. It compiled on -current, but failed to
+#   run properly. Upstream never updated the old sourceforge page to
+#   let us know he moved to github, so I just now found it out...
+#   Upstream doesn't use tags for releases, I used latest git for
+#   all 3 projects (vwm, libviper, libvterm).
+# - Bundle libviper. The old libviper build is gone (nothing else used it).
+# - Bundled libs are now shared, not static, and are included in the
+#   built package (along with their includes).
+# - Upstream switched to cmake, many changes because of that.
+
+# 20170825 bkw:
+# - Take over maintenance.
+# - Update for v2.1.3.
+# - slack-desc cosmetics.
+# - Don't install useless INSTALL to doc dir.
+# - Remove -j1 from the make commands, except the one for keycodes. seems
+#   not to be needed any longer.
+# - Simplify script a bit.
+# - Build a private static 'libvterm', which is NOT the same libvterm as
+#   libraries/libvterm on SBo. Unfortunately this adds a lot of complexity
+#   back to the script :(
+# - Rebase patches/*.diff against 2.1.3 and combine into one patch.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=vwm
+VERSION=${VERSION:-3.3.2+20200112_207d888}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+
+set -e
+
+rm -rf $PKG $TMP/$PRGNAM-$VERSION
+mkdir -p $PKG $OUTPUT
+cd $TMP
+
+# The tarball includes all 3 projects (vwm, libviper, libvterm) and
+# was created by git2tarxz.sh.
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+BASEDIR=$( pwd )
+
+# First, we build the two libraries vwm needs. These are by the same
+# author as vwm. The one called libvterm is *not* related to the
+# libvterm on SBo (two projects happened to pick the same name).
+# These have to be shared libs (or anyway, libvterm has to be, as
+# vwm's vwmterm module loads it via dlopen()).
+
+buildlib() {
+  cd $BASEDIR/lib$1
+  mkdir -p build
+  cd build
+
+  # Note: the cmake stuff here ignores any attempt to install to lib64.
+  # We'll fix it later.
+  cmake \
+    -DCMAKE_C_FLAGS_RELEASE="$SLKCFLAGS -DNDEBUG" \
+    -DCMAKE_CXX_FLAGS_RELEASE="$SLKCFLAGS -DNDEBUG" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make VERBOSE=1
+  make install/strip DESTDIR=$PKG
+}
+
+buildlib vterm
+buildlib viper
+
+# no way to disable static libs via cmake, so...
+rm -f $PKG/usr/lib/*.a
+
+# Finally, we can build vwm. Easier to force-override the autodetect
+# for the libs, than it would be to make the autodetect actually work.
+cd $BASEDIR/$PRGNAM
+
+  # why is this hardcoded?
+  sed -i "s,/usr/local/lib/vwm/,/usr/lib$LIBDIRSUFFIX/vwm/," vwm.h
+
+  mkdir -p build
+  cd build
+  cmake \
+    -DCMAKE_C_FLAGS_RELEASE="$SLKCFLAGS -DNDEBUG -I$PKG/usr/include" \
+    -DCMAKE_CXX_FLAGS_RELEASE="$SLKCFLAGS -DNDEBUG -I$PKG/usr/include" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DVTERM_LIBRARY=$PKG/usr/lib/libvterm.so \
+    -DVIPER_LIBRARY=$PKG/usr/lib/libviper.so \
+    -DVTERM_INCLUDE_DIR=$PKG/usr/include \
+    -DVIPER_INCLUDE_DIR=$PKG/usr/include \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make VERBOSE=1
+  make install/strip DESTDIR=$PKG
+cd -
+
+# *Now* we can fix the lib=>lib64 mess, if needed.
+[ "$LIBDIRSUFFIX" != "" ] && mv $PKG/usr/lib $PKG/usr/lib$LIBDIRSUFFIX
+
+# Build and install the keycodes tool to determine codes for remapping
+# keystrokes in '~/.vwm/vwmrc'. Don't think we need the non-wide version,
+# since the main program uses wide ncurses.
+make -j1 -C keycodes keycodes_wide
+install -s -m0755 keycodes/keycodes_wide $PKG/usr/bin/keycodes
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+
+# upstream's README.md is mostly install instructions.
+mkdir -p $PKGDOC
+cp -a BUGS CHANGELOG LICENSE NEWS* README* TODO samples $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+cat $CWD/README > $PKGDOC/README$TAG
+
+# include docs for the libraries too.
+cd $BASEDIR
+mkdir -p $PKGDOC/{libviper,libvterm}
+cp -a libviper/{CHANGELOG,LICENSE,README.md,TODO} $PKGDOC/libviper
+cp -a libvterm/{API,CHANGELOG,COPY*,LIC*,*.md} $PKGDOC/libvterm
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

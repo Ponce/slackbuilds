@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Slackware build script for glbsp
 
@@ -6,13 +6,21 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20211008 bkw: BUILD=2
+# - include missing *.txt docs.
+# - make fltk an optional dep.
+# - include new-style icons.
+# - add .desktop for nodeview.
 # 20170621 bkw: fix build for -current (post-14.2)
 # 20151126 bkw: fix build for -current (preparing for 14.2)
 
+cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=glbsp
 VERSION=${VERSION:-2.24}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -22,7 +30,11 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-CWD=$(pwd)
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -52,11 +64,8 @@ rm -rf $PRGNAM-$VERSION-source
 tar xvf $CWD/${PRGNAM}_src_${SRCVER}.tar.gz
 cd $PRGNAM-$VERSION-source
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 # Use fltk-config --cflags and --ldflags instead of hardcoded values
 patch -p1 < $CWD/fltkconf.diff
@@ -80,7 +89,8 @@ make -f Makefile.unx install \
 gzip -9 $PKG/usr/man/man1/$PRGNAM.1
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a $PRGNAM.txt $PKG/usr/doc/$PRGNAM-$VERSION
+rm INSTALL.txt
+cp -a *.txt $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/usr/lib$LIBDIRSUFFIX $PKG/usr/include/$PRGNAM
@@ -95,25 +105,38 @@ fi
 # /usr/include/glbsp.h as a symlink), I will do likewise.
 ( cd $PKG/usr/include ; ln -s $PRGNAM/$PRGNAM.h $PRGNAM.h ) || exit 1
 
-# Build with OMIT_GUI=yes if you don't need the GUI (otherwise, fltk is
-# a build dep).
-if [ "${OMIT_GUI:-no}" = "no" ]; then
+INCLUDES="does not include"
+# Build with FLTK=no if have fltk but don't need the GUI.
+if [ "${FLTK:-yes}" = "yes" ] && [ -x /usr/bin/fltk-config ]; then
+  INCLUDES="includes"
   make -f Makefile.unx glBSPX
   cp glBSPX $PKG/usr/bin
   mkdir -p $PKG/usr/share/pixmaps $PKG/usr/share/applications
   cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+  cat $CWD/nodeview.desktop > $PKG/usr/share/applications/nodeview.desktop
   cat gui/icon.xpm > $PKG/usr/share/pixmaps/$PRGNAM.xpm
   cd nodeview
     sed -i "s/-O -g3/$SLKCFLAGS/" Makefile.unx
-    make -f Makefile.unx
+    make -f Makefile.unx bin
     cp nodeview $PKG/usr/bin
     cat README.txt TODO.txt > $PKG/usr/doc/$PRGNAM-$VERSION/nodeview.txt
   cd ..
+
+# 20211008 bkw: icons were extracted from included OSX icons with
+# libicns, like so:
+# icns2png -x gui/glBSPX.app/Contents/Resources/glbspx.icns
+# rm -f *x1.png
+  for i in 16 32 48 128; do
+    size=${i}x${i}
+    dir=$PKG/usr/share/icons/hicolor/$size/apps
+    mkdir -p $dir
+    cat $CWD/icons/glbspx_${size}x32.png > $dir/$PRGNAM.png
+  done
 fi
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@INCLUDES@,$INCLUDES," < $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
