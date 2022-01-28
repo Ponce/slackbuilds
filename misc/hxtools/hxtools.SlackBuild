@@ -1,0 +1,164 @@
+#!/bin/bash
+
+# Slackware build script for hxtools
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# This build includes both hxtools and the libHX library it depends
+# on. In the unlikely event that someone finds another project that
+# depends on libHX and wants to package it up for SBo, whatever it is
+# can just list hxtools as a dependency.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=hxtools
+VERSION=${VERSION:-20211204}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+LIBNAM=libHX
+LIBVER=${LIBVER:-4.2}
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM
+mkdir -p $PRGNAM
+cd $PRGNAM
+TOPDIR="$( pwd )"
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+tar xvf $CWD/$LIBNAM-$LIBVER.tar.xz
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+### libHX:
+cd $LIBNAM-$LIBVER
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --disable-static \
+  --build=$ARCH-slackware-linux
+
+make # V=1
+make install-strip DESTDIR=$PKG
+rm -f $PKG/usr/lib*/*.la
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+LIBDOC=$PKGDOC/$LIBNAM-$VERSION
+
+# LICENSE.GPL3 and LICENSE.WTFPL are also in hxtools, don't install here.
+mkdir -p $LIBDOC
+cp -a COPYING LICENSE.LGPL* *.rst doc $LIBDOC
+
+### hxtools itself, link with the libHX in $PKG:
+cd $TOPDIR/$PRGNAM-$VERSION
+
+# look for extract_dfqshared.pm in /usr/share/$PRGNAM, not /usr/bin.
+patch -p1 < $CWD/shared_perl_lib.diff
+
+libHX_CFLAGS="-I$PKG/usr/include" \
+libHX_LIBS="-L$PKG/usr/lib$LIBDIRSUFFIX -lHX" \
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --disable-static \
+  --build=$ARCH-slackware-linux
+
+make # V=1
+make install-strip DESTDIR=$PKG
+
+# dunno why so much stuff is installed in libexec... easier to
+# move it after the fact than patch the autotools stuff to fix it.
+mv $PKG/usr/libexec/$PRGNAM/* $PKG/usr/bin
+rm -rf $PKG/usr/libexec
+
+# move this to where the patched extract_* tools expect to find it.
+install -m0644 $PKG/usr/bin/extract_dfqshared.pm $PKG/usr/share/$PRGNAM
+rm -f $PKG/usr/bin/extract_dfqshared.pm
+
+# these don't get installed by 'make install'
+install -m0755 sadmin/filenameconv $PKG/usr/bin
+install -s -m0755 smath/graph-{fanout,lchain} $PKG/usr/bin
+
+# nor these...
+mkdir -p $PKG/usr/sbin
+install -m0755 sadmin/raregetty $PKG/usr/sbin
+# this isn't useful on Slackware, is it?
+install -m0755 sadmin/rpmdep.pl $PKG/usr/sbin
+
+cp -a doc/filenameconv.1 $PKG/usr/man/man1
+cp -a doc/raregetty.8 $PKG/usr/man/man8
+
+# these 2 conflict with bsd-games and man-db:
+rm -f $PKG/usr/bin/{rot13,man2html} \
+      $PKG/usr/man/man1/{rot13,man2html}.1
+
+# there's also a bin2c in SBo's cudatoolkit, but it's installed to
+# /usr/share/cuda/bin, so there's no conflict here.
+
+# redundant copy (the other one's in etc/):
+rm -f $PKG/usr/share/hxtools/hxloginpref.conf
+
+gzip -9 $PKG/usr/man/man*/*
+
+# symlink redundant licenses
+cp -a LICENSE* doc/*.rst examples $PKGDOC
+ln -s ../LICENSE.WTFPL $LIBDOC/LICENSE.WTFPL
+ln -s ../LICENSE.GPL3 $LIBDOC/LICENSE.GPL3
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
