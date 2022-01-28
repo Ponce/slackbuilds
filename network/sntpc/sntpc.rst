@@ -1,5 +1,5 @@
-.. RST source for sntpc(1) man page. Convert with:
-..   rst2man.py sntpc.rst > sntpc.1
+.. RST source for sntpc(8) man page. Convert with:
+..   rst2man.py sntpc.rst > sntpc.8
 .. rst2man.py comes from the SBo development/docutils package.
 
 .. |version| replace:: 20181113_1ca1d00
