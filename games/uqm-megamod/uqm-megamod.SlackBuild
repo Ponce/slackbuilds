@@ -1,0 +1,132 @@
+#!/bin/bash
+
+# Slackware build script for uqm-megamod
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Unlike the original uqm SlackBuild, I'm including all the optional
+# content in this one build. It's the "MegaMod", so it should have
+# everything. If you think this is too much, you should be using the
+# original uqm instead.
+
+# Also, OpenAL is enabled by default (unlike in uqm). Although it's
+# still 'experimental', upstream's release binaries are built with
+# it enabled. And even so, the user has to enable it in the in-game
+# settings (default is 'mixsdl').
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=uqm-megamod
+VERSION=${VERSION:-0.8.1_3}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+else
+  SLKCFLAGS="-O2"
+fi
+
+set -e
+
+SRCVER="${VERSION/_/-}"
+SRCNAM="UQM-MegaMod"
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$SRCVER
+tar xvf $CWD/$SRCNAM-$SRCVER.tar.gz
+cd $SRCNAM-$SRCVER
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# why do people even think it's a good idea to hide the compile
+# commands behind something like this?
+export MAKE_VERBOSE=1
+
+# rather than interactive config:
+cat $CWD/config.state > config.state
+
+# hidden env var, let me test builds without OpenAL:
+[ "${OPENAL:-yes}" = "no" ] && sed -i 's,openal,mixsdl,' config.state
+
+# this generates build.vars:
+sh build.sh uqm reprocess_config
+
+# use our flags:
+sed -i "s/-O3/$SLKCFLAGS/g" build.vars
+
+sh build.sh uqm $MAKEFLAGS
+
+mkdir -p $PKG/usr/games
+install -s -m0755 UrQuanMasters $PKG/usr/games/$PRGNAM
+
+# icon and desktop need a bit of love.
+for px in 16 32 48 64 128; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  convert -resize $size src/res/megamod.png $dir/$PRGNAM.png
+done
+
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# modified copy of upstream's .desktop. ours validates...
+mkdir -p $PKG/usr/share/applications
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+# upstream ships a uqm.6 man page, but it's for the original uqm, not
+# the megamod (which adds many new options). don't install it. maybe
+# make a proper man page someday.
+
+CONTENT_DIR=$PKG/usr/share/games/$PRGNAM/content
+mkdir -p $CONTENT_DIR/{packages,addons}
+install -oroot -groot -m0644 content/version $CONTENT_DIR/version
+install -oroot -groot -m0644 $CWD/mm-0.8.1-content.uqm $CONTENT_DIR/packages
+
+for i in \
+  mm-0.8.1-hd.uqm \
+  mm-0.8.1-3dovoice.uqm \
+  uqm-0.7.0-3DOMusicRemastered.uqm \
+  uqm-0.7.0-3dovideo.uqm
+do
+  install -oroot -groot -m0644 $CWD/$i $CONTENT_DIR/addons
+done
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS BUGS *Change* Contrib* README* licenses doc/release WhatsNew \
+      $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
