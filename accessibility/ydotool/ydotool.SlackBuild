@@ -1,0 +1,118 @@
+#!/bin/bash
+
+# Slackware build script for ydotool
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Note: this is not the latest version of ydotool, though it's newer
+# than the version that Debian packages. It uses the stable(ish)
+# libevdevplus and libuinputplus versions that Debian also packages.
+
+# Later ytodool, libevdevplus, and libuinputplus versions are
+# rapidly-moving targets for now. Plus, latest ydotool uses "CPM"
+# (Cmake Package Manager) to auto-download its dependencies, and I
+# haven't had time to figure out how to defeat that so the script can
+# run without doing network access...
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=ydotool
+VERSION=${VERSION:-0.1.9}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# The cmake project version variables control the shared library's
+# version, which should match the actual ytodool version... version
+# 0.1.9 thinks it's 0.1.5.
+patch -p1 < $CWD/project_version.diff
+
+mkdir -p build
+cd build
+  cmake \
+    -DDYNAMIC_BUILD=on \
+    -DSTATIC_BUILD=off \
+    -DCMAKE_CXX_FLAGS_RELEASE="$SLKCFLAGS -DNDEBUG" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+    -DMAN_INSTALL_DIR=/usr/man \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make VERBOSE=1
+  make install/strip DESTDIR=$PKG
+cd ..
+
+# Upstream's man pages are in scdoc format, which looks like a pretty
+# nice text-to-manpage mini-language. Rather than require scdoc as a
+# dependency, I just converted the man pages and included them with
+# the script. If they ever need to be generated again, use this:
+
+if [ "${CONVERT_MAN:-no}" = "yes" ]; then
+  sed -i 's,\\fR,,' manpage/ydotool.1.scd
+  scdoc < manpage/ydotool.1.scd > $CWD/ydotool.1
+  scdoc < manpage/ydotoold.8.scd > $CWD/ydotoold.8
+fi
+
+PMAN=$PKG/usr/man
+mkdir -p $PMAN/man{1,8}
+gzip -9c < $CWD/$PRGNAM.1 > $PMAN/man1/$PRGNAM.1.gz
+gzip -9c < $CWD/${PRGNAM}d.8 > $PMAN/man8/${PRGNAM}d.8.gz
+
+# Install setuid unless disabled. See README for rationale.
+if [ "${SETUID:-yes}" = "yes" ]; then
+  chown root:console $PKG/usr/bin/*
+  chmod 4750 $PKG/usr/bin/*
+fi
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE README* $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
