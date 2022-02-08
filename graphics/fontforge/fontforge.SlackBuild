@@ -24,6 +24,9 @@
 
 # Currently maintained by David Woodfall <dave@slackbuilds.org>
 #
+# 2022-02-08 19:11:35 +0000,20201107
+# Switch to cmake
+#
 # 2020-10-12 20:48:40 +0100:
 # Update to Version ff 20190801, gnulib 20200505~0747bf0
 # Added --without-libuninameslist
@@ -31,20 +34,24 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=fontforge
-VERSION=${VERSION:-20190801}
+VERSION=${VERSION:-20201107}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
 ENABLE_BCINT=${ENABLE_BCINT:-yes}
-FREETYPE=${FREETYPE:-2.10.0}
-GNULIB=${GNULIB:-20200505~0747bf0}
-UTHASH=${UTHASH:-2.1.0}
+FREETYPE=${FREETYPE:-2.11.1}
+GNULIB=${GNULIB:-0.1}
+UTHASH=${UTHASH:-2.3.0}
 
-if [ -e $( echo /var/log/packages/$PRGNAM-*-*-* ) ]; then
+if [ -f "$( echo /var/lib/pkgtools/packages/$PRGNAM-*-*-* )" ]; then
   echo "Please uninstall any previous versions of $PRGNAM first."
   echo "Exiting."
   exit 1
+fi
+
+if [ -x /usr/bin/sphinx-build ]; then
+  DOCS=ON
 fi
 
 if [ -z "$ARCH" ]; then
@@ -88,37 +95,32 @@ mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION freetype-$FREETYPE
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-tar xvf $CWD/freetype-$FREETYPE.tar.bz2
+tar xvf $CWD/freetype-$FREETYPE.tar.xz
 chown -R root:root $PRGNAM-$VERSION freetype-$FREETYPE
 chmod -R u+w,go+r-w,a-s $PRGNAM-$VERSION freetype-$FREETYPE
 cd $PRGNAM-$VERSION
-tar xvf $CWD/gnulib_$GNULIB.orig.tar.gz
+tar xvf $CWD/gnulib-$GNULIB.tar.gz
 tar xvf $CWD/uthash-$UTHASH.tar.gz
 mv gnulib-"$GNULIB" gnulib
 mv uthash-"$UTHASH" uthash
 chown -R root:root gnulib uthash
 chmod -R u+w,go+r-w,a-s gnulib uthash
 
-./bootstrap -f
-
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --with-x \
-  --with-freetype-source=$TMP/freetype-${FREETYPE} \
-  --enable-python-extension \
-  --enable-tile-path \
-  --enable-static=no \
-  --enable-shared=yes \
-  --without-libuninameslist \
-  --build=$ARCH-slackware-linux
-
-make
-make install DESTDIR=$PKG
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+    -DMAN_INSTALL_DIR=/usr/man \
+    -DENABLE_LIBSPIRO=OFF \
+    -DENABLE_LIBUNINAMESLIST=OFF \
+    -DENABLE_DOCS=${DOCS:-OFF} \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install DESTDIR=$PKG
+cd ..
 
 # Let's add the cidmaps
 mkdir -p $PKG/usr/share/fontforge
@@ -131,6 +133,7 @@ rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | \
   grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
+mv $PKG/usr/share/man $PKG/usr
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
