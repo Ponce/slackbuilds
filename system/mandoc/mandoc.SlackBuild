@@ -23,11 +23,16 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220209 bkw: Modified by SlackBuilds.org, BUILD=2:
+# - fix build for 15.0.
+# - actually use SLKCFLAGS.
+# - remove conflicting files when REPLACE_MAN isn't set.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=mandoc
 VERSION=${VERSION:-1.14.4}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -39,9 +44,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -80,22 +82,37 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-if [ -z "${REPLACE_MAN}" ];then
-	gzip -dc "${CWD}"/configure-noconflict.local.gz >./configure.local
+if [ -z "${REPLACE_MAN}" ]; then
+  gzip -dc "${CWD}"/configure-noconflict.local.gz >./configure.local
 else
-	gzip -dc "${CWD}"/configure-replace.local.gz >./configure.local
+  gzip -dc "${CWD}"/configure-replace.local.gz >./configure.local
 fi
+
+# 20220209 bkw: the *extremely* stupid way it tries to extract
+# the default value of CC from make, does not work... and is
+# hardcoded (can't override with environment).
+sed -i '/^CC/s,=.*,=gcc,' configure
+
 ./configure
 
-CFLAGS=$SLKCFLAGS \
-	make
-make install \
-	DESTDIR=$PKG \
-	PREFIX=/usr \
-	LIBDIR=/usr/lib${LIBDIRSUFFIX}
+make CFLAGS="-Wl,-s -fcommon $SLKCFLAGS"
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+make install \
+  DESTDIR=$PKG \
+  PREFIX=/usr \
+  LIBDIR=/usr/lib${LIBDIRSUFFIX}
+
+# 20220209 bkw: these would conflict with Slackware's man-db
+# and groff packages.
+if [ -z "${REPLACE_MAN}" ]; then
+  rm -f \
+    $PKG/usr/bin/soelim \
+    $PKG/usr/man/man1/soelim.1 \
+    $PKG/usr/man/man7/tbl.7 \
+    $PKG/usr/man/man7/eqn.7 \
+    $PKG/usr/man/man7/man.7 \
+    $PKG/usr/man/man7/roff.7
+fi
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
