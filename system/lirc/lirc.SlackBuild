@@ -25,6 +25,18 @@
 
 #  Modified for 0.9.3a by Jeremy Hansen <jebrhansen+SBo -at- gmail.com>
 
+# 20220211 bkw: BUILD=4.
+# - fix build on 15.0 (PyYAML issue).
+# - lirc doesn't ship a kernel module any more, so get rid of the
+#   KERNEL variable and don't put the kernel version in the package's
+#   version.
+# - install usable HTML conversions of the man pages (instead of
+#   identical broken ones).
+# - considered upgrading to 0.10.1 (latest release), but it still has
+#   the same problems (HTML man conversions and PyYAML), and I don't have
+#   any IR hardware to test this with, so I'll leave it at the (presumably)
+#   maintainer-tested version 0.9.3a.
+
 # 20211121 bkw: BUILD=3. install all docs to
 # /usr/doc/$PRGNAM-$VERSION, instead of /usr/share/doc/$PRGNAM. Also
 # don't include useless INSTALL in doc dir.
@@ -33,24 +45,18 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=lirc
 VERSION=${VERSION:-0.9.3a}
-BUILD=${BUILD:-3}
+BUILD=${BUILD:-4}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
-KERNEL=${KERNEL:-$(uname -r)}
-PKG_VERS=${VERSION}_$(echo $KERNEL| tr - _)
-
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+    i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$PKG_VERS-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -60,8 +66,8 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
@@ -83,15 +89,35 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 # Patch to fix config.status warning for lirc-driver.pc.in ignoring --datarootdir
 patch -p1 < $CWD/datarootdir.patch
 
+# 20220211 bkw: Fix for PyYAML >= 5.1
+sed -i \
+  's|yaml.load(f.read())|yaml.load(f.read(), Loader=yaml.FullLoader)|' \
+  tools/check_configs.py \
+  tools/lirc-setup/mvc_model.py \
+  doc/data2hwdb \
+  doc/data2table
+
+# 20220211 bkw: Source ships with HTML conversions of man pages, but
+# make thinks it needs to regenerate them. Touching them doesn't help,
+# it always tries to convert them regardless of timestamps. And the
+# conversion fails, because our man2html (from man-db) doesn't support
+# the -M and -r options. It doesn't stop the Makefile from finishing,
+# but all the html pages end up broken/useless. The configure script
+# reads an environment variable MAN2HTML, which... does nothing. We
+# can't even copy them, let make overwrite them, and restore the
+# originals, because 'make install' will regenerate them again.
+
+# So save the originals, let 'make install' generate and install the
+# broken ones, then copy the originals to $PKG/usr/doc afterwards.
+cp -a doc/man-html doc/man-html.shipped
+
+MAN2HTML=no \
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -107,7 +133,20 @@ make -j1
 
 # 20211121 bkw: the top-level Makefile doesn't pass docdir to
 # doc/Makefile, unless we set it here also.
-make install DESTDIR=$PKG docdir=/usr/doc/$PRGNAM-$VERSION
+make install-strip DESTDIR=$PKG docdir=/usr/doc/$PRGNAM-$VERSION
+
+# 20220211 bkw: $PKG/usr/doc now contains a bunch of broken HTML
+# files that just contain the usage message for man2html. Replace them
+# with pre-generated files upstream ships. Why does this have to be
+# so complex?
+cp -a doc/man-html.shipped/*.html $PKG/usr/doc/$PRGNAM-$VERSION/lirc.org/html
+
+gzip -9 $PKG/usr/man/man*/*
+
+# 20220211 bkw: not sure if the .la files in /usr/lib(64?)/lirc/plugins
+# are actually needed, so leave them. they won't bother anything, being
+# in their own private directory.
+rm -f $PKG/usr/lib*/*.la
 
 mkdir -p $PKG/lib/udev/rules.d
 cat contrib/lirc.rules > $PKG/lib/udev/rules.d/96-lirc.rules
@@ -117,14 +156,6 @@ cat contrib/lircd.conf > $PKG/etc/lircd.conf.new
 cat contrib/lircmd.conf > $PKG/etc/lircmd.conf.new
 cat contrib/lircrc > $PKG/etc/lircrc.new
 cat $CWD/lirc.logrotate > $PKG/etc/logrotate.d/lirc.new
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-# This is an empty file :|
-rm -f $PKG/usr/man/man1/smode2.1.gz
 
 PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
 
@@ -138,7 +169,7 @@ chmod -R go-w      $PKGDOC
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-sed "s%@KERNEL@%$KERNEL%" $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$PKG_VERS-$ARCH-$BUILD$TAG.$PKGTYPE
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
