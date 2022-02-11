@@ -22,10 +22,16 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220211 bkw: Modified by SlackBuilds.org.
+# - updated for v2.33.5, the last of the 2.x versions. it's still
+#   10 years old.
+# - fix build on 15.0.
+# - stop writing outside of $TMP (i'm looking at you, gconf).
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=gnome-terminal
-VERSION=${VERSION:-2.32.1}
+VERSION=${VERSION:-2.33.5}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -38,9 +44,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -75,10 +78,15 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
+# 20220211 bkw: --disable-schemas-install is needed because without it,
+# it compiles the .schemas directly to /etc/gconf (pollutes the build box).
+# Instead, we do this in the doinst.sh.
+
+LIBS="-lICE" \
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -90,13 +98,23 @@ CXXFLAGS="$SLKCFLAGS" \
   --disable-static \
   --disable-scrollkeeper \
   --disable-maintainer-mode \
+  --disable-schemas-install \
   --build=$ARCH-slackware-linux \
 
 make
-make install DESTDIR=$PKG
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# 20220211 bkw: bit of a dirty hack, to get 'make install' to finish.
+# I think this is fine, but even if it's not, it only affects a few
+# translations. It's caused by --disable-scrollkeeper...
+for i in help/*/gnome-terminal-*.omf; do
+  cp $i $i.out
+done
+
+# 20220211 bkw: have to install this manually.
+mkdir -p $PKG/etc/gconf/schemas
+cp -a src/gnome-terminal.schemas $PKG/etc/gconf/schemas
+
+make install-strip DESTDIR=$PKG
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a AUTHORS ChangeLog* COPYING HACKING NEWS README* $PKG/usr/doc/$PRGNAM-$VERSION
