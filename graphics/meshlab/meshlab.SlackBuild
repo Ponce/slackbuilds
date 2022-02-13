@@ -25,8 +25,9 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=meshlab
-VERSION=${VERSION:-2016.12}
-VCGLIBVER=${VCGLIBVER:-1.0.1}
+SRCNAM=Meshlab
+VCGLIB=vcglib
+VERSION=${VERSION:-2021.10}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -61,7 +62,6 @@ elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
-  SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
 
@@ -71,81 +71,59 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 
-rm -rf meshlab
-tar xvf $CWD/meshlab-$VERSION.tar.gz --transform="s#^meshlab-$VERSION/#meshlab/#"
-
-rm -rf vcglib
-tar xvf $CWD/vcglib-$VCGLIBVER.tar.gz --transform="s#^vcglib-$VCGLIBVER/#vcglib/#"
-
-chown -R root:root meshlab vcglib
-find -L meshlab vcglib \
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz --transform="s#$SRCNAM-$VERSION/#$VERSION/#"
+cd $PRGNAM-$VERSION/src
+tar xvf $CWD/$VCGLIB-$VERSION.tar.gz --transform="s#$VCGLIB-$VERSION/#$VCGLIB/#"
+cd -
+chown -R root:root $PRGNAM-$VERSION
+find -L $PRGNAM-$VERSION \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
   -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-cd meshlab
+cd $PRGNAM-$VERSION
 
-# patches from or via Arch
-patch -p1 < $CWD/patches/mpir.patch      # use external library, see also below
-patch -p1 < $CWD/patches/bzip2.patch     # use external library, see also below
-patch -p1 < $CWD/patches/muparser.patch  # use external library, see also below
-patch -p1 < $CWD/patches/levmar.patch    # use external library, see also below
-patch -p1 < $CWD/patches/lapack.patch    # enable lapack
-# fix derpy filename
-mv src/plugins_experimental/io_TXT/io_txt.pro src/plugins_experimental/io_TXT/io_TXT.pro
-# fix from git: https://github.com/cnr-isti-vclab/meshlab/commit/1e2a54c
-patch -p1 < $CWD/patches/1e2a54cee2fcb2f0fc15fd83c1014e1813eb75df.patch
-# fix from git: https://github.com/cnr-isti-vclab/meshlab/commit/612388c
-patch -p1 < $CWD/patches/612388c42d00ab8eba1d9626a7da33a18c724d76.patch
+mkdir -p build
+cmake \
+  -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+  -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+  -DALLOW_SYSTEM_QHULL=OFF \
+  -DCMAKE_INSTALL_PREFIX=/usr \
+  -G Ninja \
+  -B ./build \
+  -S ./src
+# shellcheck disable=SC2046 # allow MAKEFLAGS to split when passing multiple flags.
+DESTDIR=$PKG "${NINJA:=ninja}" $(grep -oP -- '-+[A-z]+ ?[0-9]*'<<<"${MAKEFLAGS:--j1}") -C "./build" install
 
-# Build the supplied dependencies (they will be statically linked into meshlab)
-cd src/external
-
-  # don't use meshlab's ancient mpir
-  rm -rf inc/ lib/  # <-- mpir in these dirs
-  # and don't use meshlab's ancient bzip2, muParser, levmar
-  sed -i \
-    -e 's/bzip2.*pro//' -e '/muparser/d' -e '/levmar/d' \
-    external.pro
-
-  qmake-qt5 -recursive external.pro \
-    CFLAGS="$SLKCFLAGS" \
-    CXXFLAGS="$SLKCFLAGS -std=c++11"
-  make
-
-cd ..
-
-# Build meshlab itself
-qmake-qt5 -recursive meshlab_mini.pro \
-  CFLAGS="$SLKCFLAGS" \
-  CXXFLAGS="$SLKCFLAGS -std=c++11"
-make
-
-mkdir -p $PKG/opt
-cp -a distrib/ $PKG/opt/meshlab
-
-mkdir -p $PKG/usr/bin
-ln -s \
-  /opt/meshlab/{meshlab,meshlabserver} \
-  $PKG/usr/bin
+# fix plugin folder
+if [ $LIBDIRSUFFIX ] ; then
+  mkdir -p $PKG/usr/lib/$PRGNAM
+  cd $PKG/usr/lib/$PRGNAM
+  ln -s ../../lib$LIBDIRSUFFIX/$PRGNAM/plugins plugins
+  cd -
+fi
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-mkdir -p $PKG/usr/share/pixmaps
-cp \
-  $CWD/meshlab_{32x32,48x48}.xpm \
-  $PKG/usr/share/pixmaps
+# Install and compress man pages
+mkdir -p $PKG/usr/man/man1
+cp docs/man/$PRGNAM.1 $PKG/usr/man/man1/
+if [ -d $PKG/usr/man ]; then
+  ( cd $PKG/usr/man
+  find . -type f -exec gzip -9 {} \;
+  for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+  ) 
+fi
 
-mkdir -p $PKG/usr/share/applications
-cp \
-  $CWD/meshlab.desktop \
-  $PKG/usr/share/applications
+# fix version in desktop entry
+sed -i "s#Version=.*#Version=$VERSION#" $PKG/usr/share/applications/$PRGNAM.desktop
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  $TMP/$PRGNAM/LICENSE.txt $TMP/$PRGNAM/README.md \
+  LICENSE.txt README.md \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
