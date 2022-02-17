@@ -28,11 +28,16 @@
 #
 # 1 - Initial release.
 
+# 20220217 bkw: Modified by SlackBuilds.org, BUILD=2:
+# - fix build on 15.0 (by way of patching for qt5).
+# - install icon with correct name (not "icon.png").
+# - fix .desktop file (absolute path to icon).
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=diffpdf
 VERSION=${VERSION:-2.1.3}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 DOCS="README CHANGES"
@@ -45,9 +50,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -82,30 +84,28 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-lrelease diffpdf.pro
-qmake
+# 20220217 bkw: this is a qt4 app, but we can't build it against our qt4,
+# because it also needs poppler to be built with qt4 support (ours has
+# qt5). so patch it for qt5, with a patch from gentoo:
+# https://github.com/calculatelinux/gentoo/raw/master/app-text/diffpdf/files/diffpdf-2.1.3-qt5.patch
+patch -p1 < $CWD/diffpdf-2.1.3-qt5.patch
+
+lrelease-qt5 diffpdf.pro
+qmake-qt5
 make
 make install PREFIX=/usr DESTDIR=$PKG
 
 # Manual installation hereon
 mkdir -p $PKG/usr/bin $PKG/usr/man/man1 $PKG/usr/share/applications $PKG/usr/share/pixmaps
 
-install -m0755 diffpdf $PKG/usr/bin
-install -m0644 diffpdf.1 $PKG/usr/man/man1
-install -m0644 images/icon.png $PKG/usr/share/pixmaps
+install -m0755 -s $PRGNAM $PKG/usr/bin
+gzip -9c < $PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+install -m0644 images/icon.png $PKG/usr/share/pixmaps/$PRGNAM.png
 install -m0644 $CWD/diffpdf.desktop $PKG/usr/share/applications
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
