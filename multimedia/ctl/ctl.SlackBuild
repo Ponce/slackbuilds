@@ -4,13 +4,16 @@
 
 # Copyright 2016 Klaatu, Wellington NZ
 # All rights reserved.
-#
+
+# 20220222 bkw: Modified by SlackBuilds.org, BUILD=2:
+# - fix build on 15.0.
+# - move .doc and .pdf documentation to our doc dir.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=ctl
 VERSION=${VERSION:-1.5.2}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -22,9 +25,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -59,9 +59,16 @@ cd CTL-$PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+ || true
+
+# 20220223 bkw: patches comes from AUR and/or gentoo.
+patch -p1 < $CWD/ctl-1.5.2-Use-GNUInstallDirs-and-fix-PkgConfig-files-1.patch
+patch -p1 < $CWD/ilmbase-2.3.0-compatibility.patch
+
+# 20220223 bkw: C++, the ever-moving target...
+sed -i -e 's,std::istream::streampos,std::streampos,g' lib/dpx/dpx.hh
 
 PKG_CONFIG_PATH="$PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig:$PKG_CONFIG_PATH" \
 CFLAGS="$SLKCFLAGS" \
@@ -71,32 +78,19 @@ cd build
   cmake \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_EXE_LINKER_FLAGS="-lAcesContainer" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DINSTALL_CMAKE_DIR=/usr/lib${LIBDIRSUFFIX} \
     -DINSTALL_LIB_DIR=/usr/lib${LIBDIRSUFFIX} \
     -DCMAKE_BUILD_TYPE=Release ..
   make
-  make install DESTDIR=$PKG
-
-  #brute force to conform to LIBDIRSUFFIX post facto
-  #installer as written hardcode some files to usr/lib
-  if [ -n "$LIBDIRSUFFIX" ]; then
-      mv $PKG/usr/lib/* $PKG/usr/lib${LIBDIRSUFFIX}
-      rmdir $PKG/usr/lib || false
-  fi
-
+  make install/strip DESTDIR=$PKG
 cd ..
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-find $PKG -name perllocal.pod \
-  -o -name ".packlist" \
-  -o -name "*.bs" \
-  | xargs rm -f
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a AUTHORS LICENSE CHANGELOG README.md $PKG/usr/doc/$PRGNAM-$VERSION
+mv $PKG/usr/share/doc/CTL/* $PKG/usr/doc/$PRGNAM-$VERSION
+rm -rf $PKG/usr/share
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
