@@ -22,11 +22,15 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220222 bkw: Modified by SlackBuilds.org, BUILD=2:
+# - add -j1 to make commands (parallel builds fail).
+# - do not install libraries to /usr/lib on x86_64.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=tclblt
 VERSION=${VERSION:-2.5.3}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 SRC="blt-src-2.5.3.zip"
@@ -40,9 +44,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -77,9 +78,9 @@ cd $SRC_HOME
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
 #Here we will apply the patches from Debian project
 rm -rv library/dd_protocols && patch -p1 < $CWD/patches/source.patch && sed -i -e 's/\$$(ddFiles)//' library/Makefile.in
@@ -121,28 +122,30 @@ CXXFLAGS="$SLKCFLAGS" \
   --with-blt=/usr/lib${LIBDIRSUFFIX} \
   --with-tcllibs=/usr/lib${LIBDIRSUFFIX}
 
-make
-make install INSTALL_ROOT=$PKG
+make -j1
+make -j1 install INSTALL_ROOT=$PKG
+gzip -9 $PKG/usr/man/man*/*
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# 20220225 bkw: configure doesn't respect --disable-static, for now
+# just leave the static libs.
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+# 20220225 bkw: documentation getting installed in /usr/lib
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+mv $PKG/usr/lib/blt*/{NEWS,PROBLEMS,README,demos} $PKGDOC
 
-find $PKG -name perllocal.pod \
-  -o -name ".packlist" \
-  -o -name "*.bs" \
-  | xargs rm -f
+# 20220225 bkw: --libdir not fully respected
+if [ -n "$LIBDIRSUFFIX" ]; then
+  mv $PKG/usr/lib/*.{so,a} $PKG/usr/lib$LIBDIRSUFFIX
+  rm -rf $PKG/usr/lib
+fi
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a html $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a examples $PKG/usr/doc/$PRGNAM-$VERSION
-DOCLIST="README PROBLEMS NEWS demos"
-for DOCNAME in $DOCLIST ; do mv $PKG/usr/lib/blt2.5/$DOCNAME $PKG/usr/doc/$PRGNAM-$VERSION ; done
-rmdir $PKG/usr/lib/blt2.5
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-find $PKG/usr/doc/$PRGNAM-$VERSION/ -type f -exec chmod 644 {} \;
+strip $PKG/usr/bin/* $PKG/usr/lib$LIBDIRSUFFIX/*.so
+
+cp -a html $PKGDOC
+cp -a examples $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+find $PKGDOC -type f -exec chmod 644 {} \+
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
