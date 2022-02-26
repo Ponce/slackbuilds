@@ -1,0 +1,160 @@
+#!/bin/bash
+
+# Slackware build script for gnash
+
+# Copyright 2012-2022 Kyle Guinn <elyk03@gmail.com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+# notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=gnash
+VERSION=${VERSION:-0.8.11dev_20190130}
+SRCVER=${SRCVER:-583ccbc1275c7701dc4843ec12142ff86bb305b4}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$(uname -m)" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$(uname -m) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM-$VERSION
+OUTPUT=${OUTPUT:-/tmp}
+
+DOCS="AUTHORS COPYING ChangeLog NEWS README* TODO"
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+# TODO: Test the KPARTS3 plugin with KDE3/Trinity.
+if [ "${KPARTS3:-no}" != "no" ]; then
+  KPARTS3_OPT=""
+else
+  KPARTS3_OPT="--disable-kparts3"
+fi
+
+# Set $KPARTS4 to "yes" to enable the KDE4 Konqueror plugin.
+if [ "${KPARTS4:-no}" != "no" ]; then
+  KPARTS4_OPT=" \
+  --with-kde4-prefix=/usr \
+  --with-kde4-incl=/usr/include \
+  --with-kde4-lib=/usr/lib${LIBDIRSUFFIX} \
+  --with-kde4-plugindir=/usr/lib${LIBDIRSUFFIX}/kde4 \
+  --with-kde4-servicesdir=/usr/share/kde4/services \
+  --with-kde4-configdir=/usr/share/config \
+  --with-kde-appsdatadir=/usr/share/apps/klash"
+else
+  KPARTS4_OPT="--disable-kparts4"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$SRCVER
+tar xvf $CWD/$PRGNAM-$SRCVER.tar.gz
+cd $PRGNAM-$SRCVER
+chown -R root:root .
+chmod -R u+w,go-w,a+rX-st .
+
+# jemalloc(3) wants <jemalloc/jemalloc.h>, not <jemalloc.h>
+sed -i 's|jemalloc.h|jemalloc/jemalloc.h|' \
+  libbase/jemalloc_gnash.c \
+  configure.ac
+
+# Fix giflib version check for API change
+sed -i 's|GIFLIB_MINOR==1|GIFLIB_MINOR>=1|' \
+  libbase/GnashImageGif.cpp
+
+# Consider using --enable-media=... to disable ffmpeg
+# if this isn't sufficient for compatibility with latest ffmpeg
+sed -i 's|FF_INPUT_BUFFER_PADDING_SIZE|AV_INPUT_BUFFER_PADDING_SIZE|' \
+  libmedia/ffmpeg/MediaHandlerFfmpeg.cpp \
+  libmedia/ffmpeg/MediaParserFfmpeg.cpp
+
+autoreconf -vif
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --infodir=/usr/info \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --build=$ARCH-slackware-linux \
+  --disable-dependency-tracking \
+  --enable-python \
+  --enable-ssh \
+  --enable-ssl \
+  --without-gconf \
+  --with-plugins-install=system \
+  --disable-npapi \ 
+  $KPARTS3_OPT \
+  $KPARTS4_OPT \
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS -std=c++14" \
+
+make
+make install-strip install-plugins DESTDIR=$PKG
+
+# make install-plugins doesn't strip the plugins.
+find $PKG -exec file {} + | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/lib${LIBDIRSUFFIX} -name '*.la' -delete
+
+find $PKG/etc -type f -exec mv {} {}.new \;
+find $PKG/usr/man -type f -exec gzip -9 {} +
+
+mkdir -p $PKG/etc/gconf/schemas
+mv $PKG/usr/share/applications/gnash.schemas $PKG/etc/gconf/schemas
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
