@@ -3,11 +3,17 @@
 # Written by Lionel Young (redtricycle at gmail dot com)
 # Updated by simotrone (simotrone at gmail dot com)
 
+# 20220301 bkw: Modified by SlackBuilds.org, BUILD=2:
+# - fix conflict with utfcpp.
+# - don't include tools/ in the doc dir, it's upstream dev stuff.
+# - don't include empty /usr/share in package.
+# - include GLOSSARY.md in package, it looks useful.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=ledger
 VERSION=${VERSION:-3.2.1}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -19,13 +25,12 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
 fi
+
+# 20220301 bkw: no SLKCFLAGS here. cmake defaults to -O3 -fPIC, which is fine.
 
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
@@ -42,36 +47,34 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
 patch -p1 < $CWD/CMakeLists.txt.patch
 patch -p1 < $CWD/boost-176.patch
+
+# 20220301 bkw: do not look for utfcpp's headers in /usr/include, use
+# only the bundled copy (otherwise the build breaks if utfcpp is installed).
+sed -i '/find_path(/s,$, NO_DEFAULT_PATH,' cmake/FindUtfcpp.cmake
 
 mkdir -p build
 cd build
   cmake \
     -DCMAKE_INSTALL_PREFIX=/usr \
     ..
-  make
-  make install DESTDIR=$PKG
+  make # VERBOSE=1  # uncomment if needed
+  make install/strip DESTDIR=$PKG
 cd ..
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
 mv $PKG/usr/share/man $PKG/usr
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+rmdir $PKG/usr/share
+gzip -9 $PKG/usr/man/man*/*
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-cp -a README.md doc/NEWS.md $PKG/usr/doc/$PRGNAM-$VERSION/
-
-cp -ra contrib      $PKG/usr/doc/$PRGNAM-$VERSION
-cp -ra test/input/* $PKG/usr/doc/$PRGNAM-$VERSION
-cp -ra tools        $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README.md doc/*.md contrib test/input/* \
+  $PKG/usr/doc/$PRGNAM-$VERSION/
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
