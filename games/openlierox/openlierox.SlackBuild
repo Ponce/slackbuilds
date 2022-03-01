@@ -22,10 +22,18 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220222 bkw: Modified by SlackBuilds.org:
+# - update for v20200424_d316c14a8 (old version won't build on 15.0).
+# - new-style icons.
+# - binary in /usr/games.
+# - put man page in right place (/usr/man/man6).
+# - remove HawkNL dependency: it's bundled in the source and built
+#   statically by default. freealut really is required though.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=openlierox
-VERSION=${VERSION:-20170313_3825306}
+VERSION=${VERSION:-20200424_d316c14}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -38,9 +46,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -70,42 +75,58 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.?z
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
 cd $PRGNAM-$VERSION
+rm -f ./libs/breakpad/autotools/compile # broken symlink
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
+# 20220301 bkw: disable BFD. it breaks the build, and it's only used
+# for backtraces if the game crashes.
 mkdir -p build
 cd build
   cmake . \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DBREAKPAD=off \
+    -DBREAKPAD=OFF \
+    -DHASBFD=OFF \
     -DCMAKE_BUILD_TYPE=Release ..
-  make
+  make VERBOSE=1
 cd ..
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-mkdir -p $PKG/usr/bin \
+mkdir -p $PKG/usr/games \
          $PKG/usr/share/games/OpenLieroX
 cp -rf share/gamedir/* $PKG/usr/share/games/OpenLieroX
-install -D -m0755 build/bin/openlierox $PKG/usr/bin/openlierox
+install -D -s -m0755 build/bin/openlierox $PKG/usr/games/openlierox
 
 mkdir -p $PKG/usr/share/applications
-install -D -m644 share/$PRGNAM-$PRGNAM.desktop $PKG/usr/share/applications/$PRGNAM-$PRGNAM.desktop
+sed -e '/Exec=/s,=,=/usr/games/,' \
+    -e "/^Icon=/s,=.*,=$PRGNAM," \
+    < share/$PRGNAM-$PRGNAM.desktop \
+    > $PKG/usr/share/applications/$PRGNAM.desktop
+
+for i in share/*.png; do
+  px="$( echo $i | cut -d. -f2 )"
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  cp -a $i $dir/$PRGNAM.png
+done
 
 mkdir -p $PKG/usr/share/pixmaps
-install -D -m644 share/OpenLieroX.svg $PKG/usr/share/pixmaps/OpenLieroX.svg
+ln -s ../icons/hicolor/32x32/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+mkdir -p $PKG/usr/man/man6
+gzip -9c < doc/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
+rm -f doc/$PRGNAM.6
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a COPYING.LIB VERSION doc/* $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README.md COPYING.LIB VERSION doc/* $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
