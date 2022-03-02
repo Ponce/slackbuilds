@@ -1,9 +1,8 @@
 #!/bin/bash
 
-# Slackware build script for buildbot
+# Slackware build script for python3 buildbot
 
-# Copyright 2021 Yth | Pont-en-Royans, France | yth@ythogtha.org
-# Copyright 2016 David Spencer, Baildon, West Yorkshire, U.K.
+# Copyright 2022 Yth | Pont-en-Royans, France | yth@ythogtha.org
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -12,21 +11,24 @@
 # 1. Redistributions of this script must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 #
-#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
-#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
-#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=buildbot
-VERSION=${VERSION:-0.8.14}
+SRCNAM=${PRGNAM#python-*}
+# "pkg" stays first
+PACKAGES="pkg www console-view grid-view waterfall-view badges wsgi-dashboards"
+VERSION=${VERSION:-3.4.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -70,9 +72,13 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+rm -rf $SRCNAM-$VERSION
+mkdir $SRCNAM-$VERSION
+cd $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+for pkg in $PACKAGES; do
+  tar xvf $CWD/$SRCNAM-$pkg-$VERSION.tar.gz
+done
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -80,19 +86,38 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-python2 setup.py install --root=$PKG
+cd $SRCNAM-$VERSION
+python3 setup.py install --root=$PKG
+cd ..
+# Packages needs the buildbot-pkg package to be available
+# Using the one from the installation (first one to be built)
+OLD_PYTHONPATH=$PYTHONPATH
+export PYTHONPATH=$(find $PKG -type d -name site-packages)
+for pkg in $PACKAGES; do
+  cd $SRCNAM-$pkg-$VERSION
+  python3 setup.py install --root=$PKG
+  cd ..
+done
+export PYTHONPATH=$OLD_PYTHONPATH
+unset OLD_PYTHONPATH
 
+cd $SRCNAM-$VERSION
 mkdir -p $PKG/usr/man/man1
 gzip -9 < docs/buildbot.1 > $PKG/usr/man/man1/buildbot.1.gz
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  COPYING CREDITS NEWS README UPGRADING \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+   docs/ COPYING* NEWS* PKG-INFO* README* UPGRADING* \
+   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cd ..
+
+for pkg in $PACKAGES; do
+  cp $SRCNAM-$pkg-$VERSION/PKG-INFO $PKG/usr/doc/$PRGNAM-$VERSION/PKG-INFO-$pkg
+done
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
