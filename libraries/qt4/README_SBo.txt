@@ -19,11 +19,17 @@ What it means for the maintainers of SBo builds that use qt4:
    cmake is smart enough to find Qt4 without help from the environment.
    For instance, quazip-qt4 didn't need any changes.
 
-2. Your script should "source /etc/profile.d/qt4.sh" before it
-   compiles anything. I recommend putting it right after the "set -e"
-   line in the template. An example script that uses this is kardsgt.
+2. If your script uses qmake, replace the qmake command with qmake-qt4.
+   If it also uses lrelease, moc, and/or uic, replace those with the
+   -qt4 versions as well.
 
-3. If your script refers to any files in $PKG/usr/lib$LIBDIRSUFFIX/qt,
+3. If the above doesn't work, your script should run
+     source /etc/profile.d/qt4.sh
+   before it compiles anything. I recommend putting it right after the
+   "set -e" line in the template. An example script that uses this
+   is kardsgt.
+
+4. If your script refers to any files in $PKG/usr/lib$LIBDIRSUFFIX/qt,
    you'll have to change the 'qt' part to 'qt4'. The best way to do
    this is to use the $QT4DIR variable: it's defined in qt4.sh (which
    you already sourced), and in the unlikely event the qt4 directory
