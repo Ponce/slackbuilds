@@ -2,7 +2,7 @@
 
 # Slackware build script for afdko
 
-# Copyright 2017 Duncan Roe, Melbourne, Australia
+# Copyright 2017,2022 Duncan Roe, Melbourne, Australia
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,8 +25,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=afdko
-VERSION=${VERSION:-2.5.65322}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-3.8.0}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -50,9 +50,17 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "x86_64" ]; then
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
+  SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
 
@@ -64,9 +72,6 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
-# This symlink is not required (but another one is, later)
-rm -f $PRGNAM-$VERSION/FDK/Tools/linux/AFDKOPython
-
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -74,40 +79,24 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Non-standard build process - see README
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install/strip DESTDIR=$PKG
+cd ..
 
-# Replacement for ./configure
-if [ "$LIBDIRSUFFIX" = 64 ]; then
-  for i in $(find . -name Makefile -o -name '*.mak' | \
-    xargs grep -E -- -m32 | cut -f1 -d:); do
-    cat $i | sed 's/ -m32//' >t5
-    mv t5 $i
-  done
-fi
-
-# Replacement for make
-cd FDK/Tools/Programs
-./BuildAllLinux.sh
-cd ../..
-
-# Replacement for make install
-mkdir -p $PKG/opt/$PRGNAM/Tools
-mv Tools/linux Tools/SharedData $PKG/opt/$PRGNAM/Tools
-
-mkdir -p $PKG/opt/$PRGNAM/Tools/linux/Python/Current/bin
-ln -s $(readlink -f $(type -p python)) \
-  $PKG/opt/$PRGNAM/Tools/linux/Python/Current/bin/python2.7
+python3 setup.py install --root=$PKG
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-mkdir -p $PKG/etc/profile.d
-cp $CWD/afdko.sh $CWD/afdko.csh $PKG/etc/profile.d/
-
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AFDKO-Overview.html FDK\ Build\ Notes.txt FDKReleaseNotes.txt \
-  Read_Me_First.html Technical\ Documentation ../LICENSE.txt ../README.md \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE.md README.md docs $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
