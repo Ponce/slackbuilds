@@ -8,7 +8,7 @@ config() {
   fi
 }
 
-config etc/dbus-1/system.d/org.freedesktop.ColorManager.conf.new
+config usr/share/dbus-1/system.d/org.freedesktop.ColorManager.conf.new
 
 if [ -e usr/share/glib-2.0/schemas ]; then
   if [ -x /usr/bin/glib-compile-schemas ]; then
