@@ -26,9 +26,8 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=kodi
 SRCNAM=xbmc
-CODNAM=Krypton
-VERSION=${VERSION:-17.6}
-FFMPEGVER=${FFMPEGVER:-3.1.11}
+CODNAM=Matrix
+VERSION=${VERSION:-19.4}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -75,9 +74,6 @@ cd $TMP
 rm -rf $SRCNAM-$VERSION-$CODNAM
 tar xvf $CWD/$SRCNAM-$VERSION-$CODNAM.tar.gz
 cd $SRCNAM-$VERSION-$CODNAM
-# Don't have the Makefile download ffmpeg during install.
-ln -s $CWD/FFmpeg-${FFMPEGVER}-${CODNAM}.tar.gz \
-  tools/depends/target/ffmpeg/ffmpeg-${FFMPEGVER}-${CODNAM}-17.5.tar.gz
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -85,89 +81,70 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# No need to show Git: "Version" in a release build.
-sed -i '/Git:/s|.*|  return GetVersionShort();|' $SRCNAM/utils/SystemInfo.cpp
+# Autodetection of "optional" dependencies sucks. It does not work and
+# compilation will fail on each of these if not explicitly disabled.
+# Figured I'd mplemented my own autodetection instead of requiring
+# passing a bunch of annoying flags :)
+if pkg-config --exists avahi-core ; then AVAHI=ON; else AVAHI=OFF; fi
+if pkg-config --exists cwiid ; then CWIID=ON; else CWIID=OFF; fi
+if pkg-config --exists dav1d ; then DAV1D=ON; else DAV1D=OFF; fi
+if pkg-config --exists libmicrohttpd ; then WEBSERVER=ON; else WEBSERVER=OFF; fi
+if pkg-config --exists libcec ; then CEC=ON; else CEC=OFF; fi
+if pkg-config --exists libnfs ; then NFS=ON; else NFS=OFF; fi
+if pkg-config --exists lirc ; then LIRC=ON; else LIRC=OFF; fi
+if [ -f /usr/bin/shairplay ] ; then AIRPLAY=ON; else AIRPLAY=OFF; fi
 
-# Patch for Samba 4.0.
-patch -p1 < $CWD/patches/xbmc-Krypton-samba-4.0.patch
-
-# Fix static linking for Texturepacker. Thanks to Gentoo.
-# Issue: http://forum.kodi.tv/showthread.php?tid=220407
-patch -p0 < $CWD/patches/kodi-texturepacker.patch
-
-# The version of ffmpeg on SBo is too old to compile kodi.
-# Optional ffmpeg is still available but not turned on by
-# default.
-if [ "${FFMPEG:-no}" == "yes" ]; then
-  OPT_DEPS="--with-ffmpeg=shared"
-else
-  OPT_DEPS=""
-fi
-
-# Build webserver. Requires libmicrohttpd.
-if [ "${WEBSERVER:-yes}" == "yes" ]; then
-  OPT_DEPS="$OPT_DEPS --enable-webserver"
-else
-  OPT_DEPS="$OPT_DEPS --disable-webserver"
-fi
-
-export PATH="$PATH:$PWD/tools/depends/native/JsonSchemaBuilder/bin"
-
-./bootstrap
-
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --disable-silent-rules \
-  --enable-static=no \
-  --disable-debug \
-  --enable-gl \
-  --enable-mid \
-  --enable-alsa \
-  --enable-texturepacker \
-  --enable-pulse \
-  $OPT_DEPS \
-  --build=$ARCH-slackware-linux
-
-make VERBOSE=1
-
-# Wii controller usage. Default is no.
-if ! [ "${WII:-no}" = "no" ]; then
-  make eventclients DESTDIR=$PKG WII_EXTRA_OPTS="-DCWIID_OLD"
-  find $PKG/usr/lib${LIBDIRSUFFIX}/python* -iname "*\.py" -exec chmod 0644 '{}' \;
-  # Create byte-compiled python files.
-  python -m compileall $PKG/usr/lib${LIBDIRSUFFIX}/python*/site-packages/$PRGNAM 2>/dev/null
-fi
-
-make install DESTDIR=$PKG
-python -m compileall $PKG/usr/share/$PRGNAM/addons/service.xbmc.versioncheck
-
-install -m 0755 tools/TexturePacker/TexturePacker $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM
+mkdir -p $TMP/$PRGNAM-build
+cd $TMP/$PRGNAM-build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DAPP_RENDER_SYSTEM=gl \
+    -DCORE_PLATFORM_NAME="x11" \
+    -DENABLE_INTERNAL_FSTRCMP=ON \
+    -DENABLE_INTERNAL_UDFREAD=ON \
+    -DENABLE_AIRTUNES=$AIRPLAY \
+    -DENABLE_AVAHI=$AVAHI \
+    -DENABLE_CEC=$LIBCEC \
+    -DENABLE_DAV1D=$DAV1D \
+    -DENABLE_EVENTCLIENTS=$CWIID \
+    -DENABLE_LIRCCLIENT=$LIRC \
+    -DENABLE_MICROHTTPD=$WEBSERVER \
+    -DENABLE_NFS=$NFS \
+    -DCMAKE_BUILD_TYPE=Release ../$SRCNAM-$VERSION-$CODNAM
+  make
+  make install/strip DESTDIR=$PKG
+cd ..
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-# Install manpages.
+# Install manpages
 mkdir -p $PKG/usr/man/man1
-for i in $PRGNAM.bin.1 $PRGNAM.1 $PRGNAM-standalone.1; do
-  install -m 0644 docs/manpages/$i $PKG/usr/man/man1/$i
+for i in {$PRGNAM{,.bin,-standalone},TexturePacker}.1; do
+  install -m 0644 $SRCNAM-$VERSION-$CODNAM/docs/manpages/$i $PKG/usr/man/man1/$i
 done
 
-if ! [ "${WII:-no}" = "no" ]; then
-  for i in $PRGNAM-ps3remote.1 $PRGNAM-send.1 $PRGNAM-wiiremote.1; do
-    install -m 0644 docs/manpages/$i $PKG/usr/man/man1/$i
+# Install Event Control manpages if enabled
+if [ $CWIID == "ON" ]; then
+  for i in $PRGNAM{-ps3remote,-wiiremote,-send}.1; do
+    install -m 0644 $SRCNAM-$VERSION-$CODNAM/docs/manpages/$i $PKG/usr/man/man1/$i
   done
 fi
-gzip -9 $PKG/usr/man/man?/*.?
 
-cp -a tools/EventClients/README.txt $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-# Final clean up.
-find $PKG \( -name "Makefile*" -o -name "*cmake*" -o -name "*\.in" \) -exec rm -f '{}' \;
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+(
+  cd $SRCNAM-$VERSION-$CODNAM
+  cp -a README.md privacy-policy.txt version.txt docs/MANIFESTO.md $PKG/usr/doc/$PRGNAM-$VERSION
+  if [ $CWIID == "ON" ]; then
+    cat tools/EventClients/README.txt > $PKG/usr/doc/$PRGNAM-$VERSION/Event-Client-README.txt
+  fi
+  cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+)
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
