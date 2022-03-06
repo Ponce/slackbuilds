@@ -3,6 +3,7 @@
 # Slackware build script for OpenJDK
 
 # Copyright 2020 Strahil Yordanov, Sofia, Bulgaria
+# Copyright 2021 Lenard Spencer, Orlando, Florida, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -43,6 +44,9 @@ diff -Nru openjdk-boot.orig/jdk/src/share/classes/sun/security/util/Optional.jav
  
 EOF
 
+# Remove the sys/sysctl.h includes (they weren't being used anyway)
+	sed -i '/sys\/sysctl.h/d' src/solaris/native/java/net/PlainDatagramSocketImpl.c
+	sed -i '/sys\/sysctl.h/d' src/solaris/native/java/net/PlainSocketImpl.c
 	cd ..
 	tar -cvjSf jdk.tar.bz2 jdk-*
 }
@@ -56,16 +60,16 @@ function fixJdkArchiveChecksum() {
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=openjdk7
-VERSION=${VERSION:-7u271}
+VERSION=${VERSION:-7u321}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 DVER=1.7.0_$(printf $VERSION | cut -du -f2)
-ICEDTEA=icedtea-2.6.23
+ICEDTEA=icedtea-2.6.28
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+    i?86) ARCH=i586 ;;
     arm*) ARCH=arm; echo "Unsupported arch $ARCH"; exit 1;;
        *) ARCH=$( uname -m ) ;;
   esac
@@ -93,6 +97,15 @@ else
   LIBDIRSUFFIX=""
 fi
 
+# Check for the gcc5 package, and abort if not found:
+if [ ! -x /usr/bin/gcc-5 ]; then
+  echo "This requires the gcc5 package to build."
+  echo "Please install gcc5 and rerun this script."
+  exit 1
+else
+  source /etc/profile.d/gcc5.sh # Set the environment
+fi
+
 BOOT_JAVA=/usr/lib${LIBDIRSUFFIX}/jvm
 
 set -e
@@ -118,6 +131,7 @@ JAVA_HOME=${BOOT_JAVA} PATH=${BOOT_JAVA}/bin:$PATH ../$ICEDTEA/configure \
     --disable-system-kerberos \
     --disable-system-pcsc \
     --disable-system-sctp \
+    --disable-compile-against-syscalls \
     --with-cacerts-file="$CWD/cacerts" \
 $(
 #  cacerts is taken from this CentOS package:
@@ -139,10 +153,11 @@ fixJdkArchiveChecksum
 
 JAVA_HOME=${BOOT_JAVA} PATH=${BOOT_JAVA}/bin:$PATH LOG=trace make
 
-cd $PKG
-mkdir -p usr/lib${LIBDIRSUFFIX}
-cd usr/lib${LIBDIRSUFFIX}
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}
+cd $PKG/usr/lib${LIBDIRSUFFIX}
 cp -av $BUILD_DIR/icedtea-build/openjdk.build/j2sdk-image/ $PRGNAM
+ln -sf $PRGNAM ${PRGNAM}${DVER}
+ln -sf $PRGNAM/jre/lib/${LIB_ARCH}/server/libjvm.so .
 
 chown -R root.root $PKG
 find -L . \
@@ -153,17 +168,10 @@ find -L . \
 
 mkdir -p $PKG/etc/profile.d
 for file in $(ls "$CWD/profile.d/${PRGNAM}"*) ; do
-  cat $file | sed -e "s#lib/openjdk7#lib${LIBDIRSUFFIX}/openjdk7#" \
+  cat $file | sed -e "s#lib/java#lib${LIBDIRSUFFIX}/java#" \
     > $PKG/etc/profile.d/$(basename $file)
 done
 chmod 755 $PKG/etc/profile.d/*
-
-( cd $PKG/usr/lib${LIBDIRSUFFIX}
-  ln -sf $PRGNAM ${PRGNAM}${DVER}
-)
-
-cd $PKG/usr/lib${LIBDIRSUFFIX}
-    ln -sf ./$PRGNAM/jre/lib/${LIB_ARCH}/server/libjvm.so .
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
