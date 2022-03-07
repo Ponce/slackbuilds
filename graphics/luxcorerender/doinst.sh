@@ -1,5 +1,5 @@
 if [ -x /usr/bin/xdg-mime ]; then
-    /usr/bin/xdg-mime install /usr/doc/luxrender-1.4/mime-lux.xml
+    /usr/bin/xdg-mime install /usr/doc/luxcorerender-2.6/mime-luxcore.xml
 fi
 
 if [ -x /usr/bin/update-desktop-database ]; then
@@ -14,5 +14,5 @@ if [ -e usr/share/icons/hicolor/icon-theme.cache ]; then
   if [ -x /usr/bin/gtk-update-icon-cache ]; then
     /usr/bin/gtk-update-icon-cache -f usr/share/icons/hicolor >/dev/null 2>&1
   fi
-fi 
+fi
 

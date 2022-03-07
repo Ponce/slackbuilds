@@ -3,7 +3,7 @@
 # Slackware build script for luxrender
 
 # Copyright 2013  Giorgio Peron Campodarsego, PD, Italy
-# Copyright 2015  Klaatu Wellington, NZ
+# Copyright 2015-22  Klaatu Wellington, NZ
 #
 # All rights reserved.
 #
@@ -26,25 +26,19 @@
 
 cd $(dirname $0) ; CWD=$(pwd)
 
-PRGNAM=luxrender
-SHORT=lux
-VERSION=${VERSION:-1.4}
+PRGNAM=luxcorerender
+SHORTNAM=LuxCore
+SHORT=luxcore
+VERSION=${VERSION:-2.6}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
-if [ -z $OPENCL ]; then
-    OPENCL="-OpenCL"
-else
-    OPENCL=""
-fi
-
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) echo "32 bit builds not supported." && exit 1
+    i?86) echo "This package is available for x86_64 only." && exit 1
 	  ;;
-    arm*) ARCH=arm
-	  LIBDIRSUFFIX=""
+    arm*) echo "This package is available for x86_64 only." && exit 1
 	  ;;
        *) ARCH=$( uname -m )
 	  LIBDIRSUFFIX="64"
@@ -52,9 +46,7 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
+# If PRINT_PACKAGE_NAME is set, print name of package
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -64,28 +56,17 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
-fi
-
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $SHORT-$VERSION
-tar xvjf $CWD/$SHORT-v"$VERSION"-x86_64-sse2"$OPENCL".tar.bz2
-cd $SHORT-v"$VERSION"-$(uname -m)-sse2"$OPENCL"
+rm -rf $PRGNAM-$VERSION
+mkdir $PRGNAM-$VERSION
+tar xvjf $CWD/$PRGNAM-v"$VERSION"-linux64.tar.bz2 \
+    --strip-components=1 -C $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -93,48 +74,46 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# manual installation
-mkdir -p $PKG/usr/bin/
-cp luxconsole $PKG/usr/bin/
-cp lux*r $PKG/usr/bin/
-cp slg4 $PKG/usr/bin/
-chmod +x $PKG/usr/bin/slg4
-mkdir -p $PKG/usr/lib"$LIBDIRSUFFIX"
-cp *.so $PKG/usr/lib"$LIBDIRSUFFIX"
-
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-# are we using default SBo location of blender?
-if [ -z $BLENDER ]; then
-    BLENDER=$(egrep '^opt\/blender\/2\....?\/scripts\/$' /var/log/packages/blender-*_SBo 2> /dev/null) || BLENDER="no"
+## install to opt
+mkdir $PKG/opt
+mv $TMP/$PRGNAM-$VERSION $PKG/opt/$PRGNAM-$VERSION
+
+# if user requests it using OPENCL=yes, then set doinst.sh to
+# rename dummy OpenCL definition so Lux can find valid OpenCL device
+if [ $OPENCL ]; then
+    cat <<EOF >>$CWD/doinst.sh
+if [ -e /etc/OpenCL/vendors/mesa.icd ]; then
+    mv /etc/OpenCL/vendors/mesa.icd /etc/OpenCL/vendors/mesa.icd-dummy
+fi
+EOF
 fi
 
-if [ X"$BLENDER" != "Xno" ]; then
-    mkdir -p $PKG/$BLENDER
-    unzip luxblend/luxblend.zip -d $PKG/$BLENDER/addons/
-    unzip luxblend/luxblend-presets.zip -d $PKG/$BLENDER/presets/
-else
-    mkdir -p $PKG/usr/share/$PRGNAM-$VERSION/luxblend
-    cp luxblend/luxblend.zip $PKG/usr/share/$PRGNAM-$VERSION/luxblend
-    cp luxblend/luxblend-presets.zip $PKG/usr/share/$PRGNAM-$VERSION/luxblend
-fi
-
+# desktop conveniences
 mkdir -p $PKG/usr/share/applications
-mkdir -p $PKG/usr/share/$PRGNAM-$VERSION
-cp -r examples $PKG/usr/share/$PRGNAM-$VERSION
-cp $CWD/$PRGNAM.desktop $PKG/usr/share/applications
+cp $CWD/luxcoreui.desktop $PKG/usr/share/applications
+cp $CWD/pyluxcoretools.desktop $PKG/usr/share/applications
 
-#icons
-mkdir -p $PKG/usr/share/icons/hicolor/scalable/mimetypes
-cp $CWD/application-x-lux.svg $PKG/usr/share/icons/hicolor/scalable/mimetypes
-cp $CWD/luxrender.svg $PKG/usr/share/icons/hicolor/scalable/apps
+# icons
+mkdir -p $PKG/usr/share/icons/hicolor/scalable/{mimetypes,apps}
+cp $CWD/application-x-$SHORT.svg \
+   $PKG/usr/share/icons/hicolor/scalable/mimetypes
+cp $CWD/$SHORT.svg $PKG/usr/share/icons/hicolor/scalable/apps
 
-#mimetypes
+# mimetypes
 mkdir -p $PKG/usr/share/mime/application/
 
+# no front-end is provided for it, so
+# provide a command to the Python zipapp
+mkdir $PKG/usr/bin/
+cat $CWD/pyluxcoretools.sh > $PKG/usr/bin/pyluxcoretools
+chmod +x $PKG/usr/bin/pyluxcoretools
+
+# docs
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp README $PKG/usr/doc/$PRGNAM-$VERSION
+mv README.md AUTHORS.txt COPYING.txt $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 cat $CWD/mime-"$SHORT".xml > $PKG/usr/doc/$PRGNAM-$VERSION/mime-"$SHORT".xml
 
