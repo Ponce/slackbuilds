@@ -9,4 +9,3 @@ fi
 
 PYTHONPATH=$PYTHONPATH:/opt/luxcorerender-2.6 python3 \
 	  /opt/luxcorerender-2.6/pyluxcoretools.zip "$@"
-
