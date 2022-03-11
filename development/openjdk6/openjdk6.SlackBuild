@@ -1,8 +1,9 @@
 #!/bin/bash
 
-# Slackware build script for OpenJDK
+# Slackware build script for openjdk6
 
 # Copyright 2017 Strahil Yordanov, Sofia, Bulgaria
+# Copyright 2021 Lenard Spencer, Orlando, Florida, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -36,7 +37,7 @@ OPENJDK_DATE=04_jan_2017
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+    i?86) ARCH=i586 ;;
     arm*) ARCH=arm; echo "Unsupported arch $ARCH"; exit 1;;
        *) ARCH=$( uname -m ) ;;
   esac
@@ -63,6 +64,15 @@ else
   LIBDIRSUFFIX=""
 fi
 
+# Check for the gcc5 package, and abort if not found:
+if [ ! -x /usr/bin/gcc-5 ]; then
+  echo "This requires the gcc5 package to build."
+  echo "Please install gcc5 and rerun this script."
+  exit 1
+else
+  source /etc/profile.d/gcc5.sh # Set the environment
+fi
+
 BOOT_JAVA=/usr/lib${LIBDIRSUFFIX}/jvm
 
 set -e
@@ -73,31 +83,56 @@ cd $BUILD_DIR
 
 tar -xvf $CWD/${ICEDTEA}.tar.xz
 
+# Alter freetypeversion.patch:
+sed -i "s/2.2.1/2.11.0/" ${ICEDTEA}/patches/freetypeversion.patch
+
+# Patch for Slackware(64)-15.0:
+patch -p0 < $CWD/openjdk6-slackware15.patch
+
 mkdir icedtea-build
 cd icedtea-build
+
+# Enable the pulseaudio driver (defaults to no)
+if [ "${PULSE:-no}" = "yes" ]; then
+  PULSEJAVA="--enable-pulse-java"
+else
+  PULSEJAVA=""
+fi
+# Disable kerberos
+if [ "${KERBEROS:-yes}" = "no" ]; then
+  KRB="--disable-system-kerberos"
+else
+  KRB=""
+fi
 
 # Set JAVA_HOME in order to avoid conflictis with other already installed JVMs.
 # cacerts taken from this CentOS package:
 # http://mirror.centos.org/centos/6/os/x86_64/Packages/ca-certificates-2015.2.4-65.0.1.el6_6.noarch.rpm
+
 JAVA_HOME=${BOOT_JAVA} PATH=${BOOT_JAVA}/bin:$PATH ../$ICEDTEA/configure \
   --with-jdk-home=${BOOT_JAVA} \
+  --with-gcj \
   --disable-docs \
   --disable-downloading \
   --without-rhino \
-  --disable-system-kerberos \
+  $KRB \
+  --enable-nss \
+  $PULSEJAVA \
   --with-openjdk-src-zip="$CWD/openjdk-6-src-${VERSION#6}-${OPENJDK_DATE}.tar.xz"
 
 echo \
   "sed -i '/^ *@Override *$/ d' openjdk/jdk/src/share/classes/javax/management/remote/rmi/RMIJRMPServerImpl.java" \
   >> fsg.sh
+DISABLE_HOTSPOT_OS_VERSION_CHECK=ok \
 JAVA_HOME=${BOOT_JAVA} PATH=${BOOT_JAVA}/bin:$PATH LOG=trace make
 
-cd $PKG
-mkdir -p usr/lib${LIBDIRSUFFIX}
-cd usr/lib${LIBDIRSUFFIX}
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}
+cd $PKG/usr/lib${LIBDIRSUFFIX}
 cp -av $BUILD_DIR/icedtea-build/openjdk.build/j2sdk-image/ $PRGNAM
+ln -sf $PRGNAM ${PRGNAM}${DVER}
+ln -sf ./$PRGNAM/jre/lib/${LIB_ARCH}/server/libjvm.so .
 
-cp "$CWD/cacerts" ${PRGNAM}/jre/lib/security
+cp "$CWD/cacerts" $PRGNAM/jre/lib/security
 
 chown -R root.root $PKG
 find -L . \
@@ -112,13 +147,6 @@ for file in $(ls "$CWD/profile.d/${PRGNAM}"*) ; do
     > $PKG/etc/profile.d/$(basename $file)
 done
 chmod 755 $PKG/etc/profile.d/*
-
-( cd $PKG/usr/lib${LIBDIRSUFFIX}
-  ln -sf $PRGNAM ${PRGNAM}${DVER}
-)
-
-cd $PKG/usr/lib${LIBDIRSUFFIX}
-    ln -sf ./$PRGNAM/jre/lib/${LIB_ARCH}/server/libjvm.so .
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc

@@ -1,0 +1,94 @@
+#!/bin/bash
+
+# Slackware build script for xpra
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=xpra
+VERSION=${VERSION:-4.3}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# no SLKCFLAGS because I don't see how to force setup.py to use it.
+# no LIBDIRSUFFIX needed.
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION-prebuilt-docs.tar.xz
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+sed -i 's,"share/man","man",' setup.py
+
+# without-strict turns off -Werror. without-docs because we don't want
+# pandoc *and its 139 deps* as a dependency. Include prebuilt docs
+# instead.
+python3 setup.py install \
+  --root=$PKG \
+  --without-docs \
+  --without-strict \
+  --without-debug
+
+# This is *much* faster than using 'file' to classify them.
+find $PKG/usr/lib* -name '*.so' | xargs strip --strip-unneeded
+
+gzip -9 $PKG/usr/man/man?/*
+
+# put the icons in the right places.
+cd $PKG/usr/share/icons
+  for i in *.png; do
+    px="$( identify $i | cut -d' ' -f3 )"
+    mkdir -p hicolor/$px/apps
+    mv $i hicolor/$px/apps
+  done
+cd -
+
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/64x64/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC/html
+
+# Instead of requiring pandoc's insanely long chain of deps, use
+# prebuilt docs. See mkdoc.sh for details.
+cp -a $PRGNAM-$VERSION-prebuilt-docs/* $PKGDOC/html
+
+cp -a COPYING README.md $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

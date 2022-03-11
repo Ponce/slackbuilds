@@ -22,10 +22,17 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220215 bkw: Modified by SlackBuilds.org:
+# - updated for v1.6.8 (old version wouldn't build on Slack 15.0).
+# - build with qt5, not qt4.
+# - autodetect and build with lirc if present.
+# - drop freealut dep from .info (because upstream dropped it).
+# - include the texinfo documentation in the package (/usr/info).
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=bino
-VERSION=${VERSION:-1.6.5}
+VERSION=${VERSION:-1.6.8}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -38,9 +45,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -75,10 +79,20 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
+# 20220215 bkw: configure script doesn't pick up lirc's libraries,
+# help it out a little.
+if [ "${LIRC:-yes}" = "yes" ] && pkg-config --exists lirc; then
+  LIRCLIBS="-llirc -llirc_client"
+  LIRCOPT="--with-lirc"
+else
+  LIRCOPT="--without-lirc"
+fi
+
+lirc_LIBS="$LIRCLIBS" \
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -89,20 +103,17 @@ CXXFLAGS="$SLKCFLAGS" \
   --mandir=/usr/man \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
   --without-equalizer \
-  --without-lirc \
-  --with-qt-version=4 \
+  $LIRCOPT \
+  --with-qt-version=5 \
   --build=$ARCH-slackware-linux
 
 make
-make install DESTDIR=$PKG
+make install-strip DESTDIR=$PKG
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+mv $PKG/usr/share/info $PKG/usr/info
+rm -f $PKG/usr/info/dir
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-
-rm -Rf $PKG/usr/info/dir $PKG/usr/share/info
+gzip -9 $PKG/usr/man/man*/* $PKG/usr/info/*
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a AUTHORS COPYING README README.Linux $PKG/usr/doc/$PRGNAM-$VERSION

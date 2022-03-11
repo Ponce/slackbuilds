@@ -23,5 +23,3 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.kea.new
-config etc/kea/kea.conf.new
-config etc/kea/keactrl.conf.new

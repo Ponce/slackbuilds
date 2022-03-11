@@ -5,10 +5,6 @@
 .. |version| replace:: 20141107_5adb0af
 .. |date| date::
 
-.. converting from pod:
-.. s/B<\([^>]*\)>/**\1**/g
-.. s/I<\([^>]*\)>/*\1*/g
-
 =========
 isextract
 =========
@@ -25,16 +21,18 @@ Extract InstallShield v3 archives
 SYNOPSIS
 ========
 
-isextract [*l|x*] file.z
+isextract [*l*] *file.z*
+
+isextract [*x*] *file.z* [*output-dir*]
 
 DESCRIPTION
 ===========
 
-isextract is a command line tool to extract the .z InstallShield v3
+**isextract** is a command line tool to extract the .Z InstallShield v3
 packages many old windows games were distributed as.
 
-The files isextract supports normally have a **.z** extension, and can be
-idenfified by the file command:
+The files **isextract** supports normally have a **.Z** extension, and can be
+idenfified by the **file**\(1) command:
 
 ::
 
@@ -51,14 +49,26 @@ idenfified by the file command:
 OPTIONS
 =======
 
-**l**       List contents of archive.
+**l**
+  List contents of archive.
 
-**x**       Extract archive to current directory.
+**x**
+  Extract archive. If an *output-dir* is given, extracted files will be written
+  there (the *output-dir* must already exist). Without *output-dir*, the current
+  directory is used.
+
+If **file** says "compress'd data" or similar, your file isn't an
+InstallShield archive; it's compressed with the old UNIX compress
+command, and can be extracted with **uncompress**\(1) or **gzip**\(1).
+
+When extracting, **isextract** *DOES NOT* preserve the directory structure
+inside the archive. All files are written to the same directory. If you
+need the directories, use **unshieldv3** instead.
 
 COPYRIGHT
 =========
 
-See the file /usr/doc/PRGNAM-|version|/LICENSE for license information.
+See the file /usr/doc/isextract-|version|/LICENSE for license information.
 
 AUTHORS
 =======
@@ -71,4 +81,4 @@ by B. Watson, and is licensed under the WTFPL.
 SEE ALSO
 ========
 
-unshield(1), cabextract(1)
+**unshieldv3**\(1), **unshield**\(1), **cabextract**\(1)

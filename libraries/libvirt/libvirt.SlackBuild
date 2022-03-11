@@ -7,7 +7,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=libvirt
-VERSION=${VERSION:-7.6.0}
+VERSION=${VERSION:-8.1.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -43,6 +43,7 @@ else
   LIBDIRSUFFIX=""
 fi
 
+VIRTUSER=${VIRTUSER:-root}
 VIRTGROUP=${VIRTGROUP:-users}
 
 # Some optional dependencies checks
@@ -73,6 +74,8 @@ sed -i "s|prefix / 'lib' / 'sysctl.d'|sysconfdir / 'sysctl.d'|" src/remote/meson
 patch -p1 < $CWD/use-virtgroup-in-polkit-rules.diff
 sed -i -e "s,@VIRTGROUP@,$VIRTGROUP,g" src/remote/libvirtd.rules
 
+patch -p1 < $CWD/823a62ec.patch
+
 # Since 5.10: "configure: error: Build directory must be different from source directory"
 mkdir -p build
 cd build
@@ -87,6 +90,7 @@ cd build
     --prefix=/usr \
     --sysconfdir=/etc \
     -Dqemu_group=$VIRTGROUP \
+    -Dqemu_user=$VIRTUSER \
     $bash_completion \
     -Daudit=${audit}abled \
     -Dlibiscsi=${libiscsi}abled \
@@ -133,8 +137,12 @@ sed -i \
   $PKG/etc/libvirt/qemu.conf
 
 # disable seccomp support or else VMs won't start with new libvirt/qemu combo
-sed -i  "s|^\#seccomp_sandbox = 1|seccomp_sandbox = 0|" \
-  $PKG/etc/libvirt/qemu.conf
+# 20220212 bkw: this file doesn't exist if qemu wasn't installed. and
+# since qemu isn't in REQUIRES, it's optional, so the build shouldn't fail.
+if [ -e $PKG/etc/libvirt/qemu.conf ]; then
+  sed -i  "s|^\#seccomp_sandbox = 1|seccomp_sandbox = 0|" \
+    $PKG/etc/libvirt/qemu.conf
+fi
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done

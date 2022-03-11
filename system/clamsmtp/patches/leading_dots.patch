@@ -1,0 +1,121 @@
+--- clamsmtp-1.10.orig/common/smtppass.c
++++ clamsmtp-1.10/common/smtppass.c
+@@ -1389,16 +1389,34 @@ int sp_cache_data(spctx_t* ctx)
+ {
+     int r, count = 0;
+     const char* data;
++    int linestart;
++
++    linestart = 1;
+     
+     while((r = sp_read_data(ctx, &data)) != 0)
+     {
+-        if(r < 0)
+-            return -1;  /* Message already printed */
++	if(r < 0)
++	 return -1;  /* Message already printed */
++
++	/* SMTP RFCs say that servers must remove leading dots at the beginning
++	 * of a line. We do that here.
++	 */
++
++	if (linestart && (data[0] == '.'))
++	{
++	    data++;
++	    r--;
++	}
++
++	if (ctx->_crlf)
++	 linestart = 1;
++	else
++	 linestart = 0;	
+             
+-        count += r;
++	count += r;
+             
+-        if((r = sp_write_data(ctx, data, r)) < 0)
+-            return -1;  /* Message already printed */
++	if((r = sp_write_data(ctx, data, r)) < 0)
++	 return -1;  /* Message already printed */
+     }
+     
+     /* End the caching */
+@@ -1572,9 +1590,12 @@ int sp_done_data(spctx_t* ctx, const cha
+     int ret = 0;
+     char *line;    
+     char header[MAX_HEADER_LENGTH] = "";
+-    size_t header_len, line_len;
++    size_t header_len;
+     int header_prepend = 0;
+     ssize_t rc;
++    size_t buf_len;
++    int linestart;
++    char *buf;
+ 
+     ASSERT(ctx->cachename[0]);  /* Must still be around */
+     ASSERT(!ctx->cachefile);    /* File must be closed */
+@@ -1582,10 +1603,12 @@ int sp_done_data(spctx_t* ctx, const cha
+     memset(header, 0, sizeof(header));
+ 
+     /* Alloc line buffer */
+-    line_len = SP_LINE_LENGTH;
+-    if((line = (char *)malloc(line_len)) == NULL)
++    buf_len = SP_LINE_LENGTH;
++    if((buf = (char *)malloc(buf_len)) == NULL)
+         RETURN(-1);
+ 
++    buf[0] = '.';
++
+     /* Open the file */
+     file = fopen(ctx->cachename, "r");
+     if(file == NULL)
+@@ -1631,17 +1654,24 @@ int sp_done_data(spctx_t* ctx, const cha
+         header[0] = '\0';
+     }
+ 
+-    /* Transfer actual file data */    
+-    while((rc = getline(&line, &line_len, file)) != -1)
++    /* Transfer actual file data */
++    while(line = (fgets(buf + 1, buf_len - 1, file)))
+     {
+-        /* 
+-         * If the line is <CRLF>.<CRLF> we need to change it so that 
+-         * it doesn't end the email. We do this by adding a space. 
+-         * This won't occur much in clamsmtpd, but proxsmtpd might 
+-         * have filters that accidentally put this in.
+-         */
+-        if(strcmp(line, "." CRLF) == 0)
+-            strncpy(line, ". " CRLF, SP_LINE_LENGTH);
++	/* SMTP RFCs say that clients must prepend an additional dot
++	 * to every line starting with a dot. We do that here.
++	 */
++	if (linestart && (line[0] == '.'))
++	 line = buf;
++
++	rc = strlen(line);
++
++	if (strstr(line, CRLF))
++	 linestart = 1;
++	else
++	 linestart = 0;
++
++	if(strcmp(line, "." CRLF) == 0)
++	 strncpy(line, ". " CRLF, SP_LINE_LENGTH);
+       
+         if(header[0] != '\0')
+         {
+@@ -1683,10 +1713,10 @@ int sp_done_data(spctx_t* ctx, const cha
+         
+ cleanup:
+     
+-	if(line)
+-		free(line); 
+-    if(file)
+-        fclose(file); /* read-only so no error check */
++	if(buf)
++		free(buf); 
++	if(file)
++		fclose(file); /* read-only so no error check */
+     
+     return ret;
+ }

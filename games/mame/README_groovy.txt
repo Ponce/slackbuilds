@@ -1,38 +1,58 @@
-GroovyMAME, also known as GroovyUME, is a fork of MAME/UME with greater
-emphasis on CRT monitor support, in order to provide smoother gameplay
-with less input lag than using regular MAME on an LCD screen. GroovyMAME
-is provided as a patch against the standard MAME sources.
+GroovyMAME, also known as GroovyUME, is a fork of MAME/UME with
+greater emphasis on CRT monitor support, in order to provide smoother
+gameplay with less input lag than using regular MAME on an LCD screen.
 
-GroovyMAME forum: http://forum.arcadecontrols.com/index.php?board=52.0
+GroovyMAME has a discussion forum:
+http://forum.arcadecontrols.com/index.php?board=52.0
 
-GroovyMAME patches can be downloaded from:
+GroovyMAME used to be provided as a patch against the standard MAME
+sources, until its author made it a proper fork on github. This
+SlackBuild supports patching the MAME sources with the GroovyMAME
+changes from github.
 
-https://drive.google.com/drive/folders/0B5iMjDor3P__aEFpcVNkVW5jbEE
+To build with GroovyMAME, export GROOVY=yes in the environment. The
+resulting mame package will mention GroovyMAME in its slack-desc
+(which you will see when you install it).
 
-Get the latest patch that matches the version of MAME. Example:
+If you get an error that says there is no GroovyMAME patch for this
+version of MAME, that means that I updated mame.SlackBuild before the
+GroovyMAME author made a release based on that version of MAME (or,
+it means you're trying to build a newer MAME by setting VERSION in the
+environment). You can check for a release at:
 
-0182_groovymame_017a.diff
+https://github.com/antonioginer/GroovyMAME/releases
 
-The "0182" is the MAME version, without the dots. The "017a" is the
-GroovyMAME version. You want the .diff file, not the .tar.bz2 or .7z!
+If there's no release matching your MAME version, you're out of luck.
+Wait until there is one.
 
-Download or copy the .diff file to the SlackBuild's directory and run the
-SlackBuild script. The script will find the .diff, apply it, and update
-the slack-desc to say "This package was patched with GroovyMAME 017a"
-(or whatever the version number really is). You *don't* have to do
-anything about the CRLF line endings, the script will handle that.
+If there *is* a new release, you have two choices:
 
-If the script seems to be ignoring the .diff file, you probably have a
-.diff for a different version of MAME. Check the version number at the
-start of the filename. Don't try to rename the .diff file to force it
-to apply: the SlackBuild will fail because the patch will fail.
+1. Wait until I update the GroovyMAME patch. I can't guarantee that
+   I'll always do this in a timely manner. Please don't email and
+   bug me about this: I maintain over 700 SlackBuilds, and I try to
+   have a life outside of that, too.
 
-If you have multiple .diff files that match the MAME version, the script
-will try to use the one with the highest GroovyMAME version number. If
-it picks the wrong one, remove the ones you don't want to use.
+2. Run mame.SlackBuild with GROOVY=update in the environment. This
+   will attempt to create a GroovyMAME patch for the MAME version
+   you're building, if the GroovyMAME author has done a release. If
+   you get a "can't find GroovyMAME release" error, that means there
+   isn't one yet, so you'll have to wait a few days. If you know for
+   a fact that there *is* a release, it means there's probably a bug
+   in my mkgroovy.sh script (in which case, please do contact me by
+   email, so I can fix it).
 
-If all else fails, please contact me by email (yalhcru@gmail.com) or on
-IRC (##slackware or #slackbuilds channel on FreeNode, user Urchlay). I
-won't necessarily be testing each MAME release against each version
-of the GroovyMAME patch for that release, so there might be problems I
-won't know about.
+Note that GROOVY=update requires the SlackBuild to access the Internet
+(which SlackBuilds normally don't do). Specifically, it runs "curl"
+as the root user, and downloads a JSON file and the actual diff (if
+found) from https://api.github.com. If you don't trust this, you can
+instead run the mkgroovy.sh script (found in the same directory as the
+SlackBuild) as a non-root user, and copy the resulting .diff to the
+SlackBuild directory.
+
+If you have multiple gm*.diff files that match the MAME version, the
+script will try to use the one with the highest GroovyMAME version
+number. If it picks the wrong one, remove the ones you don't want
+to use.
+
+NOTE: I don't currently own any CRT monitors that work on a PC, so I
+can't actually test the GroovyMAME enhancements.

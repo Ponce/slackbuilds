@@ -22,30 +22,44 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220218 bkw: Modified by SlackBuilds.org:
+# - update for v1.2.14 (the old download disappeared).
+# - autodetect jack and portaudio, instead of making the user manually
+#   set environment variables (can still disable with environment).
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=fmit
-VERSION=${VERSION:-0.99.2}
+VERSION=${VERSION:-1.2.14}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
-# To support OSS or PortAudio, pass OSS="ON" or PORTAUDIO="ON".
-JACK=${JACK:-OFF}
-OSS=${OSS:-OFF}
-PORTAUDIO=${PORTAUDIO:-OFF}
+# 20220218 bkw: always include qt (aka PulseAudio) and ALSA support.
+CONFIG="acs_qt acs_alsa"
+
+# 20220218 bkw: autodetect jack and portaudio, allow disabling in env.
+pkg-config --exists jack && \
+  [ "${JACK:-yes}" != "no" ] && \
+  CONFIG+=" acs_jack" && \
+  SETCAP="${SETCAP:-yes}"
+pkg-config --exists portaudio-2.0 && \
+  [ "${PORTAUDIO:-yes}" != "no" ] && \
+  CONFIG+=" acs_portaudio"
+
+# 20220218 bkw: build without OSS, allow enabling in env.
+[ "${OSS:-no}" = "yes" ] && CONFIG+=" acs_oss"
+
+echo "=== CONFIG='$CONFIG'"
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i486 ;;
+    i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -55,19 +69,8 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i486" ]; then
-  SLKCFLAGS="-O2 -march=i486 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
-fi
+# 20220218 bkw: SLKCFLAGS and LIBDIRSUFFIX not needed (qmake uses
+# the ones qt5 was compiled with, which is correct).
 
 set -e
 
@@ -75,45 +78,34 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION-Source.tar.bz2
-mv $PRGNAM-$VERSION-Source $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
+ -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+ -exec chmod 644 {} \+
 
-mkdir -p build
-cd build
-  cmake \
-    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DSOUNDSYSTEM_USE_JACK=$JACK \
-    -DSOUNDSYSTEM_USE_OSS=$OSS \
-    -DSOUNDSYSTEM_USE_PORTAUDIO=$PORTAUDIO \
-    -DCMAKE_BUILD_TYPE=Release ..
-  make
-  make install DESTDIR=$PKG
-cd ..
+qmake-qt5 PREFIX=/usr CONFIG+="$CONFIG"
+make
+make install INSTALL_ROOT=$PKG
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# 20220218 bkw: binary already stripped.
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  COPYING \
-  ChangeLog \
-  README.txt \
-  TODO \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a COPYING* README.txt $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@CONFIG@,$CONFIG," < $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+if [ "$SETCAP" = "yes" ]; then
+  cat $CWD/setcap.sh >> $PKG/install/doinst.sh
+  chown root:audio $PKG/usr/bin/$PRGNAM
+  chmod 0750 $PKG/usr/bin/$PRGNAM
+fi
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

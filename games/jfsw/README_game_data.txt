@@ -20,11 +20,15 @@ Shadow Warrior that was originally developed in the 90s but never released
 commercially. In 2005, it was released as a freeware download. To play
 this version of the game, install jfsw_wanton_destruction.
 
+jfsw can also play Twin Dragon, another expansion pack. Install
+jfsw_twin_dragon to play this version of the game.
+
 Possible .grp files:
 Registered sw.grp:  47536148 bytes, md5sum 9d200b5fb4ace8797e7f8638c4f96af2
 "Alternate" sw.grp: 47536148 bytes, md5sum 92006f69a15ffa5f48b7dcd07b75fda9
 Shareware sw.grp:   26056769 bytes, md5sum dafeec1b83bd31edc6dafffc9a75bdb8
 Wanton Destruction wt.grp: 48698128 bytes, d0f8dc0718127ca480abf14f3a9508c2
+Twin Dragon td.grp: 53480783 bytes, md5sum 26ebd69e0286c938f29e24b75ad896f1
 
 If you have the "alternate" (hacked? pirated?) version of sw.grp, it
 differs by only a few bytes. jfsw will refuse to "see" it because the

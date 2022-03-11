@@ -21,22 +21,27 @@
 # WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
+
 # Script modified by Juan Pablo Cordova E. (jpcordovae@gmail.com)
-#
-#
+
+# 20220303 bkw: Modified by SlackBuilds.org, BUILD=2:
+# - fix build on 15.0 (fiddly C++ annoyances).
+# - add some JDK detection stuff, to avoid the need to log out and
+#   back in after installing zulu-openjdk8, and to make the build
+#   fail quickly and gracefully if there's no JDK.
+# - binary in /usr/games.
+# - absolute paths in .desktop file.
+# - install actually useful docs (not LICENSE.html, which had
+#   *broken* hyperlinks!)
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=spring
 VERSION=${VERSION:-104.0}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -60,7 +65,34 @@ else
   LIBDIRSUFFIX=""
 fi
 
-set -eu
+set -e
+
+# 20220303 bkw: make sure we have a JDK to use, or fail immediately
+# with a helpful hint (rather than spending a couple minutes untarring
+# and running cmake so it can fail). Feel free to steal this for your
+# own java-using SlackBuilds.
+
+DEFAULT_JDK_PROFILE=/etc/profile.d/zulu-openjdk8.sh
+
+if [ -n "$JAVA_HOME" ]; then
+  echo "==> Using JAVA_HOME=\"$JAVA_HOME\" from the environment."
+else
+  if [ -e $DEFAULT_JDK_PROFILE ]; then
+    source $DEFAULT_JDK_PROFILE
+    echo "==> Sourced $DEFAULT_JDK_PROFILE, JAVA_HOME=\"$JAVA_HOME\"."
+  else
+    echo "==> Warning, $DEFAULT_JDK_PROFILE not found."
+  fi
+fi
+
+if [ -z "$JAVA_HOME" -o ! -x "$JAVA_HOME/bin/java" ]; then
+  cat <<EOF
+==> JAVA_HOME is invalid or unset, and I couldn't set it by sourcing
+==> $DEFAULT_JDK_PROFILE.
+==> Did you forget to install the dependencies?
+EOF
+  exit 1
+fi
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -71,25 +103,42 @@ cd ${PRGNAM}_${VERSION}
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+ -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
+
+# 20220303 bkw: OpenAL API change...
+sed -i 's,ALCdevice_struct,ALCdevice,g' rts/System/Sound/OpenAL/Sound.h
+
+# 20220303 bkw: Ugly, but it works.
+sed -i 's,^private:,public:,' rts/Lua/LuaObjectRendering.h
+
+# 20220303 bkw: snprintf() not declared in this scope...
+sed -i '1i#include <cstdio>' rts/System/Sync/SHA512.cpp
+
+# 20220303 bkw: this is what debian's gcc8 patch does:
+sed -i '/constexpr.*GLubyte/s,constexpr,,' rts/Rendering/GL/myGL.cpp
+
+# 20220303 bkw: nitpick the .desktop file.
+sed -i -e '/^Exec/s,=,=/usr/games/,' \
+       -e '/^Icon/s,=.*,=/usr/share/pixmaps/spring.png,' \
+       cont/freedesktop/applications/spring.desktop
 
 cmake \
  -DCMAKE_INSTALL_PREFIX=/usr \
+ -DBINDIR=games \
  -DLIBDIR=lib${LIBDIRSUFFIX} \
  -DMANDIR=man \
  -DDOCDIR=doc/$PRGNAM-$VERSION \
  .
 make
-make install DESTDIR=$PKG
+make install/strip DESTDIR=$PKG
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a LICENSE.html $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+mkdir -p $PKGDOC
+cp -a LICENSE gpl-*.txt README.* THANKS AUTHORS FAQ $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc

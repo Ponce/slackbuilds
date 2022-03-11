@@ -22,11 +22,16 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220303 bkw: Modified by SlackBuilds.org, BUILD=2:
+# - fix REQUIRES: sequel, not sequel4.
+# - get rid of hardcoded dependency versions in the gemspec.
+# - remove redundant t and dev_t scripts from /usr/bin.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=timetrap
 VERSION=${VERSION:-1.15.2}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -38,9 +43,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -50,25 +52,16 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
-fi
+# 20220303 bkw: no SLKCFLAGS needed: there's no compiled C/C++ code.
+# No LIBDIRSUFFIX needed, 'gem install' knows the right path to use.
+# The only reason this isn't noarch is that the install path includes
+# lib or lib64 (like pure python modules do).
 
 set -e
 
 rm -rf $PKG
-mkdir -p $TMP $PKG $OUTPUT
-cd $TMP
+mkdir -p $TMP/$PRGNAM-$VERSION $PKG $OUTPUT
+cd $TMP/$PRGNAM-$VERSION
 
 DESTDIR=$( ruby -r rbconfig -e '
 include RbConfig
@@ -108,8 +101,25 @@ gem install \
 	--bindir $PKG/usr/bin \
 	$CWD/$PRGNAM-$VERSION.gem
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# 20220303 bkw: don't need these extra almost-identical scripts in /usr/bin:
+rm -f $PKG/usr/bin/{t,dev_t}
+
+# 20220303 bkw: the version numbers of the deps are hardcoded in the
+# .gemspec. Any time someone updates one of them, it would break
+# timetrap. So get rid of the version numbers. This may lead to
+# breakage at some point, but right now it fixes timetrap complaining
+# that it can't find its sequel dep at runtime (it wants 5.30.0,
+# we actually have 5.42.0, and it seems to work fine). This diff is
+# unusual as it patches $PKG after the build, because picking apart
+# the .gem file, patching it, and reassembling it (and fixing the
+# checksum) is more work than I care to do.
+
+# Note that the patch has hardcoded lib64 paths, so we sed it.
+cd $PKG
+cp $CWD/remove_hardcoded_versions.diff tmp.diff
+[ "$ARCH" = "x86_64" ] || sed -i 's,usr/lib64,usr/lib,g' tmp.diff
+patch -p1 < tmp.diff
+rm -f tmp.diff
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild

@@ -22,10 +22,15 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220212 bkw: Modified by SlackBuilds.org for Slackware 15.0:
+# - resolve conflict with fpc.
+# - add missing huepy dependency.
+# - stop installing documentation directly to $PKG/usr.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=ptop
-VERSION=${VERSION:-1.0.0}
+VERSION=${VERSION:-1.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -38,9 +43,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -70,26 +72,35 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz || tar xvf $CWD/v$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# Delete argparse standard Python library from requires. 
-# ptop work with argparse minimal version.
-sed -i "19d" setup.py
+# apparently we don't need argparse as a dependency.
+sed -i '/argparse/d' setup.py
 
 python setup.py install --root=$PKG
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# 20220212 bkw: the plan was to rename the script to ptop.py, to
+# avoid conflicting with fpc. unfortunately it refuses to run under
+# another name (ImportError: No module named main), so this elaborate
+# circumlocution is required. it results in a shell script that has
+# a .py filename (confusing I supppose), but works fine.
+mkdir -p $PKG/usr/libexec/$PRGNAM
+mv $PKG/usr/bin/$PRGNAM $PKG/usr/libexec/$PRGNAM
 
+cat <<EOF > $PKG/usr/bin/$PRGNAM.py
+#!/bin/sh
+exec /usr/libexec/$PRGNAM/$PRGNAM "\$@"
+EOF
+
+chmod +x $PKG/usr/bin/$PRGNAM.py
+
+# 20220212 bkw: what a mess. the docs are installed directly to $PKG/usr.
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a README.md LICENSE.txt $PKG/usr/doc/$PRGNAM-$VERSION
+mv $PKG/usr/[A-Z]* $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install

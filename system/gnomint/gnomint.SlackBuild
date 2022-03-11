@@ -22,11 +22,16 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220211 bkw: Modified by SlackBuilds.org, BUILD=3:
+# - fix build on 15.0.
+# - validate .desktop file.
+# - don't install useless files in doc dir.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=gnomint
 VERSION=${VERSION:-1.3.0}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -38,9 +43,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -64,7 +66,9 @@ else
   LIBDIRSUFFIX=""
 fi
 
-DOCS="AUTHORS BUGS COPYING ChangeLog INSTALL MAINTAINERS NEWS README TODO"
+# 20220211 bkw: BUGS is a 0-byte placeholder, INSTALL is generic
+# "how to run ./configure", don't include in package.
+DOCS="AUTHORS COPYING ChangeLog MAINTAINERS NEWS README TODO"
 
 set -e 
 
@@ -77,12 +81,20 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
 # Apply debian patches
 for i in $CWD/patches/* ; do patch -p1 -i $i ; done
+
+# 20220211 bkw: not only is G_STATIC_MUTEX_INIT deprecated, it causes
+# the build to fail. according to the glib2 docs, it's not needed anyway:
+# "It is not necessary to initialize a mutex that has been statically
+# allocated", from https://docs.gtk.org/glib/method.Mutex.init.html.
+sed -i 's, *= *G_STATIC_MUTEX_INIT,,' \
+  src/csr_creation.c \
+  src/ca_creation.c
 
 autoreconf -fi
 
@@ -98,10 +110,12 @@ CXXFLAGS="$SLKCFLAGS" \
   --build=$ARCH-slackware-linux
 
 make
-make install DESTDIR=$PKG
+make install-strip DESTDIR=$PKG
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# 20220211 bkw: desktop-file-validate nitpicking.
+sed -i -e '/^Categories/s,Application,GTK,' \
+       -e '/^Icon/s,=.*,=/usr/share/pixmaps/gnomint.png,' \
+  $PKG/usr/share/applications/gnomint.desktop
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION

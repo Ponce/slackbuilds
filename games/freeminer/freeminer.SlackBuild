@@ -23,11 +23,28 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220302 bkw: Modified by SlackBuilds.org: fix build on 15.0,
+# by updating to latest git (80629f40a85fccafaefea1a490d9ca384f73493f).
+
+# Note to maintainer: *please* don't use only a git hash as a version
+# number. I used 0.4.14.8+20211109_80629f4, which includes the last
+# tag before the commit, the date, and the commit hash. The reason
+# for doing this is so we can tell at a glance which version is newer,
+# when looking at several packages. Also notice the updated download
+# URL in the .info file: it saves the file with the same name,
+# regardless of what the user used to download it (whether or not it
+# respects the Content-disposition header).
+
+# I tested the game to the extent of trying to connect to a server,
+# but one of the servers failed to connect, and the other connected,
+# downloaded some content, then dropped the connection. Hope that's
+# OK.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=freeminer
-VERSION=${VERSION:-git7ad981}
-SRCVER=7ad981638ea568caf0e3495752cb1bc4a3a853dd
+VERSION=${VERSION:-0.4.14.8+20211109_80629f4}
+SRCVER=80629f40a85fccafaefea1a490d9ca384f73493f
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -40,9 +57,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -72,28 +86,27 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$SRCVER
-#tar xvf $CWD/$PRGNAM-$VERSION.tar.gz || tar xvf $CWD/$VERSION.tar.gz
 unzip $CWD/$PRGNAM-$SRCVER.zip || unzip $CWD/$SRCVER.zip
 cd $PRGNAM-$SRCVER
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
-# Fix jsoncpp detection.
-sed -i '/find_path/s|)| /usr/include/jsoncpp)|' cmake/Modules/FindJson.cmake
-
-# Fix msgpack-c detection.
-sed -i 's/FIND_LIBRARY(MSGPACK_LIBRARY NAMES msgpack/& msgpackc/' cmake/Modules/FindMsgPack.cmake
+# 20220302 bkw: our json.h is a system header.
+find src -type f | \
+  xargs grep -l '#include.*json/json\.h' | \
+  xargs sed -i 's,"json/json.h",<json/json.h>,'
 
 mkdir -p build
 cd build
   cmake \
+    -DJSON_INCLUDE_DIR=/usr/include/jsoncpp \
     -DRUN_IN_PLACE:BOOL=0 \
-    -DENABLE_SYSTEM_JSONCPP:BOOL=1 \
-    -DENABLE_SYSTEM_MSGPACK:BOOL=1 \
+    -DENABLE_SYSTEM_JSONCPP:BOOL=ON \
+    -DENABLE_SYSTEM_MSGPACK:BOOL=ON \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX:PATH=/usr \
@@ -105,13 +118,9 @@ cd build
     -DCMAKE_BUILD_TYPE=Release ..
 
   make
-  make install DESTDIR=$PKG
+  make install/strip DESTDIR=$PKG
 cd ..
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-find $PKG/usr/man -type f -exec gzip -9 {} \;
+gzip $PKG/usr/man/man*/*
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a LICENSE.txt *md $PKG/usr/doc/$PRGNAM-$VERSION

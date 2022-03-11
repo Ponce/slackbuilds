@@ -1,0 +1,131 @@
+diff --git a/opendmarc/opendmarc-config.h b/opendmarc/opendmarc-config.h
+index 1b781df..8398007 100644
+--- a/opendmarc/opendmarc-config.h
++++ b/opendmarc/opendmarc-config.h
+@@ -47,6 +47,7 @@ struct configdef dmarcf_config[] =
+ 	{ "RequiredHeaders",		CONFIG_TYPE_BOOLEAN,	FALSE },
+ 	{ "RejectFailures",		CONFIG_TYPE_BOOLEAN,	FALSE },
+ 	{ "RejectMultiValueFrom",	CONFIG_TYPE_BOOLEAN,	FALSE },
++	{ "RejectString",		CONFIG_TYPE_STRING,	FALSE },
+ 	{ "ReportCommand",		CONFIG_TYPE_STRING,	FALSE },
+ 	{ "Socket",			CONFIG_TYPE_STRING,	FALSE },
+ 	{ "SoftwareHeader",		CONFIG_TYPE_BOOLEAN,	FALSE },
+diff --git a/opendmarc/opendmarc.c b/opendmarc/opendmarc.c
+index a1e49ec..c28aedd 100644
+--- a/opendmarc/opendmarc.c
++++ b/opendmarc/opendmarc.c
+@@ -190,6 +190,7 @@ struct dmarcf_config
+ 	char *			conf_historyfile;
+ 	char *			conf_pslist;
+ 	char *			conf_ignorelist;
++	char *			conf_rejectstring;
+ 	char **			conf_trustedauthservids;
+ 	char **			conf_ignoredomains;
+ 	struct list *		conf_domainwhitelist;
+@@ -1427,6 +1428,10 @@ dmarcf_config_load(struct config *data, struct dmarcf_config *conf,
+ 		                  &conf->conf_rejectfail,
+ 		                  sizeof conf->conf_rejectfail);
+ 
++		(void) config_get(data, "RejectString",
++						  &conf->conf_rejectstring,
++						  sizeof conf->conf_rejectstring);
++
+ 		(void) config_get(data, "RequiredHeaders",
+ 		                  &conf->conf_reqhdrs,
+ 		                  sizeof conf->conf_reqhdrs);
+@@ -1635,6 +1640,36 @@ dmarcf_config_load(struct config *data, struct dmarcf_config *conf,
+ 
+ 	pthread_rwlock_unlock(&hash_lock);
+ 
++	if ( conf->conf_rejectstring == NULL ) {
++		conf->conf_rejectstring = DEFREJECTSTR;
++	} else {
++		/* Count occurrences of "%s" in RejectString */
++		int countocc = 0;
++		const char *tmp = conf->conf_rejectstring;
++		if (strstr(tmp, '%%')) {
++			snprintf(err, errlen, "%s: The RejectString contains a %%%% (escaped %%)!",
++				basedir);
++			return -1;
++		}
++		while(tmp = strstr(tmp, "%s"))
++		{
++			countocc++;
++			tmp++;
++		}
++		switch ( countocc ) {
++			case 0:
++				snprintf(err, errlen, "%s: The RejectString doesn't contain %%s!",
++					basedir);
++				return -1;
++			case 1:
++				break;
++			default:
++				snprintf(err, errlen, "%s: The RejectString contains %d occurences of %%s instead of one!",
++					basedir, countocc);
++				return -1;
++		}
++	}
++
+ 	return 0;
+ }
+ 
+@@ -3566,7 +3601,7 @@ mlfi_eom(SMFICTX *ctx)
+ 		    random() % 100 < pct)
+ 		{
+ 			snprintf(replybuf, sizeof replybuf,
+-			         "rejected by DMARC policy for %s", pdomain);
++			         conf->conf_rejectstring, pdomain);
+ 
+ 			status = dmarcf_setreply(ctx, DMARC_REJECT_SMTP,
+ 			                         DMARC_REJECT_ESC, replybuf);
+diff --git a/opendmarc/opendmarc.conf.5.in b/opendmarc/opendmarc.conf.5.in
+index f6fd6b4..4b6df51 100644
+--- a/opendmarc/opendmarc.conf.5.in
++++ b/opendmarc/opendmarc.conf.5.in
+@@ -261,6 +261,13 @@ If set, messages with multiple addresses in the From: field of the message
+ will be rejected unless all domain names in that field are the same.  They
+ will otherwise be ignored by the filter (the default).
+ 
++.TP
++.I RejectString (string)
++This string describes the reason of reject at SMTP level.
++The message MUST contain the word "%s" once, which will be replaced by the
++RFC5322.From domain. Escaped "%" ("%%") are not allowed in this string.
++The default is "rejected by DMARC policy for %s"
++
+ .TP
+ .I ReportCommand (string)
+ Indicates the shell command to which failure reports should be passed for
+diff --git a/opendmarc/opendmarc.conf.sample b/opendmarc/opendmarc.conf.sample
+index 7b31987..462e6cf 100644
+--- a/opendmarc/opendmarc.conf.sample
++++ b/opendmarc/opendmarc.conf.sample
+@@ -303,6 +303,15 @@
+ #
+ # RejectFailures false
+ 
++##  RejectString string
++##      default ("rejected by DMARC policy for %s")
++##
++##  This string describes the reason of reject. The message MUST contain the
++##  word "%s" (only once), which will be replaced with the RFC5322.From domain.
++##  Escaped "%" ("%%") are not allowed in this string.
++#
++# RejectString rejected by DMARC policy for %s
++
+ ##  RejectMultiValueFrom { true | false }
+ ##  	default "false"
+ ##
+diff --git a/opendmarc/opendmarc.h b/opendmarc/opendmarc.h
+index e36f93a..a4593dc 100644
+--- a/opendmarc/opendmarc.h
++++ b/opendmarc/opendmarc.h
+@@ -34,6 +34,7 @@
+ #define	BUFRSZ		2048
+ #define	DEFCONFFILE	CONFIG_BASE "/opendmarc.conf"
+ #define	DEFREPORTCMD	"/usr/sbin/sendmail -t -odq"
++#define DEFREJECTSTR    "rejected by DMARC policy for %s"
+ #define	JOBIDUNKNOWN	"(unknown-jobid)"
+ #define	MAXARGV		65536
+ #define	MAXHEADER	1024

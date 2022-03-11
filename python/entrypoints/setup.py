@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='entrypoints',
-    version='0.3',
+    version='0.4',
     description='Discover and load entry points from installed packages',
     url='https://github.com/takluyver/entrypoints',
     author='https://github.com/takluyver',

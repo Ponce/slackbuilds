@@ -14,6 +14,16 @@ if [ -e usr/share/glib-2.0/schemas ]; then
   fi
 fi
 
+schema_install() {
+  SCHEMA="$1"
+  GCONF_CONFIG_SOURCE="xml::etc/gconf/gconf.xml.defaults" \
+  chroot . gconftool-2 --makefile-install-rule \
+    /etc/gconf/schemas/$SCHEMA \
+    1>/dev/null
+}
+
+schema_install gnome-terminal.schemas
+
 if [ -x usr/bin/rarian-sk-update ]; then
   usr/bin/rarian-sk-update 1> /dev/null 2> /dev/null
 fi

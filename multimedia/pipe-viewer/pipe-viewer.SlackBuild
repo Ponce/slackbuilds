@@ -1,0 +1,134 @@
+#!/bin/bash
+
+# Slackware build script for pipe-viewer
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=pipe-viewer
+VERSION=${VERSION:-0.1.8}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# perl-Gtk3 is a runtime dep, we can build with GTK=yes even if it's not
+# installed... but don't do that by default.
+GTK="${GTK:-auto}"
+
+case "$GTK" in
+  no)  BUILD_GTK="no"  ;;
+  yes) BUILD_GTK="yes" ;;
+  *)   perl -MGtk3 -MFile::ShareDir -e 0 2>/dev/null \
+         && BUILD_GTK="yes" \
+         || BUILD_GTK="no" ;;
+esac
+
+[ "$BUILD_GTK" = "yes" ] && GTKOPT="--gtk"
+
+echo "=== GTK=$GTK  BUILD_GTK=$BUILD_GTK  GTKOPT=$GTKOPT"
+
+# Upstream used to support mplayer (in the original youtube-viewer,
+# before the straw-viewer and pipe-viewer forks), then dropped it.
+# That's as may be, but mplayer is included in core Slackware and the
+# other players aren't. So we'll give the user the option to at least
+# try it.
+patch -p1 < $CWD/restore_mplayer.diff
+
+perl Build.PL prefix=/usr installdirs=vendor --destdir="$PKG" $GTKOPT
+./Build
+./Build test
+./Build install --install_path script=/usr/bin
+mv $PKG/usr/share/man $PKG/usr/man
+gzip -9 $PKG/usr/man/man?/*.?
+
+if [ "$BUILD_GTK" = "yes" ]; then
+  # link .desktop to standard locations
+  mkdir -p $PKG/usr/share/applications $PKG/usr/share/pixmaps
+  LNPATH="../perl5/vendor_perl/auto/share/dist/WWW-PipeViewer"
+  ln -s $LNPATH/gtk-$PRGNAM.desktop \
+    $PKG/usr/share/applications/gtk-$PRGNAM.desktop
+
+  # icon is huge (351x313)...
+  for px in 16 32 48 64 128; do
+    size=${px}x${px}
+    dir=$PKG/usr/share/icons/hicolor/$size/apps
+    mkdir -p $dir
+    convert -resize $size share/icons/gtk-pipe-viewer.png $dir/gtk-$PRGNAM.png
+  done
+
+  ln -s ../icons/hicolor/48x48/apps/gtk-$PRGNAM.png \
+        $PKG/usr/share/pixmaps/gtk-$PRGNAM.png
+
+  # support TERMINAL option for user's preferred terminal.
+  if [ "$TERMINAL" != "" ]; then
+    sed -i "s/'gnome-terminal'/'$TERMINAL', &/" $PKG/usr/bin/gtk-$PRGNAM
+  fi
+fi
+
+find $PKG -name perllocal.pod \
+  -o -name ".packlist" \
+  -o -name "*.bs" \
+  | xargs rm -f
+
+find $PKG -depth -type d -empty -delete || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a Changes LICENSE README* $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# the permissions in the final package are weird.
+find $PKG -type f -print0 | xargs -0 chmod 644
+find $PKG -type d -print0 | xargs -0 chmod 755
+chmod +x $PKG/usr/bin/*
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

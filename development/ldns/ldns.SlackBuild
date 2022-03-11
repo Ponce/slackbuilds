@@ -33,13 +33,19 @@
 # URL:        http://www.nlnetlabs.nl/projects/ldns/
 # -----------------------------------------------------------------------------
 
+# 20220308 bkw: Modified by SlackBuilds.org: fix build on 15.0:
+# - parallel makes are broken, use -j1.
+# - fix code that finds the /usr/share/vim/vimXX directory (it would
+#   fail if there were more than one of them).
+# - add python3 support, inspired by Dave Woodfall.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=ldns
 VERSION=${VERSION:-1.7.1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -49,9 +55,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -79,46 +82,70 @@ set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
-cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-CXXFLAGS="$SLKCFLAGS" \
-CFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --includedir=/usr/include \
-  --localstatedir=/var \
-  --sysconfdir=/etc \
-  --mandir=/usr/man \
-  --disable-static \
-  --enable-rrtype-ninfo \
-  --enable-rrtype-rkey \
-  --enable-rrtype-ta \
-  --enable-rrtype-avc \
-  --disable-rpath \
-  --disable-dane-verify \
-  --with-drill \
-  --with-examples \
-  --with-pyldns \
-  --with-pyldnsx \
-  --with-p5-dns-ldns \
-  --with-ca-path=/etc/ssl/certs \
-  --with-ca-file=/etc/ssl/certs/ca-certificates.crt \
-  --with-trust-anchor=/etc/$PRGNAM/root.key \
-  --build=$ARCH-slackware-linux
+buildit() {
+  local pyver="$1"
+  local perlflag="$2"
 
-make
-make install DESTDIR=$PKG INSTALLVENDORMAN3DIR=/usr/man/man3 INSTALLDIRS=vendor
-python -m compileall $PKG/usr/lib*/python*/site-packages
+  cd $TMP
+  rm -rf $PRGNAM-$VERSION
+  tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+  cd $PRGNAM-$VERSION
+  chown -R root:root .
+  find -L . \
+   \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+    -o -perm 511 \) -exec chmod 755 {} \+ -o \
+   \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+    -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
+
+  PYTHON=/usr/bin/python$pyver \
+  CXXFLAGS="$SLKCFLAGS" \
+  CFLAGS="$SLKCFLAGS" \
+  ./configure \
+    --prefix=/usr \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --includedir=/usr/include \
+    --localstatedir=/var \
+    --sysconfdir=/etc \
+    --mandir=/usr/man \
+    --disable-static \
+    --enable-rrtype-ninfo \
+    --enable-rrtype-rkey \
+    --enable-rrtype-ta \
+    --enable-rrtype-avc \
+    --disable-rpath \
+    --disable-dane-verify \
+    --with-drill \
+    --with-examples \
+    --with-pyldns \
+    --with-pyldnsx \
+    $perlflag \
+    --with-ca-path=/etc/ssl/certs \
+    --with-ca-file=/etc/ssl/certs/ca-certificates.crt \
+    --with-trust-anchor=/etc/$PRGNAM/root.key \
+    --build=$ARCH-slackware-linux
+
+  make -j1
+  make install DESTDIR=$PKG INSTALLVENDORMAN3DIR=/usr/man/man3 INSTALLDIRS=vendor
+}
+
+# 20220308 bkw: python version is either/or. to include support for
+# python2 and python3 in the same package, we have to build everything
+# twice. first time around, build python2 support, and skip the perl stuff.
+buildit 2 --without-p5-dns-ldns
+
+# 20220308 bkw: hang onto the python stuff, blow everything else away.
+mkdir -p $PKG/.keep
+mv $PKG/usr/lib*/python2* $PKG/.keep
+rm -rf $PKG/usr
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX
+mv $PKG/.keep/* $PKG/usr/lib$LIBDIRSUFFIX
+rm -rf $PKG/.keep
+python -m compileall $PKG/usr/lib*/python2*/site-packages
+
+# 20220308 bkw: now do it over again, with python 3 and perl.
+buildit 3 --with-p5-dns-ldns
+python3 -m compileall $PKG/usr/lib*/python3*/site-packages
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -134,13 +161,19 @@ sed -n '/Zone/,$p' $CWD/root-anchors.xml | sed -e 's|<[^>]*>||g' | \
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a Changelog LICENSE README* doc/TODO $PKG/usr/doc/$PRGNAM-$VERSION
 
-mkdir -p $PKG/$(find /usr/share/vim -type d -name "vim[0-9]*")/syntax
-install -m 0644 libdns.vim \
-  $PKG/$(find /usr/share/vim -type d -name "vim[0-9]*")/syntax/$PRGNAM.vim
+# 20220308 bkw: it's fully possible for there to be multiple
+# /usr/share/vim/vim<version> directories. For one thing, if vim gets
+# upgraded while this package is installed... so go with what we hope
+# is the highest-numbered vim version here.
+VIMDIR="$(find /usr/share/vim -type d -name "vim[0-9]*" | sort | tail -1)/syntax"
+mkdir -p $PKG/$VIMDIR
+install -m 0644 libdns.vim $PKG/$VIMDIR/$PRGNAM.vim
 
 find $PKG -type f -perm 444 -exec chmod 0644 '{}' \;
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 find $PKG -name "LDNS.so" -exec chmod 0755 {} \;
+
+rm -f $PKG/usr/lib*/*.la
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc

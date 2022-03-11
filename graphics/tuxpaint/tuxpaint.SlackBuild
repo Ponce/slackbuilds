@@ -7,11 +7,16 @@
 # Taken over maintenance (and some updates) by Tim Dickson (dickson.tim@googlemail.com)
 # added tuxpaint-config 2019-02-11
 
+# 20220222 bkw: Modified by SlackBuilds.org: fix build on 15.0.
+# - update for v0.9.27 and config v0.0.18.
+# - fix parallel builds.
+# - stop spamming the real /usr (ugh).
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=tuxpaint
-VERSION=${VERSION:-0.9.25}
-CONFVER=${CONFVER:-0.0.16}
+VERSION=${VERSION:-0.9.27}
+CONFVER=${CONFVER:-0.0.18}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -24,9 +29,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -62,9 +64,18 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
+
+# 20220226 bkw: fix parallel builds.
+mkdir trans
+
+# 20220226 bkw: FFS, do NOT attempt to install icons and .desktop
+# using the xdg-icon-resource and xdg-desktop-menu tools: these don't
+# support DESTDIR or any other way to control where the files get
+# installed (meaning they install to the real /usr, not $PKG/usr).
+sed -i '/^linux_ARCH_INSTALL/s,install-xdg ,,' Makefile
 
 make PREFIX=/usr LIBDIRSUFFIX=$LIBDIRSUFFIX OPTFLAGS="$SLKCFLAGS"
 make \
@@ -80,12 +91,27 @@ make \
 mv $PKG/etc/tuxpaint/tuxpaint.conf $PKG/etc/tuxpaint/tuxpaint.conf.new
 mkdir -p $PKG/usr/share/applications
 cp src/$PRGNAM.desktop $PKG/usr/share/applications/
+
+# 20220226 bkw: install the icons correctly, to $PKG. Not only were
+# they going to the real /usr, they were incorrectly named!
+for i in data/images/icon*x*.png; do
+  px="$( basename $i | cut -dx -f2 | cut -d. -f1 )"
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  cp -a $i $dir/$PRGNAM.png
+done
+
 #
 #now for tuxpaint-config
 #
 cd ..
 tar xvf $CWD/$PRGNAM-config-$CONFVER.tar.gz
 cd $PRGNAM-config-$CONFVER
+
+# 20220226 bkw: fix parallel builds.
+mkdir trans
+
 make PREFIX=/usr LIBDIRSUFFIX=$LIBDIRSUFFIX OPTFLAGS="$SLKCFLAGS"
 make \
   MAN_PREFIX=/usr/man \
@@ -97,9 +123,7 @@ make \
   DESTDIR=$PKG \
   install
 
-#now sanitize stuff.
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+strip $PKG/usr/bin/tuxpaint{,-config} $PKG/usr/lib*/tuxpaint/plugins/*.so
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild

@@ -1,0 +1,289 @@
+diff --git a/.gitignore b/.gitignore
+index 3768c97..d88251b 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -2,3 +2,4 @@
+ build/
+ dist/
+ *.pyc
++.eggs
+diff --git a/.travis.yml b/.travis.yml
+index b94c4dc..8770821 100644
+--- a/.travis.yml
++++ b/.travis.yml
+@@ -1,4 +1,7 @@
+ os: linux
++arch:
++   - amd64
++   - ppc64le
+ addons:
+   apt:
+     update: true
+@@ -6,8 +9,8 @@ addons:
+       - libchm-dev
+ language: python
+ python:
+-  - "3.5"
+   - "3.6"
+   - "3.7"
+   - "3.8"
++  - "3.9"
+ script: scripts/travis-run.sh
+diff --git a/AUTHORS b/AUTHORS
+index 23e621b..d36c3ec 100644
+--- a/AUTHORS
++++ b/AUTHORS
+@@ -1,3 +1,3 @@
+ Copyright (c) 2003 Eugeny Korekin <az@ftc.ru>
+ Copyright (c) 2005-2009 Basil Shubin <basil.shubin@gmail.com>
+-Copyright (c) 2015,2019 Mikhail Gusarov <dottedmag@dottedmag.net>
++Copyright (c) 2015-2020 Misha Gusarov <dottedmag@dottedmag.net>
+diff --git a/README.md b/README.md
+index ec2b4e1..b14cec2 100644
+--- a/README.md
++++ b/README.md
+@@ -33,6 +33,8 @@ This feature requires `htmldoc(1)`, and `lynx(1)` or `elinks(1)` installed.
+ Installation
+ ============
+ 
++Archmage uses PyCHM that depends on (C library) CHMlib. After CHMlib is installed, do
++
+     pip install archmage
+ 
+ Requirements
+@@ -40,7 +42,7 @@ Requirements
+ 
+ arCHMage has the following dependencies:
+ 
+-  * Python 3.5+
++  * Python 3.6+
+   * PyCHM
+   * BeautifulSoup4
+ 
+diff --git a/archmage/CHM.py b/archmage/CHM.py
+index ce85446..44bbd98 100644
+--- a/archmage/CHM.py
++++ b/archmage/CHM.py
+@@ -3,7 +3,7 @@
+ # archmage -- CHM decompressor
+ # Copyright (c) 2003 Eugeny Korekin <aaaz@users.sourceforge.net>
+ # Copyright (c) 2005-2009 Basil Shubin <bashu@users.sourceforge.net>
+-# Copyright (c) 2015,2019 Mikhail Gusarov <dottedmag@dottedmag.net>
++# Copyright (c) 2015-2020 Misha Gusarov <dottedmag@dottedmag.net>
+ #
+ # This program is free software; you can redistribute it and/or modify it under
+ # the terms of the GNU General Public License as published by the Free Software
+@@ -29,6 +29,7 @@ import string
+ import tempfile
+ import os.path
+ from enum import Enum
++from typing import List, Union
+ 
+ import archmage
+ 
+@@ -36,7 +37,7 @@ from archmage.CHMParser import SitemapFile, PageLister, ImageCatcher, TOCCounter
+ 
+ # import PyCHM bindings
+ try:
+-    from chm import chmlib
++    from chm import chmlib  # type: ignore
+ except ImportError as msg:
+     sys.exit(
+         "ImportError: %s\nPlease check README file for system requirements."
+@@ -70,7 +71,7 @@ class FileSource:
+                 out.append(path)
+             return chmlib.CHM_ENUMERATOR_CONTINUE
+ 
+-        out = []
++        out: List[str] = []
+         if (
+             chmlib.chm_enumerate(
+                 self._chm, chmlib.CHM_ENUMERATE_ALL, get_name, out
+@@ -123,7 +124,7 @@ class CHM:
+         self.cache = {}
+         # Name of source directory with CHM content
+         if os.path.isdir(name):
+-            self.source = DirSource(name)
++            self.source: Union[DirSource, FileSource] = DirSource(name)
+         else:
+             self.source = FileSource(name)
+         self.sourcename = name
+@@ -177,13 +178,14 @@ class CHM:
+         return self.cache["image_urls"]
+ 
+     def _image_urls(self):
+-        out = []
++        out: List[str] = []
+         image_catcher = ImageCatcher()
+         for file in self.html_files():
++            # Use latin-1, as it will accept any byte sequences
+             image_catcher.feed(
+                 Entry(
+                     self.source, file, self.filename_case, self.restore_framing
+-                ).correct()
++                ).correct().decode("latin-1")
+             )
+             for image_url in image_catcher.imgurls:
+                 if not out.count(image_url):
+@@ -273,7 +275,8 @@ class CHM:
+ 
+     def _toclevels(self):
+         counter = TOCCounter()
+-        counter.feed(self.topicstree)
++        # Use latin-1, as it will accept any byte sequences
++        counter.feed(self.topicstree.decode("latin-1"))
+         if counter.count > self.maxtoclvl:
+             return self.maxtoclvl
+         else:
+@@ -432,7 +435,7 @@ class CHM:
+                     self.extract_entry(
+                         entry=key, output_file=key.lower(), destdir=tempdir
+                     )
+-        htmldoc(files, self.htmldoc_exec, options, self.toclevels, output)
++        htmldoc(files, self.htmldoc_exec, options, self.toclevels(), output)
+         # Remove temporary files
+         shutil.rmtree(path=tempdir)
+ 
+@@ -493,21 +496,21 @@ if (window.name != "content")
+                 data = self.lower_links(data)
+ 
+             # Delete unwanted HTML elements.
+-            data = re.sub("<div .*teamlib\\.gif.*\\/div>", "", data)
+-            data = re.sub("<a href.*>\\[ Team LiB \\]<\\/a>", "", data)
++            data = re.sub(b"<div .*teamlib\\.gif.*\\/div>", b"", data)
++            data = re.sub(b"<a href.*>\\[ Team LiB \\]<\\/a>", b"", data)
+             data = re.sub(
+-                "<table.*larrow\\.gif.*rarrow\\.gif.*<\\/table>", "", data
++                b"<table.*larrow\\.gif.*rarrow\\.gif.*<\\/table>", b"", data
+             )
+-            data = re.sub("<a href.*next\\.gif[^>]*><\\/a>", "", data)
+-            data = re.sub("<a href.*previous\\.gif[^>]*><\\/a>", "", data)
+-            data = re.sub("<a href.*prev\\.gif[^>]*><\\/a>", "", data)
+-            data = re.sub('"[^"]*previous\\.gif"', '""', data)
+-            data = re.sub('"[^"]*prev\\.gif"', '""', data)
+-            data = re.sub('"[^"]*next\\.gif"', '""', data)
++            data = re.sub(b"<a href.*next\\.gif[^>]*><\\/a>", b"", data)
++            data = re.sub(b"<a href.*previous\\.gif[^>]*><\\/a>", b"", data)
++            data = re.sub(b"<a href.*prev\\.gif[^>]*><\\/a>", b"", data)
++            data = re.sub(b'"[^"]*previous\\.gif"', b'""', data)
++            data = re.sub(b'"[^"]*prev\\.gif"', b'""', data)
++            data = re.sub(b'"[^"]*next\\.gif"', b'""', data)
+         if data is not None:
+             return data
+         else:
+-            return ""
++            return b""
+ 
+     def get(self):
+         """Get CHM entry content"""
+@@ -524,4 +527,4 @@ if (window.name != "content")
+         if data is not None:
+             return data
+         else:
+-            return ""
++            return b""
+diff --git a/archmage/CHMParser.py b/archmage/CHMParser.py
+index 1ac1e2b..02c8c37 100644
+--- a/archmage/CHMParser.py
++++ b/archmage/CHMParser.py
+@@ -2,7 +2,7 @@
+ #
+ # archmage -- CHM decompressor
+ # Copyright (c) 2009 Basil Shubin <bashu@users.sourceforge.net>
+-# Copyright (c) 2015,2019 Mikhail Gusarov <dottedmag@dottedmag.net>
++# Copyright (c) 2015-2020 Misha Gusarov <dottedmag@dottedmag.net>
+ #
+ # This program is free software; you can redistribute it and/or modify it under
+ # the terms of the GNU General Public License as published by the Free Software
+@@ -21,9 +21,10 @@
+ 
+ import re
+ import mimetypes
+-import sgmllib, urllib.request, urllib.error, urllib.parse
++import sgmllib  # type: ignore
++import urllib.request, urllib.error, urllib.parse
+ 
+-from bs4 import BeautifulSoup, UnicodeDammit
++from bs4 import BeautifulSoup, UnicodeDammit  # type: ignore
+ from html.parser import HTMLParser
+ from urllib.parse import urlparse
+ 
+diff --git a/archmage/__init__.py b/archmage/__init__.py
+index 8f1d5c5..804becf 100644
+--- a/archmage/__init__.py
++++ b/archmage/__init__.py
+@@ -3,7 +3,7 @@
+ # archmage -- CHM decompressor
+ # Copyright (c) 2003 Eugeny Korekin <aaaz@users.sourceforge.net>
+ # Copyright (c) 2005-2009 Basil Shubin <bashu@users.sourceforge.net>
+-# Copyright (c) 2015,2019 Mikhail Gusarov <dottedmag@dottedmag.net>
++# Copyright (c) 2015-2020 Misha Gusarov <dottedmag@dottedmag.net>
+ #
+ # This program is free software; you can redistribute it and/or modify it under
+ # the terms of the GNU General Public License as published by the Free Software
+diff --git a/archmage/arch.conf b/archmage/arch.conf
+index bb5432a..c9208a4 100644
+--- a/archmage/arch.conf
++++ b/archmage/arch.conf
+@@ -56,7 +56,7 @@ chmtohtml = '-t html -f "%(output)s" --book %(toc)s --no-numbered --toctitle "Ta
+ 
+ # CHM2PDF converting. Use following command to convert CHM content to a single 
+ # PDF file. Make sure that htmldoc is available on your system.
+-chmtopdf = '-t pdf14 -f "%(output)s" --book %(toc)s --no-numbered --toctitle "Table of Contents" --title --textcolor "#000000" --linkcolor "#0000ff" --linkstyle plain --size Universal --left 1.00in --right 0.50in --top 0.50in --bottom 0.50in --header .t. --header1 ... --footer h.1 --nup 1 --tocheader .t. --tocfooter ..i --portrait --color --no-pscommands --no-xrxcomments --compression=1 --jpeg=0 --fontsize 11.0 --fontspacing 1.2 --headingfont Helvetica --bodyfont Times --headfootsize 11.0 --headfootfont Helvetica --charset iso-8859-1 --links --embedfonts --pagemode outline --pagelayout single --firstpage c1 --pageeffect none --pageduration 10 --effectduration 1.0 --no-encryption --permissions all  --owner-password ""  --user-password "" --browserwidth 680 --no-strict --no-overflow --quiet'
++chmtopdf = '-t pdf14 -f "%(output)s" --webpage %(toc)s --no-title --no-numbered --toctitle "Table of Contents" --textcolor "#000000" --linkcolor "#0000ff" --linkstyle plain --size Universal --left 1.00in --right 0.50in --top 0.50in --bottom 0.50in --header .t. --header1 ... --footer h.1 --nup 1 --tocheader .t. --tocfooter ..i --portrait --color --no-pscommands --no-xrxcomments --compression=1 --jpeg=0 --fontsize 11.0 --fontspacing 1.2 --headingfont Helvetica --bodyfont Times --headfootsize 11.0 --headfootfont Helvetica --charset iso-8859-1 --links --embedfonts --pagemode outline --pagelayout single --firstpage c1 --pageeffect none --pageduration 10 --effectduration 1.0 --no-encryption --permissions all  --owner-password ""  --user-password "" --browserwidth 680 --no-strict --no-overflow --quiet'
+ 
+ # Maximum Table of Content levels for htmldoc utility.
+ #
+diff --git a/archmage/cli.py b/archmage/cli.py
+index a7fd54a..8a573f7 100755
+--- a/archmage/cli.py
++++ b/archmage/cli.py
+@@ -3,7 +3,7 @@
+ # archmage -- CHM decompressor
+ # Copyright (c) 2003 Eugeny Korekin <aaaz@users.sourceforge.net>
+ # Copyright (c) 2005-2009 Basil Shubin <bashu@users.sourceforge.net>
+-# Copyright (c) 2015,2019 Mikhail Gusarov <dottedmag@dottedmag.net>
++# Copyright (c) 2015-2020 Misha Gusarov <dottedmag@dottedmag.net>
+ #
+ # This program is free software; you can redistribute it and/or modify it under
+ # the terms of the GNU General Public License as published by the Free Software
+diff --git a/archmage/htmldoc.py b/archmage/htmldoc.py
+index 606fea1..b223dfd 100644
+--- a/archmage/htmldoc.py
++++ b/archmage/htmldoc.py
+@@ -21,7 +21,6 @@
+ """Generic converter function"""
+ 
+ import os
+-import string
+ import tempfile
+ import subprocess
+ 
+@@ -42,10 +41,10 @@ def htmldoc(input, cmd, options, toclevels, output):
+     options = options % {"output": output, "toc": toc}
+     if input:
+         # Create a htmldoc file for batch processing
+-        f = tempfile.NamedTemporaryFile(delete=False)
+-        f.write("#HTMLDOC 1.8.27\n")
+-        f.write(options + "\n")
+-        f.write(string.join(input, "\n"))
++        f = tempfile.NamedTemporaryFile(mode="wb", delete=False)
++        f.write(b"#HTMLDOC 1.8.27\n")
++        f.write(options.encode("utf-8") + b"\n")
++        f.write(b'\n'.join(f.encode('utf-8') for f in input))
+         f.close()
+         # Prepare command line to execute
+         command = "%s --batch %s" % (cmd, f.name)
+diff --git a/setup.py b/setup.py
+index 630a675..092372d 100644
+--- a/setup.py
++++ b/setup.py
+@@ -18,7 +18,7 @@ setup(
+     name="archmage",
+     version="0.4.2.1",
+     description="CHM decompressor",
+-    maintainer="Mikhail Gusarov",
++    maintainer="Misha Gusarov",
+     maintainer_email="dottedmag@dottedmag.net",
+     url="https://github.com/dottedmag/archmage",
+     license="GPLv2+",

@@ -22,11 +22,18 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220222 bkw: Modified by SlackBuilds.org, BUILD=2:
+# - fix build on 15.0 (missing C++ includes).
+# - fix libdir (/usr/lib => /usr/lib64 on x86_64).
+# - fix incorrect ipelets path built into the binary (ugh).
+# - eliminate some useless docs (install.txt and macos.txt)
+# - symlink html docs to doc dir.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=ipe
 VERSION=${VERSION:-7.2.13}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -38,9 +45,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -75,24 +79,40 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
-QT_SELECT=5 make -C src IPEPREFIX="$PKG/usr/" IPEMANDIR="$PKG/usr/man/man1" MOC=moc-qt5
-QT_SELECT=5 make -C src install IPEPREFIX="$PKG/usr/" IPEMANDIR="$PKG/usr/man/man1" MOC=moc-qt5
+# 20220226 bkw: C++ madness.
+sed -i '1i#include <cstdint>' src/include/ipeattributes.h
+sed -i '1i#include <cerrno>' src/ipelib/ipeplatform.cpp
+sed -i '1i#include <QPainterPath>' src/ipecanvas/ipecanvas_qt.cpp
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# 20220226 bkw: some of these paths get baked into the binaries, so
+# we don't want $PKG in them during the build.
+runmake() {
+QT_SELECT=5 \
+make -C src \
+  IPEPREFIX="$1/usr/" \
+  IPEMANDIR="$1/usr/man/man1" \
+  IPELETDIR="$1/usr/lib$LIBDIRSUFFIX/ipe/$VERSION/ipelets" \
+  IPELIBDIR="$1/usr/lib$LIBDIRSUFFIX" \
+  MOC=moc-qt5 \
+  $2
+}
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+runmake
+runmake $PKG install
+strip $PKG/usr/bin/* $PKG/usr/lib*/*.so.*.*.*
+gzip -9 $PKG/usr/man/man*/*
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  gpl.txt install.txt macos.txt news.txt readme.txt \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# 20220226 bkw: the real documentation is the html, leave it where 'make
+# install' put it, but symlink to where it belongs in a Slackware package.
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+ln -s ../../share/$PRGNAM/$VERSION/doc $PKGDOC/html
+cp -a gpl.txt news.txt readme.txt $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc

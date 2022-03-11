@@ -26,9 +26,13 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=digimend-kernel-drivers
 VERSION=${VERSION:-10}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+
+KERNEL=${KERNEL:-$(uname -r)}
+KERNELPATH=${KERNELPATH:-/lib/modules/$KERNEL/build}
+PKG_VERS=${VERSION}_$(echo $KERNEL | tr - _)
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -42,7 +46,7 @@ fi
 # the name of the created package would be, and then exit. This information
 # could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
-  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  echo "$PRGNAM-$PKG_VERS-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
 fi
 
@@ -79,21 +83,26 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-make
-make install DESTDIR=$PKG
+# don't run depmod here
+sed -i '/depmod -a$/d' Makefile
+# don't run udevadm here
+sed -i '/^install:/s/ udev_rules_install / udev_rules_install_files /' Makefile
+make KVERSION=$KERNEL 
+make install DESTDIR=$PKG KVERSION=$KERNEL 
 
-mkdir -p $PKG/lib/modules/$(uname -r)/kernel/drivers/hid/
-cp hid*.ko $PKG/lib/modules/$(uname -r)/kernel/drivers/hid/
+mkdir -p $PKG/lib/modules/$KERNEL/kernel/drivers/hid/
+cp hid*.ko $PKG/lib/modules/$KERNEL/kernel/drivers/hid/
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a COPYING README.md $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+mkdir -p $PKG/usr/doc/$PRGNAM-$PKG_VERS
+cp -a COPYING README.md $PKG/usr/doc/$PRGNAM-$PKG_VERS
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$PKG_VERS/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s%@KERNEL@%$KERNEL%" $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$PKG_VERS-$ARCH-$BUILD$TAG.$PKGTYPE

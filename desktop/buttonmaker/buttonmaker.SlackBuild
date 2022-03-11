@@ -22,12 +22,26 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# Now maintained by B. Watson <yalhcru@gmail.com>
+
+# 20220208 bkw: BUILD=2
+# - take over maintenance
+# - fix for 15.0, and actually use SLKCFLAGS.
+# - update README and slack-desc a bit.
+# - simplify the horrid sed code that was here before.
+
+# Note: this dockapp looks pretty useless to me, as a windowmaker
+# dockapp... because windowmaker already supports docking app icons,
+# and launches them on double-click. I can see a possible use case
+# *outside* of windowmaker, as a low-resource-usage launcher button
+# for an even simpler window manager...
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=buttonmaker
 SRCNAM=ButtonMaker
 VERSION=${VERSION:-0.1}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -39,9 +53,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -74,51 +85,40 @@ rm -rf $SRCNAM
 tar xvf $CWD/$SRCNAM.tar.gz
 cd $SRCNAM
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-#fix code in main.c to prevent dockapp from exit on right click
-sed -i '
-/exit(0)/{
- x
- # add a dot to the hold space
- s/$/./
- # #dots==#desired?
- /^.\{2\}$/{
-  # do the replacement action
-  x
-  s:exit(0):/* removed */:
-  x
- }
- x
-}
-' $PWD/src/main.c
-#and interpreting the command properly on the left button click
-sed -i -e '0,/strcat/ s/strcat/strcpy/'  $PWD/src/main.c
+# don't exit on right click, and interpret the cmd properly on left click.
+sed -i -e '0,/strcat/ s/strcat/strcpy/' \
+       -e '/exit(0);/d' \
+    $PWD/src/main.c
 
-CFLAGS="$SLKCFLAGS" \
+DOCDIR=/usr/doc/$PRGNAM-$VERSION
+PKGDOC=$PKG/$DOCDIR
+
+SLKCFLAGS+=" -fcommon"
+
+CFLAGS="$SLKCFLAGS -fcommon" \
 CXXFLAGS="$SLKCFLAGS" \
-./autogen.sh
-./configure \
+./autogen.sh \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --build=$ARCH-slackware-linux
 
-make
-make install DESTDIR=$PKG
+make V=1
+make install-strip DESTDIR=$PKG
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a ChangeLog COPYING INSTALL $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/${PRGNAM}.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/${PRGNAM}.SlackBuild
+# INSTALL is useless, NEWS AUTHORS README ChangeLog are empty placeholders.
+# They all got installed here...
 rm -rf $PKG/usr/doc/$PRGNAM
+
+# Our one actual documentation file:
+mkdir -p $PKGDOC
+cp -a COPYING $PKGDOC
+
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc

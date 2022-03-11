@@ -1,0 +1,914 @@
+diff --git a/libs/boost-logging/boost/logging/detail/tss/tss_impl_pthread.hpp b/libs/boost-logging/boost/logging/detail/tss/tss_impl_pthread.hpp
+index 3077276..af9afd2 100644
+--- a/libs/boost-logging/boost/logging/detail/tss/tss_impl_pthread.hpp
++++ b/libs/boost-logging/boost/logging/detail/tss/tss_impl_pthread.hpp
+@@ -39,7 +39,7 @@ inline tss_slots* get_slots()
+     slots = static_cast<tss_slots*>( pthread_getspecific(tss_data_native_key()));
+     if (slots == 0)
+     {
+-        std::auto_ptr<tss_slots> temp( new_object_ensure_delete<tss_slots>() );
++        std::unique_ptr<tss_slots> temp( new_object_ensure_delete<tss_slots>() );
+         // pre-allocate a few elems, so that we'll be fast
+         temp->resize(BOOST_LOG_TSS_SLOTS_SIZE);
+ 
+diff --git a/src/mbase/project/media.cpp b/src/mbase/project/media.cpp
+index 81e44d2..5f9e4f6 100644
+--- a/src/mbase/project/media.cpp
++++ b/src/mbase/project/media.cpp
+@@ -58,7 +58,9 @@ void StorageMD::MakeByPath(const std::string& path, bool cnv_to_utf8,
+ 
+ std::string MakeAutoName(const std::string& str, int old_sz)
+ {
+-    return (str::stream() << str << " " << old_sz+1).str();
++    str::stream ss;
++    ss << str << " " << old_sz+1;
++    return ss.str();
+ }
+ 
+ void VideoMD::AddChapter(ChapterItem chp)
+diff --git a/src/mbase/project/menu.cpp b/src/mbase/project/menu.cpp
+index 1f25817..94b8755 100644
+--- a/src/mbase/project/menu.cpp
++++ b/src/mbase/project/menu.cpp
+@@ -166,7 +166,9 @@ void MenuMD::SerializeImpl(Archieve& ar)
+ static std::string MakeObjectPath(int idx, const char* type)
+ {
+     ASSERT( idx != NO_HNDL );
+-    return (str::stream() << type << "." << idx).str();
++    str::stream ss;
++    ss << type << "." << idx;
++    return ss.str();
+ }
+ 
+ std::string GetMediaRef(MediaItem mi)
+@@ -197,7 +199,9 @@ class RefMaker: public ObjVisitor
+ void RefMaker::Visit(VideoChapterMD& obj)
+ {
+     refStr  = GetMediaRef(obj.owner);
+-    refStr += (str::stream() << "." << ChapterPosInt(&obj)).str();
++    str::stream ss;
++    ss << "." << ChapterPosInt(&obj);
++    refStr += ss.str();
+ }
+ 
+ std::string Media2Ref(MediaItem mi)
+@@ -233,8 +237,9 @@ int GetRefIndex(const char*& str)
+ 
+ std::string ThrowBadIndex(const char* prefix, int idx)
+ {
+-    throw std::runtime_error(
+-        (str::stream() << prefix << idx).str() );
++    str::stream ss;
++    ss << prefix << idx;
++    throw std::runtime_error(ss.str());
+ }
+ 
+ MediaItem TryGetMedia(int idx)
+diff --git a/src/mbase/project/serialization.h b/src/mbase/project/serialization.h
+index ff5b7a9..547c438 100644
+--- a/src/mbase/project/serialization.h
++++ b/src/mbase/project/serialization.h
+@@ -75,7 +75,9 @@ namespace ToString
+ template<typename T>
+ std::string MakeString(const T& t)
+ {
+-    return (str::stream() << t).str();
++    str::stream ss;
++    ss << t;
++    return ss.str();
+ }
+ 
+ template<typename T>
+diff --git a/src/mbase/project/srl-common.cpp b/src/mbase/project/srl-common.cpp
+index c2c92b5..ab1c62b 100644
+--- a/src/mbase/project/srl-common.cpp
++++ b/src/mbase/project/srl-common.cpp
+@@ -36,10 +36,12 @@ void Serialize(Archieve& ar, MenuParams& mp)
+ std::string ToString(const RGBA::Pixel& pxl)
+ {
+     using Mpeg::set_hms;
+-    return (str::stream("#") << std::hex 
+-            << set_hms() << (int)pxl.red 
+-            << set_hms() << (int)pxl.green 
+-            << set_hms() << (int)pxl.blue << (int)pxl.alpha).str();
++    str::stream ss ("#");
++    ss << std::hex 
++      << set_hms() << (int)pxl.red 
++      << set_hms() << (int)pxl.green 
++      << set_hms() << (int)pxl.blue << (int)pxl.alpha;
++    return ss.str();
+ }
+ 
+ // как pango_color_parse()
+diff --git a/src/mbase/project/srl-db.cpp b/src/mbase/project/srl-db.cpp
+index c3babec..e50a523 100644
+--- a/src/mbase/project/srl-db.cpp
++++ b/src/mbase/project/srl-db.cpp
+@@ -102,7 +102,7 @@ void DbSerializeProjectImpl(Archieve& ar)
+ }
+ 
+ void ADatabase::Load(const std::string& fname,
+-                     const std::string& cur_dir) throw (std::exception)
++                     const std::string& cur_dir)
+ {
+     try
+     {
+diff --git a/src/mbase/project/table.cpp b/src/mbase/project/table.cpp
+index 455c334..3e52383 100644
+--- a/src/mbase/project/table.cpp
++++ b/src/mbase/project/table.cpp
+@@ -29,6 +29,7 @@
+ #include "theme.h"
+ 
+ #include <mbase/resources.h>
++#include <boost/filesystem/directory.hpp>
+ 
+ 
+ const char* APROJECT_VERSION = "1.2.4";
+@@ -154,7 +155,7 @@ NameValueT<Media> LoadMedia(Archieve& ar, MediaList& md_list)
+ void SerializePath(Archieve& ar, const char* tag_name, std::string& fpath)
+ {
+     //ar & NameValue("Path", mdPath);
+-    fs::path rel_to_dir = fs::path(AData().GetProjectFName()).branch_path();
++    fs::path rel_to_dir = fs::path(AData().GetProjectFName()).parent_path();
+     if( ar.IsLoad() )
+     {
+         ar >> NameValue(tag_name, fpath);
+@@ -162,7 +163,7 @@ void SerializePath(Archieve& ar, const char* tag_name, std::string& fpath)
+         if( !fpath.empty() )
+         {
+             fs::path pth(fpath);
+-            if( !pth.is_complete() )
++            if( !pth.is_absolute() )
+                 fpath = (rel_to_dir/fpath).string();
+         }
+     }
+diff --git a/src/mbase/project/table.h b/src/mbase/project/table.h
+index 7c73085..cc7e36d 100644
+--- a/src/mbase/project/table.h
++++ b/src/mbase/project/table.h
+@@ -128,7 +128,7 @@ class ADatabase: public Singleton<ADatabase>, public DataWare
+                  void  ClearSettings();
+ 
+                  void  Load(const std::string& fname,
+-                            const std::string& cur_dir = std::string()) throw (std::exception);
++                            const std::string& cur_dir = std::string());
+                  bool  Save();
+ 
+                  bool  SaveAs(const std::string& fname,
+diff --git a/src/mbase/project/tests/test_table.cpp b/src/mbase/project/tests/test_table.cpp
+index f8a1c20..3e7115a 100644
+--- a/src/mbase/project/tests/test_table.cpp
++++ b/src/mbase/project/tests/test_table.cpp
+@@ -129,7 +129,7 @@ BOOST_AUTO_TEST_CASE( TestMediaList )
+         // проверка чтения/записи путей
+         boost::intrusive_ptr<StillImageMD> pict2 = ptr::dynamic_pointer_cast<StillImageMD>(ml[2]);
+         fs::path pth = pict2->GetPath();
+-        BOOST_CHECK( pth.is_complete() );
++        BOOST_CHECK( pth.is_absolute() );
+         BOOST_CHECK( fs::exists(pth) );
+ 
+         // проверка ссылок
+diff --git a/src/mdemux/dvdread.cpp b/src/mdemux/dvdread.cpp
+index d8392b1..12fcae6 100644
+--- a/src/mdemux/dvdread.cpp
++++ b/src/mdemux/dvdread.cpp
+@@ -35,8 +35,10 @@ namespace DVD {
+ std::string VobFName(VobPos& pos, const std::string& suffix)
+ {
+     using Mpeg::set_hms;
+-    return (str::stream("Video") << set_hms() << int(pos.Vts()) 
+-            << "-" << set_hms() << pos.VobId() << suffix << ".vob").str();
++    str::stream ss ("Video");
++    ss << set_hms() << int(pos.Vts()) 
++      << "-" << set_hms() << pos.VobId() << suffix << ".vob";
++    return ss.str();
+ }
+ 
+ typedef boost::function<void(int, double)> VobTimeFnr;
+@@ -282,9 +284,11 @@ VobPtr FindVob(VobArr& dvd_vobs, uint8_t vts, uint16_t vob_id)
+ static void TryDVDReadBlocks(dvd_file_t* file, int off, size_t cnt, char* buf)
+ {
+     int real_cnt = DVDReadBlocks(file, off, cnt, (unsigned char*)buf);
+-    if( (int)cnt != real_cnt )
+-        throw std::runtime_error( (str::stream() << real_cnt << 
+-                                   " != DVDReadBlocks(" << cnt << ")").str() );
++    if( (int)cnt != real_cnt ) {
++        str::stream ss;
++        ss << real_cnt << " != DVDReadBlocks(" << cnt << ")";
++        throw std::runtime_error( ss.str() );
++    }
+ }
+ 
+ // размер буфера должен соответствовать читаемому диапазону
+diff --git a/src/mdemux/mpeg2demux.cpp b/src/mdemux/mpeg2demux.cpp
+index bb7b1b1..ecb3774 100644
+--- a/src/mdemux/mpeg2demux.cpp
++++ b/src/mdemux/mpeg2demux.cpp
+@@ -71,7 +71,9 @@ bool DemuxSvc::Filter(uint32_t code)
+ 
+ static std::string MakePESKey(int id, const char* ext)
+ {
+-    return (str::stream() << id << "." << ext).str();
++    str::stream ss;
++    ss << id << "." << ext;
++    return ss.str();
+ }
+ 
+ static bool ReadPart(io::stream& strm, uint8_t* buf, int sz, int& len)
+@@ -110,7 +112,9 @@ static std::string MakeKeyNameForLPCM(int track, uint8_t inf)
+         ASSERT(0);
+     }
+ 
+-    std::string header_str = (str::stream() << sample_rate << ":" << channels << ":" << bps << ".lpcm").str();
++    str::stream ss;
++    ss << sample_rate << ":" << channels << ":" << bps << ".lpcm";
++    std::string header_str = ss.str();
+     return MakePESKey(track, header_str.c_str());
+ }
+ 
+diff --git a/src/mdemux/seek.cpp b/src/mdemux/seek.cpp
+index e46658f..f0ce934 100644
+--- a/src/mdemux/seek.cpp
++++ b/src/mdemux/seek.cpp
+@@ -37,8 +37,10 @@ std::string SecToHMS(double len, bool round_sec)
+     int hh    = min / 60;
+     int mm    = min - hh*60;
+ 
+-    return (str::stream() << set_hms() << hh << ":" 
+-                          << set_hms() << mm << ":" << set_hms() << ss).str();
++    str::stream strss;
++    strss << set_hms() << hh << ":"
++      << set_hms() << mm << ":" << set_hms() << ss;
++    return strss.str();
+ }
+ 
+ bool MediaInfo::InitBegin(VideoLine& vl)
+diff --git a/src/mgui/author/burn.cpp b/src/mgui/author/burn.cpp
+index ddfad0a..578429e 100644
+--- a/src/mgui/author/burn.cpp
++++ b/src/mgui/author/burn.cpp
+@@ -85,7 +85,7 @@ BurnData& GetInitedBD()
+     return bd;
+ }
+ 
+-re::pattern WriteSpeed_RE("Write Speed #"RG_NUM":"RG_SPS RG_NUM"\\."RG_NUM "x1385"); 
++re::pattern WriteSpeed_RE("Write Speed #" RG_NUM ":" RG_SPS RG_NUM "\\." RG_NUM "x1385"); 
+ 
+ RefPtr<Gtk::ListStore> sp_store;
+ 
+@@ -253,7 +253,7 @@ DVDInfo ParseDVDInfo(bool is_good, const std::string& out_info)
+     }
+     else
+     {
+-        static re::pattern media_type_re("Mounted Media:"RG_SPS"[0-9A-F]+h, ([^ \n]+)");
++        static re::pattern media_type_re("Mounted Media:" RG_SPS "[0-9A-F]+h, ([^ \n]+)");
+         re::match_results what;
+ 
+         bool is_found = re::search(out_info, what, media_type_re);
+@@ -277,7 +277,7 @@ DVDInfo ParseDVDInfo(bool is_good, const std::string& out_info)
+         // isBlank
+         if( res != dvdOTHER )
+         {
+-            static re::pattern media_status_re("Disc status:"RG_SPS"([a-z]+)\n");
++            static re::pattern media_status_re("Disc status:" RG_SPS "([a-z]+)\n");
+             bool is_found = re::search(out_info, what, media_status_re);
+             ASSERT_RTL( is_found );
+ 
+diff --git a/src/mgui/author/execute.cpp b/src/mgui/author/execute.cpp
+index 5b2330c..e308552 100644
+--- a/src/mgui/author/execute.cpp
++++ b/src/mgui/author/execute.cpp
+@@ -64,9 +64,9 @@ static void InitFoundStageTag(RefPtr<Gtk::TextTag> tag)
+     tag->property_foreground() = "darkgreen";
+ }
+ 
+-re::pattern DVDAuthorRE(RG_CMD_BEG"dvdauthor"RG_EW ".*-x"RG_EW RG_SPS RG_BW"DVDAuthor\\.xml"RG_EW);
+-re::pattern MkIsoFsRE(RG_CMD_BEG MK_ISO_CMD RG_EW ".*-dvd-video"RG_EW ".*>.*"RG_BW"dvd.iso"RG_EW);
+-re::pattern GrowIsoFsRE(RG_CMD_BEG"growisofs"RG_EW ".*-dvd-compat"RG_EW ".*-dvd-video"RG_EW); 
++re::pattern DVDAuthorRE(RG_CMD_BEG"dvdauthor" RG_EW ".*-x" RG_EW RG_SPS RG_BW "DVDAuthor\\.xml" RG_EW);
++re::pattern MkIsoFsRE(RG_CMD_BEG MK_ISO_CMD RG_EW ".*-dvd-video" RG_EW ".*>.*" RG_BW "dvd.iso" RG_EW);
++re::pattern GrowIsoFsRE(RG_CMD_BEG"growisofs" RG_EW ".*-dvd-compat" RG_EW ".*-dvd-video" RG_EW); 
+ 
+ //static void PrintMatchResults(const re::match_results& what)
+ //{
+@@ -94,7 +94,7 @@ class MkIsoFsPP: public ProgressParser
+     virtual void  Filter(const std::string& line);
+ };
+ 
+-re::pattern MkIsoFsPercent_RE( RG_FLT"?% done");
++re::pattern MkIsoFsPercent_RE( RG_FLT "?% done");
+ 
+ void MkIsoFsPP::Filter(const std::string& line)
+ {
+@@ -126,8 +126,8 @@ class DVDAuthorPP: public ProgressParser
+             bool  fixStage;
+ };
+ 
+-re::pattern DVDAuthorVOB_RE( "^STAT: VOBU "RG_NUM" at "RG_NUM"MB"); 
+-re::pattern DVDAuthorFix_RE( "^STAT: fixing VOBU at "RG_NUM"MB \\("RG_NUM"/"RG_NUM", "RG_NUM"%\\)"); 
++re::pattern DVDAuthorVOB_RE( "^STAT: VOBU " RG_NUM " at " RG_NUM "MB"); 
++re::pattern DVDAuthorFix_RE( "^STAT: fixing VOBU at " RG_NUM "MB \\(" RG_NUM "/" RG_NUM ", " RG_NUM "%\\)"); 
+ 
+ void DVDAuthorPP::Filter(const std::string& line)
+ {
+@@ -157,7 +157,7 @@ void DVDAuthorPP::Filter(const std::string& line)
+     if( p )
+         of.SetProgress(p);
+     
+-    static re::pattern ch_error_re("ERR:.*Cannot jump to chapter "RG_NUM" of title "RG_NUM", only "RG_NUM" exist");
++    static re::pattern ch_error_re("ERR:.*Cannot jump to chapter " RG_NUM " of title " RG_NUM ", only " RG_NUM " exist");
+     if( re::search(line, what, ch_error_re) )
+     {
+         std::string& err_str = of.firstError;
+diff --git a/src/mgui/author/render.cpp b/src/mgui/author/render.cpp
+index 1ffbca2..81720d7 100644
+--- a/src/mgui/author/render.cpp
++++ b/src/mgui/author/render.cpp
+@@ -866,7 +866,7 @@ std::string FFmpegPostArgs(const std::string& out_fname, bool is_4_3, bool is_pa
+             // 
+             // :KLUDGE: (только) в ffmpeg, avformat 53.13.0, поменяли . на : => надо
+             // самим открывать файл и узнавать индекс! 
+-            static re::pattern audio_idx("Stream #"RG_NUM"[\\.|:]"RG_NUM".*Audio:");
++            static re::pattern audio_idx("Stream #" RG_NUM "[\\.|:]" RG_NUM ".*Audio:");
+ 
+             re::match_results what;
+             // флаг означает, что перевод строки не может быть точкой
+@@ -1221,17 +1221,17 @@ void TestFFmpegForDVDEncoding(const std::string& conts)
+ {
+     CheckNoCodecs(CheckForCodecList(conts));
+ 
+-    static re::pattern dvd_format("^ .E dvd"RG_EW);
++    static re::pattern dvd_format("^ .E dvd" RG_EW);
+     CheckStrippedFFmpeg(dvd_format, conts, "dvd format");
+ 
+ // :TRICKY: с версии libavcodec 54 при выводе начальный пробел не ставят => поэтому ?
+ // ("спасибо" Anton Khirnov за очередное "улучшение") 
+ #define _CPP_ "^ ?"
+-    static re::pattern mpeg2video_codec(_CPP_".EV... mpeg2video"RG_EW);
++    static re::pattern mpeg2video_codec(_CPP_ ".EV... mpeg2video" RG_EW);
+     CheckStrippedFFmpeg(mpeg2video_codec, conts, "mpeg2 video encoder");
+ 
+     // по факту ffmpeg всегда использует ac3, однако mp2 тоже возможен
+-    static re::pattern ac3_codec(_CPP_".EA... ac3"RG_EW);
++    static re::pattern ac3_codec(_CPP_ ".EA... ac3" RG_EW);
+     CheckStrippedFFmpeg(ac3_codec, conts, "ac3 audio encoder");
+ #undef _CPP_
+ }
+@@ -1241,7 +1241,7 @@ TripleVersion FindAVVersion(const std::string& conts, const char* avlib_name)
+     // * ищем версию libavfilter
+     // пример: " libavfilter    0. 4. 0 / "
+ #define RG_PADNUM RG_SPS RG_NUM
+-    std::string reg_str = boost::format(RG_BW"%1%"RG_PADNUM"\\."RG_PADNUM"\\."RG_PADNUM" / ")
++    std::string reg_str = boost::format(RG_BW "%1%" RG_PADNUM "\\." RG_PADNUM "\\." RG_PADNUM " / ")
+         % avlib_name % bf::stop;
+     re::pattern avfilter_version(reg_str.c_str());
+     return FindVersion(conts, avfilter_version, AVCnvBin(), avlib_name);
+@@ -1307,7 +1307,9 @@ FFmpegVersion CheckFFDVDEncoding()
+ 
+ bool RenderMainPicture(const std::string& out_dir, Menu mn, int i)
+ {
+-    Author::Info((str::stream() << "Rendering menu \"" << mn->mdName << "\" ...").str());
++    str::stream ss;
++    ss << "Rendering menu \"" << mn->mdName << "\" ...";
++    Author::Info(ss.str());
+     const std::string mn_dir = MakeMenuPath(out_dir, mn, i);
+ 
+     if( IsMotion(mn) )
+diff --git a/src/mgui/author/script.cpp b/src/mgui/author/script.cpp
+index ccfd32f..f2b1c7e 100644
+--- a/src/mgui/author/script.cpp
++++ b/src/mgui/author/script.cpp
+@@ -130,7 +130,9 @@ static std::string MakeFPTarget(MediaItem mi)
+     {
+         VideoItem vi = IsVideo(mi);
+         ASSERT( vi );
+-        str = (str::stream() << "title " << GetAuthorNumber(vi)).str();
++        str::stream ss;
++        ss << "title " << GetAuthorNumber(vi);
++        str = ss.str();
+     }
+     return str;
+ }
+@@ -179,7 +181,9 @@ void TargetCommandVis::Visit(VideoChapterMD& obj)
+     // Потому: для удоства пользователей даем создавать нулевую главу, разрешая это здесь 
+     // (однако доп. нулевые главы будут приводить к ошибке Cannot jump to chapter N ... only M exist)
+     int c_num = ChapterPosInt(&obj) + (owner->List()[0]->chpTime ? 2 : 1) ;
+-    res = (str::stream() << "jump title " << v_num << " chapter " << c_num << ";").str();
++    str::stream ss;
++    ss << "jump title " << v_num << " chapter " << c_num << ";";
++    res = ss.str();
+ }
+ 
+ static std::string MakeButtonJump(MediaItem mi, bool vts_domain)
+@@ -204,7 +208,9 @@ std::string MenuAuthorDir(Menu mn, int idx, bool cnv_from_utf8)
+     if( !fs::native(name) )
+         name = "Menu";
+ 
+-    std::string fname = (str::stream() << idx+1 << "." << name).str();
++    str::stream ss;
++    ss << idx+1 << "." << name;
++    std::string fname = ss.str();
+     return cnv_from_utf8 ? ConvertPathFromUtf8(fname) : fname ;
+ }
+ 
+@@ -626,7 +632,9 @@ static void CopyRootFile(const std::string& fname, const std::string& out_dir)
+ void AuthorSectionInfo(const std::string& str)
+ {
+     Author::Info("\n#", false);
+-    Author::Info((str::stream() << "# " << str).str(), false);
++    str::stream ss;
++    ss << "# " << str;
++    Author::Info(ss.str(), false);
+     Author::Info("#\n", false);
+ }
+ 
+@@ -676,7 +684,7 @@ static void CheckSpumuxFontFile()
+     if( !fs::exists(font_path) )
+     {
+         std::string err_str;
+-        if( !CreateDirs(font_path.branch_path(), err_str) )
++        if( !CreateDirs(font_path.parent_path(), err_str) )
+             Error(err_str.c_str());
+         fs::copy_file(DataDirPath("copy-n-paste/FreeSans.ttf"), font_path);
+     }
+@@ -755,9 +763,9 @@ static void CalcTransPercent(double cur_dur, Job& job, JobData& jd, double full_
+ // ffmpeg выводит статистику первого создаваемого файла каждые полсекунды,
+ // см. print_report() (при verbose=1, по умолчанию)
+ // Формат размера: "size=%8.0fkB"
+-re::pattern FFmpegSizePat( "size= *"RG_NUM"kB"); 
++re::pattern FFmpegSizePat( "size= *" RG_NUM "kB"); 
+ // Формат длительности: "time=%0.2f"
+-re::pattern FFmpegDurPat( "time="RG_FLT);
++re::pattern FFmpegDurPat( "time=" RG_FLT);
+ 
+ static void OnTranscodePrintParse(const char* dat, int sz, const PercentFunctor& fnr)
+ {
+@@ -787,7 +795,7 @@ static void OnTranscodePrintParse(const char* dat, int sz, const PercentFunctor&
+ 
+ // Формат длительности для ffmpeg c коммита dd471070: "time=%02d:%02d:%02d.%02d"
+ // Образец: frame=  208 fps= 58 q=2.0 size=     476kB time=00:00:08.44 bitrate= 461.9kbits/s dup=1 drop=0
+-re::pattern FFmpegNewDurPat( "time="RG_NUM":"RG_NUM":"RG_FLT);
++re::pattern FFmpegNewDurPat( "time=" RG_NUM ":" RG_NUM ":" RG_FLT);
+ 
+ static void OnTranscodeHMSParse(const char* dat, int sz, const PercentFunctor& fnr)
+ {
+@@ -1082,7 +1090,9 @@ static void TranscodeVideos(int pass, const std::string& out_dir)
+ 
+ static void AuthorImpl(const std::string& out_dir)
+ {
+-    AuthorSectionInfo((str::stream() << "Build DVD-Video in folder: " << out_dir).str());
++    str::stream ss;
++    ss << "Build DVD-Video in folder: " << out_dir;
++    AuthorSectionInfo(ss.str());
+     IteratePendingEvents();
+ 
+     IndexVideosForAuthoring();
+@@ -1136,7 +1146,7 @@ static void AuthorImpl(const std::string& out_dir)
+             // 2) парсер dvdauthor не любит незнакомые ему атрибуты => spumux < 0.7 не работает
+             std::string help_str;
+             PipeOutput("spumux -h", help_str);
+-            static re::pattern spumux_version("DVDAuthor::spumux, version "RG_NUM"\\."RG_NUM"\\."RG_NUM"\\.\n");
++            static re::pattern spumux_version("DVDAuthor::spumux, version " RG_NUM "\\." RG_NUM "\\." RG_NUM "\\.\n");
+             if( IsVersionGE(FindVersion(help_str, spumux_version, "spumux"), TripleVersion(0, 7, 0)) )
+                 AddFormatAttr(sp);
+ 
+diff --git a/src/mgui/dvdimport.cpp b/src/mgui/dvdimport.cpp
+index 44dcdec..fc9b965 100644
+--- a/src/mgui/dvdimport.cpp
++++ b/src/mgui/dvdimport.cpp
+@@ -211,10 +211,11 @@ static void OnPreparePage(ImportData& id)
+                 row[VF().selState]  = false;
+                 row[VF().name]      = VobFName(vob.pos);
+                 row[VF().thumbnail] = vob.aspect == af4_3 ? pix4_3 : pix16_9;
+-                std::string desc = (str::stream(Mpeg::SecToHMS(vob.tmLen, true)) <<  ", "
+-                                    << vob.sz.x << "x" << vob.sz.y << ", "
+-                                    << (vob.aspect == af4_3 ? "4:3" : "16:9") << ", " 
+-                                    << std::fixed << std::setprecision(2) << vob.Count()/512. << " " << _("MB")).str();
++                str::stream ss (Mpeg::SecToHMS(vob.tmLen, true));
++                ss << ", " << vob.sz.x << "x" << vob.sz.y << ", "
++                  << (vob.aspect == af4_3 ? "4:3" : "16:9") << ", " 
++                  << std::fixed << std::setprecision(2) << vob.Count()/512. << " " << _("MB");
++                std::string desc = ss.str();
+                 row[VF().desc]      = desc;
+             }
+             CompleteSelection(id, false);
+@@ -275,7 +276,7 @@ static ReaderPtr OpenDVD(const std::string& dvd_path, ImportData& id)
+         id.errLbl.hide();
+ 
+     id.reader = rd;
+-    SetCurPageComplete(id.ast, id.reader);
++    SetCurPageComplete(id.ast, bool(id.reader));
+ 
+     return rd;
+ }
+diff --git a/src/mgui/editor/toolbar.cpp b/src/mgui/editor/toolbar.cpp
+index 6a1894c..a039c3a 100644
+--- a/src/mgui/editor/toolbar.cpp
++++ b/src/mgui/editor/toolbar.cpp
+@@ -45,6 +45,8 @@
+ #include <mlib/sdk/logger.h>
+ #include <mlib/range/enumerate.h>
+ 
++#include <boost/filesystem/directory.hpp>
++
+ namespace Editor
+ {
+ 
+diff --git a/src/mgui/ffviewer.cpp b/src/mgui/ffviewer.cpp
+index 64ea813..a8dc6cb 100644
+--- a/src/mgui/ffviewer.cpp
++++ b/src/mgui/ffviewer.cpp
+@@ -36,6 +36,10 @@
+ #define AVFORMAT_54
+ #endif
+ 
++C_LINKAGE_BEGIN
++#include <libavutil/imgutils.h>
++C_LINKAGE_END
++
+ // разрабы libav считают себя самыми умными и потому решили
+ // закрыть простым смертным доступ к ffurl_register_protocol() 
+ // (бывшая av_register_protocol2()),- https://bugzilla.libav.org/show_bug.cgi?id=224
+@@ -74,7 +78,7 @@ C_LINKAGE_BEGIN
+ 
+ typedef struct AVCodecTag {
+ #if LIBAVFORMAT_VERSION_INT >= AV_VERSION_INT(52,39,00)
+-    enum CodecID id;
++    enum AVCodecID id;
+ #else
+     int id;
+ #endif
+@@ -82,14 +86,14 @@ typedef struct AVCodecTag {
+ } AVCodecTag;
+ 
+ #if LIBAVFORMAT_VERSION_INT >= AV_VERSION_INT(52,34,00)
+-static uint FFCodecID2Tag(CodecID codec_id) 
++static uint FFCodecID2Tag(AVCodecID codec_id) 
+ {
+     unsigned int ff_codec_get_tag(const AVCodecTag *tags, int id);
+     extern const AVCodecTag ff_codec_bmp_tags[];
+     return ff_codec_get_tag(ff_codec_bmp_tags, codec_id);
+ }
+ #else
+-static uint FFCodecID2Tag(CodecID codec_id) 
++static uint FFCodecID2Tag(AVCodecID codec_id) 
+ {
+     unsigned int codec_get_tag(const AVCodecTag *tags, int id);
+     extern const AVCodecTag codec_bmp_tags[];
+@@ -400,7 +404,7 @@ static unsigned char GetChar(uint tag, int bit_begin)
+     return (tag>>bit_begin) & 0xFF;
+ }
+ 
+-static std::string CodecID2Str(CodecID codec_id)
++static std::string CodecID2Str(AVCodecID codec_id)
+ {
+ #ifdef _MSC_VER
+     std::string tag_str = boost::format("%1%") % codec_id % bf::stop;
+@@ -807,7 +811,7 @@ static void DoVideoDecode(FFViewer& ffv, int& got_picture, AVPacket* pkt)
+ #ifdef AVFRAME_INIT_CHANGE
+     // avcodec_get_frame_defaults() перенесли в avcodec_decode_video2()
+ #else
+-    avcodec_get_frame_defaults(&picture); // ffmpeg.c очищает каждый раз
++    av_frame_unref (&picture);
+ #endif
+ 
+ #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(52,25,00)
+diff --git a/src/mgui/mux.cpp b/src/mgui/mux.cpp
+index 427058e..885dde7 100644
+--- a/src/mgui/mux.cpp
++++ b/src/mgui/mux.cpp
+@@ -162,7 +162,7 @@ static void OnVideoSelected(Gtk::FileChooserButton& v_btn, Gtk::FileChooserButto
+     fs::path pth = GetFilename(v_btn);
+     if( pth.empty() )
+         return;
+-    std::string folder = pth.branch_path().string();
++    std::string folder = pth.parent_path().string();
+ 
+     if( a_btn.get_filename().empty() )
+         a_btn.set_current_folder(folder);
+diff --git a/src/mgui/project/add.cpp b/src/mgui/project/add.cpp
+index 9454578..e8ae94f 100644
+--- a/src/mgui/project/add.cpp
++++ b/src/mgui/project/add.cpp
+@@ -86,7 +86,9 @@ static void SetImportError(ErrorDesc& ed, bool is_good, const std::string& out_s
+ 
+ static std::string FpsToStr(const Point& frate)
+ {
+-    return (str::stream() << (double)frate.x/frate.y).str();
++    str::stream ss;
++    ss << (double)frate.x/frate.y;
++    return ss.str();
+ }
+ 
+ static std::string TVTypeStr(bool is_ntsc)
+@@ -163,7 +165,9 @@ void CheckVideoFormat(ErrorDesc& ed, const Mpeg::SequenceData& vid, bool is_ntsc
+     // *
+     bool is_aspect_ok = vid.sarCode == af4_3 || vid.sarCode == af16_9;
+     Point aspect = vid.SizeAspect();
+-    std::string aspect_str = (str::stream() << aspect.x << ':' << aspect.y).str();
++    str::stream ss;
++    ss << aspect.x << ':' << aspect.y;
++    std::string aspect_str = ss.str();
+     SetImportError(ed, is_aspect_ok, 
+                    std::string(_("Aspect ratio")) + ": \t" + MarkError(aspect_str, is_aspect_ok),
+                    BF_(Descriptions[2]) % tv_type % bf::stop);
+@@ -479,7 +483,7 @@ void TryAddMedias(const Str::List& paths, MediaBrowser& brw,
+                 MessageBox(BF_("The file \"%1%\" looks like VOB from DVD.\nRun import?") % leaf % bf::stop,
+                            Gtk::MESSAGE_QUESTION, Gtk::BUTTONS_OK_CANCEL) == Gtk::RESPONSE_OK )
+             {
+-                DVD::RunImport(*GetTopWindow(brw), pth.branch_path().string());
++                DVD::RunImport(*GetTopWindow(brw), pth.parent_path().string());
+                 return;
+             }
+         }
+diff --git a/src/mgui/project/browser.cpp b/src/mgui/project/browser.cpp
+index 02d95a1..47b730b 100644
+--- a/src/mgui/project/browser.cpp
++++ b/src/mgui/project/browser.cpp
+@@ -328,7 +328,7 @@ Gtk::HButtonBox& CreateMListButtonBox()
+     return hb;
+ }
+ 
+-std::string MediaItemDnDTVType() { return "DnDTreeView<"DND_MI_NAME">"; }
++std::string MediaItemDnDTVType() { return "DnDTreeView<" DND_MI_NAME ">"; }
+ 
+ void SetupBrowser(ObjectBrowser& brw, int dnd_column, bool is_media_brw)
+ {
+diff --git a/src/mgui/project/mconstructor.cpp b/src/mgui/project/mconstructor.cpp
+index 3b56587..754f9f8 100644
+--- a/src/mgui/project/mconstructor.cpp
++++ b/src/mgui/project/mconstructor.cpp
+@@ -52,6 +52,8 @@
+ // COPY_N_PASTE_ETALON из go-file.c, проект Gnumeric, http://projects.gnome.org/gnumeric/
+ //
+ 
++#include <boost/filesystem/directory.hpp>
++
+ #ifndef GOFFICE_WITH_GNOME
+ static char *
+ check_program (char const *prog)
+diff --git a/src/mgui/project/serialize.cpp b/src/mgui/project/serialize.cpp
+index a5366aa..03583ec 100644
+--- a/src/mgui/project/serialize.cpp
++++ b/src/mgui/project/serialize.cpp
+@@ -73,7 +73,7 @@ static std::string MakeProjectTitle(bool with_path_breakdown = false)
+     fs::path full_path(db.GetProjectFName());
+     std::string res_str = fs::name_str(full_path);
+     if( with_path_breakdown )
+-        res_str += " (" + full_path.branch_path().string() + ")";
++        res_str += " (" + full_path.parent_path().string() + ")";
+     return res_str;
+ }
+ 
+diff --git a/src/mgui/sdk/cairo_utils.cpp b/src/mgui/sdk/cairo_utils.cpp
+index 14f11be..10c1f97 100644
+--- a/src/mgui/sdk/cairo_utils.cpp
++++ b/src/mgui/sdk/cairo_utils.cpp
+@@ -27,6 +27,8 @@
+ std::string MakeSVGFilename(const char* prefix)
+ {
+     static int idx = 1;
+-    return (str::stream() << prefix << "-" << Mpeg::set_hms() << idx++ << ".svg" ).str();
++    str::stream ss;
++    ss << prefix << "-" << Mpeg::set_hms() << idx++ << ".svg";
++    return ss.str();
+ }
+ 
+diff --git a/src/mgui/timeline/layout.cpp b/src/mgui/timeline/layout.cpp
+index c139626..b5b5ca7 100644
+--- a/src/mgui/timeline/layout.cpp
++++ b/src/mgui/timeline/layout.cpp
+@@ -600,8 +600,10 @@ time4_t FramesToTime(int cnt, double fps)
+ void FramesToTime(std::string& str, int cnt, double fps)
+ {
+     time4_t t4 = FramesToTime(cnt, fps);
+-    str = (str::stream() << Mpeg::set_hms() << t4.hh << ":" << Mpeg::set_hms() << t4.mm << ":"
+-                         << Mpeg::set_hms() << t4.ss << ";" << Mpeg::set_hms() << t4.ff).str();
++    str::stream ss;
++    ss << Mpeg::set_hms() << t4.hh << ":" << Mpeg::set_hms() << t4.mm << ":"
++      << Mpeg::set_hms() << t4.ss << ";" << Mpeg::set_hms() << t4.ff;
++    str = ss.str();
+ }
+ 
+ } // namespace TimeLine
+diff --git a/src/mgui/timeline/select.cpp b/src/mgui/timeline/select.cpp
+index 9d8ec5a..337ada6 100644
+--- a/src/mgui/timeline/select.cpp
++++ b/src/mgui/timeline/select.cpp
+@@ -152,7 +152,7 @@ static void SaveFrame(DAMonitor& mon)
+ 
+         mon.FramePixbuf()->save(fnam, ext);
+ 
+-        SaveFrameDir() = fs::path(fnam).branch_path().string();
++        SaveFrameDir() = fs::path(fnam).parent_path().string();
+         if( add_btn.get_active() )
+             Project::TryAddMediaQuiet(fnam, "SaveFrame");
+     }
+diff --git a/src/mgui/win_utils.cpp b/src/mgui/win_utils.cpp
+index e135f1a..beafca8 100644
+--- a/src/mgui/win_utils.cpp
++++ b/src/mgui/win_utils.cpp
+@@ -132,7 +132,9 @@ void Scale(RefPtr<Context> cr, RefPtr<ImageSurface> src,
+ 
+ std::string ColorToString(const unsigned int rgba)
+ {
+-    return (str::stream() << std::hex << (rgba >> 8)).str();
++    str::stream ss;
++    ss << std::hex << (rgba >> 8);
++    return ss.str();
+ }
+ 
+ CR::Color GetBGColor(Gtk::Widget& wdg)
+diff --git a/src/mlib/filesystem.cpp b/src/mlib/filesystem.cpp
+index 7ae7162..278dfc5 100644
+--- a/src/mlib/filesystem.cpp
++++ b/src/mlib/filesystem.cpp
+@@ -30,6 +30,7 @@
+ #if BOOST_MINOR_VERSION >= 51
+ #define BOOST_FS_3 boost::filesystem
+ #include <boost/filesystem/path_traits.hpp> // boost::filesystem::convert()
++#include <boost/filesystem/directory.hpp>
+ #else
+ #define BOOST_FS_3 boost::filesystem3
+ #include <boost/filesystem/v3/path_traits.hpp>
+@@ -161,25 +162,16 @@ namespace Project
+ 
+ fs::path MakeAbsolutePath(const fs::path& pth, const fs::path& cur_dir)
+ {
+-    fs::path res;
+-
+-    if( pth.is_complete() )
+-        res = pth;
+-    else
+-    {
+-        fs::path dir = cur_dir.empty() ? fs::current_path() : cur_dir ;
+-        res = dir/pth;
+-    }
+-    return res.normalize();
++    return absolute(pth, cur_dir);
+ }
+ 
+ // оба аргумента должны быть абсолютными путями
+ bool MakeRelativeToDir(fs::path& pth, fs::path dir)
+ {
+-    pth.normalize();
+-    dir.normalize();
+-    ASSERT( pth.is_complete() );
+-    ASSERT( dir.is_complete() );
++    pth = canonical(pth);
++    dir = canonical(dir);
++    ASSERT( pth.is_absolute() );
++    ASSERT( dir.is_absolute() );
+ 
+     fs::path::iterator p_itr = pth.begin(), p_end = pth.end();
+     fs::path::iterator d_itr = dir.begin(), d_end = dir.end();
+diff --git a/src/mlib/read_stream.h b/src/mlib/read_stream.h
+index 9806ae3..05c6e1f 100644
+--- a/src/mlib/read_stream.h
++++ b/src/mlib/read_stream.h
+@@ -22,6 +22,8 @@
+ #ifndef __MLIB_READ_STREAM_H__
+ #define __MLIB_READ_STREAM_H__
+ 
++#include <boost/mpl/bool.hpp>
++
+ #include "stream.h"
+ #include "filesystem.h"
+ 
+diff --git a/src/mlib/regex.cpp b/src/mlib/regex.cpp
+index df98fdb..dc9ea62 100644
+--- a/src/mlib/regex.cpp
++++ b/src/mlib/regex.cpp
+@@ -22,7 +22,7 @@
+ #include "regex.h"
+ #include "string.h"
+ 
+-#include <boost/regex.hpp>
++#include <boost/regex/v4/regex.hpp>
+ 
+ namespace re
+ {
+diff --git a/src/mlib/regex.h b/src/mlib/regex.h
+index 4a18717..8da1214 100644
+--- a/src/mlib/regex.h
++++ b/src/mlib/regex.h
+@@ -27,6 +27,7 @@
+ #include <boost/regex/v4/regbase.hpp>
+ #include <boost/regex/v4/match_flags.hpp>
+ 
++#include <boost/mpl/bool.hpp>
+ #include <mlib/ptr.h>
+ 
+ #include <string>
+@@ -185,7 +186,7 @@ bool search(const std::string& s,
+ #define RG_EW "\\>"           // конец  слова
+ #define RG_SPS "[[:space:]]*" // пробелы
+ #define RG_NUM "([0-9]+)"     // число
+-#define RG_FLT RG_NUM"([\\.,]"RG_NUM")" // вещ. число, в паре с ExtractDouble()
++#define RG_FLT RG_NUM "([\\.,]" RG_NUM ")" // вещ. число, в паре с ExtractDouble()
+ #define RG_CMD_BEG RG_BW // "^"RG_SPS  // начало команды
+ 
+ bool ExtractDouble(double& val, const re::match_results& what, int idx = 1);
+diff --git a/src/mlib/sdk/bfs.h b/src/mlib/sdk/bfs.h
+index c12b5d0..6e172cc 100644
+--- a/src/mlib/sdk/bfs.h
++++ b/src/mlib/sdk/bfs.h
+@@ -7,6 +7,7 @@
+ //#define BOOST_FILESYSTEM_NO_DEPRECATED
+ 
+ #include <boost/filesystem/path.hpp>
++#include <boost/filesystem/exception.hpp>
+ #include <boost/filesystem/operations.hpp>
+ #include <boost/filesystem/convenience.hpp> // fs::create_directories()
+ 
+diff --git a/src/mlib/sdk/misc.cpp b/src/mlib/sdk/misc.cpp
+index 5d3f297..803187b 100644
+--- a/src/mlib/sdk/misc.cpp
++++ b/src/mlib/sdk/misc.cpp
+@@ -173,12 +173,16 @@ std::string PointToStr(const Point& pnt)
+ std::string Double2Str(double val)
+ {
+     //return boost::format("%1%") % val % bf::stop;
+-    return (str::stream() << val).str();
++    str::stream ss;
++    ss << val;
++    return ss.str();
+ }
+ 
+ std::string Int2Str(int val)
+ {
+-    return (str::stream() << val).str();
++    str::stream ss;
++    ss << val;
++    return ss.str();
+ }
+ 
+ static bool ICaseMatch(const std::string& str, const std::string& pat_str)
+diff --git a/src/mlib/sdk/system.cpp b/src/mlib/sdk/system.cpp
+index 8d10e3f..e9508bd 100644
+--- a/src/mlib/sdk/system.cpp
++++ b/src/mlib/sdk/system.cpp
+@@ -28,7 +28,9 @@
+ int GetMemSize()
+ {
+     pid_t pid = getpid();
+-    std::string str = (str::stream() << "/proc/" << pid << "/statm").str();
++    str::stream ss;
++    ss << "/proc/" << pid << "/statm";
++    std::string str = ss.str();
+ 
+     io::stream strm(str.c_str(), iof::in);
+     int mem;
+diff --git a/src/mlib/tech.h b/src/mlib/tech.h
+index 6ddadf8..f2e2c2a 100644
+--- a/src/mlib/tech.h
++++ b/src/mlib/tech.h
+@@ -26,7 +26,7 @@
+ //  Технические вещи
+ // 
+ #include <boost/current_function.hpp>  // для BOOST_CURRENT_FUNCTION
+-#include <boost/detail/endian.hpp>     // для BOOST_XXX_ENDIAN
++#include <boost/predef/other/endian.h> // BOOST_ENDIAN_*_BYTE
+ #include <boost/version.hpp>           // для BOOST_MINOR_VERSION
+ 
+ // для С-шного кода в С++
+@@ -78,9 +78,9 @@ void AssertImpl(const char* assertion, const char* file,
+                 long line, const char* function);
+ 
+ // endianness
+-#if defined(BOOST_BIG_ENDIAN)
++#if defined(BOOST_ENDIAN_BIG_BYTE)
+ #   define HAS_BIG_ENDIAN
+-#elif defined(BOOST_LITTLE_ENDIAN)
++#elif defined(BOOST_ENDIAN_LITTLE_BYTE)
+ #   define HAS_LITTLE_ENDIAN
+ #else
+ #   error mlib/tech.h: unknown endianness (legacy PDP arch?)
+diff --git a/src/mlib/tests/test_utils.cpp b/src/mlib/tests/test_utils.cpp
+index c4712e8..99a2e94 100644
+--- a/src/mlib/tests/test_utils.cpp
++++ b/src/mlib/tests/test_utils.cpp
+@@ -139,17 +139,17 @@ BOOST_AUTO_TEST_CASE( TestFilesystem )
+ #endif
+     }
+ 
+-    // is_complete
++    // is_absolute
+     {
+         fs::path pth("../some_file");
+-        BOOST_CHECK( !pth.is_complete() );
+-        BOOST_CHECK( fs::current_path().is_complete() );
++        BOOST_CHECK( !pth.is_absolute() );
++        BOOST_CHECK( fs::current_path().is_absolute() );
+ 
+         fs::path apth = Project::MakeAbsolutePath(pth);
+         //LOG_INF << "Making abs path: " << pth.string() << " => " << apth.string() << io::endl;
+ 
+-        BOOST_CHECK( Project::MakeAbsolutePath(pth, MakeRootComplete("/")).is_complete() );
+-        BOOST_CHECK( !Project::MakeAbsolutePath(pth, "./").is_complete() );
++        BOOST_CHECK( Project::MakeAbsolutePath(pth, MakeRootComplete("/")).is_absolute() );
++        BOOST_CHECK( !Project::MakeAbsolutePath(pth, "./").is_absolute() );
+     }
+ 
+     // MakeRelativeToDir

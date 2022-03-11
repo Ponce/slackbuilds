@@ -3,8 +3,8 @@
 # Slackware build script for povray:
 # the Persistence of Vision Raytracer
 
-# Maintainer: Klaatu
-# Thanks to: Franzen
+# Maintainer: Klaatu <klaatu@member.fsf.org>
+# Thanks to Franzen
 
 # Copyright 2009,2011,2013 Niels Horn, Rio de Janeiro, RJ, Brazil
 # All rights reserved.
@@ -28,15 +28,17 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=povray
-VERSION=${VERSION:-3.7.0.8}
+SRCNAM=povunix
+VERSION=${VERSION:-3.8.0_beta.2}
+SRCVER=${SRCVER:-v3.8.0-beta.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 DOCDIR=${DOCDIR:-/usr/doc}
 MANDIR=${MANDIR:-/usr/man}
 
-# The "short" version number is needed later:
-SHORT_VERSION=$( echo $VERSION | cut -f1-2 -d. )
+# Short version number is generated during compilation
+SHORTVER=$( echo $VERSION | cut -f1-2 -d. )
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -46,9 +48,7 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
+# If PRINT_PACKAGE_NAME is set, print the name of the package
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -80,7 +80,9 @@ set -e
 rm -rf $TMP/$PRGNAM-$VERSION $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-tar xvf $CWD/$PRGNAM-$VERSION.tar.?z*
+mkdir $PRGNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$SRCVER-src.tar.?z* \
+    --strip-components=1 -C $PRGNAM-$VERSION
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
@@ -89,19 +91,12 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# make sure no bundled static libs can be used
-rm -r libraries
-
 (
   cd unix
-  sed 's/automake --w/automake --add-missing --w/g' -i prebuild.sh
   # Prevent march=nativ for compatibility
   sed "s/native/$ARCH/g" -i configure.ac
-  # By disabling march=nativ, compatibilitybreaking optimizations like sse4 may arize by prebuild.sh
+  # By disabling march=nativ, compatibility-breaking optimizations may arise
   sed "s/ax_x86_cpuflags=.*/unset ax_x86_cpuflags/g" -i config/ax_x86_arch.m4
-  # prevent creating files in $HOME while building
-  patch prebuild.sh $CWD/prebuild.patch
-  sh ./prebuild.sh
 )
 
 CXXFLAGS="$SLKCFLAGS" \
@@ -110,6 +105,7 @@ CXXFLAGS="$SLKCFLAGS" \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --localstatedir=/var \
+  --docdir=$DOCDIR \
   --mandir=$MANDIR \
   --build=$ARCH-slackware-linux \
   LIBS="-lboost_system -lboost_thread" \
@@ -125,25 +121,30 @@ find $PKG/$MANDIR -type f -exec gzip -9 {} \;
 for i in $( find $PKG/$MANDIR -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 # Rename configuration files to .new, will be checked by doinst.sh
-mv $PKG/etc/$PRGNAM/$SHORT_VERSION/$PRGNAM.conf \
-   $PKG/etc/$PRGNAM/$SHORT_VERSION/$PRGNAM.conf.new
-mv $PKG/etc/$PRGNAM/$SHORT_VERSION/$PRGNAM.ini \
-   $PKG/etc/$PRGNAM/$SHORT_VERSION/$PRGNAM.ini.new
+mv $PKG/etc/$PRGNAM/$SHORTVER/$PRGNAM.conf \
+   $PKG/etc/$PRGNAM/$SHORTVER/$PRGNAM.conf.new
+mv $PKG/etc/$PRGNAM/$SHORTVER/$PRGNAM.ini \
+   $PKG/etc/$PRGNAM/$SHORTVER/$PRGNAM.ini.new
 
-# ./configure does not accept docdir; move docs manually as needed
+# fix scripts
+find $PKG/usr/share/$PRGNAM-$SHORTVER/scripts/ -type f \
+     -name "*.sh" | xargs sed -i "s/\r//"
+
+# ./configure ignores DOCDIR; move docs manually
 if [ "$DOCDIR" != "/usr/share/doc" ]; then
     mkdir -p $PKG/$DOCDIR/$PRGNAM-$VERSION
-    mv $PKG/usr/share/doc/$PRGNAM-$SHORT_VERSION/* $PKG/$DOCDIR/$PRGNAM-$VERSION/
-    rm -r $PKG/usr/share/doc
+    mv $PKG/usr/share/doc/$PRGNAM-$SHORTVER $PKG/$DOCDIR/$PRGNAM-$VERSION
+    rmdir $PKG/usr/share/doc
 fi
 
-cp -a COPYING INSTALL $PKG/$DOCDIR/$PRGNAM-$VERSION
+cp -a COPYING INSTALL AUTHORS changes.txt revision.txt \
+   README.md kde_install.sh $PKG/$DOCDIR/$PRGNAM-$VERSION
 find $PKG/$DOCDIR/$PRGNAM-$VERSION -type f -exec chmod 644 {} \;
 cat $CWD/$PRGNAM.SlackBuild > $PKG/$DOCDIR/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-sed "s,@VERSION@,$SHORT_VERSION,g" $CWD/doinst.sh > $PKG/install/doinst.sh
+sed "s,@VERSION@,$VERSION,g" $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

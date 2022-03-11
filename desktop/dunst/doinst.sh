@@ -11,4 +11,4 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/dunst/dunstrc.new
+config etc/xdg/dunst/dunstrc.new

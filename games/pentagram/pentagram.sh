@@ -7,7 +7,7 @@ set -e
 
 if [ ! -e ~/.pentagram/pentagram.ini ]; then
 	mkdir -p ~/.pentagram
-	cat /usr/share/pentagram/pentagram.ini.default > ~/.pentagram/pentagram.ini
+	cat /usr/share/games/pentagram/pentagram.ini.default > ~/.pentagram/pentagram.ini
 fi
 
-exec /usr/bin/pentagram-bin "$@"
+exec /usr/libexec/pentagram/pentagram-bin "$@"

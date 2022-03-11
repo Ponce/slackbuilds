@@ -66,6 +66,6 @@ for cue_out in tmpcue??.cue; do
   rm -f track??.wav
   binfile="$( head -1 "$cue_out" | cut -d\" -f2 )"
   bchunk -w "$binfile" "$cue_out" track
-  [ -e track??.wav ] && oggenc -q 7 track??.wav && rm -f track??.wav
+  [ -e track??.wav ] && oggenc -q ${OGGQUAL:-7} track??.wav && rm -f track??.wav
   rm -f $cue_out
 done

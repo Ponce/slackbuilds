@@ -23,6 +23,8 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220215 bkw: Modified by SlackBuilds.org, fix build on 15.0.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=bombono-dvd
@@ -39,9 +41,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -76,28 +75,23 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
-# specify our CFLAGS
-sed -i "s|-O2||" SConstruct
+# 20220215 bkw: ported the stupid scons stuff to python3, since
+# 15.0's scons doesn't do python2.
+patch -p1 < $CWD/patches/scons.diff
+
 # Allow use of cdrtools as an alternative to cdrkit, thanks gentoo
 patch -p1 < $CWD/patches/bombono-dvd-1.2.0-cdrtools.patch
 
-# Fix for the newer ffmpeg - thanks ArchLinux
-patch -p1 < $CWD/patches/fix_ffmpeg_codecid.patch
+# 20220215 bkw: more boost breakage. this is upstream's commit e0956f48d5,
+# but slightly edited to remove the reference to README (which won't apply).
+patch -p1 < $CWD/patches/boost-1.78.diff
 
-# Credit to ARCH Linux
-patch -p1 < $CWD/patches/fix_ptr2bool_cast.patch
-patch -p1 < $CWD/patches/fix_c++11_literal_warnings.patch
-patch -p1 < $CWD/patches/autoptr2uniqueptr.patch
-patch -p1 < $CWD/patches/boost.patch
-patch -p1 < $CWD/patches/fix_operator_ambiguity.patch
-patch -p1 < $CWD/patches/fix_throw_specifications.patch
-
-# Fix for ffmpeg-3
-patch -p1 < $CWD/patches/ffmpeg3.patch
+# specify our CFLAGS
+sed -i "s|-O2||" SConstruct
 
 # Build package
 scons \
@@ -123,13 +117,10 @@ scons \
   DESTDIR=$PKG \
   install
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+strip $PKG/usr/bin/*
 
 mv $PKG/usr/share/man $PKG/usr/
-
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+gzip -9 $PKG/usr/man/man*/*
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a COPYING README $PKG/usr/doc/$PRGNAM-$VERSION
