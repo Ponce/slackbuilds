@@ -22,11 +22,16 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220301 bkw: Modified by SlackBuilds.org, BUILD=2:
+# - fix 32-bit build (libraries in /usr/lib, not /usr/lib64).
+# - do not install compile instructions or empty files in doc dir.
+# - don't install a pkgconfig .pc file to /usr/share.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=capstone
 VERSION=${VERSION:-4.0.1}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -38,9 +43,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -75,9 +77,9 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
 mkdir -p build
 cd build
@@ -86,7 +88,7 @@ cmake \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DLIB_SUFFIX="$LIBDIRSUFFIX" \
+    -DINSTALL_LIB_DIR=/usr/lib$LIBDIRSUFFIX \
     -DCAPSTONE_ARM_SUPPORT=1 \
     -DCAPSTONE_ARM64_SUPPORT=1 \
     -DCAPSTONE_M68K_SUPPORT=1 \
@@ -101,24 +103,22 @@ cmake \
     -DCAPSTONE_BUILD_STATIC=0 \
     -DCMAKE_BUILD_TYPE=Release ..
   make VERBOSE=1
-  make install DESTDIR=$PKG
+  make install/strip DESTDIR=$PKG
 cd ..
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# 20220317 bkw: .pc file gets install to wrong place on 64-bit...
+rm -rf $PKG/usr/lib/pkgconfig
 
-# pkg-config (PKG_CONFIG_PATH environment variable)
-# to generate .pc file do: $ python setup.py build
-# inside bindings/python
-mkdir -p $PKG/usr/share/pkgconfig
-sed -e "s|@CMAKE_INSTALL_PREFIX@|/usr|" \
-    -e "s|@VERSION_MAJOR@.@VERSION_MINOR@.@VERSION_PATCH@|$VERSION|" \
-    -e "s|@LIBSUFFIX@|$LIBDIRSUFFIX|" \
-  < capstone.pc.in \
-  > $PKG/usr/share/pkgconfig/capstone.pc
+# 20220317 bkw: updated the .pc.in file.
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/pkgconfig
+sed "s,@LIBDIRSUFFIX@,$LIBDIRSUFFIX,g" \
+    < $CWD/$PRGNAM.pc.in \
+    > $PKG/usr/lib$LIBDIRSUFFIX/pkgconfig/$PRGNAM.pc
 
+# 20220317 bkw: RELEASE_NOTES is a 0-byte placeholder.
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a COMPILE* CREDITS.TXT ChangeLog HACK.TXT LICENSE* README.md RELEASE_NOTES SPONSORS.TXT TODO $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CREDITS.TXT ChangeLog HACK.TXT LICENSE* README.md SPONSORS.TXT TODO \
+      $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
