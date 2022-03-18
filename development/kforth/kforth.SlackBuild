@@ -4,6 +4,12 @@
 
 # Written by G. Schoenmakers <gschoen@iinet.net.au>
 
+# 20220318 bkw: Modified by SlackBuilds.org:
+# - fix build on 15.0.
+# - use SLKCFLAGS.
+# - strip the binaries.
+# - check ARCH and exit if unsupported.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=kforth
@@ -23,9 +29,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -34,6 +37,19 @@ fi
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+else
+  SLKCFLAGS="-O2"
+fi
+
+case "$ARCH" in
+  i?86) ;; # OK
+  *) echo "Unsupported ARCH '$ARCH'"; exit 1 ;;
+esac
 
 set -e
 
@@ -46,21 +62,26 @@ cd $PRGNAM-$SRCVER
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
+ -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+ -exec chmod 644 {} \+
 
 patch ForthVM.cpp $CWD/ForthVM.diff
 patch Makefile $CWD/Makefile.diff
 
-make
+# 20220318 bkw: pow10() is deprecated, according to its man
+# page. and apparently it's also a macro, since taking its address
+# fails. exp10() performs exactly the same, and is a real function...
+sed -i 's,\<pow10\>,exp10,g' vmc.c
+
+# 20220318 bkw: sneak our CFLAGS in...
+make CC="gcc $SLKCFLAGS" CPP="g++ $SLKCFLAGS"
 
 # There is no "make install" so the following instructions are used to copy
 # the relevant files into the $PKG directory.
 
 mkdir -p $PKG/usr/bin
-cp -a kforth $PKG/usr/bin
-cp -a kforth-fast $PKG/usr/bin
+install -s -m0755 $PRGNAM $PRGNAM-fast $PKG/usr/bin
 
 mkdir -p $PKG/usr/share/pixmaps
 cp -a kforth.xpm $PKG/usr/share/pixmaps
