@@ -22,6 +22,8 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220320 bkw: Modified by SlackBuilds.org: fix 32-bit build.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=rspamd
@@ -38,20 +40,19 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-UIDGID=359
-if ! getent group $PRGNAM; then
-  echo "  You must have the \"$PRGNAM\" group to run this script."
+# 20220320 bkw: please don't make me run the script twice to see
+# both commands: show them both if either is missing.
+group_user_error() {
+  echo "  You must have the \"$PRGNAM\" group and user to run this script."
   echo "    # groupadd -g $UIDGID $PRGNAM"
-  exit 1
-elif ! getent passwd $PRGNAM; then
-  echo "  You must have the \"$PRGNAM\" user to run this script."
   echo "    # useradd -u $UIDGID -s /bin/false -d /dev/null -g $PRGNAM $PRGNAM"
   exit 1
-fi
+}
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
+UIDGID=359
+getent group  $PRGNAM || group_user_error
+getent passwd $PRGNAM || group_user_error
+
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -86,17 +87,19 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
 # Patch to use correct linker
 # https://github.com/rspamd/rspamd/issues/3168#issuecomment-583849873
 patch -p0 < $CWD/Toolset.cmake.patch
 
+# 20220320 bkw: patch from Debian, allows building on 32-bit.
+patch -p1 < $CWD/0007-fix-i386-compilation.patch
+
 mkdir -p build
 cd build
-  export "PATH=/opt/cmake-202x/bin:$PATH"
   cmake \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
@@ -109,15 +112,10 @@ cd build
     -DENABLE_OPTIMIZATION=ON \
     -DCMAKE_BUILD_TYPE=Release \
     ..
-  make
-  make install DESTDIR=$PKG
+  make VERBOSE=1
+  make install/strip DESTDIR=$PKG
 cd ..
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+gzip $PKG/usr/man/man*/*
 
 mkdir -p $PKG/var/log/rspamd
 chown rspamd:rspamd $PKG/var/log/rspamd
