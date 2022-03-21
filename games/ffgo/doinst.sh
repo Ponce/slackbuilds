@@ -8,7 +8,7 @@ config() {
   fi
 }
 
-CONF=/usr/libLIBDIRSUFFIX/pythonPY3VER/site-packages/ffgo/data/config
+CONF=usr/libLIBDIRSUFFIX/pythonPY3VER/site-packages/ffgo/data/config
 
 for conf in $CONF/*.new ; do
   config ${conf}
