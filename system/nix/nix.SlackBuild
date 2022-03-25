@@ -23,6 +23,26 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220325 bkw: Modified by SlackBuilds.org: fix multiple issues:
+# - on 64-bit, /usr/bin/nix and some /usr/lib64/libnix*.so files
+#   were being written to the real root partition (this happened
+#   during "make", not "make install"). added a patch from Debian
+#   that prevents this.
+# - on 32-bit, the same thing happened, plus the build failed. the
+#   same patch fixes that.
+# - get rid of empty gzipped file usr/man/man1/nix3-manpages.gz.
+#
+# Note: this defeats ccache by default (it uses
+# e.g. x86_64-slackware-linux-gcc instead of just gcc). If you want
+# cacheable builds, export CC=gcc and CXX=g++ in the environment.
+#
+# Note: during the build, we get "warning: you don't have Internet
+# access; disabling some network-dependent features" when building
+# with network access disabled (e.g. in a container). I have no
+# idea if this is a problem, but it's something the maintainer might
+# want to look into. SlackBuilds aren't supposed to require network
+# access to run.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=nix
@@ -39,9 +59,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -76,9 +93,14 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
+
+# 20220325 bkw: patch from Debian, stops nix from installing
+# /usr/bin/nix and its libraries during "make". spamming the real
+# root partition is bad, m'kay?
+patch -p1 < $CWD/fix_nix_DIR_in_doc_local_mk.patch
 
 autoreconf -vfim
 autoheader
@@ -110,6 +132,9 @@ rm -fR $PKG/usr/lib${LIBDIRSUFFIX}/systemd
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+# 20220325 bkw: this isn't even named correctly for a man page...
+rm -f $PKG/usr/man/man1/nix3-manpages.gz
 
 if [ "$ARCH" = "x86_64" ]; then
   rm -rf $PKG/usr/lib
