@@ -10,9 +10,20 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
+config_blacklist() {
+  # package_blacklist changed names to just blacklist in version 2.2, so make a copy
+  # of package_blacklist -> blacklist for the user to compare with blacklist.new.
+  NEW="etc/sboui/blacklist"
+  OLD="etc/sboui/package_blacklist"
+  if [[ ! -r $NEW && -r $OLD ]]; then
+    cp $OLD $NEW
+  fi
+}
+
 config etc/sboui/sboui.conf.new
 config etc/sboui/sboui-backend.conf.new
-config etc/sboui/package_blacklist.new
+config_blacklist
+config etc/sboui/blacklist.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
