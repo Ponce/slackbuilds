@@ -8,22 +8,17 @@ config() {
   fi
 }
 
-config etc/pki/fwupd/GPG-KEY-Hughski-Limited.new
-config etc/pki/fwupd/GPG-KEY-Linux-Foundation-Firmware.new
-config etc/pki/fwupd/GPG-KEY-Linux-Vendor-Firmware-Service.new
-config etc/pki/fwupd/LVFS-CA.pem.new
-config etc/pki/fwupd-metadata/GPG-KEY-Linux-Foundation-Metadata.new
-config etc/pki/fwupd-metadata/GPG-KEY-Linux-Vendor-Firmware-Service.new
-config etc/pki/fwupd-metadata/LVFS-CA.pem.new
-config etc/fwupd/remotes.d/lvfs.conf.new
-config etc/fwupd/remotes.d/lvfs-testing.conf.new
-config etc/fwupd/remotes.d/vendor.conf.new
-config etc/fwupd/remotes.d/vendor-directory.conf.new
-config etc/fwupd/remotes.d/fwupd-tests.conf.new
 config etc/fwupd/daemon.conf.new
+config etc/fwupd/msr.conf.new
 config etc/fwupd/redfish.conf.new
+config etc/fwupd/remotes.d/dell-esrt.conf.new
+config etc/fwupd/remotes.d/fwupd-tests.conf.new
+config etc/fwupd/remotes.d/lvfs-testing.conf.new
+config etc/fwupd/remotes.d/lvfs.conf.new
+config etc/fwupd/remotes.d/vendor-directory.conf.new
+config etc/fwupd/remotes.d/vendor.conf.new
 config etc/fwupd/thunderbolt.conf.new
-config etc/fwupd/upower.conf.new
+config etc/fwupd/uefi_capsule.conf.new
 
 if [ -e usr/share/icons/hicolor/icon-theme.cache ]; then
   if [ -x /usr/bin/gtk-update-icon-cache ]; then
