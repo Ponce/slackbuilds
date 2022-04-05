@@ -2,24 +2,17 @@
 
 # Slackware build script for ghex
 
-# Written by B. Watson (yalhcru@gmail.com)
-
+# Originally written by B. Watson (yalhcru@gmail.com), Copyright © 2020-2021
+# Updated for GHex 4.x by Logan Rathbone <poprocks@gmail.com>, Copyright © 2022
+#
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
-
-# Although upstream describes this as "a hex editor for GNOME", it has
-# no gnome dependencies (just GTK3). Previous versions (2.x) did depend
-# on gnome so I never wanted to package them...
-
-# 20210831 bkw: update for v3.41.beta. Normally I wouldn't package
-# a beta, but the beta has the ability to copy/paste raw binary
-# data between ghex windows (of the same instance of ghex, anyway).
-# And the new upstream ghex maintainer is a friend (and also a SBo
-# contributor; hi Logan!)
+#
+# For ChangeLog, see SBo git log history.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=ghex
-VERSION=${VERSION:-3.41.beta}
+VERSION=${VERSION:-42.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -67,41 +60,36 @@ chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# Fix the .docbook help files so they work with 14.2's docbook,
-# and so they don't cause docbook2html to connect to a remote site.
-# DTD may have to change for some future Slackware release.
-DTD="/usr/share/xml/docbook/xml-dtd-4.5/docbookx.dtd"
-sed -i \
-    -e '/<xi:include.*legal/s,.*,\&legal;,' \
-    -e '/docbookx.dtd/a  <!ENTITY legal SYSTEM "legal.xml">' \
-    -e 's,"http://www\.oasis.*dtd","'$DTD'",' \
-    help/*/index.docbook
+# Process optional yelp dependency option
+if [ "$YELP" = "true" ]; then
+  STATIC_HELP="false"
+else
+  STATIC_HELP="true"
+fi
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 meson \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --strip \
+  -Dbuildtype=plain \
+  -Dprefix=/usr \
+  -Dlibdir=/usr/lib${LIBDIRSUFFIX} \
+  -Dsysconfdir=/etc \
+  -Dlocalstatedir=/var \
+  -Ddocdir=/usr/doc \
+  -Dstrip=true \
+  -Dgtk_doc=${GTK_DOC:-false} \
+  -Dstatic-html-help=${STATIC_HELP} \
   build
 
-DESTDIR="$PKG" ${NINJA:-ninja} -C build install
+DESTDIR="$PKG" ${NINJA:-ninja} -v -C build install
+
+# Don't ship .la files:
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
 
 PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
 mkdir -p $PKGDOC
 cp -a COPYING* HACKING NEWS README* $PKGDOC
 cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
-
-# Generate the HTML help, for those who don't want to install yelp.
-docbook2html -u -o $PKGDOC/html/ $PKG/usr/share/help/C/$PRGNAM/index.docbook
-ln -s ../../../share/help/C/$PRGNAM/figures $PKGDOC/html/
-
-# Man page is fairly useless, include it anyway (from Debian).
-mkdir -p $PKG/usr/man/man1
-gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
