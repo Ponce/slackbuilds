@@ -22,11 +22,15 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220408 bkw: Modified by SlackBuilds.org, BUILD=2:
+# - set ARCH correctly if it's not set in the environment.
+# - on 32-bit, remove the 64-bit binaries (and vice versa).
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=apache-activemq
 VERSION=${VERSION:-5.14.5}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -35,16 +39,26 @@ ACTIVEMQ_UID=${ACTIVEMQ_UID:-253}
 ACTIVEMQ_GROUP=${ACTIVEMQ_GROUP:-activemq}
 ACTIVEMQ_GID=${ACTIVEMQ_GID:-253}
 
-# i486 or x86_64 only
-ARCH=${ARCH:-i486}
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
 fi
+
+# i?86 or x86_64 only
+case "$ARCH" in
+  i?86)   wrongbindir=linux-x86-64 ;;
+  x86_64) wrongbindir=linux-x86-32 ;;
+  *) echo "Unsupported ARCH $ARCH, only x86_64 and i?86 are supported." ;
+     exit 1 ;;
+esac
 
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
@@ -84,9 +98,9 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
+ -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+ -exec chmod 644 {} \+
 
 # Worst file permissions ever seen in a package...
 find . -type d -exec chmod 755 {} \;
@@ -98,7 +112,13 @@ mkdir -p $PKG/etc/activemq \
   $PKG/var/{run,lib,log}/activemq
 
 cp -f conf/* $PKG/etc/activemq/
-rm -rf bin/macosx
+rm -rf bin/macosx bin/$wrongbindir
+
+# 20220408 bkw: the binaries should be stripped, unless that breaks
+# something. I don't know how to tell, so this is commented out.
+# Maintainer of this build, please uncomment and check?
+#strip bin/linux-x86*/{wrapper,libwrapper.so}
+
 cp -rf bin lib $PKG/usr/share/activemq/
 cp -rf webapps $PKG/var/lib/activemq/
 
@@ -114,11 +134,12 @@ chown -R $ACTIVEMQ_USER:$ACTIVEMQ_GROUP $PKG/var/{run,lib,log}/activemq
 )
 
 # These links are still needed for activemq to actually work
-ln -sf /etc/activemq $PKG/usr/share/activemq/conf
-ln -sf /var/lib/activemq/webapps $PKG/usr/share/activemq/webapps
-ln -sf /var/log/activemq $PKG/usr/share/activemq/log
-ln -sf /tmp/activemq $PKG/usr/share/activemq/tmp
-
+# 20220408 bkw: made these relative links. the one to /tmp still
+# makes sbopkglint complain...
+ln -sf ../../../etc/activemq $PKG/usr/share/activemq/conf
+ln -sf ../../../var/lib/activemq/webapps $PKG/usr/share/activemq/webapps
+ln -sf ../../../var/log/activemq $PKG/usr/share/activemq/log
+ln -sf ../../../tmp/activemq $PKG/usr/share/activemq/tmp
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
