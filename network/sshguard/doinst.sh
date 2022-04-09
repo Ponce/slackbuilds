@@ -19,4 +19,5 @@ preserve_perms() {
   config $NEW
 }
 
+config etc/sshguard.conf.new
 preserve_perms etc/rc.d/rc.sshguard.new

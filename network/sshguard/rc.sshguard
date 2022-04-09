@@ -1,45 +1,105 @@
-#!/bin/sh
+#!/bin/bash
+
+declare -r daemon_name=sshguard
+declare -r daemon_prog=/usr/sbin/sshguard
 
 ################################################################################
-sshguard_start() {
+the_daemon()
 ################################################################################
-  if [ -n "$(pidof sshguard)" ]; then
-    echo "sshguard seems to be already running."
-    return
-  fi
-
-  /usr/sbin/sshguard -l /var/log/messages 1>/dev/null &
+{
+    daemon --name "${daemon_name}" "${@}"
 }
 
 ################################################################################
-sshguard_stop() {
+the_damon_start()
 ################################################################################
-  if [ -z "$(pidof sshguard)" ]; then
-    echo "sshguard does not seem to be running."
-    return
-  fi
+{
+    if ! the_daemon --running; then
+        echo "Starting ${daemon_name}:  ${daemon_prog}"
 
-  kill $(pidof sshguard)
+        the_daemon -- ${daemon_prog}
+    else
+        echo "${daemon_name} seems to be already running."
+    fi
 }
 
 ################################################################################
-sshguard_restart() {
+the_damon_stop()
 ################################################################################
-  sshguard_stop
-  sleep 1
-  sshguard_start
+{
+    if the_daemon --running; then
+        echo "Stopping ${daemon_name}."
+
+        the_daemon --stop
+    else
+        echo "${daemon_name} does not seem to be running."
+    fi
 }
 
-case "$1" in
-'start')
-  sshguard_start
-  ;;
-'stop')
-  sshguard_stop
-  ;;
-'restart')
-  sshguard_restart
-  ;;
+################################################################################
+the_damon_restart()
+################################################################################
+{
+    if the_daemon --running; then
+        the_damon_stop
+        the_daemon_wait_stopped
+        the_damon_start
+    else
+        echo "${daemon_name} does not seem to be running."
+    fi
+}
+
+################################################################################
+the_daemon_wait_stopped()
+################################################################################
+{
+    # All time values given in a unit of 0.1 second.
+
+    local -r timeout=50
+    local delay=1
+    local delay_sum=0
+    local -r test_expr=(the_daemon --running)
+
+    # Poll (with timeout) for the daemon to exit.
+
+    while "${test_expr[@]}" && [[ ${delay_sum} -lt ${timeout} ]]; do
+        sleep $(echo "${delay} / 10.0" | bc -l)
+        delay_sum=$((delay_sum + delay))
+
+        # Double the delay in each iteration to lower the CPU use.
+
+        delay=$((delay * 2))
+
+        # Adjust next's iteration delay prevent waiting longer than _timeout_
+        # in case the time already waited and the delay to be waited in
+        # the next iteration would be greater than the requested _timeout_.
+
+        if [[ $((delay_sum + delay)) -gt ${timeout} ]]; then
+            delay=$((timeout - delay_sum))
+        fi
+    done
+
+    if "${test_expr[@]}"; then
+        echo "Timeout waiting for ${daemon_name} to stop."
+
+        exit 1
+    fi
+}
+
+case "${1}" in
+start)
+    the_damon_start
+;;
+
+stop)
+    the_damon_stop
+;;
+
+restart)
+    the_damon_restart
+;;
+
 *)
-  echo "usage: $0 start|stop|restart"
+    echo "usage: ${0} start|stop|restart"
+;;
 esac
