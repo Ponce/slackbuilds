@@ -13,10 +13,3 @@ config() {
     fi
     # Otherwise, we leave the .new copy for the admin to consider...
 }
-
-# doinst.sh reads the list of files from ./install/conffiles at install time.
-# ./install/conffiles was generated at build time/
-for cf in $(cat install/conffiles)
-do
-    config $cf.new
-done
