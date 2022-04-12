@@ -24,4 +24,4 @@ preserve_perms() {
 config etc/ha.d/authkeys.new
 config etc/ha.d/ha.cf.new
 config etc/ha.d/haresources.new
-preserve_perms etc/init.d/heartbeat.new
+preserve_perms etc/rc.d/init.d/heartbeat.new
