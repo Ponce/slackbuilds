@@ -47,3 +47,5 @@ config etc/xrdp/km-00000813.ini.new
 config etc/xrdp/km-00000816.ini.new
 config etc/xrdp/km-0000100c.ini.new
 config etc/xrdp/km-00010409.ini.new
+config etc/logrotate.d/xrdp-sesman.new
+config etc/logrotate.d/xrdp.new
