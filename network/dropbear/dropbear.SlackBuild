@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Copyright 2007-2008, Piter Punk, São Paulo, Brazil
-# Copyright 2017-2020, Andrew Clemons, Wellington New Zealand
+# Copyright 2017-2020,2022 Andrew Clemons, Wellington New Zealand
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -21,18 +21,12 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# 20220411 bkw: Modified by SlackBuilds.org, BUILD=3:
-# - change the WITH_SCP option so it defaults to no. in other words,
-#   the default behaviour is to *not* conflict with a Slackware package.
-# - use relative symlinks for binaries.
-# - add missing SlackBuild to doc dir.
-
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=dropbear
-VERSION=${VERSION:-2020.81}
+VERSION=${VERSION:-2022.82}
 SRCVERSION="DROPBEAR_$VERSION"
-BUILD=${BUILD:-3}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -78,9 +72,9 @@ cd $PRGNAM-$SRCVERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \+ -o \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 autoreconf -if
 
@@ -101,30 +95,36 @@ CXXFLAGS="$SLKCFLAGS" \
   --disable-pututxline \
   --build=$ARCH-slackware-linux
 
-PROGRAMS="dropbear dbclient dropbearkey dropbearconvert"
-
-# 20220412 bkw: disabled by default. please don't change it back.
-if [ "${WITH_SCP:-no}" = "yes" ] ; then
-  PROGRAMS="$PROGRAMS scp"
-fi
+PROGRAMS="dropbear dbclient dropbearkey dropbearconvert scp"
 
 make strip \
   PROGRAMS="$PROGRAMS" \
-  MULTI=1
+  MULTI=1 \
+  SCPPROGRESS=1
 
 make install \
   PROGRAMS="$PROGRAMS" \
   MULTI=1 \
+  SCPPROGRESS=1 \
   DESTDIR=$PKG
 
-gzip -9 $PKG/usr/man/man*/*
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+WITH_SCP=${WITH_SCP:-no}
 
 # 20220412 bkw: use relative symlinks.
 for i in $PROGRAMS; do
   BIN=$PKG/usr/bin/$i
   SBIN=$PKG/usr/sbin/$i
-  [ -L $BIN  ] && rm -f $BIN  && ln -s dropbearmulti $BIN
-  [ -L $SBIN ] && rm -f $SBIN && ln -s ../bin/dropbearmulti $SBIN
+
+  if [ "$i" = "scp" ] && [ "$WITH_SCP" != "yes" ] ; then
+    [ -L $BIN  ] && rm -f $BIN  && ln -s dropbearmulti $BIN.dropbear
+    [ -L $SBIN ] && rm -f $SBIN && ln -s ../bin/dropbearmulti $SBIN.dropbear
+  else
+    [ -L $BIN  ] && rm -f $BIN  && ln -s dropbearmulti $BIN
+    [ -L $SBIN ] && rm -f $SBIN && ln -s ../bin/dropbearmulti $SBIN
+  fi
 done
 
 mkdir -p $PKG/etc/rc.d
