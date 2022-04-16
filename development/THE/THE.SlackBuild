@@ -2,7 +2,7 @@
 
 # Slackware build script for The Hessling Editor
 
-# Copyright 2012-2018 Richard Narron, California, USA
+# Copyright 2012-2022 Richard Narron, California, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,10 +25,12 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=THE
-VERSION=${VERSION:-3.3RC4}
-BUILD=${BUILD:-5}
+VERSION=${VERSION:-3.3RC8}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+
+TARFILE=the-3.3
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -38,9 +40,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -70,8 +69,9 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+rm -rf $PRGNAM-$VERSION $TARFILE
+tar xvf $CWD/$TARFILE.tar.gz
+mv $TARFILE $PRGNAM-$VERSION
 
 cd $PRGNAM-$VERSION
 chown -R root:root .
@@ -81,9 +81,6 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-cat $CWD/THE-file-c.patch | patch -p0
-cat $CWD/THE-xcurses.patch | patch -p1
-
 # make the ncurses version of THE and the documentation
 mkdir ncurses
 cd    ncurses
@@ -91,7 +88,7 @@ cd    ncurses
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ../configure \
-  --with-ncurses \
+  --with-curses=ncurses \
   --with-rexx=regina \
   --build=$ARCH-slackware-linux \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
@@ -103,27 +100,42 @@ CXXFLAGS="$SLKCFLAGS" \
 
 make
 make install DESTDIR=$PKG
+
+rm -rf doc/html
 make html
 
-rm -f $PKG/usr/bin/the ; ln -fs nthe $PKG/usr/bin/the
+rm -f $PKG/usr/bin/the 
+ln -fs the-con $PKG/usr/bin/the
+ln -fs the-con $PKG/usr/bin/nthe
 
-mkdir -p                               $PKG/usr/doc/$PRGNAM-$VERSION/html
-install -m0644 *.html                  $PKG/usr/doc/$PRGNAM-$VERSION/html
-install -m0644 the64.png the64.gif     $PKG/usr/doc/$PRGNAM-$VERSION/html
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/html
+install -m0644 the64.gif the64.png doc/html/*.html \
+         $PKG/usr/doc/$PRGNAM-$VERSION/html
 
 cd $TMP/$PRGNAM-$VERSION
-install -m0644 COPYING FAQ HISTORY INSTALL README* THE*spec TODO \
-                                       $PKG/usr/doc/$PRGNAM-$VERSION
+install -m0644 COPYING FAQ HISTORY README* TODO \
+         $PKG/usr/doc/$PRGNAM-$VERSION
 
-# if PDCurses (XCurses) then make the X11 version
-if ldconfig -p | grep -q libXCurses.so ; then
+# Try to  make the X11 version of THE by using PDCurses (XCurses)
+
+if  ldconfig -p | grep -q libXCurses.so; then
   mkdir xcurses
   cd    xcurses
 
+  # for XCurses, create pdcurses-x11.pc pkg-config
+  XLIBDIR=lib${LIBDIRSUFFIX}
+  XVERSION=$(xcurses-config --version)
+  mkdir -p        pkgconfig
+  sed -e "s/XLIBDIR/${XLIBDIR}/" \
+      -e "s/XVERSION/${XVERSION}/" \
+      <                $CWD/libpdcurses-x11.pc \
+      >           pkgconfig/libpdcurses-x11.pc
+
+  PKG_CONFIG_PATH=pkgconfig   \
   CFLAGS="$SLKCFLAGS" \
   CXXFLAGS="$SLKCFLAGS" \
   ../configure \
-    --with-xcurses \
+    --with-curses=pdcurses-x11 \
     --with-rexx=regina \
     --build=$ARCH-slackware-linux \
     --docdir=/usr/doc/$PRGNAM-$VERSION \
@@ -132,9 +144,10 @@ if ldconfig -p | grep -q libXCurses.so ; then
     --mandir=/usr/man \
     --prefix=/usr \
     --sysconfdir=/etc
-
-  make xthe
-  install -m0755 xthe $PKG/usr/bin
+    
+  make           the-x11
+  install -m0755 the-x11 $PKG/usr/bin
+  ln -fs         the-x11 $PKG/usr/bin/xthe
 fi
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
