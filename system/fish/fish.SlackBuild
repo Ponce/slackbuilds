@@ -24,11 +24,32 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220411 bkw: Modified by SlackBuilds.org, BUILD=2:
+# - get rid of (empty) /usr/share/doc dir. yes, it has a file in it
+#   called .buildinfo, but this is utterly useless in a binary
+#   package (it's more-or-less a cache to keep from rebuilding the
+#   docs when they haven't changed, only useful if you're rebuilding
+#   the same source dir multiple times).
+# - get rid of empty /usr/share/fish/man/man1/ dir.
+# - add update-desktop-database to doinst.sh, since v3.4.0 adds a
+#   .desktop file.
+# - use absolute path to icon in doinst.sh.
+# - tighten up the script a bit.
+# Note to maintainer: The build will create the man pages and
+# HTML docs if Sphinx is installed, or use pre-generated ones if
+# not. Nothing wrong with this, per se, but it might lead to trouble
+# later (if Sphinx gets upgraded to a version that won't work with
+# fish's build process, e.g). Your mission, should you choose to
+# accept it, is to modify the cmake parameters (or even patch the
+# CMakeLists.txt) to make it always use the pre-generated HTML and
+# manpages (and ignore Sphinx, if found).
+#   -- B. Watson <urchlay@slackware.uk>
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=fish
 VERSION=${VERSION:-3.4.0}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -40,9 +61,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -72,14 +90,16 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xJvf $CWD/$PRGNAM-$VERSION.tar.xz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
+
+sed -i '/^Icon/s,=.*,=/usr/share/pixmaps/fish.png,' $PRGNAM.desktop
 
 mkdir -p build
 cd build
@@ -87,28 +107,26 @@ cd build
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
-	-DCMAKE_INSTALL_LIBDIR=/usr/lib${LIBDIRSUFFIX} \
-	-DCMAKE_INSTALL_SYSCONFDIR=/etc \
+    -DCMAKE_INSTALL_LIBDIR=/usr/lib${LIBDIRSUFFIX} \
+    -DCMAKE_INSTALL_SYSCONFDIR=/etc \
     -DCMAKE_BUILD_TYPE=Release ..
   make
-  make install DESTDIR=$PKG
+  make install/strip DESTDIR=$PKG
 cd ..
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 mkdir -p $PKG/usr/share/$PRGNAM
 mv $PKG/usr/share/doc/$PRGNAM/* $PKG/usr/share/$PRGNAM
+rm -rf $PKG/usr/share/doc
 
 # Let's not clobber the old config
 mv $PKG/etc/fish/config.fish $PKG/etc/fish/config.fish.new
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
 mkdir -p $PKG/usr/man/man1
 mv $PKG/usr/share/$PRGNAM/man/man1/* $PKG/usr/man/man1
+rm -rf $PKG/usr/share/$PRGNAM/man/
 rm -rf $PKG/usr/share/man/
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+gzip $PKG/usr/man/man*/*
 
 # Remove manual pages that overwrites coreutils' man pages
 rm -f $PKG/usr/man/man1/{echo,false,pwd,test,true}.1.gz

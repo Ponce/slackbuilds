@@ -15,3 +15,7 @@ config etc/fish/config.fish.new
 
 # add Fish to /etc/shells
 grep -qe '^/usr/bin/fish$' etc/shells || echo '/usr/bin/fish' >> etc/shells
+
+if [ -x /usr/bin/update-desktop-database ]; then
+  /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
+fi
