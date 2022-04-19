@@ -22,11 +22,17 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220418 bkw: Modified by SlackBuilds.org, BUILD=2:
+# - actually use SLKCFLAGS.
+# - remove the static library.
+# - fix the shared library so it actually works.
+# - install the shared lib stripped.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=iniparser
 VERSION=${VERSION:-4.0}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -38,9 +44,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -59,8 +62,6 @@ elif [ "$ARCH" = "i686" ]; then
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
-  LDSHFLAGS="-shared -Wl,-Bsymbolic  -Wl,-rpath -Wl,/usr/lib64 -Wl,-rpath,/usr/lib64"
-  LDFLAGS="-Wl,-rpath -Wl,/usr/lib64 -Wl,-rpath,/usr/lib64"
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
@@ -77,25 +78,31 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
+# 20220418 bkw: previous version of this script tried to fix the -rpath
+# info in the shared library, but was broken. this works:
+sed -i "s,/usr/lib,/usr/lib$LIBDIRSUFFIX," Makefile
+
+# 20220418 bkw: SLKCFLAGS weren't being used.
 CFLAGS="$SLKCFLAGS" \
 CXFLAGS="$SLKCFLAGS" \
-
-make
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+make V=1
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}
 mkdir -p $PKG/usr/include
 
-cp -ar AUTHORS INSTALL LICENSE README.md html $PKG/usr/doc/$PRGNAM-$VERSION
+cp -ar AUTHORS LICENSE README.md html $PKG/usr/doc/$PRGNAM-$VERSION
 
-cp -a libiniparser.a libiniparser.so.0 $PKG/usr/lib${LIBDIRSUFFIX}
+install -s -m0755 libiniparser.so.0 $PKG/usr/lib${LIBDIRSUFFIX}
+
+# 20220418 bkw: create the symlink gcc uses to link with this.
+# previously, anything (such as cava) which linked with
+# -liniparser was actually using the static library.
+ln -s lib${PRGNAM}.so.0 $PKG/usr/lib$LIBDIRSUFFIX/lib${PRGNAM}.so
 
 cp -a ./src/dictionary.h ./src/iniparser.h $PKG/usr/include
 
