@@ -6,7 +6,7 @@
 # Modified by Mario Preksavec <mario@slackware.hr>
 
 KERNEL=${KERNEL:-5.15.27}
-XEN=${XEN:-4.15.2}
+XEN=${XEN:-4.16.1}
 
 ROOTMOD=${ROOTMOD:-ext4}
 ROOTFS=${ROOTFS:-ext4}
