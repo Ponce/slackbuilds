@@ -22,4 +22,16 @@ preserve_perms() {
   config $NEW
 }
 
+config etc/hostapd/hostapd.accept.new
+config etc/hostapd/hostapd.android.rc.new
+config etc/hostapd/hostapd.conf.new
+config etc/hostapd/hostapd.deny.new
+config etc/hostapd/hostapd.eap_user.new
+config etc/hostapd/hostapd.eap_user_sqlite.new
+config etc/hostapd/hostapd.radius_clients.new
+config etc/hostapd/hostapd.sim_db.new
+config etc/hostapd/hostapd.vlan.new
+config etc/hostapd/hostapd.wpa_psk.new
+config etc/hostapd/wired.conf.new
+
 preserve_perms etc/rc.d/rc.hostapd.new
