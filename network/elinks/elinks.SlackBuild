@@ -24,8 +24,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=elinks
-VERSION=${VERSION:-git20170723}
-COMMIT=f86be659
+VERSION=${VERSION:-20170723_f86be65}
+COMMIT=${VERSION#*_}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -38,9 +38,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -50,21 +47,22 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-# Added -fno-strict-aliasing -Wno-pointer-sign for a much more peaceful build
 if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686 -fno-strict-aliasing -Wno-pointer-sign"
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686 -fno-strict-aliasing -Wno-pointer-sign"
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC -fno-strict-aliasing -Wno-pointer-sign"
-  SLKLDFLAGS="-m64"
+  SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
+
+# A much more peaceful build
+SLKCFLAGS="$SLKCFLAGS -fno-strict-aliasing -Wno-pointer-sign"
 
 set -e
 
@@ -72,22 +70,29 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$COMMIT
-tar xvf $CWD/$PRGNAM-$COMMIT.tar.?z
+tar xvf $CWD/$COMMIT.tar.?z
 cd $PRGNAM-$COMMIT
+chown -R root:root .
+find -L . \
+  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
 # fix documentation generation on 15.0.
 # xmlto needs --skip-validation or it fails.
 sed -i 's/$(XMLTO) -o/$(XMLTO) --skip-validation -o/' doc/Makefile
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-for patch in $CWD/patches/*
-do
+for patch in $CWD/patches/*; do
   patch --verbose -p1 < $patch
 done
+
+# patches for no suspend (^Z) and -no-connect by default
+# courtesy of B. Watson.
+[ "${NO_SUSPEND:-no}" = "yes" ] &&
+  patch --verbose -p1 -i $CWD/option-patches/0010-*
+[ "${NO_CONNECT:-no}" = "yes" ] &&
+  patch --verbose -p1 -i $CWD/option-patches/0020-*
 
 # System
 [ "${FASTMEM:-no}"    = "yes" ] && fastmem="--enable-fastmem"
@@ -125,8 +130,11 @@ done
 [ "${NNTP:-no}"       = "yes" ] && nntp="--enable-nntp"
 [ "${SMB:-no}"        = "yes" ] && smb="--enable-smb"
 
+# quiet some more warnings
+sed "s,^aclocal,& -Wnone," -i autogen.sh
+
 ./autogen.sh
-CFLAGS="$SLKCFLAGS -L/usr/lib64" \
+CFLAGS="$SLKCFLAGS -L/usr/lib$LIBDIRSUFFIX" \
   ./configure \
   --prefix=/usr \
   --libdir=/usr/lib$LIBDIRSUFFIX \
@@ -135,6 +143,7 @@ CFLAGS="$SLKCFLAGS -L/usr/lib64" \
   --mandir=/usr/man \
   --infodir=/usr/info \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --htmldir=/usr/doc/$PRGNAM-$VERSION/html \
   $fastmem \
   $cgi \
   $combining \
@@ -164,16 +173,12 @@ CFLAGS="$SLKCFLAGS -L/usr/lib64" \
   --build=$ARCH-slackware-linux
 
 make
+# html doesn't install so we copy it later
+make -C doc html
 make install DESTDIR=$PKG
-cd doc
-make html
-cd ..
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+strip --strip-unneeded $PKG/usr/bin/$PRGNAM
+gzip -9 $PKG/usr/man/man?/*.?
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 
@@ -182,7 +187,9 @@ cp -a \
   doc/*txt doc/manual.html-chunked \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-rm -f $PKG/usr/doc/$PRGNAM-$VERSION/manual.html-chunked/manual.proc
+
+# don't need these
+find $PKG \( -name ".gitignore" -o -name "manual.proc" \) -delete
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
