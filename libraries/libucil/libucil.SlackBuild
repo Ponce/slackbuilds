@@ -22,11 +22,15 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220424 bkw: Modified by SlackBuilds.org, BUILD=3:
+# - remove broken symlink from doc dir.
+# - do not write outside of $TMP.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=libucil
 VERSION=${VERSION:-20160609}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -42,9 +46,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -74,15 +75,22 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $SRCNAM-$SRCVER
-tar xvzf $CWD/$SRCNAM-$SRCVER.tar.gz
+
+# 20220424 bkw: this tarball contains a symlink whose target
+# is /usr/share/gtk-doc/data/gtk-doc.make. Extracting the
+# tarball actually touches the file in /usr, so don't do that.
+# This script doesn't build the gtk stuff, so it doesn't matter
+# about the symlink.
+tar xvf $CWD/$SRCNAM-$SRCVER.tar.gz \
+   --wildcards --exclude='*/libunicapgtk/doc/libunicapgtk/gtk-doc.make'
 
 cd $SRCNAM-$SRCVER/$PRGNAM
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
 # Generate configuration files.
 autoreconf --force --install
@@ -95,18 +103,14 @@ CFLAGS="$SLKCFLAGS" \
   --build=$ARCH-slackware-linux
 
 make
-make install DESTDIR=$PKG
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" \
-  | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+make install-strip DESTDIR=$PKG
 
 PRGSHR=$PKG/usr/share
 PRGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
 
 # Install documentation.
 mkdir -p $PRGDOC
-cp -a ABOUT-NLS AUTHORS COPYING ChangeLog INSTALL README $PRGDOC/
-ln -sf /usr/share/gtk-doc/html/$PRGNAM $PRGDOC/html
+cp -a AUTHORS COPYING ChangeLog README $PRGDOC/
 cat $CWD/$PRGNAM.SlackBuild > $PRGDOC/$PRGNAM.SlackBuild
 
 rm -f $PKG/usr/lib*/*.la
