@@ -1,33 +1,24 @@
 #!/bin/bash
 
 # Slackware build script for dump
+
+# Copyright 2022 B. Watson <urchlay@slackware.uk>
 # Copyright 2017 Donald Cooley, South Haven, Indiana USA
-# Copyright 2012  Chris Abela, Malta
-# Copyright 2014  Ryan P.C. McQuen, WA, ryanpcmcquen@member.fsf.org
-# All rights reserved.
-#
-# Redistribution and use of this script, with or without modification, is
-# permitted provided that the following conditions are met:
-#
-# 1. Redistributions of this script must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-#
-#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
-#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
-#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Copyright 2014 Ryan P.C. McQuen, WA, ryanpcmcquen@member.fsf.org
+# Copyright 2012 Chris Abela, Malta
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20220425 bkw: BUILD=2
+# - take over maintenance.
+# - relicense as WTFPL (with permission; see mailing list).
+# - rename /sbin/restore command (and man page) to restore.dump.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=dump
 VERSION=${VERSION:-0.4b47}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -39,9 +30,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -74,11 +62,8 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
- -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 # rmt is available on Slack's tar package, so I am disabling it
 # The full path for mandir is necessary
@@ -94,20 +79,36 @@ EXT2FS_LIBS="-lext2fs -lcom_err" \
   --enable-selinux=no
 
 make
-make prefix=$PKG install # According to fhs-2.3, dump goes in /sbin
+make prefix=$PKG install-strip # According to fhs-2.3, dump goes in /sbin
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# 20220425 bkw: avoid conflicting with Slackware's restore. the old
+# version of this script installed dump's restore in /sbin, and didn't
+# mess with Slackware's /usr/sbin/restore... technically not a conflict,
+# but a landmine anyway (it would be all too easy to type the wrong
+# path to the restore command). rename it.
+cd $PKG/sbin
+mv restore restore.dump
+rm -f rrestore
+ln -s restore.dump rrestore
+cd -
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $(find $PKG/usr/man -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+# 20220425 bkw: rename the man page, for consistency. note that
+# rdump.8 just used ".so dump.8" (and likewise for rrestore); replace
+# with symlinks.
+cd $PKG/usr/man/man8
+mv restore.8 restore.dump.8
+rm -f rdump.8 rrestore.8
+gzip -9 *
+ln -s restore.dump.8.gz rrestore.8.gz
+ln -s dump.8.gz rdump.8.gz
+cd -
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
 cp -a \
-  AUTHORS COPYING INSTALL *BUGS MAINTAINERS NEWS README TODO ChangeLog examples \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-find $PKG/usr/doc/$PRGNAM-$VERSION -type f -exec chmod 644 {} \;
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+  AUTHORS COPYING *BUGS MAINTAINERS NEWS README TODO ChangeLog examples \
+  $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
