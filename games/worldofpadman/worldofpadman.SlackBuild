@@ -22,11 +22,20 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20220427 bkw: Modified by SlackBuilds.org, BUILD=2:
+# - don't install both 32-bit and 64-bit binaries (rm the ones
+#   not needed for the current ARCH).
+# - don't install windows .ico or mac .icns icons.
+# - new-style icons (multiple sizes, plus scalable).
+# - wrapper executables in /usr/games, so people can launch them
+#   from the command line without knowing the full path in /opt.
+# - fix .desktop file (this isn't a Qt nor KDE app).
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=worldofpadman
 VERSION=${VERSION:-1.6}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 SRCVER=${SRCVER:-1.5}
@@ -40,9 +49,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -65,52 +71,64 @@ unzip $CWD/*$SRCVER-unified.zip
 # Patch the new version if available
 if [ -f $CWD/*$PATCHVER-patch-unified.zip ]; then
   unzip -o $CWD/*$PATCHVER-patch-unified.zip
-else
-  VERSION=$SRCVER
 fi
 
 cd $PKG
 chown -R root:root .
 
-# Fix permissions
-find . -type d -exec chmod 0755 {} \;
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
-find ./opt/ -type f -name *.i386 -exec chmod +x {} \;
-find ./opt/ -type f -name *.x86_64 -exec chmod +x {} \;
+# 20220428 bkw: fix permissions, remove what we don't need:
+find . -type d -exec chmod 0755 {} \+
+find . -type f -exec chmod 0644 {} \+
+cd $PKG/opt/$PRGNAM
+if [ "$ARCH" = "x86_64" ]; then
+  rm -f *i386*
+else
+  rm -f *x86_64*
+fi
+rm -rf *.exe *.dll wop.app # windows and mac stuff, don't need
+chmod +x *.so wop.* wopded.*
 
-# Copy icons to /usr/share/icons
-mkdir -p $PKG/usr/share/icons/hicolor/32x32/apps
-install -D $PKG/opt/$PRGNAM/XTRAS/*.ico \
-  $PKG/usr/share/icons/hicolor/32x32/apps
-convert $PKG/usr/share/icons/hicolor/32x32/apps/wop.ico \
-  $PKG/usr/share/icons/hicolor/32x32/apps/wop.png
+# 20220428 bkw: XTRAS is mostly documentation, plus icons.
+# interestingly enough, the documentation includes the source.
+cd XTRAS
+
+for px in 16 32 48 64 128; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  convert -background none -geometry $size icon.svg $dir/$PRGNAM.png
+done
+mkdir -p $PKG/usr/share/icons/hicolor/scalable/apps
+mv icon.svg $PKG/usr/share/icons/hicolor/scalable/apps/$PRGNAM.svg
+
+# 20220428 bkw: don't need windows and mac icons.
+rm -f *.ico *.icns
+
+# 20220428 bkw: what's left is just docs, move it to correct Slackware dir.
+cd ..
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+mv XTRAS/* $PKGDOC
+rm -rf XTRAS
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 # Install a .desktop launcher:
 mkdir -p $PKG/usr/share/applications
 cat $CWD/worldofpadman.desktop > $PKG/usr/share/applications/worldofpadman.desktop
 
-# Let's take care of documentation
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/editing\ files
-cp -r $PKG/opt/$PRGNAM/XTRAS/readme/* $PKG/usr/doc/$PRGNAM-$VERSION
-cp -r $PKG/opt/$PRGNAM/XTRAS/editing\ files/* $PKG/usr/doc/$PRGNAM-$VERSION/editing\ files
-cp $PKG/opt/$PRGNAM/XTRAS/*.txt $PKG/usr/doc/$PRGNAM-$VERSION
+# 20220428 bkw: wrapper scripts. this allows CLI users to run the game
+# or server by typing "wop" or "wopded", and keeps us from having to
+# change the .desktop file for different ARCHes.
+mkdir -p $PKG/usr/games
+for exe in wop wopded; do
+  sed -e "s,@ARCH@,$ARCH,g" -e "s,@EXE@,$exe,g" \
+    < $CWD/wrapper.sh \
+    > $PKG/usr/games/$exe
+  chmod 0755 $PKG/usr/games/$exe
+done
 
-# Create symlinks
-case $ARCH in
-  i386)
-    ln -s /opt/worldofpadman/wop.i386 $PKG/opt/worldofpadman/padman
-    ln -s /opt/worldofpadman/wopded.i386 $PKG/opt/worldofpadman/wopded
-    ;;
-  x86_64)
-    ln -s /opt/worldofpadman/wop.x86_64 $PKG/opt/worldofpadman/padman
-    ln -s /opt/worldofpadman/wopded.x86_64 $PKG/opt/worldofpadman/wopded
-    ;;
-esac
+# 20220428 bkw: for compatibility with previous version of this script:
+ln -s wop $PKG/usr/games/padman
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
