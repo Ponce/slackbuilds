@@ -21,14 +21,25 @@
 # WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+#
 cd $(dirname $0) ; CWD=$(pwd)
-
+ 
 PRGNAM=rabbitmq-c
-VERSION=${VERSION:-0.8.0}
+VERSION=${VERSION:-0.11.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+
+# these are rabbitmq-c CMake default options that are incompatible 
+# with a SlackBuild. When turned on executables will be in the 
+# /usr/doc/$PRGNAM-$VERSION/{examples,tests}/bin/ directories
+BUILD_EXAMPLES=${BUILD_EXAMPLES:-OFF}
+BUILD_TESTS=${BUILD_TESTS:-OFF}
+BUILD_TOOLS_DOCS=${BUILD_TOOLS_DOCS:-ON}
+
+# from CMakeLists.txt: tests and examples require the static library
+[  "$BUILD_TESTS"    = "ON" 
+-o "$BUILD_EXAMPLES" = "ON" ] && BUILD_STATIC_LIBS=ON
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -70,7 +81,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar -xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
@@ -108,10 +119,43 @@ fi
 
 for d in examples tests; do
   mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/$d/src
-  cp -a $d/* $PKG/usr/doc/$PRGNAM-$VERSION/$d/src/
-  mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/$d/bin
-  cp -a build/$d/* $PKG/usr/doc/$PRGNAM-$VERSION/$d/bin/
+  cp -a $d/* $PKG/usr/doc/$PRGNAM-$VERSION/$d/src/ || true
 done
+
+if [ "$BUILD_EXAMPLES" = "ON" ] ; then
+  mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/examples/bin
+  cp -a build/examples/* $PKG/usr/doc/$PRGNAM-$VERSION/examples/bin/ || true
+fi
+if [ "$BUILD_TESTS"    = "ON" ] ; then
+  mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/tests/bin
+  cp -a build/tests/* $PKG/usr/doc/$PRGNAM-$VERSION/tests/bin/ || true
+fi
+
+# maybe make man entries in /usr/man/man1 and /usr/man/man7
+if [ -x `which xmlto` ] ; then
+  if [ "$BUILD_TOOLS" != "OFF" -a "$BUILD_TOOLS_DOCS" != "OFF" ] ;
+  then
+    mkdir -p $PKG/usr/man || true
+    cd $TMP/$PRGNAM-$VERSION/tools/doc
+    touch man-date.ent
+  
+    for x in *.xml ; do
+      xmlto man $x
+    done
+  
+    for m in *.[1-9] ; do
+       s="$(echo $m |awk -F'.' '{ print $NF }')"
+  
+       [ "$s" = "" ] && continue
+       
+       d="$PKG/usr/man/man${s}"
+  
+       [ ! -d "$d" ] && mkdir -p "$d"
+  
+       gzip < $m > $d/$m.gz
+    done
+  fi
+fi
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
