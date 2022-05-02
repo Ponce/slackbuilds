@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright 2013-2014 Edward Koenig, Vancouver, WA, USA <kingbeowulf@gmail.com>
+# Copyright 2013-2014 Edward W. Koenig, Vancouver, WA, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
