@@ -31,3 +31,6 @@ find etc/default -type f -name 'xen*.new' \
 find etc/xen -type f -name '*.new' \
   | while read new ; do config $new ; done
 
+[ -d etc/sysconfig ] && find etc/sysconfig -type f -name 'xen*.new' \
+  | while read new ; do config $new ; done
+
