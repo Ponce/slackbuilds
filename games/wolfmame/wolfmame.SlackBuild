@@ -1,0 +1,139 @@
+#!/bin/bash
+
+# Slackware build script for wolfmame
+
+# Copyright 2021 David Ferrone RI, USA
+# All rights reserved.
+
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=wolfmame
+VERSION=${VERSION:-0.243}
+WOLFVER=wolf${VERSION#0.}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;; ## Unknown if this builds on a 32bit machine.
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG/opt $OUTPUT
+cd $PKG/opt
+# Rename the output directory name as it's extracted.
+tar xvf $CWD/$PRGNAM-$WOLFVER.tar.gz --xform="s/^$PRGNAM-$WOLFVER/$PRGNAM/"
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+cd $PKG/opt/$PRGNAM
+
+# The following and make options are from mame slackbuild
+# Use ccache by default - massively cuts down on rebuild time
+# Tun off with USE_CCACHE=no
+export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
+
+if [ "${USE_CCACHE:-yes}" = "yes" ]; then
+  CC="/usr/bin/ccache /usr/bin/clang"
+  CXX="/usr/bin/ccache /usr/bin/clang++"
+else
+  CC="${CC:-$( which gcc )}"
+  CXX="${CXX:-$( which g++ )}"
+fi
+
+# See top of makefile for full list of options
+make \
+     USE_SYSTEM_LIB_EXPAT=1 \
+     USE_SYSTEM_LIB_ZLIB=1 \
+     USE_SYSTEM_LIB_JPEG=1 \
+     USE_SYSTEM_LIB_FLAC=1 \
+     PYTHON_EXECUTABLE="/usr/bin/python3 -S" \
+     OPT_FLAGS="$SLKCFLAGS" \
+     LDOPTS="-fuse-ld=gold" \
+     OVERRIDE_CC="$CC" \
+     OVERRIDE_CXX="$CXX" \
+     CC="$CC" \
+     CXX="$CXX" \
+     PRECOMPILE=1 \
+     VERBOSE=1
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Make directory for recording .inp files (if errors try -m 777)
+install -d -o games -g users -m g+rwx inp
+
+# Install wrapper script and .desktop files
+install -D -m 0755 $CWD/$PRGNAM -t $PKG/usr/bin/
+install -D -m 0644 $CWD/$PRGNAM.desktop -t $PKG/usr/share/applications/
+install -D -m 0644 $CWD/$PRGNAM.png -t $PKG/usr/share/pixmaps/
+
+# Install man pages and gzip
+install -D -m 0644 docs/man/*.1 -t $PKG/usr/man/man1/
+install -D -m 0644 docs/man/*.6 -t $PKG/usr/man/man6/
+gzip -9 $PKG/usr/man/man*/*.{1,6}
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a COPYING wolfmame.txt docs/LICENSE docs/README.md docs/CONTRIBUTING.md \
+   $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
