@@ -3,19 +3,46 @@
 # Slackware build script for anki
 
 # Written by Giuseppe Scalzi <giuseppe[at]osgate[dot]org>
+# Updated for new Anki build scheme by Caterino Tommaso, T.O.P. (2022)
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=anki
-VERSION=${VERSION:-2.1.16}
+VERSION=${VERSION:-2.1.51}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-ARCH="noarch"
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
+# Find ARCH
+if [ -z "$ARCH" ]; then
+  ARCH=$( uname -m )
+fi
+
+# Bail out if not x86_64
+if [ "$ARCH" = x86_64 ]; then
+  LIBDIRSUFFIX=64
+else
+  echo "Architecture $ARCH is not supported" >&2
+  exit 1
+fi
+
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -25,36 +52,52 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-set -e
+# Exit for errors or unset variables below.
+set -eu
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
-cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION-source.tgz
-cd $PRGNAM-$VERSION
+cd $PKG
+python3 -m venv usr
+
+( cd usr ; bin/pip3 install -v --no-deps $CWD/aqt*.whl $CWD/anki*.whl )
+
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
   -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-DESTDIR=$PKG make install
+find $PKG/usr \
+  -mindepth 1 -maxdepth 1 \
+  -not -name lib \
+  -not -name bin \
+  -execdir rm -rf '{}' \+
 
-# Move the man file to the correct directory and gzip it
-mv $PKG/usr/share/man/ $PKG/usr/man
-find $PKG/usr/man -type f -exec gzip -9 {} \;
+find $PKG/usr/bin $PKG/usr/lib/python3.9/site-packages \
+  -mindepth 1 -maxdepth 1 \
+  -not -name "aqt*" \
+  -not -name "anki*" \
+  -execdir rm -rf '{}' \+
 
-# `make install` puts the docs in the wrong place for Slackware
+mv -v $PKG/usr/lib $PKG/usr/lib$LIBDIRSUFFIX
+
+# delete line 1, insert python bang
+sed -i '1d;2i #!/usr/bin/python3' $PKG/usr/bin/anki
+
+install -vD -m 0644 $CWD/anki/anki.{png,xpm} -t $PKG/usr/share/pixmaps
+install -vD -m 0644 $CWD/anki/anki.desktop -t $PKG/usr/share/applications
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-mv $PKG/usr/share/doc/anki/* $PKG/usr/doc/$PRGNAM-$VERSION
-
+cp -a $CWD/README $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
-cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
