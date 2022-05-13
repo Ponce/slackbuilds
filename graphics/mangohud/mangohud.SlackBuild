@@ -25,13 +25,17 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=mangohud
-VERSION=${VERSION:-0.6.6_1}
-RLSVRS=${RLSVRS:-0.6.6-1}
+SRCNAM=MangoHud
+VERSION=${VERSION:-0.6.7}
+IMGUIVER=${IMGUIVER:-1.81}
+SPDLOGVER=${SPDLOGVER:-1.8.5}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+COMPAT32=${COMPAT32:-no}
 XNVCTRL=${XNVCTRL:-disabled}
 SYSVULKAN=${SYSVULKAN:-enabled}
+MANGOAPP=${MANGOAPP:-true}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -73,14 +77,16 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf MangoHud-$VERSION
-rm -rf MangoHud-$RLSVRS
-tar xvf $CWD/MangoHud-$RLSVRS.tar.?z
-cd MangoHud-$RLSVRS/subprojects
-tar xvf $CWD/imgui-1.81.tar.gz
-unzip $CWD/imgui_1.81-1_patch.zip
-tar xvf $CWD/spdlog-1.8.5.tar.gz
-unzip $CWD/spdlog_1.8.5-1_patch.zip
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.?z
+cd $SRCNAM-$VERSION/subprojects
+tar xvf $CWD/imgui-$IMGUIVER.tar.gz
+unzip $CWD/imgui_$IMGUIVER-1_patch.zip
+tar xvf $CWD/spdlog-$SPDLOGVER.tar.gz
+unzip $CWD/spdlog_$SPDLOGVER-1_patch.zip
+if [ "$MANGOAPP" = "true" ]; then
+  unzip $CWD/include.zip -d nlohmann_json-3.10.5
+fi
 cd ..
 chown -R root:root .
 
@@ -104,10 +110,35 @@ cd build
     --prefix=/usr \
     --sysconfdir=/etc \
      -Duse_system_vulkan=$SYSVULKAN \
-     -Dwith_xnvctrl=$XNVCTRL
+     -Dwith_xnvctrl=$XNVCTRL \
+     -Dmangoapp=$MANGOAPP
   ninja
   DESTDIR=$PKG ninja install
 cd ..
+
+if [ "$COMPAT32" = "yes" ]; then
+  mkdir build32
+  cd build32
+    CC="gcc -m32" \
+    CXX="g++ -m32" \
+    CFLAGS="$SLKCFLAGS" \
+    CXXFLAGS="$SLKCFLAGS" \
+    LDFLAGS="-L/usr/lib" \
+    PKG_CONFIG_PATH="/usr/lib/pkgconfig" \
+    meson .. \
+      --buildtype=release \
+      --infodir=/usr/info \
+      --libdir=/usr/lib \
+      --localstatedir=/var \
+      --mandir=/usr/man \
+      --prefix=/usr \
+      --sysconfdir=/etc \
+       -Duse_system_vulkan=$SYSVULKAN \
+       -Dmangoapp=$MANGOAPP
+    ninja
+    DESTDIR=$PKG ninja install
+  cd ..
+fi
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -116,8 +147,12 @@ find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a LICENSE README.md meson_options.txt $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE README.md $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mv $PKG/usr/share/doc/$PRGNAM/$SRCNAM.conf.example \
+  $PKG/usr/doc/$PRGNAM-$VERSION/
+rm -rf $PKG/usr/share/doc
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
