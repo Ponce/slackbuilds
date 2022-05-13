@@ -4,7 +4,7 @@
 #
 # Copyright 2015-2017  Edinaldo P. Silva, Rio de Janeiro, Brazil.
 # Copyright 2017-2019, Alexander Verbovetsky, Moscow, Russia
-# Copyright 2019-2021, Ruari Oedegaard, Oslo, Norway
+# Copyright 2019-2022, Ruari Oedegaard, Oslo, Norway
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -27,28 +27,17 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=vivaldi
-VERSION=${VERSION:-3.7.2218.52}
-FFMPEG_VERSION="89.0.4389.90"
-WIDEVINE_VERSION="4.10.1582.2"
+VERSION=${VERSION:-5.2.2623.46}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
 fi
-
-case "$ARCH" in
-    i?86) BITS="i386" ; WBITS="ia32" ; PBITS="x86" ;;
-  x86_64) BITS="amd64" ; WBITS="x64" ; PBITS="x64" ;;
-    arm*) BITS="armhf" ;;
-       *) echo "$ARCH is not supported."
-          exit 1 ;;
-esac
 
 # If the variable PRINT_PACKAGE_NAME is set, then this script will report what
 # the name of the created package would be, and then exit. This information
@@ -67,21 +56,7 @@ set -e
 rm -rf $PKG $TMP/$PRGNAM
 mkdir -p $TMP/$PRGNAM $PKG $OUTPUT
 cd $TMP/$PRGNAM
-ar p $CWD/${PRGNAM}-stable_${VERSION}-*_${BITS}.deb data.tar.xz | tar xvJ ./opt ./usr
-ar p $CWD/chromium-codecs-ffmpeg-extra_${FFMPEG_VERSION}-*_${BITS}.deb \
-  data.tar.xz | tar xOJ ./usr/lib/chromium-browser/libffmpeg.so \
-  > opt/vivaldi/libffmpeg.so.${VERSION%\.*\.*}
-
-if [ "x$BITS" = "xarmhf" ] ; then
-  echo "This script doesn't support installing Widevine on ARM."
-elif [ "x$BITS" = "xi386" ] ; then
-  rm -f opt/vivaldi/WidevineCdm
-  mkdir -p opt/vivaldi/WidevineCdm/_platform_specific/linux_${PBITS}
-  unzip -oq $CWD/${WIDEVINE_VERSION}-linux-${WBITS}.zip \
-    -d opt/vivaldi/WidevineCdm
-  mv opt/vivaldi/WidevineCdm/libwidevinecdm.so \
-    opt/vivaldi/WidevineCdm/_platform_specific/linux_${PBITS}
-fi
+ar p $CWD/${PRGNAM}-stable_${VERSION}-*.deb data.tar.xz | tar xJ ./opt ./usr
 
 chown -R root:root .
 find -L . \
@@ -96,7 +71,12 @@ mv opt usr $PKG/
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-ln -sf /opt/vivaldi/vivaldi $PKG/usr/bin/vivaldi
+# Make symlinks relative
+rm -f $PKG/usr/bin/vivaldi* $PKG/opt/vivaldi/WidevineCdm
+ln -s ../../opt/vivaldi/vivaldi $PKG/usr/bin/vivaldi
+ln -s ../../opt/vivaldi/vivaldi $PKG/usr/bin/vivaldi-stable
+# Note that this is a broken link until the user manually installs widevineCdm
+ln -s ../google/chrome/WidevineCdm $PKG/opt/vivaldi/WidevineCdm
 
 for res in 16 22 24 32 48 64 128 256; do
    install -Dm644 "$PKG/opt/vivaldi/product_logo_${res}.png" \
@@ -116,9 +96,26 @@ rm -rf $PKG/usr/share/doc
 cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
-mkdir -p $PKG/install
+# Add a note about uninstall on Slackware 14.2
+cat <<EON> $PKG/usr/doc/$PRGNAM-$VERSION/UNINSTALL-Slackware-14.2.txt
+Since '${0##*/}' was created with Slackware 15 and above in mind, it
+uses the new 'douninst.sh' script to clear down any proprietary media libs
+fetched by 'update-ffmpeg' during post install.
+
+If you run 14.2 (or older), make a copy of the douninst.sh *before* uninstall:
+
+  cp /var/lib/pkgtools/douninst.sh/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG .
+
+Then simply run it as root after uninstall.
+
+(If you forget it is not the end of the world, you will just potentially leave
+behind a small file [libffmpeg.so] under /var/opt/vivaldi*)
+EON
+
+mkdir -p $PKG/install $PKG/var/lib/pkgtools/douninst.sh
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/douninst.sh > $PKG/var/lib/pkgtools/douninst.sh/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
