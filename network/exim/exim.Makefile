@@ -198,7 +198,7 @@ SPOOL_DIRECTORY=/var/spool/exim
 # the libraries and headers are installed, as the pkg-config .pc
 # specification should include all -L/-I information necessary.
 # Enabling the USE_*_PC options should be sufficient. If not using
-# pkg-config, then you have to specify the libraries, and you mmight
+# pkg-config, then you have to specify the libraries, and you might
 # need to specify the locations too.
 
 # Uncomment the following lines if you want
@@ -207,7 +207,7 @@ SPOOL_DIRECTORY=/var/spool/exim
 # Unless you do this, you must define one of USE_OPENSSL or USE_GNUTLS
 # below.
 
-# If you are buliding with TLS, the library configuration must be done:
+# If you are building with TLS, the library configuration must be done:
 
 # Uncomment this if you are using OpenSSL
 USE_OPENSSL=yes
@@ -275,6 +275,9 @@ USE_OPENSSL_PC=openssl
 # You don't need to set TLS_INCLUDE if the relevant directories are already
 # specified in INCLUDE.
 
+
+# Uncomment the following line to remove support for TLS Resumption
+# DISABLE_TLS_RESUME=yes
 
 
 ###############################################################################
@@ -412,6 +415,8 @@ LOOKUP_DSEARCH=yes
 # LOOKUP_JSON=yes
 LOOKUP_JSON_PC=jansson
 # LOOKUP_LDAP=yes
+# LOOKUP_LMDB=yes
+
 # LOOKUP_MYSQL=yes
 # LOOKUP_MYSQL_PC=mariadb
 # LOOKUP_NIS=yes
@@ -490,7 +495,8 @@ SUPPORT_DANE=yes
 # You do not need to use this for any lookup information added via pkg-config.
 
 # LOOKUP_INCLUDE=-I /usr/local/ldap/include -I /usr/local/mysql/include -I /usr/local/pgsql/include
-# LOOKUP_LIBS=-L/usr/local/lib -lldap -llber -lmysqlclient -lpq -lgds -lsqlite3
+# LOOKUP_INCLUDE +=-I /usr/local/include
+# LOOKUP_LIBS=-L/usr/local/lib -lldap -llber -lmysqlclient -lpq -lgds -lsqlite3 -llmdb
 
 # ...or just enable your favourite lookups and let GNUmake handle the rest
 
@@ -574,13 +580,20 @@ DISABLE_MAL_MKS=yes
 # DISABLE_DNSSEC=yes
 
 # To disable support for Events set DISABLE_EVENT to "yes"
-
 # DISABLE_EVENT=yes
 
 
 # Uncomment this line to remove support for early pipelining, per
 # https://datatracker.ietf.org/doc/draft-harris-early-pipe/
 # DISABLE_PIPE_CONNECT=yes
+
+
+# Uncomment the following to remove the fast-ramp two-phase-queue-run support
+# DISABLE_QUEUE_RAMP=yes
+
+# Uncomment the following lines to add SRS (Sender Rewriting Scheme) support
+# using only native facilities.  See EXPERIMENTAL_SRS_ALT for an alternative.
+# SUPPORT_SRS=yes
 
 
 #------------------------------------------------------------------------------
@@ -594,21 +607,20 @@ DISABLE_MAL_MKS=yes
 
 # EXPERIMENTAL_DCC=yes
 
-# Uncomment the following lines to add SRS (Sender rewriting scheme) support.
+# Uncomment the following lines to add SRS (Sender rewriting scheme) support
+# using the implementation in linbsrs_alt.
 # You need to have libsrs_alt installed on your system (srs.mirtol.com).
 # Depending on where it is installed you may have to edit the CFLAGS and
 # LDFLAGS lines.
 
-# EXPERIMENTAL_SRS=yes
+# EXPERIMENTAL_SRS_ALT=yes
 # CFLAGS  += -I/usr/local/include
 # LDFLAGS += -lsrs_alt
 
-# Uncomment the following lines to add SRS (Sender rewriting scheme) support
-# using only native facilities.
-# EXPERIMENTAL_SRS_NATIVE=yes
-
 # Uncomment the following line to add DMARC checking capability, implemented
 # using libopendmarc libraries. You must have SPF and DKIM support enabled also.
+# Library version libopendmarc-1.4.1-1.fc33.x86_64  (on Fedora 33) is known broken;
+# 1.3.2-3 works.  I seems that the OpenDMARC project broke their API.
 # SUPPORT_DMARC=yes
 # CFLAGS += -I/usr/local/include
 # LDFLAGS += -lopendmarc
@@ -632,21 +644,8 @@ DISABLE_MAL_MKS=yes
 # Uncomment the following to include extra information in fail DSN message (bounces)
 # EXPERIMENTAL_DSN_INFO=yes
 
-# Uncomment the following to add LMDB lookup support
-# You need to have LMDB installed on your system (https://github.com/LMDB/lmdb)
-# Depending on where it is installed you may have to edit the CFLAGS and LDFLAGS lines.
-# EXPERIMENTAL_LMDB=yes
-# CFLAGS += -I/usr/local/include
-# LDFLAGS += -llmdb
-
 # Uncomment the following line to add queuefile transport support
 # EXPERIMENTAL_QUEUEFILE=yes
-
-# Uncomment the following line to include support for TLS Resumption
-# EXPERIMENTAL_TLS_RESUME=yes
-
-# Uncomment the following to include the fast-ramp two-phase-queue-run support
-# EXPERIMENTAL_QUEUE_RAMP=yes
 
 ###############################################################################
 #                 THESE ARE THINGS YOU MIGHT WANT TO SPECIFY                  #
@@ -762,6 +761,13 @@ FIXED_NEVER_USERS=root
 # By default, no macros are whitelisted for -D usage.
 
 # WHITELIST_D_MACROS=TLS:SPOOL
+
+# The next setting enables a main config option
+# "allow_insecure_tainted_data" to turn taint failures into warnings.
+# Though this option is new, it is deprecated already now, and will be
+# ignored in future releases of Exim. It is meant as mitigation for
+# upgrading old (possibly insecure) configurations to more secure ones.
+ALLOW_INSECURE_TAINTED_DATA=yes
 
 #------------------------------------------------------------------------------
 # Exim has support for the AUTH (authentication) extension of the SMTP
