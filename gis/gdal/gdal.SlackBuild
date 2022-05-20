@@ -3,8 +3,9 @@
 # Slackware build script for GDAL
 
 # Copyright 2009 Marco Cecchetti <mrc.ild@gmail.com>
-# Updated 2019-2021 Benjamin Trigona-Harany <slackbuilds@jaxartes.net>
-# Updated 2021-2022 Gregory J. L. Tourte <artourter@gmail.com>
+# Copyright 2010-2018 David Spencer <baildon.research@googlemail.com>
+# Copyright 2019-2021 Benjamin Trigona-Harany <slackbuilds@jaxartes.net>
+# Copyright 2021-2022 Gregory J. L. Tourte <artourter@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -24,12 +25,11 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# Maintained by David Spencer <baildon.research@googlemail.com>
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=gdal
-VERSION=${VERSION:-3.4.3}
+VERSION=${VERSION:-3.5.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -83,87 +83,55 @@ find -L . \
   \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# OpenCL, webp, Spatialite and Grass support need special arrangements.
-# Everything else is handled automatically by configure.
 WITHLIST=""
 
 # Request OpenCL support:
 if [ ${OPENCL:-no} = "yes" ]; then
-   WITHLIST+=" --with-opencl=yes"
+  WITHLIST+=" -DGDAL_USE_OPENCL=ON"
 fi
 
-# Request webp support if it's installed:
-if pkg-config --exists libwebp; then
-  WITHLIST+=" --with-webp=yes"
+# Build JAVA bindings:
+if [ ${JAVA:-no} = "no" ]; then
+  WITHLIST+=" -DBUILD_JAVA_BINDINGS:BOOL=OFF"
 fi
 
-# Spatialite support if package is installed:
-if pkg-config --exists spatialite; then
-  WITHLIST+=" --with-spatialite=yes"
-fi
+mkdir build
 
-# Also, enabling Grass support in gdal introduces a circular dependency,
-# so here is another undocumented option.
-if pkg-config --exists grass; then
-  if [ ${GRASS:-no} = "yes" ]; then
-    WITHLIST+=" --with-grass=$(pkg-config --variable=prefix grass)"
-  fi
-fi
-
-# 12 bit JPEG support is handled by internal modified versions of libjpeg
-# and libtiff, but this can cause segfaults in other software linked against
-# the real libjpeg (eg. qgis calling qt). Enable JPEG12 only if you need it:
-if [ ${JPEG12:-no} = "yes" ]; then
-   WITHLIST+=" --with-jpeg=internal"
-else
-   WITHLIST+=" --with-jpeg=yes"
-fi
-
-# The CPPFLAGS are for the newer mariadb (thanks pprkut!)
-CPPFLAGS="-I/usr/include/mysql/server" \
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --enable-static=no \
-  --with-threads=yes \
-  --with-cpp14=yes \
-  --without-libtool \
-  --with-bash-completion \
-  --with-geos=yes \
-  --with-libz=yes \
-  --with-liblzma=yes \
-  --with-curl=yes \
-  --with-crypto=yes \
-  --with-mysql=yes \
-  --with-python=/usr/bin/python3 \
-  --with-poppler=yes \
-  --with-libtiff=internal \
-  --with-rename-internal-libtiff-symbols=yes \
-  --with-geotiff=internal \
-  --with-rename-internal-libgeotiff-symbols=yes \
-  --with-jasper=no \
-  $WITHLIST \
-  --build=$ARCH-slackware-linux
-
-make
-make install DESTDIR=$PKG
+# The MYSQL_INCLUDE_DIR is for the newer mariadb (thanks pprkut!)
+( cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_SYSCONFDIR=/etc \
+    -DCMAKE_INSTALL_LOCALSTATEDIR=/var \
+    -DCMAKE_INSTALL_LIBDIR=lib${LIBDIRSUFFIX} \
+    -DCMAKE_INSTALL_DATAROOTDIR=share \
+    -DCMAKE_INSTALL_MANDIR=man \
+    -DCMAKE_INSTALL_DOCDIR=doc/$PRGNAM-$VERSION \
+    -DBUILD_CSHARP_BINDINGS:BOOL=OFF \
+    -DBUILD_SHARED_LIBS:BOOL=ON \
+    -DMYSQL_INCLUDE_DIR=/usr/include/mysql/server \
+    -DGDAL_USE_GEOTIFF_INTERNAL=ON \
+    -DGDAL_USE_TIFF_INTERNAL=ON \
+    $WITHLIST \
+    -DCMAKE_BUILD_TYPE=Release \
+    ..
+  make
+  make install/strip DESTDIR=$PKG
+)
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  COMMITTERS HOWTO-RELEASE LICENSE.TXT MIGRATION_GUIDE.TXT NEWS.md PROVENANCE.TXT VERSION \
+  CITATION COMMITTERS HOWTO-RELEASE LICENSE.TXT MIGRATION_GUIDE.TXT NEWS.md PROVENANCE.TXT SECURITY.md VERSION \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-
-rm -f $PKG/usr/lib*/*.la
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
