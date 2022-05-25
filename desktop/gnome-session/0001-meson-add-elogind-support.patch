@@ -1,0 +1,193 @@
+From ab8893f12c925050aceea4e31dd84aef674c6e9f Mon Sep 17 00:00:00 2001
+From: Dudemanguy <random342@airmail.cc>
+Date: Wed, 7 Oct 2020 10:08:33 -0500
+Subject: [PATCH 1/1] meson: add elogind support
+
+systemd session management (AKA logind) works with elogind. Just add an
+option to enable elogind and modify the defines a little bit to get it
+to build with systemd session management support.
+---
+ data/meson.build                  |  2 +-
+ gnome-session/gsm-autostart-app.c |  2 +-
+ gnome-session/gsm-manager.c       |  4 ++--
+ gnome-session/gsm-systemd.c       |  2 +-
+ gnome-session/gsm-util.c          |  4 ++--
+ gnome-session/gsm-util.h          |  2 +-
+ gnome-session/main.c              |  4 ++--
+ meson.build                       | 15 +++++++++++++--
+ meson_options.txt                 |  1 +
+ 9 files changed, 24 insertions(+), 12 deletions(-)
+
+diff --git a/data/meson.build b/data/meson.build
+index f6d264f8..ad04e6bc 100644
+--- a/data/meson.build
++++ b/data/meson.build
+@@ -120,7 +120,7 @@ install_data(
+   install_dir: join_paths(session_datadir, 'GConf', 'gsettings')
+ )
+ 
+-if enable_systemd_session
++if enable_systemd_session and enable_systemd
+   unit_conf = configuration_data()
+   unit_conf.set('libexecdir', session_libexecdir)
+ 
+diff --git a/gnome-session/gsm-autostart-app.c b/gnome-session/gsm-autostart-app.c
+index 8204d4f1..244a325f 100644
+--- a/gnome-session/gsm-autostart-app.c
++++ b/gnome-session/gsm-autostart-app.c
+@@ -31,7 +31,7 @@
+ #define GNOME_DESKTOP_USE_UNSTABLE_API
+ #include <libgnome-desktop/gnome-systemd.h>
+ 
+-#ifdef HAVE_SYSTEMD
++#if defined(HAVE_SYSTEMD) || defined(HAVE_ELOGIND)
+ #ifdef ENABLE_SYSTEMD_JOURNAL
+ #include <systemd/sd-journal.h>
+ #endif
+diff --git a/gnome-session/gsm-manager.c b/gnome-session/gsm-manager.c
+index 1b88b266..8dfd23fe 100644
+--- a/gnome-session/gsm-manager.c
++++ b/gnome-session/gsm-manager.c
+@@ -974,7 +974,7 @@ _client_stop (const char *id,
+         return FALSE;
+ }
+ 
+-#ifdef HAVE_SYSTEMD
++#if defined(HAVE_SYSTEMD) || defined(HAVE_ELOGIND)
+ static void
+ maybe_restart_user_bus (GsmManager *manager)
+ {
+@@ -1020,7 +1020,7 @@ do_phase_exit (GsmManager *manager)
+                                    NULL);
+         }
+ 
+-#ifdef HAVE_SYSTEMD
++#if defined(HAVE_SYSTEMD) || defined(HAVE_ELOGIND)
+         if (!priv->systemd_managed)
+                 maybe_restart_user_bus (manager);
+ #endif
+diff --git a/gnome-session/gsm-systemd.c b/gnome-session/gsm-systemd.c
+index cf30a4bd..d25ca83c 100644
+--- a/gnome-session/gsm-systemd.c
++++ b/gnome-session/gsm-systemd.c
+@@ -21,7 +21,7 @@
+ #include "config.h"
+ #include "gsm-systemd.h"
+ 
+-#ifdef HAVE_SYSTEMD
++#if defined(HAVE_SYSTEMD) || defined(HAVE_ELOGIND)
+ 
+ #include <errno.h>
+ #include <string.h>
+diff --git a/gnome-session/gsm-util.c b/gnome-session/gsm-util.c
+index f1e6489d..607395c8 100644
+--- a/gnome-session/gsm-util.c
++++ b/gnome-session/gsm-util.c
+@@ -626,7 +626,7 @@ gsm_util_export_activation_environment (GError     **error)
+         return environment_updated;
+ }
+ 
+-#ifdef HAVE_SYSTEMD
++#if defined(HAVE_SYSTEMD) || defined(HAVE_ELOGIND)
+ gboolean
+ gsm_util_export_user_environment (GError     **error)
+ {
+@@ -839,7 +839,7 @@ gsm_util_setenv (const char *variable,
+                 g_clear_error (&error);
+         }
+ 
+-#ifdef HAVE_SYSTEMD
++#if defined(HAVE_SYSTEMD) || defined(HAVE_ELOGIND)
+         /* If this fails, the system user session won't get the updated environment
+          */
+         if (!gsm_util_update_user_environment (variable, value, &error)) {
+diff --git a/gnome-session/gsm-util.h b/gnome-session/gsm-util.h
+index bc26a21e..97289c02 100644
+--- a/gnome-session/gsm-util.h
++++ b/gnome-session/gsm-util.h
+@@ -53,7 +53,7 @@ const char * const * gsm_util_listenv               (void);
+ const char * const * gsm_util_get_variable_blacklist(void);
+ 
+ gboolean    gsm_util_export_activation_environment  (GError     **error);
+-#ifdef HAVE_SYSTEMD
++#if defined(HAVE_SYSTEMD) || defined(HAVE_ELOGIND)
+ gboolean    gsm_util_export_user_environment        (GError     **error);
+ gboolean    gsm_util_start_systemd_unit             (const char  *unit,
+                                                      const char  *mode,
+diff --git a/gnome-session/main.c b/gnome-session/main.c
+index a460a849..65bc9721 100644
+--- a/gnome-session/main.c
++++ b/gnome-session/main.c
+@@ -541,7 +541,7 @@ main (int argc, char **argv)
+ 
+         session_name = opt_session_name;
+ 
+-#ifdef HAVE_SYSTEMD
++#if defined(HAVE_SYSTEMD) || defined(HAVE_ELOGIND)
+         gsm_util_export_user_environment (&error);
+         if (error && !g_getenv ("RUNNING_UNDER_GDM")) {
+                 g_warning ("Failed to upload environment to systemd: %s", error->message);
+@@ -624,7 +624,7 @@ main (int argc, char **argv)
+ 
+         gsm_main ();
+ 
+-#ifdef HAVE_SYSTEMD
++#if defined(HAVE_SYSTEMD) || defined(HAVE_ELOGIND)
+         gsm_util_export_user_environment (NULL);
+ #endif
+ 
+diff --git a/meson.build b/meson.build
+index f56aa316..b29860b1 100644
+--- a/meson.build
++++ b/meson.build
+@@ -119,7 +119,8 @@ enable_systemd_session = get_option('systemd_session') != 'disable'
+ use_systemd_session = get_option('systemd_session') == 'default'
+ enable_systemd_journal = get_option('systemd_journal')
+ enable_consolekit = get_option('consolekit')
+-if enable_systemd or enable_consolekit
++enable_elogind = get_option('elogind')
++if enable_systemd or enable_consolekit or enable_elogind
+   session_bin_deps += dependency('gio-unix-2.0', version: glib_req_version)
+ 
+   # Check for systemd
+@@ -161,14 +162,24 @@ if enable_systemd or enable_consolekit
+       session_tracking = 'ConsoleKit'
+     endif
+   endif
++
++  # Check for elogind
++  if enable_elogind
++    elogind_dep = dependency('libelogind', version: '>= 209')
++    session_bin_deps += elogind_dep
++
++    session_tracking = 'elogind'
++  endif
++
+ endif
+ if enable_systemd_session
+-  assert(enable_systemd, 'Systemd support must be enabled when using systemd session management')
++  assert(enable_systemd or enable_elogind, 'Systemd or elogind support must be enabled when using systemd session management')
+ endif
+ config_h.set('HAVE_SYSTEMD', enable_systemd)
+ config_h.set('ENABLE_SYSTEMD_SESSION', enable_systemd_session)
+ config_h.set('ENABLE_SYSTEMD_JOURNAL', enable_systemd_journal)
+ config_h.set('HAVE_CONSOLEKIT', enable_consolekit)
++config_h.set('HAVE_ELOGIND', enable_elogind)
+ config_h.set10('USE_SYSTEMD_SESSION', use_systemd_session)
+ 
+ configure_file(
+diff --git a/meson_options.txt b/meson_options.txt
+index 4c05dc6e..4a27c7fd 100644
+--- a/meson_options.txt
++++ b/meson_options.txt
+@@ -3,6 +3,7 @@ option('session_selector', type: 'boolean', value: false, description: 'enable b
+ option('systemd', type: 'boolean', value: true, description: 'Use systemd')
+ option('systemd_session', type: 'combo', choices: ['disable', 'enable', 'default'], value: 'default', description: 'Whether to include systemd session support and use it by default')
+ option('systemd_journal', type: 'boolean', value:'true', description: 'Send log to systemd-journal')
++option('elogind', type: 'boolean', value: false, description: 'Use elogind')
+ option('consolekit', type: 'boolean', value: false, description: 'Use consolekit')
+ option('docbook', type: 'boolean', value: true, description: 'build documentation')
+ option('man', type: 'boolean', value: true, description: 'build documentation (requires xmlto)')
+-- 
+2.34.1
+
