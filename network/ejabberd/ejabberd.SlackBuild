@@ -1,0 +1,171 @@
+#!/bin/bash
+
+# Slackware build script for ejabberd
+
+# Copyright 2022, Alexander Verbovetsky, Moscow, Russia
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=ejabberd
+VERSION=${VERSION:-22.05_git75a771b}
+COMMIT=75a771bfec3626145d404349fdaec4f0eef83bbc
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+if ! grep ^ejabberd: /etc/group 2>&1 > /dev/null; then
+  echo "  A group "ejabberd" must exist prior to running this script."
+  echo "    # groupadd -g 370 ejabberd"
+  exit 1
+elif ! grep ^ejabberd: /etc/passwd 2>&1 > /dev/null; then
+  echo "  A user "ejabberd" must exist prior to running this script."
+  echo "    # useradd -u 370 -g 370 -s /sbin/nologin -d /var/lib/ejabberd ejabberd"
+  exit 1
+elif ! grep ^ejabberd:.*:/var/lib/ejabberd: /etc/passwd 2>&1 > /dev/null; then
+  echo "  Please change the user "ejabberd" home directory to /var/lib/ejabberd."
+  echo "    # usermod -d /var/lib/ejabberd ejabberd"
+  exit 1
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$COMMIT
+tar xvf $CWD/$PRGNAM-$COMMIT.tar.gz
+cd $PRGNAM-$COMMIT
+
+find -L $CWD -type f -name "*.tar.gz" ! -name "$PRGNAM-$COMMIT.tar.gz" \
+  | while read f
+do
+  fn=$(basename $f | sed -e 's/ejabberd-po.*/ejabberd_po/' \
+      | rev | cut -d- -f2 | rev)
+  mkdir -p deps/$fn
+  tar xvf $f -C deps/$fn --strip-components=1
+done
+
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+odbc="";   [ "${ODBC:-no}" != "no" ]   && odbc="--enable-odbc"
+mysql="";  [ "${MYSQL:-no}" != "no" ]  && mysql="--enable-mysql"
+pgsql="";  [ "${PGSQL:-no}" != "no" ]  && pgsql="--enable-pgsql"
+sqlite=""; [ "${SQLITE:-no}" != "no" ] && sqlite="--enable-sqlite"
+pam="";    [ "${PAM:-no}" != "no" ]    && pam="--enable-pam"
+redis="";  [ "${REDIS:-no}" != "no" ]  && redis="--enable-redis"
+elixir=""; [ "${ELIXIR:-no}" != "no" ] && elixir="--enable-elixir"
+sip="";    [ "${SIP:-no}" != "no" ]    && sip="--enable-sip"
+lua="";    [ "${LUA:-no}" != "no" ]    && lua="--enable-lua"
+tools="";  [ "${TOOLS:-no}" != "no" ]  && tools="--enable-tools"
+
+./autogen.sh
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --enable-user=ejabberd \
+  --build=$ARCH-slackware-linux \
+  $odbc \
+  $mysql \
+  $pgsql \
+  $sqlite \
+  $pam \
+  $redis \
+  $elixir \
+  $sip \
+  $lua \
+  $tools
+
+make
+make install DESTDIR=$PKG
+
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+install -D -m644 tools/ejabberdctl.bc \
+  $PKG/usr/share/bash-completion/completions/ejabberdctl
+rm -f tools/ejabberdctl.bc
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CHANGELOG.md CONTRIBUTING.md CONTRIBUTORS.md README.md sql tools \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+chown -R ejabberd:ejabberd $PKG/var/lib/ejabberd
+chmod 700 $PKG/var/lib/ejabberd
+
+for i in `find $PKG/etc/ejabberd -type f`; do mv $i $i.new; done
+
+mkdir -p $PKG/etc/rc.d
+cat $CWD/rc.ejabberd > $PKG/etc/rc.d/rc.ejabberd.new
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
