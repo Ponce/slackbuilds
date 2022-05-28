@@ -36,6 +36,7 @@ config etc/svxlink/svxlink.d/ModuleSelCallEnc.conf.new
 config etc/svxlink/svxlink.d/ModulePropagationMonitor.conf.new
 config etc/svxlink/svxlink.d/ModuleMetarInfo.conf.new
 config etc/svxlink/svxlink.d/ModuleParrot.conf.new
+config etc/svxlink/svxlink.d/ModuleTrx.conf.new
 preserve_perms etc/rc.d/rc.svxlink.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
