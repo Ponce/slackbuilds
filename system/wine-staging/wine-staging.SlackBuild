@@ -34,11 +34,15 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=wine-staging
-VERSION=${VERSION:-7.1}
-WINEVERSION=${WINEVERSION:-7.1}
+VERSION=${VERSION:-7.9}
+WINEVERSION=${WINEVERSION:-7.9}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -56,12 +60,6 @@ if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   exit 0
 fi
 
-TMP=${TMP:-/tmp/SBo}
-PKG=$TMP/package-$PRGNAM
-OUTPUT=${OUTPUT:-/tmp}
-WIN32=${WIN32:-yes}
-WIN64=${WIN64:-no}
-
 # If your video card does not support hardware accelerated OpenGL,
 # run the script like:   OPENGL=NO ./wine.SlackBuild
 if [ "${OPENGL:-YES}" = "YES" ]; then
@@ -69,9 +67,17 @@ if [ "${OPENGL:-YES}" = "YES" ]; then
 else
   do_opengl="without"
 fi
-if [ "$WIN32" = "no" ] && [ "$WIN64" = "no" ]; then
-  echo "Both 64 and 32 bit builds disabled. Nothing to do."
-  exit 1
+
+# auto find which ARCHs to build for
+WINETMP="$( mktemp -d $TMP/wine-test-XXXXXX )"
+echo "int main(void) {; return(0); }" > "$WINETMP/test.c"
+gcc -m32 "$WINETMP/test.c" -o /dev/null >/dev/null 2>&1 && WINE32=${WINE32:-yes}
+gcc -m64 "$WINETMP/test.c" -o /dev/null >/dev/null 2>&1 && WINE64=${WINE64:-yes}
+rm -rf "$WINETMP"
+
+if [ "${WINE32:-no}${WINE64:-no}" = "nono" ]; then
+ echo "Both 64 and 32 bit builds disabled. Nothing to do."
+ exit 1
 fi
 
 # These should work for anything not specified below
@@ -104,7 +110,7 @@ rm -rf $PRGNAM-$VERSION wine-$WINEVERSION
 tar xvf $CWD/wine-$WINEVERSION.tar.xz
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 
-cd $PRGNAM-$VERSION/patches
+cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -112,6 +118,7 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
+cd patches
 ./patchinstall.sh DESTDIR=$TMP/wine-$WINEVERSION --all
 
 cd $TMP/wine-$WINEVERSION
@@ -128,7 +135,7 @@ patch -p1 --verbose < $CWD/0001-winhlp32-Workaround-a-bug-in-Flex.patch
 # fix path of opencl headers.
 sed 's|OpenCL/opencl.h|CL/opencl.h|g' -i configure*
 
-if [ "$WIN64" = "yes" ]; then
+if [ "${WINE64:-no}" = "yes" ]; then
   wine64="--with-wine64=../wine64"
   mkdir wine64
   cd wine64
@@ -157,7 +164,7 @@ if [ "$WIN64" = "yes" ]; then
   cd ..
 fi
 
-if [ "$WIN32" = "yes" ]; then
+if [ "${WINE32:-no}" = "yes" ]; then
   mkdir wine32
   cd wine32
 
@@ -218,8 +225,6 @@ cp $CWD/*.desktop $PKG/usr/share/applications/
 
 DOCS="ANNOUNCE AUTHORS COPYING.LIB LICENSE* MAINTAINERS README VERSION"
 FONTS_LICENSE="COPYING.arial COPYING.cour COPYING.msyh COPYING.times"
-
-VERSION=$( printf %s $VERSION | tr - _ )
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp $DOCS $FONTS_LICENSE $PKG/usr/doc/$PRGNAM-$VERSION
