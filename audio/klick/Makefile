@@ -1,4 +1,4 @@
-# Makefile for klick, by B. Watson (yalhcru@gmail.com). Part of
+# Makefile for klick, by B. Watson (urchlay@slackware.uk). Part of
 # SlackBuilds.org build for klick.
 
 # Wrote this because the SConstruct for klick no longer works in
