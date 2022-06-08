@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# extract-shadow-warrior.sh, by B. Watson (yalhcru@gmail.com).
+# extract-shadow-warrior.sh, by B. Watson (urchlay@slackware.uk).
 
 # Licensed under the WTFPL: Do WTF you want with this. See
 # http://www.wtfpl.net/txt/copying/ for details.
