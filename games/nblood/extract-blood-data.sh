@@ -3,7 +3,7 @@
 # extract-blood-data.sh - extract the game data from a mounted Blood
 # CD-ROM or (not mounted) .iso file in the current directory.
 
-# By B. Watson <yalhcru@gmail.com>, released under the WTPL: Do WTF you
+# By B. Watson <urchlay@slackware.uk>, released under the WTPL: Do WTF you
 # want with this.
 
 if [ "$( id -u )" != "0" ]; then
