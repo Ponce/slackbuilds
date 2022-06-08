@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# fixman.sh - part of SBo adl build. B Watson (yalhcru@gmail.com), WTFPL.
+# fixman.sh - part of SBo adl build. B Watson (urchlay@slackware.uk), WTFPL.
 
 # needs polyglotman.
 
