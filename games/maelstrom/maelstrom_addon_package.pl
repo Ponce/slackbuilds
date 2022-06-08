@@ -9,7 +9,7 @@
 # This script is meant to work on a stock Slackware system, so it
 # doesn't use any CPAN modules (which makes the code a bit awkward).
 
-# Author: B. Watson (yalhcru@gmail.com)
+# Author: B. Watson (urchlay@slackware.uk)
 
 # This program is released into the public domain; do as ye list wi' her.
 # Author not responsible for any damages resulting from the use of this
