@@ -1,0 +1,1 @@
+options nvidia NVreg_OpenRmEnableUnsupportedGpus=1
