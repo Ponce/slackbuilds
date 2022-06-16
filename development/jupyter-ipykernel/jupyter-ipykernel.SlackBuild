@@ -26,7 +26,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=jupyter-ipykernel
-VERSION=${VERSION:-6.13.0}
+VERSION=${VERSION:-6.15.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -82,7 +82,34 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-python3 setup.py install --root=$PKG
+# Use this setup.py shim:
+cat << EOF > setup.py
+from distutils.core import setup
+from glob import glob
+from ipykernel.kernelspec import KERNEL_NAME, make_ipkernel_cmd, write_kernel_spec
+import os
+here = os.path.abspath(os.path.dirname(__file__))
+pjoin = os.path.join
+packages = []
+for d, _, _ in os.walk(pjoin(here, 'ipykernel')):
+    if os.path.exists(pjoin(d, '__init__.py')):
+        packages.append(d[len(here)+1:].replace(os.path.sep, '.'))
+dest = pjoin(here, "data_kernelspec")
+if os.path.exists(dest):
+    shutil.rmtree(dest)
+write_kernel_spec(dest, overrides={"argv": make_ipkernel_cmd()})
+setup(name='${PRGNAM}',
+    version='${VERSION}',
+    packages=packages,
+    py_modules=["ipykernel_launcher"],
+    data_files=[(pjoin("share", "jupyter", "kernels", KERNEL_NAME), glob(pjoin("data_kernelspec", "*")))],
+    package_data={"ipykernel": ["resources/*.*", "py.typed"]},
+)
+EOF
+
+# With the shim, it's a good idea to use "unshare -n" to prevent downloading
+# anything extra:
+unshare -n python3 setup.py install --root=$PKG || exit 1
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
