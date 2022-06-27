@@ -8,11 +8,8 @@ config() {
   fi
 }
 
-CONFIGS="slpkg.conf repositories.conf blacklist slackware-mirrors \
-    default-repositories custom-repositories rlworkman.deps pkg_security"
-for file in $CONFIGS; do
-    config etc/slpkg/${file}.new
-done
+config etc/slpkg/slpkg.yaml.new
+config etc/slpkg/blacklist.yaml.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
