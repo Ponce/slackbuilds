@@ -40,7 +40,7 @@ if [ -f /etc/xdg/autostart/pipewire.desktop ] ; then
   fi
 
   echo "Pipewire Media Session enabled as media session server."
-  if ps ax | grep -q pipewire ; then
+  if ps ax | grep -q wireplumber ; then
     echo
     echo "You may need to stop running daemon/wireplumber processes."
     echo "The clean way is to run these commands as the user that owns the processes:"
