@@ -460,19 +460,19 @@ LDAP_LIB_TYPE=OPENLDAP2
 
 
 #------------------------------------------------------------------------------
-# The PCRE library is required for Exim.  There is no longer an embedded
+# The PCRE2 library is required for Exim.  There is no longer an embedded
 # version of the PCRE library included with the source code, instead you
-# must use a system library or build your own copy of PCRE.
+# must use a system library or build your own copy of PCRE2.
 # In either case you must specify the library link info here.  If the
-# PCRE header files are not in the standard search path you must also
+# PCRE2 header files are not in the standard search path you must also
 # modify the INCLUDE path (above)
 #
 # Use PCRE_CONFIG to query the pcre-config command (first found in $PATH)
 # to find the include files and libraries, else use PCRE_LIBS and set INCLUDE
 # too if needed.
 
-PCRE_CONFIG=yes
-# PCRE_LIBS=-lpcre
+PCRE2_CONFIG=yes
+# PCRE_LIBS=-lpcre2
 
 
 #------------------------------------------------------------------------------
@@ -497,6 +497,13 @@ SUPPORT_DANE=yes
 # LOOKUP_INCLUDE=-I /usr/local/ldap/include -I /usr/local/mysql/include -I /usr/local/pgsql/include
 # LOOKUP_INCLUDE +=-I /usr/local/include
 # LOOKUP_LIBS=-L/usr/local/lib -lldap -llber -lmysqlclient -lpq -lgds -lsqlite3 -llmdb
+
+#------------------------------------------------------------------------------
+# If you included LOOKUP_LMDB above you will need the library. Depending
+# on where installed you may also need an include directory
+#
+# LOOKUP_INCLUDE += -I/usr/local/include
+# LOOKUP_LIBS += -llmdb
 
 # ...or just enable your favourite lookups and let GNUmake handle the rest
 
@@ -592,8 +599,8 @@ DISABLE_MAL_MKS=yes
 # DISABLE_QUEUE_RAMP=yes
 
 # Uncomment the following lines to add SRS (Sender Rewriting Scheme) support
-# using only native facilities.  See EXPERIMENTAL_SRS_ALT for an alternative.
-# SUPPORT_SRS=yes
+# using only native facilities.
+SUPPORT_SRS=yes
 
 
 #------------------------------------------------------------------------------
@@ -606,16 +613,6 @@ DISABLE_MAL_MKS=yes
 # Doing so will also explicitly turn on the WITH_CONTENT_SCAN option.
 
 # EXPERIMENTAL_DCC=yes
-
-# Uncomment the following lines to add SRS (Sender rewriting scheme) support
-# using the implementation in linbsrs_alt.
-# You need to have libsrs_alt installed on your system (srs.mirtol.com).
-# Depending on where it is installed you may have to edit the CFLAGS and
-# LDFLAGS lines.
-
-# EXPERIMENTAL_SRS_ALT=yes
-# CFLAGS  += -I/usr/local/include
-# LDFLAGS += -lsrs_alt
 
 # Uncomment the following line to add DMARC checking capability, implemented
 # using libopendmarc libraries. You must have SPF and DKIM support enabled also.
@@ -761,13 +758,6 @@ FIXED_NEVER_USERS=root
 # By default, no macros are whitelisted for -D usage.
 
 # WHITELIST_D_MACROS=TLS:SPOOL
-
-# The next setting enables a main config option
-# "allow_insecure_tainted_data" to turn taint failures into warnings.
-# Though this option is new, it is deprecated already now, and will be
-# ignored in future releases of Exim. It is meant as mitigation for
-# upgrading old (possibly insecure) configurations to more secure ones.
-ALLOW_INSECURE_TAINTED_DATA=yes
 
 #------------------------------------------------------------------------------
 # Exim has support for the AUTH (authentication) extension of the SMTP
@@ -1048,10 +1038,10 @@ EXTRALIBS += -ldl
 # If you want IDNA2008 mappings per RFCs 5890, 6530 and 6533, you additionally
 # need libidn2 and SUPPORT_I18N_2008.
 
-SUPPORT_I18N=yes
-LDFLAGS += -lidn
-# SUPPORT_I18N_2008=yes
-# LDFLAGS += -lidn -lidn2
+# SUPPORT_I18N=yes
+# LDFLAGS += -lidn
+SUPPORT_I18N_2008=yes
+LDFLAGS += -lidn -lidn2
 
 
 #------------------------------------------------------------------------------
@@ -1513,5 +1503,10 @@ PID_FILE_PATH=/var/run/exim.pid
 #------------------------------------------------------------------------------
 # For development, add this to include code to time various stages and report.
 # CFLAGS += -DMEASURE_TIMING
+
+# For a very slightly smaller build, for constrained systems, uncomment this.
+# The feature involved is purely for debugging.
+
+# DISABLE_CLIENT_CMD_LOG=yes
 
 # End of EDITME for Exim 4.
