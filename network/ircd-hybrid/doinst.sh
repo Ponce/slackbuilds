@@ -22,5 +22,4 @@ preserve_perms() {
   config $NEW
 }
 
-config etc/ircd/ircd.conf.new
 preserve_perms etc/rc.d/rc.ircd.new
