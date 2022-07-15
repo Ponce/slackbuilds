@@ -1,0 +1,182 @@
+#!/bin/bash
+
+# Slackware build script for atarisio
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=atarisio
+VERSION=${VERSION:-210714}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+SRCNAM=AtariSIO
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# The kernel driver is really nice, but has two issues:
+# 1. It requires a real 16550A serial port. These are pretty rare on
+#    modern machines.
+# 2. While the driver is loaded, you can't use the serial port as a
+#    normal serial port. This prevents using the Atari as a terminal
+#    or SLIP mode for FujiChat.
+# By default, this build will disable it.
+KERNEL=${KERNEL:-no}
+if [ "$KERNEL" = "no" ]; then
+  DEFAULT_DEVICE=${DEFAULT_DEVICE:-/dev/ttyUSB0}
+  INCLUDES="does not include"
+  KVER=""
+else
+  DEFAULT_DEVICE=${DEFAULT_DEVICE:-/dev/atarisio0}
+  INCLUDES="includes"
+  KERNVER="$( uname -r )"
+  KVER=" for kernel $KERNVER"
+fi
+
+# Use our flags, and don't waste time running depmod since we
+# install the module to $PKG anyway.
+sed -i "/^CFLAGS/s,-g,$SLKCFLAGS," Makefile
+sed -i '/\tdepmod/d' driver/Makefile
+
+# Thought about ENABLE_ATP=1, but ATP is incomplete and abandoned.
+# Nothing ever used it, according to the AtariSIO author.
+do_make() {
+  make $@ \
+    DEFAULT_DEVICE="$DEFAULT_DEVICE" \
+    INST_DIR=$PKG/usr \
+    MDIR=$PKG/lib/modules/$KERNVER/misc
+}
+
+do_make tools ENABLE_TESTS=1
+do_make tools-install
+strip $PKG/usr/bin/*
+
+# built all the test stuff with ENABLE_TESTS, but not all
+# of it's generally useful. These look like they are:
+install -s -m0755 tools/{casinfo,serialwatcher,ataridd} $PKG/usr/bin
+
+# atariserver and atarixfer get installed setuid root.
+# we have 3 choices in this build:
+# 1. leave them setuid root (SETUID=yes, ignore SETGID)
+# 2. make them setgid dialout (so they can access /dev/ttyS*) and
+#    set capabilities in doinst.sh (SETUID=no, SETGID=yes)
+# 3. no setuid or setgid; let the user sudo or whatever (SETUID=no, SETGID=no)
+
+# default choice is 2.
+SETUID="${SETUID:-no}"
+SETGID="${SETGID:-yes}"
+
+# thought about adding serialwatcher and ataridd to this list, but
+# they're quick & dirty test tools, author probably didn't give a lot
+# of thought to security.
+SBINS="$PKG/usr/bin/atariserver $PKG/usr/bin/atarixfer"
+
+# reset ownership to Slackware default:
+chown root:root $PKG/usr/bin/*
+chmod 0755 $PKG/usr/bin/*
+
+if [ "$SETUID" = "yes" ]; then
+  # choice 1:
+  chown root:users $SBINS
+  chmod 4750 $SBINS
+elif [ "$SETGID" = "yes" ]; then
+  # choice 2:
+  chown root:dialout $SBINS
+  chmod 2755 $SBINS
+  mkdir -p $PKG/install
+  cat $CWD/doinst.caps >> $PKG/install/doinst.sh
+else
+  # choice 3: do nothing, leave at Slackware default
+  :
+fi
+
+if [ "$KERNEL" != "no" ]; then
+  do_make driver
+  do_make driver-install
+  mkdir -p $PKG/lib/udev/rules.d $PKG/etc/modprobe.d
+  cp -a atarisio-modprobe.conf $PKG/etc/modprobe.d/atarisio.conf.new
+  cp -a atarisio-udev.rules $PKG/lib/udev/rules.d/99-atarisio.rules
+fi
+
+# If the kernel stuff wasn't built, this is an empty dir.
+rmdir $PKG/usr/include 2>/dev/null || true
+
+# man pages and HTML docs not built by main Makefile
+cd docbook
+  make docs-man
+  make docs-html
+  rm -f html/*.proc
+  mkdir -p $PKG/usr/man/man1
+  for i in man/*.1; do
+    gzip -c < $i > $PKG/usr/man/man1/$( basename $i ).gz
+  done
+cd -
+
+# there's no man pages for these, so I wrote them:
+for i in ataricom casinfo; do
+  gzip -9c < $CWD/$i.1 > $PKG/usr/man/man1/$i.1.gz
+done
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a Changelog README* TODO docbook/html contrib $PKGDOC
+if [ "$KERNEL" != "no" ]; then
+  cat $CWD/README_kernel.txt > $PKGDOC/README_kernel.txt
+fi
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+sed -e "s,@INCLUDES@,$INCLUDES," \
+    -e "s,@KVER@,$KVER," \
+    -e "s,@DEFAULT_DEVICE@,$DEFAULT_DEVICE," \
+    < $CWD/slack-desc > $PKG/install/slack-desc
+[ "$KERNEL" != "no" ] && cat $CWD/doinst.kernel >> $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
