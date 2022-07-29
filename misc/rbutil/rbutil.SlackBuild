@@ -2,7 +2,7 @@
 
 # Slackware build script for RockboxUtility
 
-# Copyright 2020-2021 Kyle Guinn <elyk03@gmail.com>
+# Copyright 2020-2022 Kyle Guinn <elyk03@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -26,8 +26,8 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=rbutil
 SRCNAM=RockboxUtility
-VERSION=${VERSION:-1.4.1}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.5.1}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -39,9 +39,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -51,7 +48,7 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM-$VERSION
 OUTPUT=${OUTPUT:-/tmp}
 
-DOCS="docs/COPYING"
+DOCS="docs/COPYING docs/CREDITS utils/rbutilqt/changelog.txt"
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
@@ -72,49 +69,59 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $SRCNAM-v$VERSION
+rm -rf $SRCNAM-v$VERSION-src
 tar xvf $CWD/$SRCNAM-v$VERSION-src.tar.bz2
-cd $SRCNAM-v$VERSION
+cd $SRCNAM-v$VERSION-src
 chown -R root:root .
 chmod -R u+w,go-w,a+rX-st .
 
-cd rbutil/rbutilqt
-
 # Use the system quazip.  Thanks to gentoo.
-patch -p1 < $CWD/patches/rbutil-1.4.1-quazip.patch
-sed -i 's/quazip5/quazip/' base/ziputil.cpp
-sed -i 's/quazip5/quazip/' base/ziputil.h
-sed -i 's/ -lquazip5//' rbutilqt.pro
-sed -i 's/\$\$_PRO_FILE_PWD_\/zlib//' rbutilqt.pro
-echo "INCLUDEPATH += $(pkg-config --cflags-only-I quazip1-qt5 | sed s/-I//g)" >> rbutilqt.pro
-echo "LIBS += $(pkg-config --libs quazip1-qt5)" >> rbutilqt.pro
-rm -rf quazip zlib
+patch -p1 < $CWD/patches/rbutil-1.5.1-system-quazip.patch
+patch -p1 < $CWD/patches/rbutil-1.5.1-cmake.patch
+patch -p1 < $CWD/patches/rbutil-1.5.1-headers.patch
 
-# Respect SLKCFLAGS, add -fcommon for gcc >= 10.x
-sed -i "s/-O3/$SLKCFLAGS -fcommon/" ../mkimxboot/Makefile
+# Use the system bzip2, only for use with bspatch
+# (another 3rd party program, modified by Rockbox
+# for use as a library, so cannot be unbundled).
+patch -p1 < $CWD/patches/system-bzip2.patch
+
+# Use the system mspack.
+patch -p1 < $CWD/patches/system-mspack.patch
+
+# Use the system tomcrypt.
+patch -p1 < $CWD/patches/system-tomcrypt.patch
+
+# Ensure we don't build/use these bundled libs.
+patch -p1 < $CWD/patches/bundled-licenses.patch
+rm -rf \
+  lib/rbcodec/codecs/libspeex \
+  utils/rbutilqt/mspack \
+  utils/rbutilqt/quazip \
+  utils/rbutilqt/zlib \
+  utils/bzip2 \
+  utils/tomcrypt \
 
 # Decrease the amount of log spam.
-sed -i 's/Logger::Debug/Logger::Warning/' logger/AbstractAppender.cpp
+sed -i 's/Logger::Debug/Logger::Warning/' utils/rbutilqt/logger/src/AbstractAppender.cpp
 
-# Build the translations first to avoid warnings.
-lrelease rbutilqt.pro
-
-# SLKCFLAGS aren't always respected.
-# $CC is not quoted properly.  "ccache gcc" (the default) will fail.
-qmake \
-  QMAKE_CFLAGS="$SLKCFLAGS" \
-  QMAKE_CXXFLAGS="$SLKCFLAGS" \
-  -config noccache \
-  rbutilqt.pro
-make
-
-install -D -m 0755 -s RockboxUtility $PKG/usr/bin/RockboxUtility
-# Some of these icons aren't exactly square.
-for i in 16 32 48 64 128 256; do
-  install -D -m 0644 icons/rockbox-$i.png $PKG/usr/share/icons/hicolor/$i\x$i/apps/rockbox.png
-done
-
+mkdir -p utils/build
+cd utils/build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=None \
+    -DCMAKE_RULE_MESSAGES=OFF \
+    -DCMAKE_VERBOSE_MAKEFILE=TRUE \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DCCACHE_PROGRAM=FALSE \
+    -DUSE_SYSTEM_QUAZIP=ON \
+    ..
+  make
+  install -D -m 0755 -s rbutilqt/RockboxUtility $PKG/usr/bin/RockboxUtility
 cd ../..
+install -D -m 0644 utils/rbutilqt/RockboxUtility.desktop $PKG/usr/share/applications/RockboxUtility.desktop
+install -D -m 0644 docs/logo/rockbox-clef.svg $PKG/usr/share/icons/hicolor/scalable/apps/rockbox-clef.svg
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
