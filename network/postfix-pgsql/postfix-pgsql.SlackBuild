@@ -1,0 +1,118 @@
+#!/bin/bash
+#
+# Copyright 2006, 2011  Alan Hicks, Lizella, GA
+# Copyright 2010, 2011, 2013, 2014, 2015, 2016, 2017  Mario Preksavec, Zagreb, Croatia
+# Copyright 2017, 2018  Patrick J. Volkerding, Sebeka, MN USA
+# Copyright 2020, 2021, 2022  Eugen Wissner, Dachau, Germany
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=postfix-pgsql
+VERSION=${VERSION:-3.6.4}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+SRCNAM=postfix
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e # Exit on most errors
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
+
+PGSQLARGS="-I/usr/include/postgresql -DHAS_PGSQL"
+
+### CHANGING BUILT-IN DOCUMENTATION PATH SETTINGS
+#
+# If we try to use postfix-$VERSION in any of these paths, we'll get a compile
+# failure: "error: too many decimal points in number"
+# So we're pretty much forced to leave things as postfix expects them.
+PATHARGS="'-DDEF_HTML_DIR=\"/usr/doc/postfix/html\"' \
+  '-DDEF_MANPAGE_DIR=\"/usr/man\"' \
+  '-DDEF_README_DIR=\"/usr/doc/postfix/readme\"'"
+
+make makefiles dynamicmaps=yes pie=yes shared=yes \
+  shlib_directory=/usr/lib${LIBDIRSUFFIX}/postfix/MAIL_VERSION \
+  CCARGS="$PGSQLARGS $PATHARGS" \
+  AUXLIBS_PGSQL="-lpq -lz -lm" \
+  OPT="$SLKCFLAGS" DEBUG=""
+make
+
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/postfix/$VERSION
+cp -a lib/postfix-pgsql.so $PKG/usr/lib${LIBDIRSUFFIX}/postfix/$VERSION/
+
+strip --strip-unneeded $PKG/usr/lib${LIBDIRSUFFIX}/postfix/$VERSION/postfix-pgsql.so
+
+mkdir -p $PKG/etc/postfix/dynamicmaps.cf.d
+echo "pgsql	postfix-pgsql.so	dict_pgsql_open" > $PKG/etc/postfix/dynamicmaps.cf.d/pgsql.cf.new
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
