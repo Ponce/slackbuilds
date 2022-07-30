@@ -1,0 +1,109 @@
+#!/bin/bash
+
+# Slackware build script for tnfs-fuse
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=tnfs-fuse
+VERSION=${VERSION:-20130127_fd46ff}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+SRCVER="$( echo $VERSION | cut -d_ -f2 )"
+SRCNAM="spectranet-tnfs-fuse"
+
+# I didn't make a separate build for python-fuse, because it would
+# conflict with the existing python-fusepy. No idea why there are
+# two incompatible fuse modules for python, and don't care either.
+# This python-fuse will get installed in a private directory so it
+# won't stomp on python-fusepy.
+LIBNAM="python-fuse"
+LIBVER="1.0.5"
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+LIBDIR=/usr/lib$LIBDIRSUFFIX/$PRGNAM
+PKGLIB=$PKG/$LIBDIR
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+mkdir -p $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+TOPDIR="$(pwd)"
+tar xvf $CWD/$SRCNAM-$SRCVER*.tar.gz
+tar xvf $CWD/$LIBNAM-$LIBVER.tar.gz
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# first the library. remember, private directory.
+cd $LIBNAM-$LIBVER
+python2 setup.py install --root=$PKG
+mkdir -p $PKGLIB
+mv $PKG/usr/lib*/python*/site-packages/* $PKGLIB
+rm -rf $PKG/usr/lib*/python*
+strip $PKGLIB/*/*.so
+
+# now the application (which also has a library)
+cd $TOPDIR/$SRCNAM-$SRCVER*
+patch -p1 < $CWD/libdir.diff
+mkdir -p $PKG/usr/bin
+sed "s,@LIBDIR@,$LIBDIR," < $PRGNAM.py > $PKG/usr/bin/$PRGNAM
+chmod 755 $PKG/usr/bin/$PRGNAM
+cp -a tnfs_client.py $PKGLIB
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a README.md $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+# upstream didn't include a separate license, so copy/paste the comments.
+cat $CWD/COPYING > $PKGDOC/COPYING
+
+# man page written for this SlackBuild.
+mkdir -p $PKG/usr/man/man1
+gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
