@@ -22,5 +22,5 @@ preserve_perms() {
   config $NEW
 }
 
-config etc/default/tlp.new
+config etc/tlp.conf.new
 preserve_perms etc/rc.d/rc.tlp.new
