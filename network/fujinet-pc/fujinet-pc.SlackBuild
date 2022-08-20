@@ -1,0 +1,135 @@
+#!/bin/bash
+
+# Slackware build script for fujinet-pc
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=fujinet-pc
+VERSION=${VERSION:-2206.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+SRCVER="release-$VERSION"
+
+SDVER="${SDVER:-2021-04-29}"
+
+HOST="${HOST:-$( hostname -s )}"
+PORT="${PORT:-/dev/ttyUSB0}"
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$SRCVER
+tar xvf $CWD/$PRGNAM-$SRCVER.tar.gz
+cd $PRGNAM-$SRCVER
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+PKGBIN=$PKG/usr/bin
+PKGLIBX=$PKG/usr/libexec/$PRGNAM
+PKGSHARE=$PKG/usr/share/$PRGNAM
+mkdir -p $PKGDOC $PKGBIN $PKGLIBX $PKGSHARE
+
+# fujinet-pc itself:
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make VERBOSE=1
+  make dist
+  install -s -m2755 -oroot -gdialout dist/fujinet $PKGLIBX/fujinet
+
+  cp -a dist/{SD,data} $PKGSHARE
+
+  # we don't need the upstream run-fujinet script
+cd ..
+
+cp -a CREDITS.md README.md LICENSE $PKGDOC
+
+# config file has \r\n line endings, keep it gzipped in git to avoid
+# git "fixing" it.
+gzip -dc < $CWD/fnconfig.ini.gz | \
+  sed -e "s,_HOST_,$HOST," \
+      -e "s,_PORT_,$PORT," \
+  > $PKGSHARE/fnconfig.ini
+
+# our wrapper script replaces run-fujinet
+install -m0755 -oroot -groot $CWD/$PRGNAM.sh $PKGBIN/$PRGNAM
+
+# fujinet-sd-card content:
+tar xvfC \
+  $CWD/fujinet-sd-card-fujinet-sd-card-$SDVER.tar.gz \
+  $PKGSHARE/SD \
+  --strip-components=1
+
+ln -s ../../share/$PRGNAM/SD/README.md $PKGDOC/README-fujinet-sd-card.md
+
+# .desktop and man page written for this SlackBuild.
+mkdir -p $PKG/usr/man/man1
+gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+
+mkdir -p $PKG/usr/share/applications
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+for px in 16 32 48 64 128; do
+  size="${px}x${px}"
+  DIR=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $DIR
+  convert -resize "$size!" \
+          $PKGSHARE/data/www/favicon.ico \
+          PNG32:$DIR/$PRGNAM.png
+done
+
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
