@@ -32,8 +32,8 @@ computers. It's simpler than NFS, SMB, or FTP. It's similar to TFTP,
 but has features TFTP lacks.
 
 **tnfsd** is the server for the TNFS protocol. It listens for clients
-on UDP and TCP port 16384. Most 8-bit clients use UDP, and the Linux
-client **tnfs-fuse** uses TCP.
+on UDP port 16384. In theory, the protocol supports TCP connections,
+but this hasn't been implemented yet.
 
 The mandatory **directory** option is the root of the TNFS filesystem
 tree.

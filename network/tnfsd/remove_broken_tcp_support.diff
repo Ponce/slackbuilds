@@ -1,0 +1,167 @@
+diff -Naur spectranet-TNFSD-2020-10-19/tnfs/tnfsd/config.h spectranet-TNFSD-2020-10-19.patched/tnfs/tnfsd/config.h
+--- spectranet-TNFSD-2020-10-19/tnfs/tnfsd/config.h	2020-09-23 14:06:09.000000000 -0400
++++ spectranet-TNFSD-2020-10-19.patched/tnfs/tnfsd/config.h	2022-08-18 17:20:04.008064003 -0400
+@@ -28,7 +28,6 @@
+ #define MAX_DHND_PER_CONN 8	/* max open directories per client */
+ #define MAX_CLIENTS	256	/* maximum number of UDP clients */
+ #define MAX_CLIENTS_PER_IP 8 /* maximum number of UDP clients from single IP */
+-#define MAX_TCP_CONN	256	/* Maximum number of TCP clients */
+ #define TNFS_HEADERSZ	4	/* minimum header size */
+ #define TNFS_MAX_PAYLOAD (MAXMSGSZ - TNFS_HEADERSZ - 1) /* Maximum usuable payload in a UDP datagram (-1 for status byte) */
+ #define MAX_TNFSPATH	256	/* maximum path length */
+diff -Naur spectranet-TNFSD-2020-10-19/tnfs/tnfsd/datagram.c spectranet-TNFSD-2020-10-19.patched/tnfs/tnfsd/datagram.c
+--- spectranet-TNFSD-2020-10-19/tnfs/tnfsd/datagram.c	2020-09-23 14:06:09.000000000 -0400
++++ spectranet-TNFSD-2020-10-19.patched/tnfs/tnfsd/datagram.c	2022-08-18 17:19:22.440374999 -0400
+@@ -50,7 +50,6 @@
+ #include "tnfs_file.h"
+ 
+ int sockfd;		 /* UDP global socket file descriptor */
+-int tcplistenfd; /* TCP listening socket file descriptor */
+ 
+ tnfs_cmdfunc dircmd[NUM_DIRCMDS] =
+ 	{&tnfs_opendir, &tnfs_readdir, &tnfs_closedir,
+@@ -140,24 +139,6 @@
+ 
+ 	if (bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
+ 		die("Unable to bind");
+-
+-	/* Create the TCP socket */
+-	tcplistenfd = socket(AF_INET, SOCK_STREAM, 0);
+-	if (tcplistenfd < 0)
+-	{
+-		die("Unable to create TCP socket");
+-	}
+-
+-	memset(&servaddr, 0, sizeof(servaddr));
+-	servaddr.sin_family = AF_INET;
+-	servaddr.sin_addr.s_addr = htons(INADDR_ANY);
+-	servaddr.sin_port = htons(TNFSD_PORT);
+-	if (bind(tcplistenfd, (struct sockaddr *)&servaddr,
+-			 sizeof(servaddr)) < 0)
+-	{
+-		die("Unable to bind TCP socket");
+-	}
+-	listen(tcplistenfd, 5);
+ }
+ 
+ void tnfs_mainloop()
+@@ -165,25 +146,13 @@
+ 	int readyfds, i;
+ 	fd_set fdset;
+ 	fd_set errfdset;
+-	int tcpsocks[MAX_TCP_CONN];
+-
+-	memset(&tcpsocks, 0, sizeof(tcpsocks));
+ 
+ 	while (1)
+ 	{
+ 		FD_ZERO(&fdset);
+ 
+-		/* add UDP socket and TCP listen socket to fdset */
++		/* add UDP socket socket to fdset */
+ 		FD_SET(sockfd, &fdset);
+-		FD_SET(tcplistenfd, &fdset);
+-
+-		for (i = 0; i < MAX_TCP_CONN; i++)
+-		{
+-			if (tcpsocks[i])
+-			{
+-				FD_SET(tcpsocks[i], &fdset);
+-			}
+-		}
+ 
+ 		FD_COPY(&fdset, &errfdset);
+ 		if ((readyfds = select(FD_SETSIZE, &fdset, NULL, &errfdset, NULL)) != 0)
+@@ -199,53 +168,8 @@
+ 			{
+ 				tnfs_handle_udpmsg();
+ 			}
+-			/* Incoming TCP connection? */
+-			else if (FD_ISSET(tcplistenfd, &fdset))
+-			{
+-				tcp_accept(&tcpsocks[0]);
+-			}
+-			else
+-			{
+-				for (i = 0; i < MAX_TCP_CONN; i++)
+-				{
+-					if (tcpsocks[i])
+-					{
+-						if (FD_ISSET(tcpsocks[i], &fdset))
+-						{
+-							tnfs_handle_tcpmsg(tcpsocks[i]);
+-						}
+-					}
+-				}
+-			}
+-		}
+-	}
+-}
+-
+-void tcp_accept(int *socklist)
+-{
+-	int acc_fd, i;
+-	struct sockaddr_in cli_addr;
+-	socklen_t cli_len = sizeof(cli_addr);
+-	int *fdptr;
+-
+-	acc_fd = accept(tcplistenfd, (struct sockaddr *)&cli_addr, &cli_len);
+-	if (acc_fd < 1)
+-	{
+-		fprintf(stderr, "WARNING: unable to accept TCP connection\n");
+-		return;
+-	}
+-
+-	fdptr = socklist;
+-	for (i = 0; i < MAX_TCP_CONN; i++)
+-	{
+-		if (*fdptr == 0)
+-		{
+-			*fdptr = acc_fd;
+-			return;
+ 		}
+ 	}
+-
+-	/* tell the client 'too many connections' */
+ }
+ 
+ void tnfs_handle_udpmsg()
+@@ -273,15 +197,6 @@
+ 	*(rxbuf + rxbytes) = 0;
+ }
+ 
+-void tnfs_handle_tcpmsg(int cli_fd)
+-{
+-	char buf[255];
+-	int sz;
+-
+-	sz = read(cli_fd, buf, sizeof(buf));
+-	printf("DEBUG: rx of tcpmsg: %d bytes: %s\n", sz, buf);
+-}
+-
+ void tnfs_decode(struct sockaddr_in *cliaddr, int rxbytes, unsigned char *rxbuf)
+ {
+ 	Header hdr;
+diff -Naur spectranet-TNFSD-2020-10-19/tnfs/tnfsd/datagram.h spectranet-TNFSD-2020-10-19.patched/tnfs/tnfsd/datagram.h
+--- spectranet-TNFSD-2020-10-19/tnfs/tnfsd/datagram.h	2020-09-23 14:06:09.000000000 -0400
++++ spectranet-TNFSD-2020-10-19.patched/tnfs/tnfsd/datagram.h	2022-08-18 17:20:12.070197634 -0400
+@@ -51,8 +51,6 @@
+ void tnfs_sockinit();
+ void tnfs_mainloop();
+ void tnfs_handle_udpmsg();
+-void tcp_accept(int *fdlist);
+-void tnfs_handle_tcpmsg(int cli_fd);
+ void tnfs_decode(struct sockaddr_in *cliaddr, 
+ 		int rxbytes, unsigned char *rxbuf);
+ void tnfs_badcommand(Header *hdr, Session *sess);
+diff -Naur spectranet-TNFSD-2020-10-19/tnfs/tnfsd/tnfs.h spectranet-TNFSD-2020-10-19.patched/tnfs/tnfsd/tnfs.h
+--- spectranet-TNFSD-2020-10-19/tnfs/tnfsd/tnfs.h	2020-09-23 14:06:09.000000000 -0400
++++ spectranet-TNFSD-2020-10-19.patched/tnfs/tnfsd/tnfs.h	2022-08-18 17:20:22.625372592 -0400
+@@ -134,7 +134,6 @@
+ #endif
+ 	int lastmsgsz;			/* last message's size inc. hdr */
+ 	uint8_t lastseqno;		/* last sequence number */
+-	uint8_t isTCP;			/* uses the TCP transport */
+ } Session;
+ 
+ typedef struct _header

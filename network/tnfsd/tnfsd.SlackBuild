@@ -6,11 +6,20 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20220818 bkw: BUILD=2
+# - remove TCP support entirely. it's incomplete & thoroughly broken.
+# - mention UDP port 16384 in slack-desc.
+
+# Note to self: tnfs-perl/tnfsd.pl looks interesting, but it lacks
+# the ability to chroot and set a new user ID. Leave it out of
+# the package. The tnfs-fuseclient/ is empty except a README, and
+# tnfsd.test/ looks like an ancient version from 2010.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=tnfsd
 VERSION=${VERSION:-20201019}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -43,9 +52,17 @@ EOF
   exit 1
 }
 
-getent group  tnfsd &>/dev/null      || uid_gid_err
-getent group  tnfs-files &>/dev/null || uid_gid_err
-getent passwd tnfsd &>/dev/null      || uid_gid_err
+chkgrp() {
+  getent group "$1"  &>/dev/null || uid_gid_err
+}
+
+chkuser() {
+  getent passwd "$1" &>/dev/null || uid_gid_err
+}
+
+chkgrp  tnfsd
+chkgrp  tnfs-files
+chkuser tnfsd
 
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
@@ -72,14 +89,26 @@ mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $SRCNAM-$SRCVER
 tar xvf $CWD/$SRCNAM-$SRCVER.tar.gz --wildcards '*/tnfs/*'
-cd $SRCNAM-$SRCVER/tnfs
+cd $SRCNAM-$SRCVER
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# this printf causes tnfsd to log something like 13GB of data in 5
-# minutes, if anyone ever connects to it with TCP. No thank you.
-sed -i '/printf.*DEBUG/d' tnfsd/datagram.c
+# 20220818 bkw: After messing with this for a while, I've discovered
+# that TCP *just doesn't work*. It'll listen and accept TCP
+# connections, but it never actually *does* anything with data
+# received via TCP (reads and discards it). Also, it never notices
+# when a TCP connection is closed, instead getting stuck in an
+# infinite loop eating 100% of one core... and logging massive
+# amounts of debug messages to stdout (like 2-3GB per minute). Since
+# it's non-functional anyway, this patch just dikes out TCP support
+# completely. So far as I know, there are no TNFS clients which use
+# TCP anyway.
+
+patch -p1 < $CWD/remove_broken_tcp_support.diff
+
+cd tnfs
+rm -f tnfsd/bin/* # guarantee we don't use prebuilt binary!
 
 [ "${USAGELOG:-yes}" = "yes" ] && SLKCFLAGS+=" -DUSAGELOG"
 sed -i "s,-Wall,& $SLKCFLAGS," tnfsd/Makefile
