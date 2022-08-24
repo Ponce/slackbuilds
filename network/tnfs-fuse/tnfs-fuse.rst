@@ -31,16 +31,8 @@ simplicity and ease of implementation on small systems, such as 8-bit
 computers. It's simpler than NFS, SMB, or FTP. It's similar to TFTP,
 but has features TFTP lacks.
 
-**tnfs-fuse** is a client for the TNFS protocol.
-
-Note that **tnfs-fuse** uses TCP to communicate with the TNFS server.
-Most TNFS clients are written for smaller systems (e.g. Atari or
-Spectrum 8-bit computers) and use UDP. This isn't an actual problem,
-but it's a factor to take into account when e.g. setting up firewall
-rules to allow TNFS traffic. Also, when troubleshooting a failed
-TNFS connection from an 8-bit client, just because you can connect
-with **tnfs-fuse** using TCP, doesn't mean the UDP port is open and
-working.
+**tnfs-fuse** is a client for the TNFS protocol. It uses UDP port
+16384 by default (standard for TNFS).
 
 When working with mounted TNFS directories, some error messages will
 be wrong, e.g. instead of "Permission denied", you may get "Bad file
@@ -87,4 +79,4 @@ by B. Watson, and is licensed under the WTFPL.
 SEE ALSO
 ========
 
-**tnfsd**\(1), **fuse**\(8)
+**tnfs-client**\(1), **tnfsd**\(1), **fuse**\(8)
