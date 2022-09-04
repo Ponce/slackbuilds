@@ -28,7 +28,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=unbound
 VERSION=${VERSION:-1.16.2}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -118,7 +118,7 @@ CXXFLAGS="$SLKCFLAGS" \
 make
 make install DESTDIR=$PKG
 
-rm -f $PKG/usr/lib${LIBDIRSUFFIX}/libunbound.la
+rm -f --verbose $PKG/usr/lib${LIBDIRSUFFIX}/libunbound.la
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -133,8 +133,33 @@ cp -a doc/README* doc/FEATURES doc/CREDITS doc/TODO $PKG/usr/doc/$PRGNAM-$VERSIO
 head -n 1000 doc/Changelog > $PKG/usr/doc/$PRGNAM-$VERSION/Changelog
 touch -r doc/Changelog $PKG/usr/doc/$PRGNAM-$VERSION/Changelog
 
+# Save the upstream unbound.conf and set some reasonable defaults:
+# 1) Set the default log path to /var/log/unbound/
+# 2) Enable Unbound control interface. It's used for logrotate script
+#    but also gives you the power to control your process without
+#    restarts/reloads. It binds to localhost and cannot be used by
+#    unprivileged users.
+# 3) Change timestamps to ASCII format (from Epoch).
+# 4) Turn off chroot.
+# 5) Disable systemd socket activation.
+cp -a $PKG/etc/unbound/unbound.conf $PKG/etc/unbound/unbound.conf.upstream
+sed -i \
+-e 's/# control-interface:/control-interface:/g' \
+-e 's/# control-enable: no/control-enable: yes/g' \
+-e 's/# log-time-ascii: no/log-time-ascii: yes/g' \
+-e 's/# use-systemd: no/use-systemd: no/g' \
+-e 's/# logfile: ""/logfile: "\/var\/log\/unbound\/unbound.log"/g' \
+-e 's/# chroot: "\/etc\/unbound"/chroot: ""/g' \
+$PKG/etc/unbound/unbound.conf \
+
 mkdir -p $PKG/var/run/unbound
-chown $USER:$GROUP $PKG/var/run/unbound/
+mkdir -p $PKG/var/log/unbound
+mkdir -p $PKG/etc/logrotate.d
+
+chown $UB_USER:$UB_GROUP $PKG/var/run/unbound/
+chown $UB_USER:$UB_GROUP $PKG/var/log/unbound/
+
+cp -a $CWD/unbound.logrotate $PKG/etc/logrotate.d/unbound.new
 mv $PKG/etc/unbound/unbound.conf $PKG/etc/unbound/unbound.conf.new
 install -m 0644 -D $CWD/rc.unbound $PKG/etc/rc.d/rc.unbound.new
 

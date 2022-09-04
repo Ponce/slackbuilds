@@ -24,6 +24,7 @@ preserve_perms() {
 
 preserve_perms etc/rc.d/rc.unbound.new
 config etc/unbound/unbound.conf.new
+config etc/logrotate.d/unbound.new
 
 # MD5SUM d837bf4c42abb7048c90d720a579f829 is a file hash from the previous initscript.
 
