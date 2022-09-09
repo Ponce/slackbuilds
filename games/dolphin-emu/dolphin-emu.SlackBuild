@@ -2,6 +2,7 @@
 
 # Slackware build script for dolphin-emu
 
+# Copyright 2022 Steven Voges <Oregon, USA>
 # Copyright 2013-2017 Larry Hajali <larryhaja[at]gmail[dot]com>
 # All rights reserved.
 #
@@ -25,7 +26,14 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=dolphin-emu
-VERSION=${VERSION:-20210406_5322256}
+SRCNAM=dolphin
+VERSION=${VERSION:-20220903_1088021}
+SRCVER=${SRCVER:-1088021e39750c22ba622ab9e5065ffc32cb0e39}
+LIBSPNG=${LIBSPNG:-dc5b1032c08efac68ad30170f7ccbf0aa8dd55c9}
+MGBA=${MGBA:-40d4c430fc36caeb7ea32fd39624947ed487d2f2}
+SPIRVCROSS=${SPIRVCROSS:-50b4d5389b6a06f86fb63a2848e1a7da6d9755ca}
+ZLIBNG=${ZLIBNG:-a406284705a462939c7a634119884a31b87d6af9}
+USEMGBA=${USEMGBA:-ON}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -38,9 +46,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -49,6 +54,7 @@ fi
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
+DEPS=$TMP/$SRCNAM-$SRCVER/Externals
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
@@ -69,9 +75,21 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf ${PRGNAM/-*/}-$VERSION
-tar xvf $CWD/${PRGNAM/-*/}-$VERSION.tar.?z
-cd ${PRGNAM/-*/}-$VERSION
+rm -rf $SRCNAM-$SRCVER
+tar xvf $CWD/$SRCNAM-$SRCVER.tar.gz
+
+tar xvf $CWD/SPIRV-Cross-$SPIRVCROSS.tar.gz -C \
+  $DEPS/spirv_cross/SPIRV-Cross --strip-components 1
+tar xvf $CWD/libspng-$LIBSPNG.tar.gz -C \
+  $DEPS/libspng/libspng --strip-components 1
+if [ ${USEMGBA} = "ON" ]; then
+  tar xvf $CWD/mgba-$MGBA.tar.gz -C \
+    $DEPS/mGBA/mgba --strip-components 1
+fi
+tar xvf $CWD/zlib-ng-$ZLIBNG.tar.gz -C \
+  $DEPS/zlib-ng/zlib-ng --strip-components 1
+
+cd $SRCNAM-$SRCVER
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -79,26 +97,21 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-mkdir build
+mkdir -p build
 cd build
-  cmake -G "Unix Makefiles" \
-    -DCMAKE_INSTALL_PREFIX:PATH=/usr \
-    -Dbindir=/usr/games \
-    -Dmandir=/usr/man \
-    -DLIB_INSTALL_DIR=lib${LIBDIRSUFFIX} \
-    -DENABLE_LTO:BOOL=ON \
-    -DUSE_SHARED_GTEST:BOOL=ON \
-    -DUSE_SHARED_ENET:BOOL=ON \
-    -DENABLE_SDL:BOOL=ON \
-    -DINSTALL_LIB_DIR=/usr/lib${LIBDIRSUFFIX} \
+  cmake \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
-    -DDISTRIBUTOR="Slackware" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLIB_INSTALL_DIR=/usr/lib${LIBDIRSUFFIX} \
+    -Dmandir=/usr/man \
+    -DDISTRIBUTOR=SlackBuilds.org \
+    -DENABLE_SDL=ON \
+    -DUSE_MGBA=$USEMGBA \
     -DCMAKE_BUILD_TYPE=Release ..
-
-  make VERBOSE=1
-  make install DESTDIR=$PKG
-cd -
+  make
+  make install/strip DESTDIR=$PKG
+cd ..
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -106,14 +119,10 @@ find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | gr
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-for i in 16 32 64 128; do
-  convert Installer/Dolphin.ico -resize ${i}x${i}! $PRGNAM-${i}.png
-  install -D -m 0644 $PRGNAM-${i}-3.png \
-    $PKG/usr/share/icons/hicolor/${i}x${i}/apps/$PRGNAM.png
-done
-
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a license.txt *.md $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  docs LICENSES/* COPYING Contributing.md Readme.md \
+  $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
