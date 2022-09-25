@@ -3,7 +3,7 @@
 # Slackware build script for audacity
 
 # Copyright 2006-2010 Chess Griffin <chess@chessgriffin.com>
-# Copyright 2011-2021 Matteo Bernardini <ponce@slackbuilds.org>
+# Copyright 2011-2022 Matteo Bernardini <ponce@slackbuilds.org>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -26,15 +26,16 @@
 # Thanks to Eric Hameleers for adding the audacity.desktop file
 # and other tweaks and bug fixes.  Thanks to Heinz Wiesinger for
 # bug fixes and the soundtouch and twolame improvements.
+# ...and thanks again to Eric Hameleers for the various hints needed
+# to build the conan-free releases
 
 # Modified by the SlackBuilds.org project
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=audacity
-SRCNAM=Audacity
-VERSION=${VERSION:-3.0.2}
-MANVER=${MANVER:-3.0.2}
+VERSION=${VERSION:-3.2.0}
+MANVER=${MANVER:-3.2.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -47,9 +48,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -77,6 +75,8 @@ if [ -x /usr/bin/listplugins ];      then do_ladspa="on";         else do_ladspa
 if pkg-config --exists soundtouch;   then do_soundtouch="system"; else do_soundtouch="off"; fi
 if pkg-config --exists twolame;      then do_twolame="system";    else do_twolame="off";    fi
 if pkg-config --exists vamp-hostsdk; then do_vamp="system";       else do_vamp="off";       fi
+if pkg-config --exists vst3sdk;      then do_vst3="system";       else do_vst3="off";       fi
+if pkg-config --exists jack;         then do_jack="system";       else do_jack="off";       fi
 if $(pkg-config --exists lilv-0) && $(pkg-config --exists suil-0); then do_lv2="system"; else do_lv2="off"; fi
 
 set -e
@@ -84,12 +84,9 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$SRCNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$SRCNAM-$VERSION.tar.gz
-cd $PRGNAM-$SRCNAM-$VERSION
-mkdir -p build/cmake-proxies/wxWidgets
-( cd build/cmake-proxies/wxWidgets
-  tar xvf $CWD/wxwidgets-audacity-$VERSION.tar.xz )
+rm -rf $PRGNAM-sources-$VERSION
+tar xvf $CWD/$PRGNAM-sources-$VERSION.tar.gz
+cd $PRGNAM-sources-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -97,42 +94,41 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# fix vamp plugin search path on x86_64 - thanks to B. Watson
-sed -i "s,lib/vamp,lib$LIBDIRSUFFIX/vamp,g" \
-  lib-src/libvamp/src/vamp-hostsdk/PluginHostAdapter.cpp || true
-
-# fix building against ffmpeg-2.6.x, patch from archlinux
-patch -p1 < $CWD/audacity-ffmpeg.patch || exit 1
-
-# add a missing include for gcc >= 11.x
-sed -i '/#include <functional>/a #include <limits>' include/audacity/Types.h
-
 mkdir -p build
 cd build
   cmake \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DAUDACITY_BUILD_LEVEL=2 \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_C_FLAGS_RELEASE:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS -DHAVE_VISIBILITY=1" \
+    -DCMAKE_CXX_FLAGS_RELEASE:STRING="$SLKCFLAGS -DHAVE_VISIBILITY=1" \
+    -DCMAKE_CXX_STANDARD=11 \
+    -DCMAKE_INSTALL_DOCDIR=/usr/doc/$PRGNAM-$VERSION \
+    -DCMAKE_INSTALL_LIBDIR=lib${LIBDIRSUFFIX} \
+    -DCMAKE_INSTALL_MANDIR=/usr/man \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
-    -DMAN_INSTALL_DIR=/usr/man \
-    -Daudacity_use_sndfile=system \
-    -Daudacity_use_soxr=system \
-    -Daudacity_use_lame=system \
+    -DCMAKE_VERBOSE_MAKEFILE:BOOL="on" \
     -Daudacity_use_twolame=$do_twolame \
-    -Daudacity_use_flac=system \
     -Daudacity_use_ladspa=$do_ladspa \
-    -Daudacity_use_vorbis=system \
-    -Daudacity_use_id3tag=system \
-    -Daudacity_use_expat=system \
     -Daudacity_use_soundtouch=$do_soundtouch \
     -Daudacity_use_vamp=$do_vamp \
+    -Daudacity_use_jack=$do_jack \
     -Daudacity_use_lv2=$do_lv2 \
-    -Daudacity_use_midi=system \
-    -Daudacity_use_ogg=system \
+    -Daudacity_has_vst3="off" \
+    -Daudacity_use_portsmf="system" \
     -Daudacity_use_ffmpeg=loaded \
-    -Daudacity_use_sqlite=local \
-    -Daudacity_use_wxwidgets=local \
-    -Daudacity_use_portaudio=local \
+    -Daudacity_conan_enabled="off" \
+    -Daudacity_has_networking="off" \
+    -Daudacity_has_crashreports="off" \
+    -Daudacity_has_updates_check="off" \
+    -Daudacity_has_sentry_reporting="off" \
+    -Daudacity_obey_system_dependencies="on" \
+    -Daudacity_lib_preference="system" \
+    -Daudacity_use_wxwidgets="system" \
+    -DwxWidgets_CONFIG_EXECUTABLE=/usr/bin/wx-config \
+    -DwxWidgets_wxrc_EXECUTABLE=/usr/bin/wxrc \
     -DCMAKE_BUILD_TYPE=Release ..
   make
   make install DESTDIR=$PKG
@@ -141,27 +137,24 @@ cd ..
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-# We're going to overwrite the included audacity.desktop file with ours,
-# and the icon isn't added at all by upstream, so we'll do that here
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+# We're going to overwrite the included audacity.desktop file with ours
 install -D -m 0644 $CWD/$PRGNAM.desktop \
   $PKG/usr/share/applications/$PRGNAM.desktop
-install -D -m 0644 images/AudacityLogo48x48.xpm \
-  $PKG/usr/share/pixmaps/$PRGNAM.xpm
-
-# Move manpage directory to the proper location
-mv $PKG/usr/share/man $PKG/usr
-find $PKG/usr/man -type f -exec gzip -9 {} \;
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 rm -fr $PKG/usr/share/doc
-cp LICENSE.txt README.txt todo.txt $PKG/usr/doc/$PRGNAM-$VERSION
+cp LICENSE.txt README.txt $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 # Before changing the version just check the path inside of the zip:
 # the index file must be located to /usr/share/audacity/help/manual/index.html
 if [ "${MANUAL:-no}" = "yes" ]; then
   mkdir -p $PKG/usr/share/$PRGNAM
-  unzip $CWD/$PRGNAM-manual-$MANVER.zip -d $PKG/usr/share/$PRGNAM
+  cd $PKG/usr/share/$PRGNAM
+  tar xvf $CWD/$PRGNAM-manual-$VERSION.tar.gz
 fi
 
 mkdir -p $PKG/install
