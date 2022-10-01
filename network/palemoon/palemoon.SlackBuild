@@ -2,7 +2,7 @@
 
 # Slackware build script for Pale Moon
 
-# Copyright 2018,2019 Vasily Sora USA
+# Copyright 2018,2019,2022 Vasily Sora USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -28,15 +28,12 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=palemoon
-VERSION=${VERSION:-30.0.0}
-SRCNAM1=${SRCNAM1:-Pale-Moon-${VERSION}_Release}
-SRCNAM2=${SRCNAM2:-GRE-RELBASE_20220310}
+VERSION=${VERSION:-31.3.0.1}
+SRCNAM1=${SRCNAM1:-$PRGNAM-${VERSION}_Release}
+SRCNAM2=${SRCNAM2:-uxp-RB_20220928}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-
-DOCS="AUTHORS LICENSE README.md"
-DOCS_GRE="AUTHORS LEGAL SECURITY.md"
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -61,6 +58,8 @@ OUTPUT=${OUTPUT:-/tmp}
 OBJ=${OBJ:-obj-$PRGNAM}
 GTK=${GTK:-gtk2}
 
+DOCS="AUTHORS LICENSE README.md SECURITY.md"
+ALSA=${ALSA:-1}
 # You can try changing the optimization level to simply "-O2" if your processor
 # doesn't support sse2 instructions.
 # "-Os" might help if you experience segfaults.
@@ -72,17 +71,12 @@ elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
+  SLKCFLAGS="-O2 -fPIC -Wno-format-overflow"
   LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
-
-# look into adding this as an option:
-# elif [ "$ARCH" = "x86_64" ]; then
-#	  SLKCFLAGS="-O2 -D_FORTIFY_SOURCE=2 -fstack-protector --param ssp-buffer-size=4 -fPIE -pie -Wl,-z,relro,-z,now -mindirect-branch=th
-
 
 # The default is to build with official branding. This SlackBuild is used to
 # produce officially approved third party "contributed builds" of Pale Moon.
@@ -92,10 +86,9 @@ fi
 # master trunck of the Pale Moon github repository.
 BRANDING=${BRANDING:---enable-official-branding}
 if [ "$BRANDING" = "NewMoon" ]; then
-     BRANDING="--disable-official-branding --with-branding=browser/branding/unofficial"
-elif
-  [ "$BRANDING" = "unstable" ]; then
-    BRANDING="--disable-official-branding --with-branding=other-licenses/branding/palemoon/unstable"
+	BRANDING="--disable-official-branding --with-branding=palemoon/branding/unofficial"
+elif [ "$BRANDING" = "unstable" ]; then
+	BRANDING="--disable-official-branding --with-branding=palemoon/branding/unstable"
 fi
 
 rm -rf $PKG $TMP/gold $TMP/$OBJ
@@ -157,14 +150,11 @@ PATH=$TMP/autoconf-tmp/usr/bin:$PATH
 # Build Pale Moon
 cd $TMP
 rm -rf $SRCNAM1
-tar -xvf $CWD/$SRCNAM1.tar.gz --transform="flags=r;s/pale-moon/$SRCNAM1/"
+tar -xvzf $CWD/$SRCNAM1.tar.gz # --transform s/pale-moon/${SRCNAM1}/
 cd $SRCNAM1
-tar -xvf $CWD/$SRCNAM2.tar.gz --transform="flags=r;s/gre/platform/"
+tar -xvzf $CWD/$SRCNAM2.tar.gz --transform s/${SRCNAM2}/platform/
 
-patch -p1 < $CWD/0001-Issue-7-Add-GCC-11-initial-support.patch
-if [ "${ADNAUSEAM:-block}" = "unblock" ]; then
-	patch -p1 < $CWD/adNauseam-unblock.patch
-fi
+#patch -p1 < $CWD/basilisk-include-limits.patch
 
 chown -R root:root .
 find -L . \
@@ -212,7 +202,7 @@ OPTIONS="\
   --disable-accessibility \
   $DEBUG \
   $DEVTOOLS \
-  --enable-application=browser \
+  --enable-application=$PRGNAM \
   --disable-crashreporter \
   --disable-updater \
   --disable-tests \
@@ -226,7 +216,11 @@ for option in $OPTIONS; do echo "ac_add_options $option" >> .mozconfig; done
 echo "ac_add_options --enable-optimize=\"$OPTIMIZE\"" >> .mozconfig
 
 if ! pkg-config --exists libpulse; then
-echo "ac_add_options --disable-pulseaudio" >> .mozconfig; fi
+  echo "ac_add_options --disable-pulseaudio" >> .mozconfig
+  TAG=${TAG}_alsa
+elif [ $ALSA = 1 ]; then
+  echo "ac_add_options --disable-pulseaudio" >> .mozconfig
+TAG=${TAG}_alsa; fi
 
 if pkg-config --exists jack && [ "${BLACKLIST_JACK:-no}" != "yes" ]; then
 echo "ac_add_options --enable-jack" >> .mozconfig; fi
@@ -234,9 +228,9 @@ echo "ac_add_options --enable-jack" >> .mozconfig; fi
 ./mach build
 
 ## Clean up; and package Pale Moon.
-DESTDIR=$PKG ./mach install
 mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/mozilla/plugins
 cd $TMP/$OBJ
+make install DESTDIR=$PKG
 
 cd $PKG
 
@@ -257,23 +251,21 @@ fi
 # Install icons:
 for PX in 16 32 48 ; do
   mkdir -p $PKG/usr/share/icons/hicolor/${PX}x${PX}/apps
-  ln -s /usr/lib${LIBDIRSUFFIX}/$PRGNAM-$VERSION/chrome/icons/default/default${PX}.png \
+  ln -s /usr/lib${LIBDIRSUFFIX}/$PRGNAM-$VERSION/browser/chrome/icons/default/default${PX}.png \
         $PKG/usr/share/icons/hicolor/${PX}x${PX}/apps/$PRGNAM.png
 done
 # ... and the 128px icon file too:
 mkdir -p $PKG/usr/share/icons/hicolor/128x128/apps
-ln -s /usr/lib${LIBDIRSUFFIX}/$PRGNAM-$VERSION/icons/mozicon128.png \
+ln -s /usr/lib${LIBDIRSUFFIX}/$PRGNAM-$VERSION/browser/icons/mozicon128.png \
       $PKG/usr/share/icons/hicolor/128x128/apps/$PRGNAM.png
 
 mkdir -p $PKG/usr/share/applications
 cat $CWD/palemoon.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/GRE
-for i in $DOCS; do
-  cp  $TMP/$SRCNAM1/$i $PKG/usr/doc/$PRGNAM-$VERSION
-done
-for i in $DOCS_GRE; do
-  cp $TMP/$SRCNAM1/platform/$i $PKG/usr/doc/$PRGNAM-$VERSION/GRE/
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/UXP
+for docs in $DOCS; do
+  cp $TMP/${SRCNAM1}/$docs $PKG/usr/doc/$PRGNAM-$VERSION/ || true
+  cp $TMP/${SRCNAM1}/platform/$docs $PKG/usr/doc/$PRGNAM-$VERSION/UXP/ || true
 done
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
