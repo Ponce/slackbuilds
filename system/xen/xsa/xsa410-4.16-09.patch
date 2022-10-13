@@ -1,0 +1,159 @@
+From: Roger Pau Monné <roger.pau@citrix.com>
+Subject: x86/p2m: free the paging memory pool preemptively
+
+The paging memory pool is currently freed in two different places:
+from {shadow,hap}_teardown() via domain_relinquish_resources() and
+from {shadow,hap}_final_teardown() via complete_domain_destroy().
+While the former does handle preemption, the later doesn't.
+
+Attempt to move as much p2m related freeing as possible to happen
+before the call to {shadow,hap}_teardown(), so that most memory can be
+freed in a preemptive way.  In order to avoid causing issues to
+existing callers leave the root p2m page tables set and free them in
+{hap,shadow}_final_teardown().  Also modify {hap,shadow}_free to free
+the page immediately if the domain is dying, so that pages don't
+accumulate in the pool when {shadow,hap}_final_teardown() get called.
+
+Move altp2m_vcpu_disable_ve() to be done in hap_teardown(), as that's
+the place where altp2m_active gets disabled now.
+
+This is part of CVE-2022-33746 / XSA-410.
+
+Signed-off-by: Roger Pau Monné <roger.pau@citrix.com>
+Signed-off-by: Jan Beulich <jbeulich@suse.com>
+Acked-by: Tim Deegan <tim@xen.org>
+
+--- a/xen/arch/x86/domain.c
++++ b/xen/arch/x86/domain.c
+@@ -38,7 +38,6 @@
+ #include <xen/livepatch.h>
+ #include <public/sysctl.h>
+ #include <public/hvm/hvm_vcpu.h>
+-#include <asm/altp2m.h>
+ #include <asm/regs.h>
+ #include <asm/mc146818rtc.h>
+ #include <asm/system.h>
+@@ -2381,12 +2380,6 @@ int domain_relinquish_resources(struct d
+             vpmu_destroy(v);
+         }
+ 
+-        if ( altp2m_active(d) )
+-        {
+-            for_each_vcpu ( d, v )
+-                altp2m_vcpu_disable_ve(v);
+-        }
+-
+         if ( is_pv_domain(d) )
+         {
+             for_each_vcpu ( d, v )
+--- a/xen/arch/x86/mm/hap/hap.c
++++ b/xen/arch/x86/mm/hap/hap.c
+@@ -28,6 +28,7 @@
+ #include <xen/domain_page.h>
+ #include <xen/guest_access.h>
+ #include <xen/keyhandler.h>
++#include <asm/altp2m.h>
+ #include <asm/event.h>
+ #include <asm/page.h>
+ #include <asm/current.h>
+@@ -546,24 +547,8 @@ void hap_final_teardown(struct domain *d
+     unsigned int i;
+ 
+     if ( hvm_altp2m_supported() )
+-    {
+-        d->arch.altp2m_active = 0;
+-
+-        if ( d->arch.altp2m_eptp )
+-        {
+-            free_xenheap_page(d->arch.altp2m_eptp);
+-            d->arch.altp2m_eptp = NULL;
+-        }
+-
+-        if ( d->arch.altp2m_visible_eptp )
+-        {
+-            free_xenheap_page(d->arch.altp2m_visible_eptp);
+-            d->arch.altp2m_visible_eptp = NULL;
+-        }
+-
+         for ( i = 0; i < MAX_ALTP2M; i++ )
+             p2m_teardown(d->arch.altp2m_p2m[i], true);
+-    }
+ 
+     /* Destroy nestedp2m's first */
+     for (i = 0; i < MAX_NESTEDP2M; i++) {
+@@ -578,6 +563,8 @@ void hap_final_teardown(struct domain *d
+     paging_lock(d);
+     hap_set_allocation(d, 0, NULL);
+     ASSERT(d->arch.paging.hap.p2m_pages == 0);
++    ASSERT(d->arch.paging.hap.free_pages == 0);
++    ASSERT(d->arch.paging.hap.total_pages == 0);
+     paging_unlock(d);
+ }
+ 
+@@ -603,6 +590,7 @@ void hap_vcpu_teardown(struct vcpu *v)
+ void hap_teardown(struct domain *d, bool *preempted)
+ {
+     struct vcpu *v;
++    unsigned int i;
+ 
+     ASSERT(d->is_dying);
+     ASSERT(d != current->domain);
+@@ -611,6 +599,28 @@ void hap_teardown(struct domain *d, bool
+     for_each_vcpu ( d, v )
+         hap_vcpu_teardown(v);
+ 
++    /* Leave the root pt in case we get further attempts to modify the p2m. */
++    if ( hvm_altp2m_supported() )
++    {
++        if ( altp2m_active(d) )
++            for_each_vcpu ( d, v )
++                altp2m_vcpu_disable_ve(v);
++
++        d->arch.altp2m_active = 0;
++
++        FREE_XENHEAP_PAGE(d->arch.altp2m_eptp);
++        FREE_XENHEAP_PAGE(d->arch.altp2m_visible_eptp);
++
++        for ( i = 0; i < MAX_ALTP2M; i++ )
++            p2m_teardown(d->arch.altp2m_p2m[i], false);
++    }
++
++    /* Destroy nestedp2m's after altp2m. */
++    for ( i = 0; i < MAX_NESTEDP2M; i++ )
++        p2m_teardown(d->arch.nested_p2m[i], false);
++
++    p2m_teardown(p2m_get_hostp2m(d), false);
++
+     paging_lock(d); /* Keep various asserts happy */
+ 
+     if ( d->arch.paging.hap.total_pages != 0 )
+--- a/xen/arch/x86/mm/shadow/common.c
++++ b/xen/arch/x86/mm/shadow/common.c
+@@ -2824,8 +2824,17 @@ void shadow_teardown(struct domain *d, b
+     for_each_vcpu ( d, v )
+         shadow_vcpu_teardown(v);
+ 
++    p2m_teardown(p2m_get_hostp2m(d), false);
++
+     paging_lock(d);
+ 
++    /*
++     * Reclaim all shadow memory so that shadow_set_allocation() doesn't find
++     * in-use pages, as _shadow_prealloc() will no longer try to reclaim pages
++     * because the domain is dying.
++     */
++    shadow_blow_tables(d);
++
+ #if (SHADOW_OPTIMIZATIONS & (SHOPT_VIRTUAL_TLB|SHOPT_OUT_OF_SYNC))
+     /* Free the virtual-TLB array attached to each vcpu */
+     for_each_vcpu(d, v)
+@@ -2946,6 +2955,9 @@ void shadow_final_teardown(struct domain
+                    d->arch.paging.shadow.total_pages,
+                    d->arch.paging.shadow.free_pages,
+                    d->arch.paging.shadow.p2m_pages);
++    ASSERT(!d->arch.paging.shadow.total_pages);
++    ASSERT(!d->arch.paging.shadow.free_pages);
++    ASSERT(!d->arch.paging.shadow.p2m_pages);
+     paging_unlock(d);
+ }
+ 

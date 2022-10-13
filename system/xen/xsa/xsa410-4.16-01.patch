@@ -1,0 +1,59 @@
+From 4b4359122a414cc15156e13e3805988b71ff9da0 Mon Sep 17 00:00:00 2001
+From: Julien Grall <jgrall@amazon.com>
+Date: Mon, 6 Jun 2022 06:17:25 +0000
+Subject: [PATCH 1/2] xen/arm: p2m: Prevent adding mapping when domain is dying
+
+During the domain destroy process, the domain will still be accessible
+until it is fully destroyed. So does the P2M because we don't bail
+out early if is_dying is non-zero. If a domain has permission to
+modify the other domain's P2M (i.e. dom0, or a stubdomain), then
+foreign mapping can be added past relinquish_p2m_mapping().
+
+Therefore, we need to prevent mapping to be added when the domain
+is dying. This commit prevents such adding of mapping by adding the
+d->is_dying check to p2m_set_entry(). Also this commit enhances the
+check in relinquish_p2m_mapping() to make sure that no mappings can
+be added in the P2M after the P2M lock is released.
+
+This is part of CVE-2022-33746 / XSA-410.
+
+Signed-off-by: Julien Grall <jgrall@amazon.com>
+Signed-off-by: Henry Wang <Henry.Wang@arm.com>
+Tested-by: Henry Wang <Henry.Wang@arm.com>
+Reviewed-by: Stefano Stabellini <sstabellini@kernel.org>
+---
+ xen/arch/arm/p2m.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/xen/arch/arm/p2m.c b/xen/arch/arm/p2m.c
+index fb71fa4c1c90..cbeff90f4371 100644
+--- a/xen/arch/arm/p2m.c
++++ b/xen/arch/arm/p2m.c
+@@ -1093,6 +1093,15 @@ int p2m_set_entry(struct p2m_domain *p2m,
+ {
+     int rc = 0;
+ 
++    /*
++     * Any reference taken by the P2M mappings (e.g. foreign mapping) will
++     * be dropped in relinquish_p2m_mapping(). As the P2M will still
++     * be accessible after, we need to prevent mapping to be added when the
++     * domain is dying.
++     */
++    if ( unlikely(p2m->domain->is_dying) )
++        return -ENOMEM;
++
+     while ( nr )
+     {
+         unsigned long mask;
+@@ -1610,6 +1619,8 @@ int relinquish_p2m_mapping(struct domain *d)
+     unsigned int order;
+     gfn_t start, end;
+ 
++    BUG_ON(!d->is_dying);
++    /* No mappings can be added in the P2M after the P2M lock is released. */
+     p2m_write_lock(p2m);
+ 
+     start = p2m->lowest_mapped_gfn;
+-- 
+2.37.1
+

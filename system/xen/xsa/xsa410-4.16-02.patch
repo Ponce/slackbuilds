@@ -1,0 +1,165 @@
+From 0d5846490348fa09a0d0915d7c795685a016ce10 Mon Sep 17 00:00:00 2001
+From: Julien Grall <jgrall@amazon.com>
+Date: Mon, 6 Jun 2022 06:17:26 +0000
+Subject: [PATCH 2/2] xen/arm: p2m: Handle preemption when freeing intermediate
+ page tables
+
+At the moment the P2M page tables will be freed when the domain structure
+is freed without any preemption. As the P2M is quite large, iterating
+through this may take more time than it is reasonable without intermediate
+preemption (to run softirqs and perhaps scheduler).
+
+Split p2m_teardown() in two parts: one preemptible and called when
+relinquishing the resources, the other one non-preemptible and called
+when freeing the domain structure.
+
+As we are now freeing the P2M pages early, we also need to prevent
+further allocation if someone call p2m_set_entry() past p2m_teardown()
+(I wasn't able to prove this will never happen). This is done by
+the checking domain->is_dying from previous patch in p2m_set_entry().
+
+Similarly, we want to make sure that no-one can accessed the free
+pages. Therefore the root is cleared before freeing pages.
+
+This is part of CVE-2022-33746 / XSA-410.
+
+Signed-off-by: Julien Grall <jgrall@amazon.com>
+Signed-off-by: Henry Wang <Henry.Wang@arm.com>
+Tested-by: Henry Wang <Henry.Wang@arm.com>
+Reviewed-by: Stefano Stabellini <sstabellini@kernel.org>
+---
+ xen/arch/arm/domain.c     | 10 +++++++--
+ xen/arch/arm/p2m.c        | 47 ++++++++++++++++++++++++++++++++++++---
+ xen/include/asm-arm/p2m.h | 13 +++++++++--
+ 3 files changed, 63 insertions(+), 7 deletions(-)
+
+diff --git a/xen/arch/arm/domain.c b/xen/arch/arm/domain.c
+index 96e1b235501d..2694c39127c5 100644
+--- a/xen/arch/arm/domain.c
++++ b/xen/arch/arm/domain.c
+@@ -789,10 +789,10 @@ fail:
+ void arch_domain_destroy(struct domain *d)
+ {
+     /* IOMMU page table is shared with P2M, always call
+-     * iommu_domain_destroy() before p2m_teardown().
++     * iommu_domain_destroy() before p2m_final_teardown().
+      */
+     iommu_domain_destroy(d);
+-    p2m_teardown(d);
++    p2m_final_teardown(d);
+     domain_vgic_free(d);
+     domain_vuart_free(d);
+     free_xenheap_page(d->shared_info);
+@@ -996,6 +996,7 @@ enum {
+     PROG_xen,
+     PROG_page,
+     PROG_mapping,
++    PROG_p2m,
+     PROG_done,
+ };
+ 
+@@ -1056,6 +1057,11 @@ int domain_relinquish_resources(struct domain *d)
+         if ( ret )
+             return ret;
+ 
++    PROGRESS(p2m):
++        ret = p2m_teardown(d);
++        if ( ret )
++            return ret;
++
+     PROGRESS(done):
+         break;
+ 
+diff --git a/xen/arch/arm/p2m.c b/xen/arch/arm/p2m.c
+index cbeff90f4371..3bcd1e897e88 100644
+--- a/xen/arch/arm/p2m.c
++++ b/xen/arch/arm/p2m.c
+@@ -1527,17 +1527,58 @@ static void p2m_free_vmid(struct domain *d)
+     spin_unlock(&vmid_alloc_lock);
+ }
+ 
+-void p2m_teardown(struct domain *d)
++int p2m_teardown(struct domain *d)
+ {
+     struct p2m_domain *p2m = p2m_get_hostp2m(d);
++    unsigned long count = 0;
+     struct page_info *pg;
++    unsigned int i;
++    int rc = 0;
++
++    p2m_write_lock(p2m);
++
++    /*
++     * We are about to free the intermediate page-tables, so clear the
++     * root to prevent any walk to use them.
++     */
++    for ( i = 0; i < P2M_ROOT_PAGES; i++ )
++        clear_and_clean_page(p2m->root + i);
++
++    /*
++     * The domain will not be scheduled anymore, so in theory we should
++     * not need to flush the TLBs. Do it for safety purpose.
++     *
++     * Note that all the devices have already been de-assigned. So we don't
++     * need to flush the IOMMU TLB here.
++     */
++    p2m_force_tlb_flush_sync(p2m);
++
++    while ( (pg = page_list_remove_head(&p2m->pages)) )
++    {
++        free_domheap_page(pg);
++        count++;
++        /* Arbitrarily preempt every 512 iterations */
++        if ( !(count % 512) && hypercall_preempt_check() )
++        {
++            rc = -ERESTART;
++            break;
++        }
++    }
++
++    p2m_write_unlock(p2m);
++
++    return rc;
++}
++
++void p2m_final_teardown(struct domain *d)
++{
++    struct p2m_domain *p2m = p2m_get_hostp2m(d);
+ 
+     /* p2m not actually initialized */
+     if ( !p2m->domain )
+         return;
+ 
+-    while ( (pg = page_list_remove_head(&p2m->pages)) )
+-        free_domheap_page(pg);
++    ASSERT(page_list_empty(&p2m->pages));
+ 
+     if ( p2m->root )
+         free_domheap_pages(p2m->root, P2M_ROOT_ORDER);
+diff --git a/xen/include/asm-arm/p2m.h b/xen/include/asm-arm/p2m.h
+index 8f11d9c97b5d..b3ba83283e11 100644
+--- a/xen/include/asm-arm/p2m.h
++++ b/xen/include/asm-arm/p2m.h
+@@ -192,8 +192,17 @@ void setup_virt_paging(void);
+ /* Init the datastructures for later use by the p2m code */
+ int p2m_init(struct domain *d);
+ 
+-/* Return all the p2m resources to Xen. */
+-void p2m_teardown(struct domain *d);
++/*
++ * The P2M resources are freed in two parts:
++ *  - p2m_teardown() will be called when relinquish the resources. It
++ *    will free large resources (e.g. intermediate page-tables) that
++ *    requires preemption.
++ *  - p2m_final_teardown() will be called when domain struct is been
++ *    freed. This *cannot* be preempted and therefore one small
++ *    resources should be freed here.
++ */
++int p2m_teardown(struct domain *d);
++void p2m_final_teardown(struct domain *d);
+ 
+ /*
+  * Remove mapping refcount on each mapping page in the p2m
+-- 
+2.37.1
+

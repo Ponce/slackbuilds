@@ -1,0 +1,171 @@
+From: Julien Grall <jgrall@amazon.com>
+Subject: xen/x86: p2m: Add preemption in p2m_teardown()
+
+The list p2m->pages contain all the pages used by the P2M. On large
+instance this can be quite large and the time spent to call
+d->arch.paging.free_page() will take more than 1ms for a 80GB guest
+on a Xen running in nested environment on a c5.metal.
+
+By extrapolation, it would take > 100ms for a 8TB guest (what we
+current security support). So add some preemption in p2m_teardown()
+and propagate to the callers. Note there are 3 places where
+the preemption is not enabled:
+    - hap_final_teardown()/shadow_final_teardown(): We are
+      preventing update the P2M once the domain is dying (so
+      no more pages could be allocated) and most of the P2M pages
+      will be freed in preemptive manneer when relinquishing the
+      resources. So this is fine to disable preemption.
+    - shadow_enable(): This is fine because it will undo the allocation
+      that may have been made by p2m_alloc_table() (so only the root
+      page table).
+
+The preemption is arbitrarily checked every 1024 iterations.
+
+Note that with the current approach, Xen doesn't keep track on whether
+the alt/nested P2Ms have been cleared. So there are some redundant work.
+However, this is not expected to incurr too much overhead (the P2M lock
+shouldn't be contended during teardown). So this is optimization is
+left outside of the security event.
+
+This is part of CVE-2022-33746 / XSA-410.
+
+Signed-off-by: Julien Grall <jgrall@amazon.com>
+Signed-off-by: Jan Beulich <jbeulich@suse.com>
+
+--- a/xen/include/asm-x86/p2m.h
++++ b/xen/include/asm-x86/p2m.h
+@@ -574,7 +574,7 @@ int p2m_init(struct domain *d);
+ int p2m_alloc_table(struct p2m_domain *p2m);
+ 
+ /* Return all the p2m resources to Xen. */
+-void p2m_teardown(struct p2m_domain *p2m, bool remove_root);
++void p2m_teardown(struct p2m_domain *p2m, bool remove_root, bool *preempted);
+ void p2m_final_teardown(struct domain *d);
+ 
+ /* Add a page to a domain's p2m table */
+--- a/xen/arch/x86/mm/hap/hap.c
++++ b/xen/arch/x86/mm/hap/hap.c
+@@ -548,17 +548,17 @@ void hap_final_teardown(struct domain *d
+ 
+     if ( hvm_altp2m_supported() )
+         for ( i = 0; i < MAX_ALTP2M; i++ )
+-            p2m_teardown(d->arch.altp2m_p2m[i], true);
++            p2m_teardown(d->arch.altp2m_p2m[i], true, NULL);
+ 
+     /* Destroy nestedp2m's first */
+     for (i = 0; i < MAX_NESTEDP2M; i++) {
+-        p2m_teardown(d->arch.nested_p2m[i], true);
++        p2m_teardown(d->arch.nested_p2m[i], true, NULL);
+     }
+ 
+     if ( d->arch.paging.hap.total_pages != 0 )
+         hap_teardown(d, NULL);
+ 
+-    p2m_teardown(p2m_get_hostp2m(d), true);
++    p2m_teardown(p2m_get_hostp2m(d), true, NULL);
+     /* Free any memory that the p2m teardown released */
+     paging_lock(d);
+     hap_set_allocation(d, 0, NULL);
+@@ -612,14 +612,24 @@ void hap_teardown(struct domain *d, bool
+         FREE_XENHEAP_PAGE(d->arch.altp2m_visible_eptp);
+ 
+         for ( i = 0; i < MAX_ALTP2M; i++ )
+-            p2m_teardown(d->arch.altp2m_p2m[i], false);
++        {
++            p2m_teardown(d->arch.altp2m_p2m[i], false, preempted);
++            if ( preempted && *preempted )
++                return;
++        }
+     }
+ 
+     /* Destroy nestedp2m's after altp2m. */
+     for ( i = 0; i < MAX_NESTEDP2M; i++ )
+-        p2m_teardown(d->arch.nested_p2m[i], false);
++    {
++        p2m_teardown(d->arch.nested_p2m[i], false, preempted);
++        if ( preempted && *preempted )
++            return;
++    }
+ 
+-    p2m_teardown(p2m_get_hostp2m(d), false);
++    p2m_teardown(p2m_get_hostp2m(d), false, preempted);
++    if ( preempted && *preempted )
++        return;
+ 
+     paging_lock(d); /* Keep various asserts happy */
+ 
+--- a/xen/arch/x86/mm/p2m.c
++++ b/xen/arch/x86/mm/p2m.c
+@@ -749,12 +749,13 @@ int p2m_alloc_table(struct p2m_domain *p
+  * hvm fixme: when adding support for pvh non-hardware domains, this path must
+  * cleanup any foreign p2m types (release refcnts on them).
+  */
+-void p2m_teardown(struct p2m_domain *p2m, bool remove_root)
++void p2m_teardown(struct p2m_domain *p2m, bool remove_root, bool *preempted)
+ /* Return all the p2m pages to Xen.
+  * We know we don't have any extra mappings to these pages */
+ {
+     struct page_info *pg, *root_pg = NULL;
+     struct domain *d;
++    unsigned int i = 0;
+ 
+     if (p2m == NULL)
+         return;
+@@ -773,8 +774,19 @@ void p2m_teardown(struct p2m_domain *p2m
+     }
+ 
+     while ( (pg = page_list_remove_head(&p2m->pages)) )
+-        if ( pg != root_pg )
+-            d->arch.paging.free_page(d, pg);
++    {
++        if ( pg == root_pg )
++            continue;
++
++        d->arch.paging.free_page(d, pg);
++
++        /* Arbitrarily check preemption every 1024 iterations */
++        if ( preempted && !(++i % 1024) && general_preempt_check() )
++        {
++            *preempted = true;
++            break;
++        }
++    }
+ 
+     if ( root_pg )
+         page_list_add(root_pg, &p2m->pages);
+--- a/xen/arch/x86/mm/shadow/common.c
++++ b/xen/arch/x86/mm/shadow/common.c
+@@ -2770,8 +2770,12 @@ int shadow_enable(struct domain *d, u32
+  out_locked:
+     paging_unlock(d);
+  out_unlocked:
++    /*
++     * This is fine to ignore the preemption here because only the root
++     * will be allocated by p2m_alloc_table().
++     */
+     if ( rv != 0 && !pagetable_is_null(p2m_get_pagetable(p2m)) )
+-        p2m_teardown(p2m, true);
++        p2m_teardown(p2m, true, NULL);
+     if ( rv != 0 && pg != NULL )
+     {
+         pg->count_info &= ~PGC_count_mask;
+@@ -2824,7 +2828,9 @@ void shadow_teardown(struct domain *d, b
+     for_each_vcpu ( d, v )
+         shadow_vcpu_teardown(v);
+ 
+-    p2m_teardown(p2m_get_hostp2m(d), false);
++    p2m_teardown(p2m_get_hostp2m(d), false, preempted);
++    if ( preempted && *preempted )
++        return;
+ 
+     paging_lock(d);
+ 
+@@ -2945,7 +2951,7 @@ void shadow_final_teardown(struct domain
+         shadow_teardown(d, NULL);
+ 
+     /* It is now safe to pull down the p2m map. */
+-    p2m_teardown(p2m_get_hostp2m(d), true);
++    p2m_teardown(p2m_get_hostp2m(d), true, NULL);
+     /* Free any shadow memory that the p2m teardown released */
+     paging_lock(d);
+     shadow_set_allocation(d, 0, NULL);

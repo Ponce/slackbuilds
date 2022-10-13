@@ -1,0 +1,60 @@
+From: Jan Beulich <jbeulich@suse.com>
+Subject: x86/shadow: tolerate failure of sh_set_toplevel_shadow()
+
+Subsequently sh_set_toplevel_shadow() will be adjusted to install a
+blank entry in case prealloc fails. There are, in fact, pre-existing
+error paths which would put in place a blank entry. The 4- and 2-level
+code in sh_update_cr3(), however, assume the top level entry to be
+valid.
+
+Hence bail from the function in the unlikely event that it's not. Note
+that 3-level logic works differently: In particular a guest is free to
+supply a PDPTR pointing at 4 non-present (or otherwise deemed invalid)
+entries. The guest will crash, but we already cope with that.
+
+Really mfn_valid() is likely wrong to use in sh_set_toplevel_shadow(),
+and it should instead be !mfn_eq(gmfn, INVALID_MFN). Avoid such a change
+in security context, but add a respective assertion.
+
+This is part of CVE-2022-33746 / XSA-410.
+
+Signed-off-by: Jan Beulich <jbeulich@suse.com>
+Acked-by: Tim Deegan <tim@xen.org>
+Reviewed-by: Andrew Cooper <andrew.cooper3@citrix.com>
+
+--- a/xen/arch/x86/mm/shadow/common.c
++++ b/xen/arch/x86/mm/shadow/common.c
+@@ -2516,6 +2516,7 @@ void sh_set_toplevel_shadow(struct vcpu
+     /* Now figure out the new contents: is this a valid guest MFN? */
+     if ( !mfn_valid(gmfn) )
+     {
++        ASSERT(mfn_eq(gmfn, INVALID_MFN));
+         new_entry = pagetable_null();
+         goto install_new_entry;
+     }
+--- a/xen/arch/x86/mm/shadow/multi.c
++++ b/xen/arch/x86/mm/shadow/multi.c
+@@ -3312,6 +3312,11 @@ sh_update_cr3(struct vcpu *v, int do_loc
+     if ( sh_remove_write_access(d, gmfn, 4, 0) != 0 )
+         guest_flush_tlb_mask(d, d->dirty_cpumask);
+     sh_set_toplevel_shadow(v, 0, gmfn, SH_type_l4_shadow, sh_make_shadow);
++    if ( unlikely(pagetable_is_null(v->arch.paging.shadow.shadow_table[0])) )
++    {
++        ASSERT(d->is_dying || d->is_shutting_down);
++        return;
++    }
+     if ( !shadow_mode_external(d) && !is_pv_32bit_domain(d) )
+     {
+         mfn_t smfn = pagetable_get_mfn(v->arch.paging.shadow.shadow_table[0]);
+@@ -3370,6 +3375,11 @@ sh_update_cr3(struct vcpu *v, int do_loc
+     if ( sh_remove_write_access(d, gmfn, 2, 0) != 0 )
+         guest_flush_tlb_mask(d, d->dirty_cpumask);
+     sh_set_toplevel_shadow(v, 0, gmfn, SH_type_l2_shadow, sh_make_shadow);
++    if ( unlikely(pagetable_is_null(v->arch.paging.shadow.shadow_table[0])) )
++    {
++        ASSERT(d->is_dying || d->is_shutting_down);
++        return;
++    }
+ #else
+ #error This should never happen
+ #endif
