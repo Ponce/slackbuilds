@@ -6,22 +6,56 @@
 UNBOUND=/usr/sbin/unbound
 CONFIG=/etc/unbound/unbound.conf
 PIDFILE=/var/run/unbound/unbound.pid
+LOGDIR=/var/log/unbound
 
 # Unbound-control is useful but I'm not going to cram it
 # down your throat. Set this to "yes" to disable unbound-control
-# initial setup.
+# initial setup. Note that you'll need to disable control port
+# in unbound.conf so Unbound will actually start.
 DISABLE_UNBOUND_CONTROL="no"
 
+# As part of the initial checks, the script makes sure that
+# $LOGDIR exists. It's mostly for cases where admin accidentally
+# deletes the entire log folder rather than individual logs.
+# If you don't use logging at all, have a custom setup or
+# just want to skip these checks, set this to "yes".
+DISABLE_LOGDIR_CHECKS="no"
+
 initchecks() {
+    # Look out for a stale pidfile. If there's one, remove it.
+    # This shouldn't be necessary unless the system was shutdown uncleanly
+    # or if Unbound crashes.
+    if [ -e $PIDFILE ] && [ ! $(pidof unbound) ]; then
+       echo "Looks like Unbound isn't running but there's a stale pid file."
+       echo "Removing $PIDFILE"
+       rm -vf $PIDFILE
+    fi
+    # Check that /var/run/unbound exists. If not, create and chown it.
     if [ ! -e $(dirname $PIDFILE) ]; then
         mkdir -p $(dirname $PIDFILE)
         chown unbound:unbound $(dirname $PIDFILE)
     fi
+    # Run the initial setup for unbound-control unless it's disabled.
+    # Mostly relevant for the first time run.
     if [ ! -e $(dirname $CONFIG)/unbound_server.pem ] && [ "$DISABLE_UNBOUND_CONTROL" == "no" ]; then
         echo "Unbound-control: unbound_server.pem not found."
         echo "Running initial setup: /usr/sbin/unbound-control-setup"
         /usr/sbin/unbound-control-setup || exit 1
     fi
+    # Deleted the entire log directory by accident? Oh well, bound to happen.
+    # Let's fix that right away.
+    if [ "$DISABLE_LOGDIR_CHECKS" == "no" ]
+    then
+        if [ ! -d "$LOGDIR" ]; then
+        echo -n "Unbound log directory not found. Attempting to recreate it... "
+        mkdir $LOGDIR && echo "Success!"
+        fi
+        if [ $(stat -c "%U:%G" "$LOGDIR") != "unbound:unbound" ]; then
+        echo -n "Fixing permissions on the log folder $LOGDIR... "
+        chown -R unbound:unbound $LOGDIR && echo "Success!"
+        fi
+    fi
+
 }
 
 start() {
