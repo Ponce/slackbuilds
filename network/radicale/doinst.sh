@@ -22,6 +22,6 @@ preserve_perms() {
   config $NEW
 }
 
-for i in etc/radicale/config.new etc/radicale/logging.new; do
-  preserve_perms $i
-done
+preserve_perms etc/rc.d/rc.radicale.new
+config etc/radicale/config.new
+config etc/radicale/rights.new
