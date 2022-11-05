@@ -1,0 +1,139 @@
+#!/bin/bash
+
+# Slackware build script for ramulator
+
+# Copyright 2022 William PC - Seattle, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=ramulator
+VERSION=${VERSION:-20220503}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+COMMIT=743b940b70a8e18bcffb14eec22d2ed731059540
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$COMMIT
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$COMMIT
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+
+# make rule for libramulator.so
+sed -i '39alibramulator.so: $(SRCS) $(SRCDIR)/*.h' Makefile
+sed -i '40a\\t$(CXX) -c $(CXXFLAGS) -fpic -DRAMULATOR -o libramulator.o $<' Makefile
+sed -i '41a\\t$(CXX) -shared -o libramulator.so libramulator.o' Makefile
+
+# update other files
+sed -i '19,20s#./#/usr/share/'$PRGNAM-$VERSION'/#' test_ramulator.py
+sed -i '26s/^/#/' test_ramulator.py
+sed -i '27s#./#/usr/share/'$PRGNAM-$VERSION'/#' test_ramulator.py
+sed -i '32s#./##' test_ramulator.py
+sed -i '24s#./##' test_ddr3.py
+sed -i '24s#configs/#/usr/share/'$PRGNAM-$VERSION'/&#' test_ddr3.py
+
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+make ramulator libramulator.so
+
+# installing
+install -d $PKG/usr/{bin,include/ramulator,lib${LIBDIRSUFFIX}}
+install -m 755 ramulator $PKG/usr/bin
+install -m 644 src/*.h $PKG/usr/include/ramulator
+install -m 755 libramulator.so $PKG/usr/lib${LIBDIRSUFFIX}
+
+# install other files
+mkdir -p $PKG/usr/share/$PRGNAM-$VERSION
+cp -av configs mappings $PKG/usr/share/$PRGNAM-$VERSION
+mkdir -p $PKG/usr/share/$PRGNAM-$VERSION/cputraces
+find cputraces/ -type f \
+  -size -2M -exec cp -av '{}' $PKG/usr/share/$PRGNAM-$VERSION/cputraces \;
+
+mkdir -p $PKG/usr/libexec/$PRGNAM
+cp -av test_ramulator.py $PKG/usr/libexec/$PRGNAM
+cp -av test_ddr3.py $PKG/usr/libexec/$PRGNAM
+cp -av plot.py $PKG/usr/libexec/$PRGNAM
+
+
+# Don't ship .la files:
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  LICENSE README.md \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
