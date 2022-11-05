@@ -1,0 +1,154 @@
+#!/bin/bash
+
+# Slackware build script for elk
+
+# Copyright 2022 William PC - Seattle, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=elk
+VERSION=${VERSION:-8.5.10}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tgz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+
+# set default compiler flags to all modes
+# NOTE: doesn't compile without openmp
+FORTRAN_COMPILER="gfortran"
+BUILD_FLAGS="-Wall -std=legacy -fopenmp"
+
+if [ "${OMP_OPT:-no}" == "yes" ]; then
+  BUILD_FLAGS="$BUILD_FLAGS -ffast-math -funroll-loops -fopenmp"
+fi
+
+if [ "${MPI:-no}" == "yes" ]; then
+  FORTRAN_COMPILER="mpif90"
+fi
+
+# configure building
+echo > make.inc
+echo "MAKE = make" >> make.inc
+echo "F90 = $FORTRAN_COMPILER" >> make.inc
+echo "F90_OPTS = -O2 $BUILD_FLAGS" >> make.inc
+echo "F77 = $FORTRAN_COMPILER" >> make.inc
+echo "F77_OPTS = -O2 $BUILD_FLAGS" >> make.inc
+echo "AR = ar" >> make.inc
+echo "LIB_LPK = lapack.a blas.a" >> make.inc
+echo "LIB_FFT = fftlib.a" >> make.inc
+cat make.def >> make.inc
+
+if [ "${LIBXC:-no}" == "yes" ]; then
+  sed -i '47aLIB_libxc = /usr/lib'${LIBDIRSUFFIX}'/libxc.so' make.inc
+  sed -i 's/^#SRC_libxc/SRC_libxc/' make.inc
+fi
+
+# fix eos and spacegroup makefile "cannot open module file modmain.mod"
+sed -i '20s/$(OBJ)/$(SRC)/' src/eos/Makefile
+sed -i '20a\\t$(F90) $(F90_OPTS) -c $(SRC)' src/eos/Makefile
+sed -i '28s/$(OBJ)/$(SRC)/' src/spacegroup/Makefile
+sed -i '28a\\t$(F90) $(F90_OPTS) -c $(SRC)' src/spacegroup/Makefile
+
+make all
+
+# not rule to install, so perform it manually
+install -d $PKG/usr/bin
+install -m 755 src/elk $PKG/usr/bin
+
+install -d $PKG/usr/libexec/$PRGNAM
+install -m 755 src/{grepelk,protex,rmspaces,vimelk} $PKG/usr/libexec/$PRGNAM
+install -m 755 src/eos/eos $PKG/usr/libexec/$PRGNAM
+install -m 755 src/spacegroup/spacegroup $PKG/usr/libexec/$PRGNAM
+
+# install examples and some tools 
+mkdir -p $PKG/usr/share/$PRGNAM-$VERSION
+cp -a examples species utilities $PKG/usr/share/$PRGNAM-$VERSION
+
+# update examples to search expecies at system installation path
+for file in $(grep -lr "" $PKG/usr/share/$PRGNAM-$VERSION/examples); do
+  sed -i 's#\(../../..\)\(/species\)#/usr/share/'$PRGNAM-$VERSION'\2#' $file
+done
+
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  COPYING docs \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
