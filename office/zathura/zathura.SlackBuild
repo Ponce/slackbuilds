@@ -23,6 +23,14 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20221114 bkw:
+# - update for v0.5.1. zathura-pdf-poppler is still 0.3.0.
+# - fix bash/zsh/fish completion.
+# - change symlink name from pdf.so to libpdf.so (helps with completion).
+# - make zathura-pdf-poppler optional.
+# - update prebuilt man pages.
+# - stop installing duplicate man pages if Sphinx is installed.
+
 # 20210801 bkw:
 # - update for v0.4.8 and -current. build uses meson now, so this script
 #   can no longer build old zathura versions.
@@ -32,7 +40,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=zathura
-VERSION=${VERSION:-0.4.8}
+VERSION=${VERSION:-0.5.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -90,6 +98,11 @@ tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 fixperms
 
+# 20221114 bkw: Maik Wagner and Alexander Verbovetsky reported that
+# fish and bash completion weren't working, due to the symlink I use
+# to switch between the PDF plugins. This patch should fix it.
+patch -p1 < $CWD/fix_completion.diff
+
 mkdir build
 cd build
   CFLAGS="$SLKCFLAGS" \
@@ -107,8 +120,9 @@ cd build
   DESTDIR=$PKG $NINJA install
 cd ..
 
-# man pages taken from Debian. I did this to avoid a dependency
-# on Sphinx (and its tree of 13 deps).
+# man pages prebuilt on a Slackware box with Sphinx installed. I did
+# this to avoid a dependency on Sphinx (and its tree of 13 deps).
+rm -rf $PKG/usr/man # in case we had Sphinx already...
 for i in $CWD/man/*.*; do
   dest="$PKG/usr/man/man$( echo $i | sed 's,.*\.,,' )"
   mkdir -p "$dest"
@@ -124,37 +138,44 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 # less easy to navigate).
 cp -a doc/api $PKG/usr/doc/$PRGNAM-$VERSION
 
-# Now build the plugin.
-cd $TMP
-rm -rf $PLUGIN-$PLUGINVER
-tar xvf $CWD/$PLUGIN-$PLUGINVER.tar.gz
-cd $PLUGIN-$PLUGINVER
-fixperms
+# Now build the plugin, unless the user disabled it.
+if [ "${POPPLER:-yes}" != "no" ]; then
+  INCLUDES="includes"
+  cd $TMP
+  rm -rf $PLUGIN-$PLUGINVER
+  tar xvf $CWD/$PLUGIN-$PLUGINVER.tar.gz
+  cd $PLUGIN-$PLUGINVER
+  fixperms
 
-export PKG_CONFIG_PATH=$PKG/usr/lib$LIBDIRSUFFIX/pkgconfig:$PKG_CONFIG_PATH
+  export PKG_CONFIG_PATH=$PKG/usr/lib$LIBDIRSUFFIX/pkgconfig:$PKG_CONFIG_PATH
 
-mkdir build
-cd build
-  CFLAGS="$SLKCFLAGS -I$PKG/usr/include" \
-  CXXFLAGS="$SLKCFLAGS -I$PKG/usr/include" \
-  meson .. \
-    --buildtype=release \
-    --infodir=/usr/info \
-    --libdir=/usr/lib${LIBDIRSUFFIX} \
-    --localstatedir=/var \
-    --mandir=/usr/man \
-    --prefix=/usr \
-    --sysconfdir=/etc \
-    -Dstrip=true \
-    -Dplugindir=/usr/lib$LIBDIRSUFFIX/$PRGNAM/pdf
-  "${NINJA:=ninja}"
-  DESTDIR=$PKG $NINJA install
-cd ..
+  mkdir build
+  cd build
+    CFLAGS="$SLKCFLAGS -I$PKG/usr/include" \
+    CXXFLAGS="$SLKCFLAGS -I$PKG/usr/include" \
+    meson .. \
+      --buildtype=release \
+      --infodir=/usr/info \
+      --libdir=/usr/lib${LIBDIRSUFFIX} \
+      --localstatedir=/var \
+      --mandir=/usr/man \
+      --prefix=/usr \
+      --sysconfdir=/etc \
+      -Dstrip=true \
+      -Dplugindir=/usr/lib$LIBDIRSUFFIX/$PRGNAM/pdf
+    "${NINJA:=ninja}"
+    DESTDIR=$PKG $NINJA install
+  cd ..
 
-ln -s pdf/libpdf-poppler.so $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM/pdf.so
+  ln -s pdf/libpdf-poppler.so $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM/libpdf.so
+else
+  # if we don't include the plugin, we still want the empty plugin dir.
+  mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM
+  INCLUDES="DOES NOT include"
+fi
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@INCLUDES@,$INCLUDES," $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
