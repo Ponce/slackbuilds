@@ -13,3 +13,14 @@ if [ -e usr/share/glib-2.0/schemas ]; then
     /usr/bin/glib-compile-schemas usr/share/glib-2.0/schemas >/dev/null 2>&1
   fi
 fi
+
+# Set the gnome-shell wrapper executable:
+( cd usr/bin ; chmod 0755 gnome-shell )
+
+# Compile our custom provided schemas from gsettings-desktop-schemas-41.0:
+if [ -e usr/share/gnome-shell/gsettings-desktop-schemas/glib-2.0/schemas ]; then
+  if [ -x /usr/bin/glib-compile-schemas ]; then
+    /usr/bin/glib-compile-schemas usr/share/gnome-shell/gsettings-desktop-schemas/glib-2.0/schemas >/dev/null 2>&1
+  fi
+fi
+

@@ -22,10 +22,18 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# NOTE: This SlackBuild also builds gsettings-desktop-schemas-41.0 and packages
+# it along with gnome-shell. This allows gnome-shell-41 to work on 
+# Slackware-15.0, which comes with gsettings-desktop-schemas-40.0.
+# TO make this work we patch gnome-shell to allow it to build against 
+# Slackware's gsettings-desktop-schemas-40.0. Then we install the 41.0 schemas
+# in a alternate location, compile them, and show gnome-shell where they are 
+# using XDG_DATA_DIRS at runtime with a wrapper script.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=gnome-shell
-VERSION=${VERSION:-40.10}
+VERSION=${VERSION:-41.9}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -67,6 +75,48 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
+
+# Variables for gsettings-desktop-schemas build:
+GDS_NAM="gsettings-desktop-schemas"
+GDS_VER="41.0"
+GDS_DATADIR="/usr/share/$PRGNAM/$GDS_NAM"
+CLEANUP=cleanup
+
+# Build gsettings-desktop-schemas-41.0:
+rm -rf $GDS_NAM-$GDS_VER
+tar xvf $CWD/$GDS_NAM-$GDS_VER.tar.xz
+cd $GDS_NAM-$GDS_VER
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+mkdir build
+cd build
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  meson .. \
+    --buildtype=release \
+    --infodir=info \
+    --includedir=$CLEANUP \
+    --libdir=$CLEANUP \
+    --datadir=$GDS_DATADIR \
+    --localedir=$CLEANUP \
+    --localstatedir=/var \
+    --mandir=man \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    -Dstrip=true
+  "${NINJA:=ninja}"
+  DESTDIR=$PKG $NINJA install
+cd ../..
+
+# Remove everything from gsettings-desktop-schemas except the gschema files:
+rm -rf $PKG/usr/$CLEANUP $PKG$GDS_DATADIR/{GConf,gir-1.0,pkgconfig}
+
+# Build gnome-shell:
 tar xvf $CWD/$PRGNAM-$VERSION.tar.?z
 cd $PRGNAM-$VERSION
 chown -R root:root .
@@ -75,6 +125,9 @@ find -L . -prune -name 'subprojects/gvc/.gitlab-ci' \
   -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Patch meson.build to allow gsettings-desktop-schemas-40.0:
+patch -Np1 -i $CWD/0001-build-with-gsettings-desktop-schemas-40.patch
 
 mkdir build
 cd build
@@ -101,6 +154,10 @@ find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | gr
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
+# Install the gnome-shell wrapper script:
+mv $PKG/usr/bin/{gnome-shell,gnome-shell-bin}
+cat $CWD/gnome-shell.wrap > $PKG/usr/bin/gnome-shell
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
   COPYING  HACKING.md  NEWS  README.md \
@@ -110,6 +167,7 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/douninst.sh > $PKG/install/douninst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
