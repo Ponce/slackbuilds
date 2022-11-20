@@ -1,0 +1,188 @@
+#!/bin/bash
+
+# Slackware build script for mfem
+
+# Copyright 2022 William PC, Seattle (USA)
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=mfem
+VERSION=${VERSION:-4.5}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+
+if [ "${OMP:-no}" == "yes" ]; then
+  OPT_BUILD="MFEM_USE_OPENMP=YES"
+fi
+
+# this can't be null even without using MPI it has to be set
+# to don't throw an error at make
+MFEM_MPIEXEC="MFEM_MPIEXEC=mpirun"
+if [ "${MPI:-no}" == "yes" ]; then
+  OPT_BUILD="$OPT_BUILD MFEM_USE_MPI=YES"
+  OPT_BUILD="$OPT_BUILD MFEM_USE_METIS_5=YES"
+  # fix hypre location
+  sed -i 's#^HYPRE_DIR = .*#HYPRE_DIR = /usr#' config/defaults.mk
+  sed -i 's#$(HYPRE_DIR)/include#&/hypre#' config/defaults.mk
+  sed -i 's#$(HYPRE_DIR)/lib#&'${LIBDIRSUFFIX}'#' config/defaults.mk
+  # fix metis location
+  sed -i 's#METIS_DIR = @MFEM_DIR@/../metis-5.0#METIS_DIR = /usr#' config/defaults.mk
+  sed -i 's#$(METIS_DIR)/include#&/metis#' config/defaults.mk
+  sed -i 's#-L$(METIS_DIR)/lib#&'${LIBDIRSUFFIX}'#' config/defaults.mk
+  # fix for running check with MPI
+  if pkg-config --exists mpich; then
+    echo "Using mpich"
+    MFEM_MPIEXEC="MFEM_MPIEXEC=\"mpirun -host localhost\""
+  else
+    echo "Using openmpi"
+    export OMPI_ALLOW_RUN_AS_ROOT=1
+    export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+
+  fi
+fi
+
+
+if [ "${CUDA:-no}" == "yes" ]; then
+  OPT_BUILD="$OPT_BUILD MFEM_USE_CUDA=YES"
+fi
+
+# fix lib and share install location
+sed -i 's#$(PREFIX)/lib#&'${LIBDIRSUFFIX}'#' makefile
+sed -i 's#$(PREFIX)/share/mfem#&-'${VERSION}'#' makefile
+
+#  "$MFEM_MPIEXEC" \
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+make config \
+  MFEM_STATIC=NO \
+  MFEM_SHARED=YES \
+  $OPT_BUILD \
+  "$MFEM_MPIEXEC" \
+  BUILD_DIR=build
+cd build
+make
+make check
+if [ "${TESTS:-no}" == "yes" ]; then
+  make test
+fi
+make install \
+  MFEM_PREFIX=/usr \
+  MFEM_INC_DIR="@MFEM_PREFIX@/include" \
+  MFEM_LIB_DIR="@MFEM_PREFIX@/lib${LIBDIRSUFFIX}" \
+  MFEM_TEST_MK="@MFEM_PREFIX@/share/$PRGNAM-$VERSION/test.mk" \
+  PREFIX=$PKG/usr
+cd ..
+
+# fix permissions
+find -L $PKG/usr/{include,share} \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# install data files, examples and miniapps
+mkdir -p $PKG/usr/share/$PRGNAM-$VERSION
+cp -a {data,examples,miniapps} $PKG/usr/share/$PRGNAM-$VERSION
+cp -a config/defaults.mk $PKG/usr/share/$PRGNAM-$VERSION
+
+# fix examples
+sed -i -e 's$# MFEM_INSTALL_DIR = ../mfem$MFEM_INSTALL_DIR = /usr$' \
+       -e 's$# CONFIG_MK$CONFIG_MK$' \
+       -e 's#share/mfem#&-'$VERSION'#' \
+       -e  's/^MFEM_LIB_FILE/#&/'  \
+       $PKG/usr/share/$PRGNAM-$VERSION/examples/makefile
+
+# fix miniapps
+for file in $(find $PKG/usr/share/$PRGNAM-$VERSION/miniapps -iname makefile); do
+  sed -i 's$# MFEM_INSTALL_DIR = ../../mfem$MFEM_INSTALL_DIR = /usr$' $file
+  sed -i 's$# CONFIG_MK$CONFIG_MK$' $file
+  sed -i 's#share/mfem#&-'$VERSION'#' $file
+  sed -i 's#^DEFAULTS_MK.*#DEFAULTS_MK = /usr/share/'$PRGNAM-$VERSION'/defaults.mk#' $file
+done
+sed -i 's#../../general#mfem/general#' $PKG/usr/share/$PRGNAM-$VERSION/miniapps/meshing/{minimal-surface,pminimal-surface}.cpp
+sed -i 's#../../general#mfem/general#' $PKG/usr/share/$PRGNAM-$VERSION/miniapps/navier/navier_solver.cpp
+sed -i 's#../../linalg#mfem/linalg#' $PKG/usr/share/$PRGNAM-$VERSION/miniapps/autodiff/admfem.hpp
+
+
+# Don't ship .la files:
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  CHANGELOG CITATION.cff {CODE_OF_CONDUCT,CONTRIBUTING}.md LICENSE doc \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
