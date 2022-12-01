@@ -3,9 +3,13 @@
 # Slackware build script for vice
 
 # Copyright 2008 Mauro Giachero (email removed)
-# Copyright 2020, 2021 B. Watson (urchlay@slackware.uk)
+# Copyright 2020, 2021, 2022 B. Watson (urchlay@slackware.uk)
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20221129 bkw: update for v3.6.1.
+# - can't build our own HTML or plaintext docs from vice.texi.
+# - include upstream's HTML docs in package.
 
 # 20210809 bkw: update for v3.5, many changes, can't build old versions.
 # - Relicense as WTFPL, with permission from the original author.
@@ -37,7 +41,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=vice
-VERSION=${VERSION:-3.5}
+VERSION=${VERSION:-3.6.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -95,12 +99,13 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 
 # Fancy tar command here, avoid extracting what we don't need.
-tar xvf $CWD/$PRGNAM-$VERSION.tar.?z \
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz \
     --wildcards \
     --exclude='*/src/lib/lib*'
 
 cd $PRGNAM-$VERSION
 chown -R root:root .
+chmod 644 doc/html/fonts/OFL.txt # this file shouldn't be +x
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
@@ -113,10 +118,9 @@ export TEXMFVAR=$( pwd )/.texmf-var
 
 # Set proper paths in documentation.
 rm -rf doc/vice.pdf # will be rebuilt, along with the HTML doc.
-sed -i -e "1,2000s/\/usr\/local/\/usr/g" \
+sed -i -e "s/\/usr\/local/\/usr/g" \
        -e "s,/lib/vice/,/share/vice/,Ig" \
      doc/vice.texi
-
 autoreconf -vif
 
 # We build up to 3 times with slightly different ./configure args,
@@ -148,7 +152,10 @@ config() {
     $configarg \
     $ffmpeg \
     $pulseopt \
+    --enable-html-docs \
+    --enable-platformdox \
     --enable-x64 \
+    --enable-x64-image \
     --prefix=/usr \
     --libdir=/usr/lib${LIBDIRSUFFIX} \
     --sysconfdir=/etc \
@@ -231,14 +238,27 @@ install -m0644 src/arch/gtk3/data/unix/vice*directory \
 # Documentation. vice.pdf has already been installed to the doc dir.
 # Generate info, plaintext, and HTML versions here. The text doc is
 # harder to navigate, but easier to grep, so it's worth having IMO.
-makeinfo doc/$PRGNAM.texi
-mkdir -p $PKG/usr/info
-mv $PRGNAM.info* $PKG/usr/info
+# 20221130 bkw: vice.texi no longer works with makeinfo, as of
+# vice-3.6.1. Not sure whether this is because we have an
+# outdated texinfo package in Slackware 15.0, or because upstream
+# broke some kind of rule... regardless, it's disabled for now.
+if [ "${MAKEINFO:-no}" = "yes" ]; then
+	makeinfo doc/$PRGNAM.texi
+	mkdir -p $PKG/usr/info
+	mv $PRGNAM.info* $PKG/usr/info
+	gzip -9 $PKG/usr/info/*
 
-makeinfo --plaintext doc/$PRGNAM.texi > $PKGDOC/$PRGNAM.txt
+	makeinfo --plaintext doc/$PRGNAM.texi > $PKGDOC/$PRGNAM.txt
 
-( cd doc ; texi2any --html $PRGNAM.texi )
-cp -a doc/$PRGNAM $PKGDOC/html
+	( cd doc ; texi2any --html $PRGNAM.texi )
+	cp -a doc/$PRGNAM $PKGDOC/html
+fi
+
+# 20221130 bkw: HTML docs do get built, but never installed.
+mkdir -p $PKGDOC/html
+cp -a doc/html/{NEWS,COPYING,fonts/,images/,*.{html,css,ico}} $PKGDOC/html
+ln -s html/NEWS $PKGDOC/NEWS
+ln -s html/COPYING $PKGDOC/COPYING
 
 # 20210810 bkw: as of 3.5, upstream dropped the man pages. I'm
 # including the man pages from 3.4 in the 3.5 package. Edited them
@@ -251,7 +271,7 @@ for i in $CWD/man/*.?; do
       -e "s,@PDFDOC@,$DOCDIR/$PRGNAM.pdf," \
       < $i > $PKG/usr/man/man1/$( basename $i )
 done
-gzip -9 $PKG/usr/man/man?/*.? $PKG/usr/info/*
+gzip -9 $PKG/usr/man/man?/*.?
 for i in x64 x64sc xscpu64 x64dtv x128 xvic xpet xplus4 xcbm2 xcbm5x0; do
   ln -s vice.1.gz $PKG/usr/man/man1/$i.1.gz
 done
