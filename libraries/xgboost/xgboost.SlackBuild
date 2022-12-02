@@ -1,0 +1,182 @@
+#!/bin/bash
+
+# Slackware build script for xgboost
+
+# Copyright 2022 William PC - Seattle, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=xgboost
+VERSION=${VERSION:-1.6.2}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+tar xvf $CWD/dmlc-core-0.5.tar.gz -C dmlc-core --strip-components 1
+
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+
+if [ "${OMP:-no}" == "yes" ]; then
+  OPT_BUILD="-DUSE_OPENMP=ON"
+else
+  OPT_BUILD="-DUSE_OPENMP=OFF"
+fi
+
+if [ "${MPI:-no}" == "yes" ]; then
+  OPT_BUILD="$OPT_BUILD -DRABIT_BUILD_MPI=ON"
+fi
+
+if [ "${CUDA:-no}" == "yes" ]; then
+  OPT_BUILD="$OPT_BUILD -DUSE_CUDA=ON"
+  OPT_PYTHON="--use-cuda"
+fi
+
+if [ "${FULL_TESTS:-no}" == "yes" ]; then
+  OPT_BUILD="$OPT_BUILD -DGOOGLE_TEST=ON"
+fi
+
+
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=lib${LIBDIRSUFFIX} \
+    -DCMAKE_INSTALL_DOCDIR=/usr/doc/$PRGNAM-$VERSION \
+    -DCMAKE_INSTALL_DATADIR=/usr/doc/$PRGNAM-$VERSION \
+    -DBUILD_STATIC_LIB=OFF \
+    -DINSTALL_DOCUMENTATION=ON \
+    $OPT_BUILD \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install/strip DESTDIR=$PKG
+cd ..
+
+if [ "${PYTHON:-no}" == "yes" ]; then
+  cd python-package
+    python3 setup.py install $OPT_PYTHON --root=$PKG
+  cd ..
+fi
+
+if [ "${FULL_TESTS:-no}" == "yes" ]; then
+  ./build/dmlc-core/test/unittest/dmlc_unit_tests
+fi
+
+if [ "${TESTS:-no}" == "yes" ]; then
+  cd tests/cpp
+  if [ "$MPI" != "yes" ]; then
+    CC="c++"
+    SRCS="$SRCS test_serialization.cc \$(wildcard c_api/*.cc data/*.cc gbm/*.cc tree/*.cc)"
+  else
+    CC="mpic++"
+  fi
+cat <<EOF > Makefile
+CC = $CC
+LIBS = -lpthread -lgtest -lxgboost -ldmlc
+LDIR = -L../../build/dmlc-core -L../../lib -L/usr/lib${LIBDIRSUFFIX}
+INCLUDES = -I../../include -I../../dmlc-core/include -I../../rabit/include
+SRCS = helpers.cc test_global_config.cc \$(wildcard rabit/*.cc) test_main.cc $SRCS
+SRCS := \$(filter-out common/test_quantile.cc data/test_array_interface.cc data/test_sparse_page_dmatrix.cc, \$(SRCS))
+
+OBJS = \$(SRCS:.cc=.o)
+
+%.o: %.cc
+	\$(CC) \$(INCLUDES) \$(LDIR) -c $^ -o \$@ \$(LIBS)
+
+test_main: \$(OBJS)
+	\$(CC) \$(INCLUDES) \$(LDIR) -o \$@ $^ \$(LIBS)
+
+.PHONY : clean
+clean: \$(OBJS)
+	rm -f $^
+EOF
+  make test_main
+  LD_LIBRARY_PATH=$LD_LIBRARY_PATH:../../lib \
+  ./test_main
+  cd ../..
+fi
+
+
+# Don't ship .la files:
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG -depth -type d -empty -delete || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a {CITATION,CONTRIBUTORS.md,LICENSE,NEWS.md} doc \
+	$PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
