@@ -8,8 +8,8 @@ config() {
   fi
 }
 
-config etc/slpkg/slpkg.yml.new
-config etc/slpkg/blacklist.yml.new
+config etc/slpkg/slpkg.toml.new
+config etc/slpkg/blacklist.toml.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
