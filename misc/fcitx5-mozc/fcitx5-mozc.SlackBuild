@@ -1,0 +1,216 @@
+#!/bin/bash
+
+# Slackware build script for bazel
+
+# Copyright 2022 Isaac Yu <isaacyu1@isaacyu1.com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=fcitx5-mozc
+VERSION=${VERSION:-2.26.4360.102.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+BLDBASEDIR=$TMP/$PRGNAM-$VERSION
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+BLDTYPE=Release
+_bldtype=Release
+
+# source rev. and version.
+MOZC_REV=ca82d39d08df3359fdf5c653a1f56b3e95cbe2ce
+GYP_REV=caa60026e223fc501e8b337fd5086ece4028b1c6
+PROTOBUF_REV=fde7cf7358ec7cd69e8db9be4f1fa6a5c431386a
+ABSEIL_CPP_REV=0f3bb466b868b523cf1dc9b2aaaed65c77b28862
+BREAKPAD_REV=2022.07.12
+GOOGLETEST_REV=703bd9caab50b139428cea1aaff9974ebee5742e
+JSONCPP_REV=42e892d96e47b1f6e29844cc705e148ec4856448
+JAPANESE_USAGE_DICT_REV=e5b3425575734c323e1d947009dd74709437b684
+ZIPCODE_REL=202110
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+mkdir -p $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+echo "prepare source file..."
+# unzip packages
+unzip $CWD/mozc-$MOZC_REV.zip
+unzip $CWD/gyp-$GYP_REV.zip
+unzip $CWD/protobuf-$PROTOBUF_REV.zip
+unzip $CWD/abseil-cpp-$ABSEIL_CPP_REV.zip
+unzip $CWD/breakpad-${BREAKPAD_REV}.zip
+unzip $CWD/googletest-$GOOGLETEST_REV.zip
+unzip $CWD/jsoncpp-$JSONCPP_REV.zip
+unzip $CWD/japanese-usage-dictionary-$JAPANESE_USAGE_DICT_REV.zip
+unzip $CWD/jigyosyo-$ZIPCODE_REL.zip
+unzip $CWD/x-ken-all-$ZIPCODE_REL.zip
+# extact tar file
+tar -xvf ${CWD}/fcitx-mozc-icon.tar.gz
+
+# rename directory
+mv mozc-$MOZC_REV mozc
+mv gyp-$GYP_REV gyp
+mv protobuf-$PROTOBUF_REV protobuf
+mv abseil-cpp-$ABSEIL_CPP_REV abseil-cpp
+mv breakpad-$BREAKPAD_REV breakpad
+mv googletest-$GOOGLETEST_REV googletest
+mv jsoncpp-$JSONCPP_REV jsoncpp
+mv japanese-usage-dictionary-$JAPANESE_USAGE_DICT_REV japanese_usage_dictionary
+
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+cd $BLDBASEDIR/mozc
+# prepare zip code dictionary
+unzip -d src/data/dictionary_oss $CWD/jigyosyo-$ZIPCODE_REL.zip
+unzip -d src/data/dictionary_oss $CWD/x-ken-all-$ZIPCODE_REL.zip
+
+cd src/dictionary
+# Generate zip code seed
+sed -i "s/from dictionary import zip_code_util/import zip_code_util/g" gen_zip_code_seed.py
+
+cd ../data/dictionary_oss
+echo "Generating zip code seed ..."
+python3 ../../dictionary/gen_zip_code_seed.py --zip_code=x-ken-all.csv --jigyosyo=JIGYOSYO.CSV >> dictionary09.txt
+echo "Done."
+
+cd $BLDBASEDIR/mozc/scripts
+# Use python3 instead of python in slackware
+sed 's/python/python3/g' -i build
+# fix libdir path of fcitx5-mozc.so for Slackware
+sed 's/lib/lib64/g' -i install_fcitx5
+
+cd ../src
+# We won't need fcitx4 (disable fcitx4 target)
+rm unix/fcitx/fcitx.gyp
+
+cd ../../
+# Copy third party deps
+echo "Copy third party deps ..."
+for dep in abseil-cpp breakpad googletest jsoncpp gyp protobuf japanese_usage_dictionary
+do
+  cp -a $dep mozc/src/third_party/
+done
+
+cd $BLDBASEDIR/mozc/
+# Enable verbose build
+echo "... Apply 0005-Enable-verbose-build.patch"
+patch -p1 < $CWD/0005-Enable-verbose-build.patch
+# Use Gtk3 instead of Gtk2
+echo "... Apply 0008-renderer-Convert-Gtk2-to-Gtk3.patch"
+patch -p1 < $CWD/0008-renderer-Convert-Gtk2-to-Gtk3.patch
+# Fix build with gcc-11
+echo "... Apply 0010-fix-build-gcc11.patch"
+patch -p1 < $CWD/0010-fix-build-gcc11.patch
+# Buil with libstdc++
+echo "... Apply 0011-build-with-libstdc++.patch"
+patch -p1 < $CWD/0011-build-with-libstdc++.patch
+
+cd src/
+# Build with gcc instead of clang
+echo "... Apply 0012-mozc-build-gcc.patch"
+patch -p1 < $CWD/0012-mozc-build-gcc.patch
+
+# Fix compatibility with google-glog 0.3.3 (symbol conflict)
+CFLAGS="${CFLAGS} -fvisibility=hidden"
+CXXFLAGS="${CXXFLAGS} -fvisibility=hidden"
+
+# build package with gyp
+echo "build package..."
+_buildtype=Release
+TARGETS="unix/emacs/emacs.gyp:mozc_emacs_helper server/server.gyp:mozc_server gui/gui.gyp:mozc_tool unix/fcitx5/fcitx5.gyp:fcitx5-mozc"
+_targets="unix/emacs/emacs.gyp:mozc_emacs_helper server/server.gyp:mozc_server gui/gui.gyp:mozc_tool unix/fcitx5/fcitx5.gyp:fcitx5-mozc"
+
+sed -i 's|python|python3|' ../scripts/build_fcitx5
+QT_BASE_PATH=/usr/include/qt5 QTDIR=/usr GYP_DEFINES="document_dir=/usr/share/licenses/$PRGNAM use_libzinnia=1" python3 build_mozc.py gyp
+python3 build_mozc.py build -c $_bldtype $_targets
+
+
+# Extract license part of mozc
+head -n 29 server/mozc_server.cc > LICENSE
+
+export PREFIX="$PKG/usr"
+export _bldtype
+bash ../scripts/install_server
+
+install -d "$PKG/usr/share/licenses/$PRGNAM/"
+install -m 644 LICENSE data/installer/*.html "$PKG/usr/share/licenses/$PRGNAM/"
+
+install -d "${PREFIX}/share/fcitx5/addon"
+install -d "${PREFIX}/share/fcitx5/inputmethod"
+install -d "${PREFIX}/lib64/fcitx5"
+bash ../scripts/install_fcitx5
+
+# Install emacs_helper
+install -Dm644 ../LICENSE $PKG/usr/share/licenses/emacs-mozc/LICENSE
+install -Dm644 data/installer/credits_en.html  $PKG/usr/share/licenses/emacs-mozc/credits_en.html
+install -Dm755 out_linux/Release/mozc_emacs_helper $PKG/usr/bin/mozc_emacs_helper
+install -Dm644 unix/emacs/mozc.el $PKG/usr/share/emacs/site-lisp/mozc.el
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+
+cp $CWD/init.el_mozc $CWD/README.emacs $PKG/usr/doc/$PRGNAM-$VERSION/
+cp $CWD/*.patch $PKG/usr/doc/$PRGNAM-$VERSION/
+cp $CWD/$PRGNAM.SlackBuild $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+# install slack-desc
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
