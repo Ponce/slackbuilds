@@ -1,0 +1,165 @@
+#!/bin/bash
+
+# Slackware build script for 3D-ICE
+
+# Copyright 2022 William PC - Seattle, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=3D-ICE
+VERSION=${VERSION:-3.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+SRCNAM=${PRGNAM,,}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+
+# unpack requirements
+tar xvf $CWD/superlu_4.3.tar.gz
+
+if [ "${SYSTEMC:-no}" == "yes" ]; then
+  sed -i '/^SYSTEMC_MAIN/ s/$(HOME).*/\/usr/' makefile.def
+  sed -i '/^SYSTEMC_LIB/ s/-$(SYSTEMC_ARCH)/'${LIBDIRSUFFIX}'/' makefile.def
+  # it has to use the same standard which was used to compile SystemC
+  sed -i '/^CXXFLAGS/ s/c++11/c++17/' makefile.def
+  OPT_BUILD="SYSTEMC_WRAPPER=y"
+fi
+
+# do not test the plugin
+sed -i '59s/plugin//' Makefile
+sed -i '66s/plugintest//' test/Makefile
+sed -i '166,184d' test/Makefile
+
+
+cd SuperLU_4.3
+cp MAKE_INC/make.linux make.inc
+sed -i -e '/^SuperLUroot/ s/$(HOME)\/Codes\/SuperLU_4.3/../' make.inc
+sed -i -e '/^BLASLIB/ s/-L\/usr\/lib/-L\/usr\/lib\/x86_64-linux-gnu/' make.inc
+# doesn't compile with two threads
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+make -j1
+cd ..
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+make $OPT_BUILD
+make test
+make doc
+
+# install
+install -d $PKG/usr/bin
+install -m 0755 bin/3D-ICE-Client $PKG/usr/bin
+install -m 0755 bin/3D-ICE-Emulator $PKG/usr/bin
+install -m 0755 bin/3D-ICE-Server $PKG/usr/bin
+
+if [ "${SYSTEMC:-no}" == "yes" ]; then
+  install -m 0755 bin/3D-ICE-SystemC-Client $PKG/usr/bin
+fi
+
+mkdir -p $PKG/usr/include/3d-ice
+cp -av include/* $PKG/usr/include/3d-ice
+
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}
+cp -av lib/libthreed-ice-3.1.0.a $PKG/usr/lib${LIBDIRSUFFIX}
+
+mkdir -p $PKG/usr/libexec/$PRGNAM-$VERSION
+cp -av utils/{draw_temp_map.py,draw_temp_map_ani.py} $PKG/usr/libexec/$PRGNAM-$VERSION
+
+# before copy other document files, let's install the doc folder
+# and fix the permissions
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a doc $PKG/usr/doc/$PRGNAM-$VERSION
+# fix doc permissions
+find -L $PKG/usr/doc/$PRGNAM-$VERSION -type f \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 755 \
+  -o -perm 511 \) -exec chmod 644 {} \; 
+
+
+# Don't ship .la files:
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG -depth -type d -empty -delete || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CHANGELOG COPYING TODO \
+      $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
