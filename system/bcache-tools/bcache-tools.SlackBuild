@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright 2014 Nikos Giotis <nikos.giotis@gmail.com>
+# Copyright 2014-2022 Nikos Giotis <nikos.giotis@gmail.com>, Athens, Greece
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -19,6 +19,13 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20221201 ng: 
+# - move some files back in /lib/udev, there other udev related executables
+#   in /lib/udev directory also. This way they are available and included
+#   to the initrd.gz created by mkinitrd for early boot device discovery.
+# - move bcache-super-show to /lib/udev also for initrd inclusion.
+# - strip binaries the standard slackbuilds.org way
+# - update the package version and get the sources from kernel.org
 # 20220404 bkw: Modified by SlackBuilds.org, BUILD=3:
 # - i486 => i586.
 # - move probe-bcache and bcache-register binaries to /usr/sbin.
@@ -27,10 +34,11 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=bcache-tools
-VERSION=${VERSION:-1.0.8}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-20221201_2499ff2}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+SRCVER=2499ff2dd78f236c7809016be5dfff836454396b
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -50,16 +58,16 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686 -fgnu89-inline"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686 -fgnu89-inline"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
+  SLKCFLAGS="-O2 -fPIC -fgnu89-inline"
   LIBDIRSUFFIX="64"
 else
-  SLKCFLAGS="-O2"
+  SLKCFLAGS="-O2 -fgnu89-inline"
   LIBDIRSUFFIX=""
 fi
 
@@ -69,8 +77,8 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz || tar xvf $CWD/v$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$SRCVER.tar.gz
+cd $PRGNAM-$SRCVER
 
 # Patches for slackware compatibility
 # Disable initramfs, initcpio and dracut installations from 'make install' step
@@ -87,9 +95,8 @@ find -L . \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
 # Build
-cd $TMP/$PRGNAM-$VERSION
+cd $TMP/$PRGNAM-$SRCVER
 
-CC="gcc -fgnu89-inline" \
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 make
@@ -100,27 +107,40 @@ mkdir -p $PKG/lib/udev/rules.d
 mkdir -p $PKG/usr/share/man/man8
 make install DESTDIR=$PKG
 
-# 20220404 bkw: 'make install' puts a couple of ELF binaries in
-# /lib/udev, which is terrible. move them to /usr/sbin, and edit
-# the udev rules to call them from there (absolute path).
-for i in probe-bcache bcache-register; do
-  mv $PKG/lib/udev/$i $PKG/usr/sbin/$i
-  sed -i "s,$i,/usr/sbin/$i," $PKG/lib/udev/rules.d/*.rules
-done
+# Move bcache-super-show in /lib/udev as it is needed by bcache-export-cached
+mv $PKG/usr/sbin/bcache-super-show $PKG/lib/udev
 
-# 20220404 bkw: there weren't getting stripped.
-strip $PKG/usr/sbin/*
+# Move /usr/sbin/* to /sbin
+mkdir -p $PKG/sbin
+mv $PKG/usr/sbin/* $PKG/sbin
+rmdir $PKG/usr/sbin
+
+# Link bcache-super-show back to /sbin
+pushd $PKG/sbin
+ln -s /lib/udev/bcache-super-show bcache-super-show
+popd
+
+sed -i "s,bcache-super-show,/lib/udev/bcache-super-show," $PKG/lib/udev/bcache-export-cached
+
+# Use absolute paths in udev rules
+for i in probe-bcache bcache-register bcache-export-cached; do
+    sed -i "s,$i,/lib/udev/$i," $PKG/lib/udev/rules.d/*.rules
+done
 
 # Man pages in wrong place, move and gzip.
 mv $PKG/usr/share/man $PKG/usr/
 gzip -9 $PKG/usr/man/man*/*
-rm -rf $PKG/usr/share
+rmdir $PKG/usr/share
+
+# strip executables
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 # Documentation
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-cat $TMP/$PRGNAM-$VERSION/README > $PKG/usr/doc/$PRGNAM-$VERSION/README
-cat $TMP/$PRGNAM-$VERSION/COPYING > $PKG/usr/doc/$PRGNAM-$VERSION/COPYING
+cat $TMP/$PRGNAM-$SRCVER/README > $PKG/usr/doc/$PRGNAM-$VERSION/README
+cat $TMP/$PRGNAM-$SRCVER/COPYING > $PKG/usr/doc/$PRGNAM-$VERSION/COPYING
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
