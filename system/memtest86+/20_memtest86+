@@ -1,0 +1,82 @@
+#!/bin/sh
+set -e
+
+prefix="/usr"
+exec_prefix="/usr"
+datarootdir="/usr/share"
+
+. "$pkgdatadir/grub-mkconfig_lib"
+
+CLASS="--class memtest86 --class gnu --class tool"
+
+prepare_boot_cache="$(prepare_grub_to_access_device ${GRUB_DEVICE_BOOT} | grub_add_tab)"
+
+memtest_entry ()
+{
+  image="$1"
+  args="$2"
+  rel_image="$(make_system_path_relative_to_its_root ${image})"
+
+  # Apply some heuristics to show some images only on particular platforms.
+  basename="$(basename ${image})"
+  ftype="$(file ${image} | cut -d: -f2)"
+  if echo "${basename}" | grep -q ".elf\$" || echo "${ftype}" | grep -q "ELF"; then
+    protocol="knetbsd"
+    platform="pc"
+    #platform="" # Uncomment to show on EFI platforms; see below.
+  elif echo "${basename}" | grep -q ".efi\$" || echo "${ftype}" | grep -q "EFI"; then
+    protocol="chainloader"
+    platform="efi"
+  else # .bin, DOS/MBR boot sector
+    protocol="linux16"
+    platform="pc"
+    #platform="" # Uncomment to show on EFI platforms; see below.
+  fi
+
+  # All images listed above should boot on EFI platforms, but many (those
+  # marked with platform="pc") will likely run without graphics and appear to
+  # the casual user to not work, so are hidden by default.  (Some versions
+  # beep at startup, verifying it booted, but the display will be blank.)
+  # Serial consoles may still be useful.
+  #
+  # Uncomment this to un-hide all images on EFI platforms, or selectively edit
+  # the platform lines above to un-hide particular images.
+  #if [ "$platform" = "pc" ]; then
+  #  platform=""
+  #fi
+
+  if echo "${ftype}" | grep -q "Linux"; then # Linux kernel x86 boot executable
+    # .efi or .bin images may also present themselves as a Linux kernel image.
+    # When booted using the "linux" protocol, these images can be used on
+    # either "pc" or "efi" platform, and on EFI platforms they may have better
+    # or native resolution graphics.
+    protocol="linux"
+    #platform="" # Uncomment to discard platform constraint chosen above.
+  fi
+
+  # TODO: Detect multiboot images, use protocol="multiboot"
+
+  # Emit the menuentry.
+  platform_indent=""
+  if [ -n "${platform}" ]; then
+    echo "if [ x\$grub_platform = x${platform} ]; then"
+    platform_indent="${grub_tab}"
+  fi
+  echo "${platform_indent}menuentry \"Memory Tester (${basename})\" ${CLASS} {"
+  if [ "${protocol}" = "linux" -o "${protocol}" = "knetbsd" ]; then
+    echo "${platform_indent}${grub_tab}load_video"
+  fi
+  printf '%s\n' "${prepare_boot_cache}" | sed "s/^/${platform_indent}/"
+  echo "${platform_indent}${grub_tab}${protocol} ${rel_image} ${args}"
+  echo "${platform_indent}}"
+  if [ -n "${platform}" ]; then
+    echo "fi"
+  fi
+}
+
+for image in $(find /boot -maxdepth 1 -type f -regex '/boot/memtest86\+.*' | sort -Vr); do
+  if is_path_readable_by_grub "${image}" ; then
+    gettext_printf "Found memtest86 image: %s\n" "${image}" >&2
+    memtest_entry "${image}" "${GRUB_CMDLINE_MEMTEST86}"
+  fi
+done
