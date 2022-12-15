@@ -28,8 +28,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=ddclient
-VERSION=${VERSION:-3.9.1}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-3.10.0}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -55,6 +55,11 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
+
+# patch the ddclient.conf.in file pid directory
+#  @runstatedir@ should be /var/run
+sed -i.orig -e 's/@runstatedir@/@localstatedir@\/run/' ddclient.conf.in
+
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -62,30 +67,34 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-mkdir -p $PKG/usr/bin
-cp -a ddclient $PKG/usr/bin
+./autogen
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-chmod 644 sample*
-cp -a COPY* Change* README* RELEASENOTE TODO sample* $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+./configure \
+  --prefix=/usr \
+  --sysconfdir=/etc/ddclient \
+  --localstatedir=/var 
 
-mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
-cat $CWD/doinst.sh > $PKG/install/doinst.sh
+make
+make install DESTDIR=$PKG
+
+# patch to fix permissions on ddclient.conf
+# make it readable only by root # (it might contain passwords)
+chmod 0600                         $PKG/etc/ddclient/ddclient.conf
+
+# Add ".new" to the configuration file for the doinst.sh
+mv $PKG/etc/ddclient/ddclient.conf $PKG/etc/ddclient/ddclient.conf.new
 
 # Install startup script
 mkdir -p $PKG/etc/rc.d
 cat $CWD/rc.ddclient > $PKG/etc/rc.d/rc.ddclient.new
 
-# Copy configuration and make it readable only by root (it will probably
-#   contain passwords). See also doinst.sh
-mkdir -p $PKG/etc/ddclient
-cat sample-etc_ddclient.conf > $PKG/etc/ddclient/ddclient.conf.new
-chmod 0600 $PKG/etc/ddclient/ddclient.conf.new
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CO* Change* README* sample* docs/ $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild >           $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
-# Add the cache dir
-mkdir -p $PKG/var/cache/ddclient
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
-cd $PKG
+cd $PKG 
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
