@@ -1,0 +1,116 @@
+#!/bin/bash
+
+# Slackware build script for vasm
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=vasm
+VERSION=${VERSION:-1.9a}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+# create our own versioned top-level dir.
+mkdir -p $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+tar xvf $CWD/${PRGNAM}${VERSION/./_}.tar.gz
+cd $PRGNAM
+chown -R root:root .
+# permissions are awful, don't use template here.
+find . -type d -exec chmod 755 {} \+
+find . -type f -exec chmod 644 {} \+
+
+sed -i "/^COPTS/s,-O2,$SLKCFLAGS," Makefile
+
+runmake() {
+  local    cpu="$( echo "$1" | cut -d- -f1 )"
+  local syntax="$( echo "$1" | cut -d- -f2 )"
+  rm -rf obj/*
+  make CPU=$cpu SYNTAX=$syntax
+  install -s -m0755 ${PRGNAM}${cpu}* $PKG/usr/bin
+  rm -f ${PRGNAM}${cpu}*
+}
+
+# qnice looks to be a toy/test architecture (only 22 opcodes), and
+# it's never explained in the docs. leave it out.
+
+# every CPU gets std syntax:
+CPUS="6502 6800 6809 arm c16x jagrisc m68k \
+      pdp11 ppc tr3200 vidcore x86 z80"
+
+# only a few CPUs get extra syntax modules:
+EXTRAS="m68k-mot ppc-mot 6502-madmac jagrisc-madmac \
+        6502-oldstyle 6800-oldstyle 6809-oldstyle z80-oldstyle"
+
+mkdir -p $PKG/usr/bin
+for cpu in $CPUS; do
+  runmake $cpu-std
+done
+for cpusyn in $EXTRAS; do
+  runmake $cpusyn
+done
+
+install -s -m0755 vobjdump $PKG/usr/bin
+
+make doc/vasm.pdf
+
+# This would require texi2html... but it fails with the texi2html
+# we have on SBo:
+#make doc/vasm.html
+
+# This works, but doesn't create an index or TOC. Without
+# --no-split, the result is kinda hard to use.
+( cd doc && texi2any --no-split --html vasm.texi )
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a doc/vasm.pdf $PKGDOC
+cp -a doc/index.html $PKGDOC/vasm.html
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
