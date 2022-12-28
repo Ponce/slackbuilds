@@ -6,20 +6,25 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-# This is ancient software (1.01b was released in 1990), but still
-# useful. We're treating Debian as upstream here, our version number
-# matches their patchlevel (with _ intead of -).
+# 20221228 bkw: update for v2.3.
+
+# This is ancient software (1.01b was released in 1990), but recently
+# someone started maintaining it on github (2.x series), which is
+# excellent! It's now a lot easier to build, and some bugs have been
+# fixed.
+
+# Note to self: do not use the github /archive/ URLs; they require
+# a bunch of cruft and the ./bootstrip script expects to clone git
+# repos. Do use the /releases/download/ URLs; these Just Work with no
+# extra deps.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=mmv
-VERSION=${VERSION:-1.01b_19}
+VERSION=${VERSION:-2.3}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-
-SRCVER="$( echo $VERSION | cut -d_ -f1 )"
-DEBVER="$( echo $VERSION | cut -d_ -f2 )"
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -57,41 +62,41 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$SRCVER.orig
-tar xvf $CWD/${PRGNAM}_$SRCVER.orig.tar.gz
-cd $PRGNAM-$SRCVER.orig
-tar xvf $CWD/${PRGNAM}_$SRCVER-$DEBVER.debian.tar.xz
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# apply all Debian's patches:
-for i in $( cat debian/patches/series ); do
-  patch -p1 < debian/patches/$i
-done
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --build=$ARCH-slackware-linux
 
-# one patch of our own:
-patch -p1 < $CWD/compilefix.diff
-
-# the default LDFLAGS cause the build to fail, override with "nothing".
-sed -i "s,-O2,$SLKCFLAGS -Wall," Makefile
-make LDFLAGS=
-
-# easier to do this manually (only 2 files):
-mkdir -p $PKG/usr/bin $PKG/usr/man/man1
-install -s -m0755 $PRGNAM $PKG/usr/bin
-gzip -9c < $PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+make
+make install-strip DESTDIR=$PKG
+gzip -9 $PKG/usr/man/man?/*.*
 
 # multi-named executable, uses its name to decide what action to take.
-LINKS="mcp mad mln"
+# 'make install' creates the symlinks to the binary but not the man page.
+# in 2.3, the "mad" symlink is gone. doubt anyone misses it.
+LINKS="mcp mln"
 for i in $LINKS; do
-  ln -s $PRGNAM $PKG/usr/bin/$i
   ln -s $PRGNAM.1.gz $PKG/usr/man/man1/$i.1.gz
 done
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a ANNOUNCE READ.ME ARTICLE debian/changelog $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# README.md is already installed in $PKGDOC. NEWS and ChangeLog
+# are both "see git history at <url>", worth keeping one but not both.
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS ChangeLog $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
