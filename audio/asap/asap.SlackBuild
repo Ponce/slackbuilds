@@ -1,0 +1,222 @@
+#!/bin/bash
+
+# Slackware build script for asap
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Notes:
+
+# This SlackBuild turned out to be a lot more elaborate and in-depth
+# than I expected...
+
+# Do not build asapscan or the java/python/etc stuff: they require
+# "cito", because they're written in Ć (not C, C-with-acute-accent,
+# *.ci source files) and there's no SBo build for it... and I don't
+# think it's worth the trouble of creating one. What I probably
+# will do someday is create a cito SlackBuild, then use it to
+# build an asap-extras package that uses the same source as this,
+# including only the stuff that needs cito.
+
+# Slackware 15.0 has a binary called "asapcat", which is part of
+# akonadi. It's utterly unrelated to this asap build!
+
+# Any time vlc or xmms2 updates, this build has to be tested against
+# the new version. Currently it's known to work with:
+# xmms2-20170827_dedc33d
+# vlc-3.0.17.3
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=asap
+VERSION=${VERSION:-5.2.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+LIBDIR=/usr/lib$LIBDIRSUFFIX
+PKGLIBDIR=$PKG/$LIBDIR
+PKGBIN=$PKG/usr/bin
+PKGMAN1=$PKG/usr/man/man1
+
+# These functions help me follow the DRY principle.
+runmake() {
+  make CFLAGS="$SLKCFLAGS" V=1 "$@"
+}
+
+installbin() {
+  mkdir -p "$2"
+  install -s -m0755 -oroot -groot "$1" "$2"
+}
+
+installfile() {
+  mkdir -p "$2"
+  install -m0644 -oroot -groot "$1" "$2"
+}
+
+installscript() {
+  mkdir -p "$2"
+  install -m0755 -oroot -groot "$1" "$2"
+}
+
+# I got carried away and wrote man pages for everything...
+# Note to self: don't forget to "sh mkman.sh" after editing
+# any of the man/*.rst files.
+mkdir -p $PKGMAN1
+for i in $CWD/man/*.1; do
+  gzip -9c < $i > $PKGMAN1/$( basename $i ).gz
+done
+
+# Always build the standalone converter and library. The lib
+# is static (no option to make it dynamic).
+# There's a "make install" but it's not doing what I want.
+runmake
+installbin  asapconv  $PKGBIN
+installfile asap.h    $PKG/usr/include
+installfile libasap.a $PKGLIBDIR
+
+# mplayer wrapper, for command-line users' convenience.
+installscript $CWD/asap-mplayer $PKGBIN
+
+# This tools looks useful.
+installscript chksap.pl $PKG/usr/bin
+
+# It has POD that renders as a man page. Clean up the formatting some
+# and add a SEE ALSO section like the rest of the man pages have.
+sed -i -e 's/^chksap -/chksap.pl -/' \
+       -e 's/perl \(chksap\.pl\)/\1/' \
+       -e '/^=cut/i=head1 SEE ALSO\n\nB<asap-mplayer>(1), B<asap-sdl>(1), B<asapconv>(1), B<sap2ntsc>(1), B<sap2txt>(1)\n' \
+       chksap.pl
+pod2man -r$VERSION -s1 -cSlackBuilds.org chksap.pl | \
+  gzip -9c > $PKG/usr/man/man1/chksap.pl.1.gz
+
+# Looks useful, but it would need cito (don't have):
+#runmake asapscan
+#installbin asapscan $PKGBIN
+
+# Standalone player (seems to work, dunno why it's not built by default).
+runmake asap-sdl
+installbin asap-sdl $PKGBIN
+
+# This builds and seems useful, especially since most SAP files have
+# PAL timing and I live in an NTSC country:
+gcc $SLKCFLAGS -o sap2ntsc sap2ntsc.c
+installbin sap2ntsc $PKGBIN
+
+# This, too:
+gcc $SLKCFLAGS -o sap2txt sap2txt.c -lz
+installbin sap2txt $PKGBIN
+
+# Now build the plugins.
+
+# moc is part of Slackware, but I'll make it optional anyway,
+# in case someone's running a stripped-down Slackware install.
+# We need the moc source, and have to ./configure it (but not
+# actually build it).
+if [ -x /usr/bin/mocp ]; then
+  echo "=== building moc plugin"
+
+  MOCVER="${MOCVER:-$( /usr/bin/mocp --version | grep Version | sed 's,.*: ,,' )}"
+  tar xvf $CWD/moc-$MOCVER.tar.bz2
+  ( cd moc-$MOCVER && ./configure )
+
+  runmake asap-moc MOC_INCLUDE="$(pwd)/moc-$MOCVER"
+  installbin libasap_decoder.so $PKGLIBDIR/moc/decoder_plugins
+  PLUGINS+=" moc"
+fi
+
+# xmms is part of Slackware, but I'll make it optional anyway.
+if xmms-config --version &>/dev/null; then
+  echo "=== building xmms plugin"
+
+  runmake asap-xmms
+  installbin libasap-xmms.so $PKG/"$( xmms-config --input-plugin-dir )"
+  PLUGINS+=" xmms"
+fi
+
+# xmms2 is SBo, optional.
+if pkg-config --exists xmms2-plugin; then
+  echo "=== building xmms2 plugin"
+
+  # slight xmms2 API change:
+  sed -i 's,XMMS_XFORM_PLUGIN,&_DEFINE,' xmms2/libxmms_asap.c
+
+  runmake asap-xmms2
+  installbin libxmms_asap.so $PKGLIBDIR/xmms2
+  PLUGINS+=" xmms2"
+fi
+
+# vlc is SBo, optional.
+if pkg-config --exists vlc-plugin; then
+  echo "=== building vlc plugin"
+
+  runmake asap-vlc
+  installbin libasap_plugin.so \
+    $PKG/$( pkg-config --variable pluginsdir vlc-plugin )/demux
+  PLUGINS+=" vlc"
+
+  # doinst and douninst update the VLC plugins cache. only include
+  # in the package if they're actually needed.
+  mkdir -p $PKG/install
+  cat $CWD/doinst.sh   > $PKG/install/doinst.sh
+  cat $CWD/douninst.sh > $PKG/install/douninst.sh
+fi
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC/examples
+cd $PKGDOC/examples
+  unzip -LL $CWD/examples.zip
+  chmod 644 *
+cd -
+cp -a README COPYING $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+sed "s,@PLUGINS@,$PLUGINS," < $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
