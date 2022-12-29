@@ -2,7 +2,7 @@
 ..   rst2man.py unshieldv3.rst > unshieldv3.1
 .. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 1.30_beta+20190930_0037ff5
+.. |version| replace:: 0.2.1
 .. |date| date::
 
 ==========
@@ -21,9 +21,11 @@ Extract InstallShield v3 archives
 SYNOPSIS
 ========
 
-unshieldv3 list *file.z*
+unshieldv3 **info** *file.z*
 
-unshieldv3 extract *file.z* [*output-dir*]
+unshieldv3 **list** [**-v**] *file.z*
+
+unshieldv3 **extract** *file.z* *output-dir*
 
 DESCRIPTION
 ===========
@@ -46,7 +48,7 @@ identified by the **file**\(1) command:
   $ head -c6 data.Z | xxd
   00000000: 135d 658c 3a01                           .]e.:.
 
-If **file** says "compress'd data" or similar, your file isn't an
+If **file** says "compress'd data" or similar, your .Z file isn't an
 InstallShield archive; it's compressed with the old UNIX compress
 command, and can be extracted with **uncompress**\(1) or **gzip**\(1).
 
@@ -59,13 +61,17 @@ OPTIONS
 
 Options may not be abbreviated.
 
+**info**
+  Show archive metadata: number of files, compressed size, and
+  uncompressed size.
+
 **list**
-  List contents of archive.
+  List contents of archive. With **-v**, shows the size and timestamp
+  of each file.
 
 **extract**
-  Extract archive. If an *output-dir* is given, extracted files will be written
-  there (the *output-dir* must already exist). Without *output-dir*, the current
-  directory is used.
+  Extract archive. *output-dir* is required, but will not be created if
+  it doesn't exist. Use **.** to extract to the current directory.
 
 COPYRIGHT
 =========
