@@ -1,86 +1,36 @@
 ## Modifications since version 2.x
 
-### 16.3.6
+### 17.0.2
 
- * Fix shape of y-ogonek (used by Elfdalian) (#1437).
-
-
-### 16.3.5
-
- * Update Powerline line number and column number symbol (`U+E0A1`, `U+E0A2`) to follow other fonts’ design.
+* Fix variant assignment of
+  - Italic CYRILLIC SMALL LETTER TE (`U+0442`) (#1498).
+  - CYRILLIC SMALL LETTER ZHE WITH DESCENDER (`U+0497`) (#1499).
+  - CYRILLIC SMALL LETTER SHHA (`U+04BB`) (#1500).
 
 
-### 16.3.4
+### 17.0.1
 
- * Fix inconsistent serifs in Exists and Forall sign (#1435).
-
-
-### 16.3.3
-
- * Fix application of CV/SS on certain composites and some of the sample images (#1433).
+* Fix shape of Small Cyrillic Ghe with hook/descender when having inward serifs (#1494).
 
 
-### 16.3.2
+### 17.0.0
 
- * Fix alignment of Ogonek in LATIN SMALL LETTER I WITH OGONEK (`U+012F`) at with `'cv34' = 5` (#1431).
- * Fix soft dot of LATIN SMALL LETTER I WITH OGONEK (`U+012F`) (#1432).
-
-
-### 16.3.1
-
- * Fix shape of LATIN SMALL LETTER E WITH OGONEK (`U+0119`) (#1427).
- * Width grade will now influence marks' width.
-
-
-### 16.3.0
-
- * Add variant selector to remove notches for equality ligations (#1425).
- * Fix `cv40`'s application to CYRILLIC SMALL LETTER ER (`U+0440`) (#1426).
-
-
-### 16.2.1
-
- * Fix shape of `p` @ `motion-serifed` (#1423).
-
-
-### 16.2.0
-
-* Add ligation set for HTML/XML/React tags (`<>`, `</`, `/>` and `</>`) (#1413).
-
-
-### 16.1.0
-
-* Add characters:
-  - HEAVY ROUND-TIPPED RIGHTWARDS ARROW (`U+279C`) (#1401).
-* Add ligation sets for Julia and Raku (#1386, #1391).
-
-
-### 16.0.3
-
-* Add characters:
-  - HEAVY ROUND-TIPPED RIGHTWARDS ARROW (`U+279C`) (#1401).
-
-
-### 16.0.2
-
- * Fix mapping of MODIFIER LETTER VERTICAL LINE (`U+02C8`) and MODIFIER LETTER LOW VERTICAL LINE (`U+02CC`) (#1407).
- * Fix shape of LATIN SMALL LETTER T WITH CURL (`U+0236`) (#1408).
- * Fix `cv99` application on ELEMENT OF WITH DOT ABOVE (`U+22F5`) (#1409).
- * Fix `cv33` application on Hwair (`U+0195`) (#1410).
- * Fix letterform of Cyrillic Small Letter Ghe With Upturn under Italic.
-
-
-### 16.0.1
-
- * Fix `cv99` application on ASCII single quotes and graves (#1404).
- * Fix `cv44` application on certain t-derived letters (`U+01AB`, `U+0236`, `U+0288`, `U+1DB5`, and `U+20A7`) (#1405).
- * Fix shape of BLANK SYMBOL (`U+2422`, #1406).
-
-
-### 16.0.0
-
- * \[**Breaking**\] Change the mechanism of variants of not-equal ligation (#1400):
-   - The "dotted" ligation groups (`exeqeq-dotted`, `eqexeq-dotted`, `eqexeq-dl-dotted`, `exeq-dotted`) are removed.
-   - A character variant, "lig-neq" (feature tag `VXAF`), is added to control the shape instead.
- * Ensure that the middle point between Typo Ascender and Descender lies on the middle of symbols/operators (#1398).
+* Reordered variants of certain characters, including:
+  - Ampersand (`&`).
+* Add Characters
+  - LATIN CAPITAL LETTER REVERSED C WITH DOT (`U+A73E`).
+  - LATIN SMALL LETTER REVERSED C WITH DOT (`U+A73F`).
+  - LATIN CAPITAL LETTER O WITH LONG STROKE OVERLAY (`U+A74A`).
+  - LATIN SMALL LETTER O WITH LONG STROKE OVERLAY (`U+A74B`).
+  - LATIN CAPITAL LETTER INSULAR G (`U+A77D`) (#1483, #1489).
+  - LATIN CAPITAL LETTER TURNED INSULAR G (`U+A77E`) (#1483, #1489).
+  - LATIN SMALL LETTER TURNED INSULAR G (`U+A77F`) (#1483, #1489).
+  - LATIN CAPITAL LETTER BETA (`U+A7B4`) (#1492).
+  - LATIN SMALL LETTER BETA (`U+A7B5`) (#1492).
+  - LATIN CAPITAL LETTER REVERSED HALF H (`U+A7F5`) (#1490).
+  - LATIN SMALL LETTER REVERSED HALF H (`U+A7F6`) (#1490).
+  - LATIN LETTER SMALL CAPITAL TURNED M (`U+A7FA`) (#1490).
+* Add tailed variant of et-like `&` (#1491).
+* Add serifs to Wynn and Yogh under Slab (#1489).
+* Adjust the shape of Cyrillic Omega (#1489).
 
