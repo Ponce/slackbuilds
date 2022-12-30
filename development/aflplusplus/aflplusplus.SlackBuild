@@ -10,7 +10,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=aflplusplus
 SRCNAM=AFLplusplus
-VERSION=${VERSION:-3.14c}
+VERSION=${VERSION:-4.04c}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -32,19 +32,9 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
-fi
+# No SLKCFLAGS here, use upstream's flags (they know what they're doing).
+LIBDIRSUFFIX=""
+[ "$ARCH" = "x86_64" ] && LIBDIRSUFFIX="64"
 
 set -e
 
@@ -61,10 +51,38 @@ find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
 DOCDIR=/usr/doc/$PRGNAM-$VERSION
 PKGDOC=$PKG/$DOCDIR
 
+runmake() {
+  make \
+    DESTDIR=$PKG \
+    PREFIX=/usr \
+    HELPER_PATH=/usr/lib$LIBDIRSUFFIX/$PRGNAM \
+    DOC_PATH=$DOCDIR \
+    MAN_PATH=/usr/man/man8 \
+    "$1"
+}
+
+# "make all" doesn't include qemu_mode (which gets built separately,
+# below). The other modes aren't built because they're a lot of effort
+# to build for not much gain:
+
+# coresight_mode: ARM64-only. Beyond the scope of this SBo build.
+# frida_mode: New and missing a lot of features. Also a PITA to build.
+# nyx_mode: Written in Rust. Too fast-moving of a target for me, sorry.
+# unicorn_mode: Looks interesting, but I don't need it, do you?
+
+# Anyone who wants to is welcome to submit SlackBuilds for the other
+# modes, though it'll take some care to keep them from conflicting
+# with this one: your script will have to build the main aflplusplus
+# stuff (make all), because the "modes" require it to be built first,
+# but your package should only install the mode-specific stuff (so you
+# can't just use "make install").
+
+runmake all
+runmake man
+
 # Make it use the qemu source provided by us, instead of doing a git
-# clone (which didn't work properly anyway). Also this removes the
-# hexagon arch in qemu, because its meson.build breaks the build (even
-# though we're not even building hexagon support).
+# clone (which didn't work properly anyway). Also this disables -Werror
+# in the qemu build.
 patch -p1 < $CWD/build_qemu_support.diff
 
 # qemu mode is optional, only build if the source exists.
@@ -72,34 +90,17 @@ QEMUVER="$( cat qemu_mode/QEMUAFL_VERSION )"
 QEMUSRC="$CWD/qemuafl-$QEMUVER.tar.xz"
 if [ -e "$QEMUSRC" ]; then
   echo "=== QEMU source found, building qemu_mode"
+  WITHQEMU=WITH
   ( cd qemu_mode
     rm -rf qemuafl
-    tar xvf "$QEMUSRC" )
-    WITHQEMU=WITH
+    tar xvf "$QEMUSRC"
+    NO_CHECKOUT=1 sh build_qemu_support.sh )
 else
   echo "=== QEMU source NOT found, not building qemu_mode"
-  sed -i \
-    -e '/-cd qemu_mode/d' \
-    GNUmakefile
-    WITHQEMU=WITHOUT
+  WITHQEMU=WITHOUT
 fi
 
-# Apply our flags, disable frida and unicorn modes because they
-# don't build.
-sed -i \
-  -e "s/= *-O3 *-funroll-loops/= $SLKCFLAGS/" \
-  -e '/MAKE.*-C *frida_mode *$/d' \
-  -e '/-cd unicorn_mode/d' \
-  GNUmakefile
-
-make \
-  DESTDIR=$PKG \
-  PREFIX=/usr \
-  HELPER_PATH=/usr/lib$LIBDIRSUFFIX/$PRGNAM \
-  DOC_PATH=$DOCDIR \
-  MAN_PATH=/usr/man/man8 \
-  distrib \
-  install
+runmake install
 
 # 20211216 bkw: faster than the usual find|strip stuff. Maybe this
 # should be the new template.
@@ -113,7 +114,6 @@ find $PKG/usr/bin $PKG/usr/lib* -type f -print0 | \
 gzip $PKG/usr/man/man8/*.8
 
 rm -f $PKGDOC/INSTALL*              # useless.
-cat README.md > $PKGDOC/README.md   # upstream forgot this.
 cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
