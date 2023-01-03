@@ -2,11 +2,11 @@
 ..   rst2man.py rmac.rst > rmac.1
 .. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 1.8.6
+.. |version| replace:: 2.2.14_20221221
 .. |date| date::
 
 ====
-RMAC
+rmac
 ====
 
 ------------------------------
@@ -47,24 +47,32 @@ OPTIONS
 
 -fe                  ELF output object file format.
 
+-fr                  Absolute address. Source is required to have only one **.org**.
+
 -fx                  Atari 800 com/exe/xex output object file format.
+
+-g                   Generate source level debug info. Requires BSD COFF object file format.
 
 -i\ *path*           Set include-file directory search path. *Note* this is a
                      **semicolon** separated list of directories.
 
 -l\ *[file[prn]]*    Construct and direct assembly listing to the specified file.
 
--l\ *\*[filename]*   Create an output listing file without pagination
+-l\ *\*[filename]*   Create an output listing file without pagination.
 
--n                   Don't do things behind your back in RISC assembler
+-m\ *cpu*            Set default CPU type. Choices are: **68000** **68020**
+                     **68030** **68040** **68060** **68881** **68882**
+                     **56001** **6502** **tom** **jerry**
+
+-n                   Don't do things behind your back in RISC assembler.
 
 -o\ *file[.o]*       Direct object code output to the specified file.
 
 +/~oall              Turn all optimisations on/off
 
-+o\ *0-3*            Enable specific optimisation
++o\ *0-30*           Enable specific optimisation
 
-~o\ *0-3*            Disable specific optimisation
+~o\ *0-30*           Disable specific optimisation
 
                       `0: Absolute long adddresses to word (default: on)`
                       
@@ -73,10 +81,22 @@ OPTIONS
                       `2: Word branches to short (default: on)`
                       
                       `3: Outer displacement 0(an) to (an) (default: on)`                      
-
                       `4: lea size(An),An to addq #size,An (default: off)`                      
+                      `5: 68020+ Absolute long base displacement to word (default: off)`
 
-                      `5: Absolute long base displacement to word (default: off)`
+                      `6: Convert null short branches to NOP`
+
+                      `7: Convert clr.l Dn to moveq #0,Dn`
+
+                      `8: Convert adda.w/l #x,Dy to addq.w/l #x,Dy`
+
+                      `9: Convert adda.w/l #x,Dy to lea x(Dy),Dy`
+
+                      `10: 56001 Use short format for immediate values if possible`
+
+                      `11: 56001 Auto convert short addressing mode to long (default: on)`
+
+                      `30: Enforce PC relative (alternative name: op)`
 
 -p                   Produce an executable (**.prg**) output file.
 
@@ -108,6 +128,8 @@ OPTIONS
 
 -yn                  Set listing page size to n lines.
 
+-4                   Use C style operator precedence.
+
 file\ *[s]*          Assemble the specified file.
 
 FILES
@@ -135,4 +157,4 @@ SEE ALSO
 
 *hatari*\ (1)
 
-The full **rmac** documentation in /usr/doc/rmac-|version|/rmac.rst.
+The full **rmac** documentation: /usr/doc/rmac-|version|/rmac.html
