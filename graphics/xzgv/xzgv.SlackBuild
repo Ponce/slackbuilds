@@ -2,33 +2,24 @@
 
 # Slackware build script for xzgv
 
-# Copyright (c) 2010-2018  Markus Reichelt, Aachen, DE
-# All rights reserved.
-#
-#   Permission to use, copy, modify, and distribute this software for
-#   any purpose with or without fee is hereby granted, provided that
-#   the above copyright notice and this permission notice appear in all
-#   copies.
-#
-#   THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESSED OR IMPLIED
-#   WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-#   MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-#   IN NO EVENT SHALL THE AUTHORS AND COPYRIGHT HOLDERS AND THEIR
-#   CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-#   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-#   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
-#   USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-#   ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-#   OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
-#   OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
-#   SUCH DAMAGE.
-#
-# markus reichelt, slackbuilds@mareichelt.de, 0xCCEEF115
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Original author: Markus Reichelt.
+# Now maintained by B. Watson <urchlay@slackware.uk>.
+
+# 20230102 bkw: v0.9.2_2
+# - take over maintenance.
+# - relicense as WTFPL.
+# - include Debian's improved .desktop file and PNG icons.
+# - include GNU info doc in package.
+# - fix documentation permissions.
+# - get rid of useless INSTALL from docs.
+# - use Debian patch to fix man page nroff formatting.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=xzgv
-VERSION=${VERSION:-0.9.2}
+VERSION=${VERSION:-0.9.2_2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -41,10 +32,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -70,47 +57,67 @@ fi
 
 set -e
 
+SRCVER="$( echo $VERSION | cut -d_ -f1 )"
+DEBVER="$( echo $VERSION | cut -d_ -f2 )"
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+rm -rf $PRGNAM-$SRCVER
+tar xvf $CWD/$PRGNAM-$SRCVER.tar.gz
+cd $PRGNAM-$SRCVER
+tar xvf $CWD/${PRGNAM}_$SRCVER-$DEBVER.debian.tar.xz
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-mkdir -p $PKG/usr/bin $PKG/usr/man/man1 $PKG/usr/info
+# use Debian's .desktop file
+cp debian/$PRGNAM.desktop src/
 
-echo "cc=gcc" > config.mk
-echo "CFLAGS=$SLKCFLAGS">> config.mk
-echo "AWK=awk">> config.mk
-echo "BINDIR=$PKG/usr/bin">>config.mk
-echo "INFODIR=$PKG/usr/info">>config.mk
-echo "MANDIR=$PKG/usr/man/man1">>config.mk
-echo "USE_A4_DEF=-t @afourpaper">>config.mk
-echo "LDFLAGS=-lX11 -lm">> config.mk
+# use 48x48 old-style icon
+sed -i 's,icon-64,icon-48,' src/Makefile
+
+# apply Debian's patches (currently, fixes for the man page)
+for i in $( cat debian/patches/series ); do
+  patch -p1 < debian/patches/$i
+done
+
+cat > config.mk <<EOF
+CC=gcc
+AWK=awk
+CFLAGS=$SLKCFLAGS
+BINDIR=$PKG/usr/bin
+INFODIR=$PKG/usr/info
+MANDIR=$PKG/usr/man/man1
+USE_A4_DEF=-t @afourpaper
+LDFLAGS=-lX11 -lm
+PIXMAPDIR=$PKG/usr/share/pixmaps
+DESKTOPDIR1=$PKG/usr/share/applications
+DESKTOPDIR2=$PKG/usr/share/applications
+EOF
+
+mkdir -p $PKG/usr/{bin,man/man1,info,share/{pixmaps,applications}}
 
 make
-mv src/xzgv $PKG/usr/bin
+strip src/$PRGNAM
+make info
+make install
+rm -f $PKG/usr/info/dir
+chmod 644 $PKG/usr/man/man*/*
+gzip $PKG/usr/man/man*/*
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-mv doc/xzgv.1 $PKG/usr/man/man1
-
-find $PKG/usr/man/man1 -type f -exec gzip -9 {} \;
-rmdir $PKG/usr/info
-
-mkdir -p $PKG/usr/share/applications
-cat src/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+# include Debian's PNG icons
+for i in debian/$PRGNAM-*.png; do
+  px="$( basename $i .png | cut -d- -f2 )"
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  install -m0644 -oroot -groot $i $dir/$PRGNAM.png
+done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  AUTHORS ChangeLog COPYING INSTALL NEWS README TODO \
+  AUTHORS ChangeLog COPYING NEWS README TODO \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
