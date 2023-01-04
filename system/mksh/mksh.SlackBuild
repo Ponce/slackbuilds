@@ -2,34 +2,24 @@
 
 # Slackware build script for mksh
 
-# Copyright (c) 2011-2021  Markus Reichelt, Aachen, DE
-# All rights reserved.
-#
-#   Permission to use, copy, modify, and distribute this software for
-#   any purpose with or without fee is hereby granted, provided that
-#   the above copyright notice and this permission notice appear in all
-#   copies.
-#
-#   THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESSED OR IMPLIED
-#   WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-#   MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-#   IN NO EVENT SHALL THE AUTHORS AND COPYRIGHT HOLDERS AND THEIR
-#   CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-#   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-#   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
-#   USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-#   ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-#   OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
-#   OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
-#   SUCH DAMAGE.
-#
-# Markus Reichelt, slackbuilds@mareichelt.de, 0xCCEEF115
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Original author: Markus Reichelt, Aachen, DE
+# Now maintained by B. Watson <urchlay@slackware.uk>
+
+# 20230102 bkw: BUILD=2
+# - take over maintenance.
+# - relicense as WTFPL.
+# - install FAQ.htm, not mksh.faq.
+# - make the test suite optional (but default to enabled).
+# - simplify the build script.
+# - make the slack-desc show the build options.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=mksh
 VERSION=${VERSION:-R59c}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -41,9 +31,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -69,69 +56,81 @@ fi
 
 set -e
 
-rm -rf $PKG
-mkdir -p $TMP $PKG $OUTPUT
-cd $TMP
-rm -rf $PRGNAM
-tar xf $CWD/$PRGNAM-$VERSION.tgz
-cd $PRGNAM
-
 CC="gcc"
 SLKCFLAGS="${SLKCFLAGS} -Wall"
+
+# 20230102 bkw: fail if user passes both DIET=yes and MUSL=yes.
+if [ "$DIET" = "yes" -a "$MUSL" = "yes" ]; then
+  echo "$( basename $0 ): cannot combine DIET=yes with MUSL=yes." 1>&2
+  exit 1
+fi
+
+if [ "$DIET" = "yes" ]; then
+  # no need to log out & back in after installing dietlibc.
+  source /etc/profile.d/dietlibc.sh
+  CC="diet -Os gcc"
+  # diet builds are always static
+  STATIC=yes
+  BUILDOPTS+="DIET=yes "
+elif [ "$MUSL" = "yes" ]; then
+  CC="musl-gcc"
+  BUILDOPTS+="MUSL=yes "
+fi
 
 if [ "$STATIC" = "yes" ]; then
   LDFLAGS="${LDFLAGS} -static"
   CPPFLAGS="${CPPFLAGS} -DMKSH_NOPWNAM"
+  BUILDOPTS+="STATIC=yes "
 fi
 
-if [ "$DIET" = "yes" ]; then
-  CC="diet -Os gcc"
-fi
-
-if [ "$MUSL" = "yes" ]; then
-  CC="musl-gcc"
-fi
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM
+tar xvf $CWD/$PRGNAM-$VERSION.tgz
+cd $PRGNAM
 
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-mkdir build
-cd build
-
-LDFLAGS=$LDFLAGS \
-CPPFLAGS=$CPPFLAGS \
-CFLAGS=$SLKCFLAGS \
-CC=$CC \
-  sh ../Build.sh -r
+LDFLAGS="$LDFLAGS" \
+CPPFLAGS="$CPPFLAGS" \
+CFLAGS="$SLKCFLAGS" \
+CC="$CC" \
+  sh Build.sh -r
 
 # make sure tests pass whether there is a controlling tty or not. There are
 # some changes related to this in CVS, so this can probably be removed with the
 # next release.
 # thanks alpine maintainers.
-sed -i ../check.t -e '/^name: selftest-tty-absent$/,/^---$/d'
-./test.sh -C regress:no-ctty
+# 20230102 bkw: make tests optional with TESTS=no. This is a maintainer-mode
+# option (saves me time if I'm repeatedly editing/running the script).
+if [ "${TESTS:-yes}" = "yes" ]; then
+  sed -i -e '/^name: selftest-tty-absent$/,/^---$/d' check.t
+  ./test.sh -C regress:no-ctty
+fi
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION $PKG/usr/man/man1 $PKG/install
+# 20230102 bkw: turns mksh.faq into proper HTML (FAQ.htm).
+sh FAQ2HTML.sh
 
-ginstall -D -m 755 mksh $PKG/bin/mksh
-ginstall -D -m 644 ../mksh.1 $PKG/usr/man/man1/
-ginstall -D -m 644 ../lksh.1 $PKG/usr/man/man1/
-ginstall -D -m 644 ../mksh.faq $PKG/usr/doc/$PRGNAM-$VERSION/
-ginstall -D -m 644 ../dot.mkshrc $PKG/etc/skel/.mkshrc.new
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC $PKG/{bin,usr/man/man1,etc/skel,install}
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+install -m 755 -s mksh       $PKG/bin
+install -m 644    dot.mkshrc $PKG/etc/skel/.mkshrc.new
+install -m 644    dot.mkshrc $PKGDOC
+install -m 644    FAQ.htm    $PKGDOC
 
-cat ../dot.mkshrc > $PKG/usr/doc/$PRGNAM-$VERSION/dot.mkshrc
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+for i in mksh lksh; do
+  gzip -9c < $i.1 > $PKG/usr/man/man1/$i.1.gz
+done
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 cat $CWD/slack-desc > $PKG/install/slack-desc
+[ -n "$BUILDOPTS" ] && \
+  sed -i "15s,\$, Build options: $BUILDOPTS," $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
