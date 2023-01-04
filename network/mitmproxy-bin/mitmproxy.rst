@@ -2,7 +2,7 @@
 ..   rst2man.py mitmproxy.rst > mitmproxy.1
 .. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 7.0.4
+.. |version| replace:: 9.0.1
 .. |date| date::
 
 =========
