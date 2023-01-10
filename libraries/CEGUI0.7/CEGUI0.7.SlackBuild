@@ -22,12 +22,21 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20230110 bkw: modified by SlackBuilds.org, BUILD=5.
+# - Install to /opt/CEGUI0.7, not /usr. Resolves the conflict with
+#   CEGUI. Apps that depend on this will have to be modified to
+#   use /opt/CEGUI0.7 (only games/smc depends on this, though).
+# - Disable irrlicht renderer (unneeded).
+# - Disable ogre renderer (fails to build with modern ogre).
+# - Add FreeImage to REQUIRES. Our one dependee (smc) requires
+#   a CEGUI0.7 that was built with FreeImage support.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=CEGUI0.7
 SRCNAM=CEGUI
 VERSION=${VERSION:-0.7.9}
-BUILD=${BUILD:-4}
+BUILD=${BUILD:-5}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -39,9 +48,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -74,38 +80,46 @@ rm -rf $SRCNAM-$VERSION
 tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
 cd $SRCNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+OPT=/opt/$PRGNAM
+OPTLIB=$OPT/lib$LIBDIRSUFFIX
+PKGOPT=$PKG/$OPT
+PKGOPTLIB=$PKG/$OPTLIB
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
 
 patch -p1 < $CWD/CEGUI.patch
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS -fpermissive" \
 ./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --prefix=$OPT \
+  --libdir=$OPT/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --localstatedir=/var \
-  --mandir=/usr/man \
+  --mandir=$OPT/man \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
   --enable-null-renderer \
   --disable-python-module \
+  --disable-ogre-renderer \
+  --disable-irrlicht-renderer \
   --with-default-image-codec=FreeImageImageCodec \
   --build=$ARCH-slackware-linux
 
 make
-make install DESTDIR=$PKG
+make install-strip DESTDIR=$PKG
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# 20230110 bkw: .pc files contain -Wl,-rpath...
+# this way, anything that needs to link with CEGUI0.7 can simply:
+#   export PKG_CONFIG_PATH=/opt/CEGUI0.7/lib$LIBDIRSUFFIX/pkgconfig
+# example: games/smc
+install -m0644 -oroot -groot $CWD/CEGUI*.pc $PKGOPTLIB/pkgconfig
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a doc/* $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+mkdir -p $PKGDOC
+cp -a doc/* $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
-rm -f $PKG/usr/lib*/*.la
+rm -f $PKGOPTLIB/*.la
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
