@@ -17,3 +17,8 @@ config etc/timidity/eawpats.cfg.new
 if [ ! -r etc/timidity/timidity.cfg ]; then
   ( cd etc/timidity ; ln -sf eawpats.cfg timidity.cfg )
 fi
+
+# SDL 1.2's SDL_mixer still uses the obsolete location for timidity.cfg:
+if [ ! -r etc/timidity.cfg ]; then
+  ( cd etc ; ln -sf timidity/eawpats.cfg timidity.cfg )
+fi
