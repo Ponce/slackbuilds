@@ -17,3 +17,7 @@ config etc/timidity/freepats.cfg.new
 if [ ! -r etc/timidity/timidity.cfg ]; then
   ( cd etc/timidity ; ln -sf crude.cfg timidity.cfg )
 fi
+
+if [ ! -r etc/timidity.cfg ]; then
+  ( cd etc ; ln -sf timidity/crude.cfg timidity.cfg )
+fi
