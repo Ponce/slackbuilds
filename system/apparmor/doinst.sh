@@ -27,5 +27,4 @@ config etc/apparmor/easyprof.conf.new
 config etc/apparmor/logprof.conf.new
 config etc/apparmor/notify.conf.new
 config etc/apparmor/parser.conf.new
-config etc/apparmor/subdomain.conf.new
 config etc/apparmor/severity.db.new
