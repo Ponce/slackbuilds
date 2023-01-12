@@ -2,7 +2,7 @@
 
 # Slackware build script for The Hessling Editor
 
-# Copyright 2012-2022 Richard Narron, California, USA
+# Copyright 2012-2023 Richard Narron, California, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,12 +25,12 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=THE
-VERSION=${VERSION:-3.3RC8}
+VERSION=${VERSION:-4.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
-TARFILE=the-3.3
+TARFILE=the-${VERSION}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -81,7 +81,13 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# make the ncurses version of THE and the documentation
+# patch install file:  --with-curses=pdcurses-x11
+patch -b -p1 < $CWD/install.patch
+
+# patch Makefile.in to make sure manext is built early
+patch -b -p1 < $CWD/makefile-in.patch
+
+# Make the ncurses version of THE and the documentation
 mkdir ncurses
 cd    ncurses
 
@@ -101,54 +107,41 @@ CXXFLAGS="$SLKCFLAGS" \
 make
 make install DESTDIR=$PKG
 
-rm -rf doc/html
-make html
-
-rm -f $PKG/usr/bin/the 
-ln -fs the-con $PKG/usr/bin/the
-ln -fs the-con $PKG/usr/bin/nthe
+rm -f          $PKG/usr/bin/the 
+ln -sf the-con $PKG/usr/bin/the
+ln -sf the-con $PKG/usr/bin/nthe
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/html
 install -m0644 the64.gif the64.png doc/html/*.html \
          $PKG/usr/doc/$PRGNAM-$VERSION/html
 
 cd $TMP/$PRGNAM-$VERSION
-install -m0644 COPYING FAQ HISTORY README* TODO \
+install -m0644 COPYING FAQ HISTORY INSTALL README* TODO \
          $PKG/usr/doc/$PRGNAM-$VERSION
+install -m0644                    $CWD/README \
+         $PKG/usr/doc/$PRGNAM-$VERSION/README.slackware
 
-# Try to  make the X11 version of THE by using PDCurses (XCurses)
+# Make the X11 version of THE by using the included PDCursesMod source.
+mkdir xcurses
+cd    xcurses
 
-if  ldconfig -p | grep -q libXCurses.so; then
-  mkdir xcurses
-  cd    xcurses
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+../configure \
+  --with-curses=pdcurses-x11 \
+  --with-rexx=regina \
+  --build=$ARCH-slackware-linux \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --prefix=/usr \
+  --sysconfdir=/etc
 
-  # for XCurses, create pdcurses-x11.pc pkg-config
-  XLIBDIR=lib${LIBDIRSUFFIX}
-  XVERSION=$(xcurses-config --version)
-  mkdir -p        pkgconfig
-  sed -e "s/XLIBDIR/${XLIBDIR}/" \
-      -e "s/XVERSION/${XVERSION}/" \
-      <                $CWD/libpdcurses-x11.pc \
-      >           pkgconfig/libpdcurses-x11.pc
+make the-x11
 
-  PKG_CONFIG_PATH=pkgconfig   \
-  CFLAGS="$SLKCFLAGS" \
-  CXXFLAGS="$SLKCFLAGS" \
-  ../configure \
-    --with-curses=pdcurses-x11 \
-    --with-rexx=regina \
-    --build=$ARCH-slackware-linux \
-    --docdir=/usr/doc/$PRGNAM-$VERSION \
-    --libdir=/usr/lib${LIBDIRSUFFIX} \
-    --localstatedir=/var \
-    --mandir=/usr/man \
-    --prefix=/usr \
-    --sysconfdir=/etc
-    
-  make           the-x11
-  install -m0755 the-x11 $PKG/usr/bin
-  ln -fs         the-x11 $PKG/usr/bin/xthe
-fi
+install -m0755 the-x11 $PKG/usr/bin
+ln -sf         the-x11 $PKG/usr/bin/xthe
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
