@@ -25,8 +25,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=med
-VERSION=${VERSION:-4.0.0}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-4.1.1}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -69,9 +69,9 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
+rm -rf ${PRGNAM}-${VERSION}_SRC
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+cd ${PRGNAM}-${VERSION}_SRC
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -79,27 +79,30 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
+patch -p1 < $CWD/hdf5-1.12.patch
+sed -i 's/if H5_VERS_MINOR > 10/if 0/g' src/ci/MEDfileCompatibility.c # :o
+
+export CPPFLAGS+=' -DH5_USE_110_API'
+
 PYTHON_VERSION=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])') \
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --enable-fortran \
-  --disable-python \
-  --disable-static \
-  --build=$ARCH-slackware-linux
 
-# fix directory paths in Makefiles
-# from /usr//lib to /usr/lib64 for 64-bit
-# from /usr// to /usr/
-find -name Makefile -exec sed -i "s/\/usr\/\/lib/\/usr\/lib$LIBDIRSUFFIX/g" {} \;
-find -name Makefile -exec sed -i "s/\/usr\/\//\/usr\//g" {} \;
+sed -i "s|_install_dir\ lib/python|_install_dir lib$LIBDIRSUFFIX/python|" python/CMakeLists.txt
 
-make
-make install DESTDIR=$PKG
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DMEDFILE_BUILD_PYTHON=ON \
+    -DMEDFILE_BUILD_TESTS=OFF \
+    -DMEDFILE_INSTALL_DOC=OFF \
+    -DLIB_SUFFIX=$LIBDIRSUFFIX \
+    -GNinja ..
+  "${NINJA:=ninja}"
+  DESTDIR=$PKG $NINJA install
+cd ..
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a AUTHORS COPYING COPYING.LESSER ChangeLog INSTALL README $PKG/usr/doc/$PRGNAM-$VERSION
