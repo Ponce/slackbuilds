@@ -6,6 +6,17 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20230112 bkw: update for v1.2.1, after ~9 years there's a release!
+# - no more disable_alt_x.diff, it works properly now.
+# - always include the upgrade (u4upgrad.zip), since upstream does.
+# - new dependencies boron and faun.
+# - update man page and rename it u4 => xu4.
+# - rework profile_path.diff.
+# - update README and README-SBo.txt (remove obsolete info, add section
+#   on running without pulse).
+# - TODO: test with the GoG release (someone has to create a GoG account,
+#   even though it's free-of-charge, and I'm not able to).
+
 # 20211012 bkw: BUILD=3,
 # - new-style icon.
 # - binary in /usr/games.
@@ -13,14 +24,11 @@
 # - disable Alt-x keystroke (it crashes the game).
 # - "Press Alt-x to quit" => "Close window to quit".
 
-# TODO: make Alt-x stop crashing the game. It seems to work correctly
-# only at the main menu, not while playing. Disabled it for now.
-
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=xu4
-VERSION=${VERSION:-20130612_svn}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-1.2.1}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -41,6 +49,7 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
+# LIBDIRSUFFIX isn't actually used for 1.2.1
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
@@ -61,45 +70,37 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# There actually are some executables in the lib dir. If there hadn't
-# been, I would have left it as /usr/lib even on 64-bit, or better yet
-# change to /usr/share. As it is, it has to be /usr/lib64 on 64-bit.
-LIBDIR=/usr/lib$LIBDIRSUFFIX
-PKGLIBDIR=$PKG/$LIBDIR
+# If we didn't supply this file, 'make install' would try to download it.
+cat $CWD/u4upgrad.zip > u4upgrad.zip
+
+# The xu4 source on the homepage (sourceforge) is missing a commit
+# that's in the 1.2.1 tag on github, which makes it fail to compile.
+# I could use the github source, but it doesn't include src/glv.
+# Easier to just apply the github commit to the sf tarball.
+patch -p1 < $CWD/really_1.2.1.diff
 
 # Fix path to "profiles/" dir used by -p option. Patch makes it use
-# ~/.xu4/profiles/ rather than ./profiles off the current dir.
+# ~/.config/xu4/profiles/ rather than ./profiles off the current dir.
 patch -p1 < $CWD/profile_path.diff
 
-# Fix hard-coded libdir. Ugh.
-sed -i -e "s,/usr/lib,$LIBDIR," src/u4file.cpp
+# Use our flags, plus install to /usr/games (not /usr/bin).
+sed -i -e "s,-O3,$SLKCFLAGS," src/Makefile
+sed -i -e "/DESTDIR/s,/bin,/games,g" Makefile
 
-# Stop u4 from writing border.png in the current dir (it never *reads* it!)
-sed -i -e '/border\.png/s,^,//,' src/imagemgr.cpp
-
-# The libxml2 in Slack 14.2 is pickier than the one in 14.1, and fails to
-# validate the game's XML files. So:
-sed -i '/#define *DEFAULT_VALIDATE_XML/s,1,0,' src/settings.h
-
-# Patch for GCC 7
-patch -p1 < $CWD/gcc7.patch
-
-# 20211012 bkw: work around a bug. Disable Alt-X as it crashes the
-# game. Tell the user to close the window to quit, instead.
-patch -p1 < $CWD/disable_alt_x.diff
-
-# The -DNPERF stops u4 from creating a debug/ in the current dir.
-make -C src DEBUGCXXFLAGS="-DNPERF $SLKCFLAGS" prefix=/usr libdir=$PKGLIBDIR
-make -C src install prefix=$PKG/usr bindir=$PKG/usr/games libdir=$PKGLIBDIR
-
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# The configure script isn't autoconf (doesn't support the standard
+# options) and the Makefile uses DESTDIR to mean PREFIX, more-or-less.
+# We don't have to strip the binary (make install does it for us).
+# Since we're not building from a git tree, we have to explicitly
+# set VERSION (it only shows up in --help and the 'About' in the game).
+./configure --prefix /usr
+make DESTDIR=/usr VERSION=$VERSION
+make install DESTDIR=$PKG/usr VERSION=$VERSION
 
 # If we have the official release rather than the "dragon" one, repackage
 # it with the same layout as the dragon release. Note that the official
@@ -111,54 +112,45 @@ fi
 
 # The game data. This is the zip file, not the self-extracting exe (the
 # exe lacks the documentation, for one thing).
-cat $CWD/ultima4.zip > $PKGLIBDIR/u4/ultima4.zip
+cat $CWD/ultima4.zip > $PKG/usr/share/xu4/ultima4.zip
 
 # Replace stock .desktop file with one that validates.
-cat $CWD/u4.desktop > $PKG/usr/share/applications/u4.desktop
+cat $CWD/xu4.desktop > $PKG/usr/share/applications/xu4.desktop
 
-# These files should be (but aren't) installed by "make install". Without
-# them, we get no music!
-install -m0644 mid/*.it $PKGLIBDIR/u4/music/
+# New-style icons, made by downsizing icons/u4.png, except 128x128 was
+# extracted from icons/xu4.icns in the source. I didn't downsize the
+# Mac icon because it has a checkerboard background that looks good
+# at 128x128, but horrid when downscaled.
+# 48x48 was already installed, above.
+HICOLOR=$PKG/usr/share/icons/hicolor/
+mkdir -p $HICOLOR/64x64/apps
+cat icons/u4.png > $HICOLOR/64x64/apps/$PRGNAM.png
 
-# Remove execute permission from data files. Grr.
-chmod 644 $PKG/usr/share/pixmaps/* $PKG/usr/share/applications/*
-find $PKGLIBDIR \
-  -type f -a \
-  \( -name \*.mid -o -name \*.vga -o -name \*.png -o \
-     -name \*.xml -o -name \*.dtd -o -name \*.ogg \) \
-  -print0 | xargs -0 chmod 644
-
-# 20211012 bkw: new-style icon...
 for i in $CWD/icons/*.png; do
   px=$( basename $i | cut -d. -f1 )
   size=${px}x${px}
-  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  dir=$HICOLOR/$size/apps
   mkdir -p $dir
   cat $i > $dir/u4.png
 done
 
-rm -f $PKG/usr/share/pixmaps/u4.png
-ln -s ../icons/hicolor/64x64/apps/u4.png $PKG/usr/share/pixmaps/u4.png
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/xu4.png $PKG/usr/share/pixmaps/xu4.png
 
-# Docs. N.B. we don't need border.png.
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/developers
-cp -a *.html AUTHORS COPYING README $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a doc/* $PKG/usr/doc/$PRGNAM-$VERSION/developers
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# Docs.
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC/developers
+cp -a AUTHORS COPYING ChangeLog README* $PKGDOC
+cp -a doc/* $PKGDOC/developers
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
-# Include the upgrade (and extract its docs) if we have it.
-if [ -e $CWD/u4upgrad.zip ]; then
-  cat $CWD/u4upgrad.zip > $PKGLIBDIR/u4/u4upgrad.zip
-  cd $PKG/usr/doc/$PRGNAM-$VERSION
-  unzip $CWD/u4upgrad.zip Readme.txt
-  mv Readme.txt Readme-Upgrade.txt
-  cd -
-fi
+# Include the upgrade's docs.
+unzip -p $CWD/u4upgrad.zip Readme.txt > $PKGDOC/Readme-Upgrade.txt
 
 # Include the PDF docs, if we have them.
 if [ -e $CWD/ultima4_scanned_docs.zip ]; then
-  mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/pdf
-  cd $PKG/usr/doc/$PRGNAM-$VERSION/pdf
+  mkdir -p $PKGDOC/pdf
+  cd $PKGDOC/pdf
   unzip $CWD/ultima4_scanned_docs.zip '*.pdf'
   mv ultima4_scanned_docs/Ultima_IV_-_Cluebook_-_PC.pdf Hints.pdf
   mv ultima4_scanned_docs/Ultima_IV_-_Manual_-_PC.pdf History.pdf
@@ -168,7 +160,7 @@ if [ -e $CWD/ultima4_scanned_docs.zip ]; then
 fi
 
 # Include the original Ultima IV docs.
-cd $PKG/usr/doc/$PRGNAM-$VERSION
+cd $PKGDOC
 unzip $CWD/ultima4.zip '*.txt' '*.doc' '*.bmp' '*.jpg' || true
 
 # These docs only apply to running the original game on DOS or Windows. Bye.
@@ -186,14 +178,10 @@ chmod 644 *.txt ms_word_docs/*.doc
 sed -i 's/\r//' *.txt
 cd -
 
-# I hate packages called "xfoo" whose binaries are called "foo".
-ln -s u4 $PKG/usr/games/$PRGNAM
-
 # I also hate binaries that take options but have no man pages, so here's
-# the one I made. Enjoy.
+# the one I made. Enjoy. I wish I'd used rst or pod for it...
 mkdir -p $PKG/usr/man/man6
-sed "s/@VERSION@/$VERSION/" $CWD/u4.6 | gzip -9c - > $PKG/usr/man/man6/u4.6.gz
-ln -s u4.6.gz $PKG/usr/man/man6/$PRGNAM.6.gz
+sed "s/@VERSION@/$VERSION/" $CWD/xu4.6 | gzip -9c - > $PKG/usr/man/man6/xu4.6.gz
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
