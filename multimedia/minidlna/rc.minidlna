@@ -1,0 +1,132 @@
+#!/bin/sh
+#
+# /etc/rc.d/rc.minidlna
+#
+# start/stop/restart/status of the MiniDLNA server.
+#
+# To make MiniDLNA start automatically at boot, make this
+# file executable:  chmod 755 /etc/rc.d/rc.minidlna
+#
+# Written by Georgi D. Sotirov <gsotirov@gmail.com>
+# Based on examples from Internet
+
+# Bash colors
+C_GREEN=$'\e[32;01m'
+C_YELLOW=$'\e[33;01m'
+C_RED=$'\e[31;01m'
+C_NORMAL=$'\e[0m'
+
+SNAME='MiniDLNA server'
+NAME=minidlna
+CMD="/usr/sbin/${NAME}d"
+CONFILE="/etc/${NAME}.conf"
+PIDFILE="/var/run/${NAME}.pid"
+CMD_OPTS="-f $CONFILE -P $PIDFILE"
+
+ok() {
+  echo "${C_GREEN}Done${C_NORMAL}"
+}
+
+fail() {
+  echo "${C_RED}Failure${C_NORMAL}"
+}
+
+print_status() {
+  if [ $? != 0 ]; then
+    fail
+  else
+    ok
+  fi
+}
+
+start() {
+  if [ -x $CMD ]; then
+    if [ ! -e $PIDFILE ]; then
+      echo -n "Starting $SNAME in $CMD... "
+      $CMD $CMD_OPTS
+      print_status
+    else
+      echo "Starting $SNAME: Already running with PID `cat $PIDFILE`!"
+    fi
+  fi
+}
+
+stop() {
+  if [ -e $PIDFILE ]; then
+    echo -n "Stopping ${SNAME}... "
+    kill -15 `cat $PIDFILE`
+    print_status
+  else
+    echo "Stopping ${SNAME}: Not running!"
+  fi
+}
+
+restart() {
+  stop
+  sleep 3
+  start
+}
+
+status() {
+  if [ -e $PIDFILE ]; then
+    echo "$SNAME running with PID `cat $PIDFILE`."
+  else
+    STAT=`ps -C $NAME -o pid= | wc -l`
+    if [ ${STAT} -ge 1 ]; then
+      echo "$SNAME is running"
+    else
+      echo "$SNAME is not running"
+    fi
+  fi
+}
+
+db_clean() {
+  # If DB dir defined explicitly in log (i.e. not commented), then use it
+  DB_DIR_CONF=$(grep -E '^db_dir=' $CONFILE | awk -F'=' '{ print $2 }')
+  # else fallback to default
+  DB_DIR=${DB_DIR_CONF:-/var/cache/$NAME}
+  WAS_RUNNING=0
+
+  if [ -e $DB_DIR -a -d $DB_DIR ]; then
+    # Stop daemon if running
+    if [ -e $PIDFILE ]; then
+      WAS_RUNNING=1
+      stop
+      sleep 3
+    fi
+
+    echo -n "Cleaning cache in ${DB_DIR}... "
+    rm -f ${DB_DIR}/files.db
+    rm -rf ${DB_DIR}art_cache
+    print_status
+
+    # And restart daemon afterwards
+    if [ $WAS_RUNNING -ne 0 ]; then
+      start
+    fi
+  else
+    echo "Error: cache dir $DB_DIR does not exist or not a direcory!"
+  fi
+}
+
+help() {
+  echo "$SNAME control"
+  echo "Usage: $0 start|stop|restart|status|clean"
+  echo
+}
+
+case "$1" in
+  'start')
+    start ;;
+  'stop')
+    stop ;;
+  'restart')
+    restart ;;
+  'status')
+    status ;;
+  'clean')
+    db_clean ;;
+  *)
+    help ;;
+esac
+
