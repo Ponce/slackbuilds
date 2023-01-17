@@ -12,7 +12,7 @@
 # a tarball of. With no arg, HEAD is used.
 
 PRGNAM=libnsgif
-CLONE_URL=https://github.com/jcupitt/libnsgif
+CLONE_URL=https://github.com/jcupitt/libnsgif-autotools
 
 # The version of libnsgif from the netsurf project, that this autotools
 # version was forked from. Have to keep track of this manually unless
