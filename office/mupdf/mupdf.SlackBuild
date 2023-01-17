@@ -7,6 +7,13 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20230117 bkw: update for 1.21.1.
+# - Again, this script can't build older versions.
+# - There's a gumbo-parser SlackBuild now, so build with it instead of
+#   upstream's bundled version.
+# - tesseract builds work, so make that an option.
+# - Include pre-scaled PNG icons.
+
 # 20201020 bkw: update for 1.18.0. See notes, below.
 # 20200217 bkw: update for 1.16.1.
 # 20180623 bkw: BUILD=2, add patch for dynamic linking. Thanks
@@ -54,7 +61,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=mupdf
-VERSION=${VERSION:-1.18.0}
+VERSION=${VERSION:-1.21.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -91,27 +98,32 @@ else
 fi
 set -e
 
-# Tesseract code left here for future reference. At some point upstream
-# (or maybe I) will fix it.
-if [ "${TESSERACT:-no}" = "yes" ]; then
-  TESSARGS="USE_SYSTEM_LEPTONICA=yes USE_SYSTEM_TESSERACT=yes"
-  cat <<EOF
-***
-*** 20201023 bkw: Tesseract support in mupdf is currently broken. If
-*** you want to forcibly build with it, edit the SlackBuild. Aborting.
-***
-EOF
-  exit 1
-else
-  TESSARGS="HAVE_LEPTONICA=no HAVE_TESSERACT=no"
-fi
+# Building mupdf seems to work OK if an older version is installed,
+# but I only tested 1.21.1 when 1.18.0 was installed (doesn't mean
+# it works for all versions).
+print_failed_message() {
+  if pkg-config --exists mupdf; then
+  cat 1>&2 <<EOF
 
+**************************************************************************
+* The build failed. This might have happened because you had an existing *
+* (older) mupdf package installed. Run "removepkg mupdf" and try again.  *
+**************************************************************************
+EOF
+  fi
+  exit 1
+}
+
+# 20230117 bkw: tesseract builds work fine in 1.21.1, but tesseract
+# doesn't get autodetected. Help it out a little.
+TESS=no
+[ "${TESSERACT:-yes}" = "yes" ] && pkg-config --exists tesseract && TESS=yes
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION-source
-tar xvf $CWD/$PRGNAM-$VERSION-source.tar.?z
+tar xvf $CWD/$PRGNAM-$VERSION-source.tar.lz
 cd $PRGNAM-$VERSION-source
 
 chown -R root:root .
@@ -131,52 +143,70 @@ SOMAJOR=$(echo $VERSION | cut -d. -f1-2 | sed -e 's,\.[0-9]$,0&,' -e 's,\.,,g')
 SOMINOR=$(echo $VERSION | cut -d. -f3-  | sed 's,\.,,g' )
 SOVER=$SOMAJOR.$SOMINOR
 
-# Shared libraries should be installed executable.
-sed -i '/install.*644.*INSTALL_LIBS/s,644,755,' Makefile
-
-# tesseract autodetection is mildly broken:
-sed -i 's,tesseract-ocr,tesseract,' Makerules
-
 # Build against system libs instead of bundled ones, where possible.
+# Upstream recommends using their bundled lcms2 and mujs, I'll go with that.
+# Also, we *still* (in Slack 15.0) have to use the bundled freeglut
+# to get copy/paste working in mupdf-gl.
 # C++ (XCXXFLAGS) is only actually used if building with tesseract.
 make verbose=yes \
   shared=yes \
   LIB_LDFLAGS="-shared -Wl,-soname -Wl,libmupdf.so.$SOMAJOR" \
-  SO="so.$SOVER" \
-  XCFLAGS="$SLKCFLAGS -DJBIG_NO_MEMENTO" \
-  XCXXFLAGS="-std=c++11 -fpermissive" \
   USE_SYSTEM_LIBS=yes \
-  USE_SYSTEM_GUMBO=no \
   USE_SYSTEM_GLUT=no \
-  $TESSARGS \
+  tesseract=$TESS \
   build=release \
   prefix=/usr \
   libdir=/usr/lib$LIBDIRSUFFIX \
   mandir=/usr/man \
   docdir=/usr/doc/$PRGNAM-$VERSION \
   DESTDIR=$PKG \
-  all install
+  all install || print_failed_message
 
 # bins and libs are already stripped.
 gzip -9 $PKG/usr/man/man1/*.1
 
-# ldconfig will create the libmupdf.so.$SOVER link, but the libmupdf.so
-# one has to be part of the package.
-ln -s lib$PRGNAM.so.$SOMAJOR.$SOMINOR $PKG/usr/lib$LIBDIRSUFFIX/lib$PRGNAM.so
+# 20230117 bkw: fix up the lib dir.
+cd $PKG/usr/lib$LIBDIRSUFFIX
+  # 20230117 bkw: AFAIK, we have to list every shared lib this one
+  # depends on in the .pc file. This rather odd-looking bit of code
+  # creates the list.
+  PCLIBS="-lmupdf $(
+    objdump -p libmupdf.so | \
+       perl -ne 'next unless /NEEDED/;
+                 chomp;
+                 s,.* lib([^.]*)\.so.*,\1,;
+                 print "-l$_ " unless /^(c|gcc_s)$/;'
+  )"
+  WITHTESS=WITHOUT
+  echo "$PCLIBS" | grep -q ltesseract && WITHTESS=WITH
+  echo "==> PCLIBS='$PCLIBS'"
 
-# Historically, mupdf has included two libraries: libmupdf itself,
-# and libmupdf-third, containing all the bundled third party code
-# included with the source. In version 1.18.0, when building a
-# shared lib, no libmupdf-third gets created (all the code ends up in
-# libmupdf.so). However, most projects that link with libmupdf expect
-# this library to exist. This will probably change in the future as
-# those projects get updated for the changes in mupdf, but for now,
-# to be compatible with older mupdf versions, we include an empty
-# libmupdf-third for stuff to link with.
-ar crs $PKG/usr/lib$LIBDIRSUFFIX/libmupdf-third.a
+  # 20230117 bkw: the library is versioned, but the filename isn't...
+  chmod 755 libmupdf.so
+  mv libmupdf.so libmupdf.so.$SOVER
+  ln -s libmupdf.so.$SOVER libmupdf.so
+  ln -s libmupdf.so.$SOVER libmupdf.so.$SOMAJOR
+
+  # .pc file taken from debian and parameterized.
+  mkdir -p pkgconfig/
+  sed -e "s,@LIB@,lib$LIBDIRSUFFIX,g" \
+      -e "s,@VERSION@,$VERSION,g" \
+      -e "s,@PCLIBS@,$PCLIBS,g" \
+      $CWD/$PRGNAM.pc > pkgconfig/$PRGNAM.pc
+
+  # Historically, mupdf has included two libraries: libmupdf itself,
+  # and libmupdf-third, containing all the bundled third party code
+  # included with the source. In version >=1.18.0, when building a
+  # shared lib, no libmupdf-third gets created (all the code ends up in
+  # libmupdf.so). However, most projects that link with libmupdf expect
+  # this library to exist. This will probably change in the future as
+  # those projects get updated for the changes in mupdf, but for now,
+  # to be compatible with older mupdf versions, we include an empty
+  # libmupdf-third for stuff to link with.
+  ar crs libmupdf-third.a
+cd -
 
 # Compatibility symlinks. Older versions, the binary is just "mupdf".
-# Separate -curl binary exists in 1.5 but not 1.4.
 ln -s $PRGNAM-x11 $PKG/usr/bin/$PRGNAM
 for i in x11 x11-curl gl; do
   [ -e $PKG/usr/bin/$PRGNAM-$i ] && \
@@ -189,27 +219,24 @@ done
 mkdir -p $PKG/usr/share/applications
 cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
 
-# Use shipped PNG and SVG icons.
+# Use shipped SVG icon, make PNGs at various sizes.
 mkdir -p $PKG/usr/share/pixmaps $PKG/usr/share/icons/hicolor/scalable/apps
-cat docs/logo/mupdf-icon.png > $PKG/usr/share/pixmaps/$PRGNAM.png
-cat docs/logo/mupdf-logo.svg > $PKG/usr/share/icons/hicolor/scalable/apps/$PRGNAM.svg
-
-# .pc file taken from debian and parameterized.
-# -lcrypto used to be in this list, will be again someday.
-PCLIBS="-l$PRGNAM -lfreetype -lharfbuzz -ljbig2dec -ljpeg -lopenjp2 -lz -lm"
-
-mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/pkgconfig/
-sed -e "s,@LIB@,lib$LIBDIRSUFFIX,g" \
-    -e "s,@VERSION@,$VERSION,g" \
-    -e "s,@PCLIBS@,$PCLIBS,g" \
-    $CWD/$PRGNAM.pc > $PKG/usr/lib$LIBDIRSUFFIX/pkgconfig/$PRGNAM.pc
+svg=docs/logo/mupdf-logo.svg
+for i in 16 22 32 48 64 128; do
+  px=${i}x${i}
+  dir=$PKG/usr/share/icons/hicolor/$px/apps
+  mkdir -p $dir
+  rsvg-convert --width=$i --height=$i -o $dir/$PRGNAM.png $svg
+done
+cat $svg > $PKG/usr/share/icons/hicolor/scalable/apps/$PRGNAM.svg
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
 # 'make install' already installed most of the docs.
 cp -a CONTRIBUTORS docs/api $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@WITHTESS@,$WITHTESS," < $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
