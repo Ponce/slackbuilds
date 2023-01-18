@@ -1,0 +1,311 @@
+diff -Naur wolf4sdl-2.0+20210408_f31f41a/Makefile wolf4sdl-2.0+20210408_f31f41a.patched/Makefile
+--- wolf4sdl-2.0+20210408_f31f41a/Makefile	2023-01-17 21:39:16.429986286 -0500
++++ wolf4sdl-2.0+20210408_f31f41a.patched/Makefile	2023-01-17 22:30:58.234400318 -0500
+@@ -20,7 +20,7 @@
+ LDFLAGS_SDL ?= $(shell $(SDL_CONFIG) --libs)
+ 
+ 
+-CFLAGS += $(CFLAGS_SDL)
++CFLAGS += -DPREFIX='"$(PREFIX)"' $(CFLAGS_SDL)
+ 
+ #CFLAGS += -Wall
+ #CFLAGS += -W
+@@ -87,6 +87,7 @@
+ SRCS += wl_state.c
+ SRCS += wl_text.c
+ SRCS += wl_utils.c
++SRCS += datafile.c
+ 
+ DEPS = $(filter %.d, $(SRCS:.c=.d) $(SRCS:.cpp=.d))
+ OBJS = $(filter %.o, $(SRCS:.c=.o) $(SRCS:.cpp=.o))
+diff -Naur wolf4sdl-2.0+20210408_f31f41a/datafile.c wolf4sdl-2.0+20210408_f31f41a.patched/datafile.c
+--- wolf4sdl-2.0+20210408_f31f41a/datafile.c	1969-12-31 19:00:00.000000000 -0500
++++ wolf4sdl-2.0+20210408_f31f41a.patched/datafile.c	2023-01-17 22:28:44.888190048 -0500
+@@ -0,0 +1,60 @@
++
++#include <stdlib.h>
++#include <unistd.h>
++#include <limits.h>
++#include <stdio.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++
++#include "datafile.h"
++
++static char *datapath = NULL;
++
++static void set_data_path(void) {
++	if(datapath) return;
++	datapath = getenv("WOLF4PATH");
++	if(datapath) return;
++
++	// 20120113 bkw: should this be "C:\\WOLF3D" on Windows?
++	datapath = (char *)PREFIX "/share/games/wolf3d";
++}
++
++int datafile_exists(const char *file) {
++	char datafile[PATH_MAX];
++	struct stat statbuf;
++
++	set_data_path();
++
++	if(stat(file, &statbuf))
++		return 1;
++
++	sprintf(datafile, "%s/%s", datapath, file);
++	return stat(datafile, &statbuf);
++}
++
++int datafile_open(const char *file, int flags) {
++	char datafile[PATH_MAX];
++	int handle;
++
++	set_data_path();
++
++	if( (handle = open(file, flags)) > 0 )
++		return handle;
++
++	sprintf(datafile, "%s/%s", datapath, file);
++	return open(datafile, flags);
++}
++
++FILE *datafile_fopen(const char *file, const char *mode) {
++	char datafile[PATH_MAX];
++	FILE *f;
++
++	set_data_path();
++
++	if( (f = fopen(file, mode)) )
++		return f;
++
++	sprintf(datafile, "%s/%s", datapath, file);
++	return fopen(datafile, mode);
++}
+diff -Naur wolf4sdl-2.0+20210408_f31f41a/datafile.h wolf4sdl-2.0+20210408_f31f41a.patched/datafile.h
+--- wolf4sdl-2.0+20210408_f31f41a/datafile.h	1969-12-31 19:00:00.000000000 -0500
++++ wolf4sdl-2.0+20210408_f31f41a.patched/datafile.h	2023-01-17 22:28:44.888190048 -0500
+@@ -0,0 +1,22 @@
++
++#include <stdio.h>
++/*
++20120113 bkw:
++Functions for loading game data files.
++
++All these functions search for files in:
++
++- The current directory
++- The directory specified by $WOLF4PATH if set
++- If WOLF4PATH not set, fall back to PREFIX/share/games/wolf3d
++
++*/
++
++/* returns true if file exists in the data path, otherwise false */
++int datafile_exists(const char *file);
++
++/* returns a filehandle to the file if found, or -1 if not */
++int datafile_open(const char *file, int flags);
++
++/* returns a FILE* if found, or NULL if not */
++FILE *datafile_fopen(const char *file, const char *mode);
+diff -Naur wolf4sdl-2.0+20210408_f31f41a/id_ca.c wolf4sdl-2.0+20210408_f31f41a.patched/id_ca.c
+--- wolf4sdl-2.0+20210408_f31f41a/id_ca.c	2023-01-17 21:39:16.432986336 -0500
++++ wolf4sdl-2.0+20210408_f31f41a.patched/id_ca.c	2023-01-17 22:34:06.381518949 -0500
+@@ -24,6 +24,7 @@
+     #include <unistd.h>
+ #endif
+ 
++#include "datafile.h"
+ #include "wl_def.h"
+ #pragma hdrstop
+ 
+@@ -181,7 +182,7 @@
+ {
+     int32_t size;
+ 
+-    const int handle = open(filename, O_RDONLY | O_BINARY);
++    const int handle = datafile_open(filename, O_RDONLY | O_BINARY);
+     if (handle == -1)
+         return false;
+ 
+@@ -454,7 +455,7 @@
+     strcpy(fname,gdictname);
+     strcat(fname,graphext);
+ 
+-    handle = open(fname, O_RDONLY | O_BINARY);
++    handle = datafile_open(fname, O_RDONLY | O_BINARY);
+     if (handle == -1)
+         CA_CannotOpen(fname);
+ 
+@@ -465,7 +466,7 @@
+     strcpy(fname,gheadname);
+     strcat(fname,graphext);
+ 
+-    handle = open(fname, O_RDONLY | O_BINARY);
++    handle = datafile_open(fname, O_RDONLY | O_BINARY);
+     if (handle == -1)
+         CA_CannotOpen(fname);
+ 
+@@ -500,7 +501,7 @@
+     strcpy(fname,gfilename);
+     strcat(fname,graphext);
+ 
+-    grhandle = open(fname, O_RDONLY | O_BINARY);
++    grhandle = datafile_open(fname, O_RDONLY | O_BINARY);
+     if (grhandle == -1)
+         CA_CannotOpen(fname);
+ 
+@@ -544,7 +545,7 @@
+     strcpy(fname,mheadname);
+     strcat(fname,extension);
+ 
+-    handle = open(fname, O_RDONLY | O_BINARY);
++    handle = datafile_open(fname, O_RDONLY | O_BINARY);
+     if (handle == -1)
+         CA_CannotOpen(fname);
+ 
+@@ -560,14 +561,14 @@
+     strcpy(fname, "gamemaps.");
+     strcat(fname, extension);
+ 
+-    maphandle = open(fname, O_RDONLY | O_BINARY);
++    maphandle = datafile_open(fname, O_RDONLY | O_BINARY);
+     if (maphandle == -1)
+         CA_CannotOpen(fname);
+ #else
+     strcpy(fname,mfilename);
+     strcat(fname,extension);
+ 
+-    maphandle = open(fname, O_RDONLY | O_BINARY);
++    maphandle = datafile_open(fname, O_RDONLY | O_BINARY);
+     if (maphandle == -1)
+         CA_CannotOpen(fname);
+ #endif
+@@ -627,7 +628,7 @@
+     strcpy(fname,afilename);
+     strcat(fname,audioext);
+ 
+-    audiohandle = open(fname, O_RDONLY | O_BINARY);
++    audiohandle = datafile_open(fname, O_RDONLY | O_BINARY);
+     if (audiohandle == -1)
+         CA_CannotOpen(fname);
+ }
+diff -Naur wolf4sdl-2.0+20210408_f31f41a/id_pm.c wolf4sdl-2.0+20210408_f31f41a.patched/id_pm.c
+--- wolf4sdl-2.0+20210408_f31f41a/id_pm.c	2023-01-17 21:39:16.432986336 -0500
++++ wolf4sdl-2.0+20210408_f31f41a.patched/id_pm.c	2023-01-17 22:34:44.942158111 -0500
+@@ -1,5 +1,6 @@
+ // ID_PM.C
+ 
++#include "datafile.h"
+ #include "wl_def.h"
+ 
+ word ChunksInFile;
+@@ -35,7 +36,7 @@
+ 
+     strcat (fname,extension);
+ 
+-    file = fopen(fname,"rb");
++    file = datafile_fopen(fname,"rb");
+ 
+     if (!file)
+         CA_CannotOpen(fname);
+diff -Naur wolf4sdl-2.0+20210408_f31f41a/wl_menu.c wolf4sdl-2.0+20210408_f31f41a.patched/wl_menu.c
+--- wolf4sdl-2.0+20210408_f31f41a/wl_menu.c	2023-01-17 21:39:16.439986452 -0500
++++ wolf4sdl-2.0+20210408_f31f41a.patched/wl_menu.c	2023-01-17 22:39:05.618478948 -0500
+@@ -14,6 +14,7 @@
+     #include <unistd.h>
+ #endif
+ 
++#include "datafile.h"
+ #include "wl_def.h"
+ #pragma hdrstop
+ 
+@@ -4052,11 +4053,11 @@
+ //
+ #ifdef JAPAN
+ #ifdef JAPDEMO
+-    if(!stat("vswap.wj1", &statbuf))
++    if(datafile_exists("vswap.wj1"))
+     {
+         strcpy (extension, "wj1");
+ #else
+-    if(!stat("vswap.wj6", &statbuf))
++    if(datafile_exists("vswap.wj6"))
+     {
+         strcpy (extension, "wj6");
+ #endif
+@@ -4076,13 +4077,13 @@
+ // ENGLISH
+ //
+ #ifdef UPLOAD
+-    if(!stat("vswap.wl1", &statbuf))
++    if(datafile_exists("vswap.wl1"))
+         strcpy (extension, "wl1");
+     else
+         Quit ("NO WOLFENSTEIN 3-D DATA FILES to be found!");
+ #else
+ #ifndef SPEAR
+-    if(!stat("vswap.wl6", &statbuf))
++    if(datafile_exists("vswap.wl6"))
+     {
+         strcpy (extension, "wl6");
+         NewEmenu[2].active =
+@@ -4095,14 +4096,14 @@
+     }
+     else
+     {
+-        if(!stat("vswap.wl3", &statbuf))
++        if(datafile_exists("vswap.wl3"))
+         {
+             strcpy (extension, "wl3");
+             NewEmenu[2].active = NewEmenu[4].active = EpisodeSelect[1] = EpisodeSelect[2] = 1;
+         }
+         else
+         {
+-            if(!stat("vswap.wl1", &statbuf))
++            if(datafile_exists("vswap.wl1"))
+                 strcpy (extension, "wl1");
+             else
+                 Quit ("NO WOLFENSTEIN 3-D DATA FILES to be found!");
+@@ -4116,28 +4117,28 @@
+ #ifndef SPEARDEMO
+     if(param_mission == 0)
+     {
+-        if(!stat("vswap.sod", &statbuf))
++        if(datafile_exists("vswap.sod"))
+             strcpy (extension, "sod");
+         else
+             Quit ("NO SPEAR OF DESTINY DATA FILES TO BE FOUND!");
+     }
+     else if(param_mission == 1)
+     {
+-        if(!stat("vswap.sd1", &statbuf))
++        if(datafile_exists("vswap.sd1"))
+             strcpy (extension, "sd1");
+         else
+             Quit ("NO SPEAR OF DESTINY DATA FILES TO BE FOUND!");
+     }
+     else if(param_mission == 2)
+     {
+-        if(!stat("vswap.sd2", &statbuf))
++        if(datafile_exists("vswap.sd2"))
+             strcpy (extension, "sd2");
+         else
+             Quit ("NO SPEAR OF DESTINY DATA FILES TO BE FOUND!");
+     }
+     else if(param_mission == 3)
+     {
+-        if(!stat("vswap.sd3", &statbuf))
++        if(datafile_exists("vswap.sd3"))
+             strcpy (extension, "sd3");
+         else
+             Quit ("NO SPEAR OF DESTINY DATA FILES TO BE FOUND!");
+@@ -4147,7 +4148,7 @@
+     strcpy (graphext, "sod");
+     strcpy (audioext, "sod");
+ #else
+-    if(!stat("vswap.sdm", &statbuf))
++    if(datafile_exists("vswap.sdm"))
+     {
+         strcpy (extension, "sdm");
+     }

@@ -6,14 +6,12 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-# TODO: investigate the patches from https://packages.debian.org/sid/wolf4sdl
-# These don't apply cleanly to the original source (which is what
-# we use), but I don't want to use Debian's "dfsg" source because it
-# removes the OPL MIDI emulation for licensing reasons. It'll take some
-# effort: I'll have to port the patches manually, or else re-add the OPL
-# stuff to the Debian source. Also worth looking at:
-# https://github.com/11001011101001011/Wolf4SDL (which apparently adds SDL2
-# support).
+# 20230117 bkw: Updated for 2.0+20210408_f31f41a, the last commit from
+# the "community" version, which uses SDL2. This script can't build
+# 1.7 any more. Also ported some of Debian's 1.7 patches to 2.0 and
+# switched the icon to theirs (it looks better at smaller sizes).
+# Updated the man page and made the .desktop files run the game fullscreen,
+# which works a lot better with SDL2.
 
 # 20230112 bkw: BUILD=3, install doinst.sh to right place (derp).
 # 20211015 bkw: BUILD=2, new-style icons.
@@ -21,8 +19,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=wolf4sdl
-VERSION=${VERSION:-1.7}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-2.0+20210408_f31f41a}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -64,18 +62,36 @@ SRCNAM=Wolf4SDL
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $SRCNAM-$VERSION-src
-unzip $CWD/$SRCNAM-$VERSION-src.zip
-cd $SRCNAM-$VERSION-src
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
+# This old code has a terrifying amount of warnings, uncomment to see...
+#SLKCFLAGS+=" -Wall"
+
+# The shading looks awful. Apparently upstream agrees, since it's
+# disabled by default. If someone really wants to try it, here it is
+# as an undocumented build option.
+[ "${SHADING:-no}" = "yes" ] && SLKCFLAGS+=" -DUSE_SHADING"
+
 # look for game data files in /usr/share/games/wolf3d
-zcat $CWD/datadir.diff.gz | patch -p1
+patch -p1 < $CWD/patches/datadir.diff
 
 # show correct executable name in usage message (instead of Wolf4SDL)
-zcat $CWD/exename.diff.gz | patch -p1
+patch -p1 < $CWD/patches/exename.diff
+
+# 20230117 bkw: The gameplay patch was adapted from:
+# https://packages.debian.org/sid/wolf4sdl
+# It includes their novert, crosshair, autorun, and
+# autostrafe patches, ported to the 2.0 codebase (and SDL2).
+# Also added --run --strafe --modern options (see man page).
+# Didn't include shading (awful looking), pc-speaker (awful-sounding),
+# datadir (already got one), or compiler-warnings (a *lot* of work).
+# Didn't include mousewheel *yet* because I didn't get it working yet.
+patch -p1 < $CWD/patches/gameplay.diff
 
 # don't use 'make install', do it manually.
 mkdir -p $PKG/usr/games $PKG/usr/share/games/wolf3d
@@ -88,7 +104,7 @@ cat <<EOF >config.slack
 CFLAGS=$SLKCFLAGS -DVERSIONALREADYCHOSEN -DCARMACIZED -DUPLOAD
 EOF
 make CONFIG=config.slack PREFIX=/usr
-install -m0755 -s wolf3d $PKG/usr/games/$PRGNAM-wolf-demo
+install -m0755 -s wolf4sdl $PKG/usr/games/$PRGNAM-wolf-demo
 
 # Wolfenstein 3D 1.4 Full/Registered (GT/ID/Activision)
 # NOTE: If the game complains about your data files being incompatible,
@@ -100,7 +116,7 @@ cat <<EOF >config.slack
 CFLAGS=$SLKCFLAGS -DVERSIONALREADYCHOSEN -DCARMACIZED -DGOODTIMES
 EOF
 make CONFIG=config.slack PREFIX=/usr
-install -m0755 -s wolf3d $PKG/usr/games/$PRGNAM-wolf-full
+install -m0755 -s wolf4sdl $PKG/usr/games/$PRGNAM-wolf-full
 
 # Spear of Destiny 1.4 Demo
 make clean
@@ -108,7 +124,7 @@ cat <<EOF >config.slack
 CFLAGS=$SLKCFLAGS -DVERSIONALREADYCHOSEN -DCARMACIZED -DSPEAR -DSPEARDEMO
 EOF
 make CONFIG=config.slack PREFIX=/usr
-install -m0755 -s wolf3d $PKG/usr/games/$PRGNAM-spear-demo
+install -m0755 -s wolf4sdl $PKG/usr/games/$PRGNAM-spear-demo
 
 # Spear of Destiny 1.4 Full/Registered
 make clean
@@ -116,7 +132,7 @@ cat <<EOF >config.slack
 CFLAGS=$SLKCFLAGS -DVERSIONALREADYCHOSEN -DCARMACIZED -DSPEAR -DGOODTIMES
 EOF
 make CONFIG=config.slack PREFIX=/usr
-install -m0755 -s wolf3d $PKG/usr/games/$PRGNAM-spear-full
+install -m0755 -s wolf4sdl $PKG/usr/games/$PRGNAM-spear-full
 
 # Wolfenstein 3D demo data
 unzip $CWD/wolfdata.zip
@@ -136,8 +152,7 @@ for i in {wolf,spear}-{demo,full}; do
   ln -s $PRGNAM.6.gz $PKGMAN6/$PRGNAM-$i.6.gz
 done
 
-# Icons extracted from macosx/wolf4sdl.icns with icns2png.
-# 48.png scaled down from 512.png with 'convert -resize'.
+# Icons created from the Debian SVG icon, with rsvg-convert.
 # Don't install 256x256 or 512x512 icons.
 for i in $CWD/icons/*.png; do
   px=$( basename $i | cut -d. -f1 )
@@ -151,10 +166,10 @@ mkdir -p $PKG/usr/share/applications $PKG/usr/share/pixmaps
 ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
 # .desktop files written for this build.
-cp $CWD/*.desktop $PKG/usr/share/applications/
+install -m0644 -oroot -groot $CWD/desktop/*.desktop $PKG/usr/share/applications/
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a Changes.txt README.txt license-*.txt $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a Changes.txt README.TXT license-*.txt $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install

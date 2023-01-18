@@ -1,0 +1,270 @@
+diff -Naur wolf4sdl-2.0+20210408_f31f41a/id_in.c wolf4sdl-2.0+20210408_f31f41a.patched/id_in.c
+--- wolf4sdl-2.0+20210408_f31f41a/id_in.c	2023-01-17 21:39:16.000000000 -0500
++++ wolf4sdl-2.0+20210408_f31f41a.patched/id_in.c	2023-01-18 03:22:12.892051206 -0500
+@@ -393,6 +393,12 @@
+     return Joystick != NULL;
+ }
+ 
++boolean autorun = false;
++boolean autostrafe = false;
++/* This doesn't work yet.
++boolean mw_dn = false, mw_up = false;
++*/
++
+ static void processEvent(SDL_Event *event)
+ {
+     switch (event->type)
+@@ -417,6 +423,34 @@
+ 
+             LastScan = event->key.keysym.sym;
+             SDL_Keymod mod = SDL_GetModState();
++
++            if ((mod & KMOD_LSHIFT) && (mod & KMOD_RSHIFT))
++            {
++                autorun = !autorun;
++
++                if (autorun)
++                    Message ("Always Run: On");
++                else
++                    Message ("Always Run: Off");
++
++                IN_ClearKeysDown ();
++                IN_Ack ();
++            }
++            if (((mod & KMOD_LALT) && (mod & KMOD_RALT)) ||
++                ((mod & KMOD_LALT) && (mod & KMOD_MODE)) ||
++                ((mod & KMOD_LALT) && (mod & KMOD_RSHIFT)))
++            {
++                autostrafe = !autostrafe;
++
++                if (autostrafe)
++                    Message ("Always Strafe: On");
++                else
++                    Message ("Always Strafe: Off");
++
++                IN_ClearKeysDown ();
++                IN_Ack ();
++            }
++
+             if(Keyboard(sc_Alt))
+             {
+                 if(LastScan==SDLK_F4)
+@@ -426,6 +460,7 @@
+             if(LastScan == SDLK_KP_ENTER) LastScan = SDLK_RETURN;
+             else if(LastScan == SDLK_RSHIFT) LastScan = SDLK_LSHIFT;
+             else if(LastScan == SDLK_RALT) LastScan = SDLK_LALT;
++            else if(LastScan == SDLK_MODE) LastScan = SDLK_LALT; /* AltGr */
+             else if(LastScan == SDLK_RCTRL) LastScan = SDLK_LCTRL;
+             else
+             {
+@@ -470,6 +505,7 @@
+             if(key == SDLK_KP_ENTER) key = SDLK_RETURN;
+             else if(key == SDLK_RSHIFT) key = SDLK_LSHIFT;
+             else if(key == SDLK_RALT) key = SDLK_LALT;
++            else if(key == SDLK_MODE) key = SDLK_LALT; /* AltGr */
+             else if(key == SDLK_RCTRL) key = SDLK_LCTRL;
+             else
+             {
+@@ -497,6 +533,18 @@
+             GP2X_ButtonUp(event->jbutton.button);
+             break;
+ #endif
++
++				/*
++        case SDL_MOUSEWHEEL:
++        {
++            mw_dn = mw_up = false;
++            if (event->wheel.y < 0)
++                mw_dn = true;
++            else if(event->wheel.y > 0)
++                mw_up = true;
++            break;
++        }
++		  */
+     }
+ }
+ 
+diff -Naur wolf4sdl-2.0+20210408_f31f41a/wl_def.h wolf4sdl-2.0+20210408_f31f41a.patched/wl_def.h
+--- wolf4sdl-2.0+20210408_f31f41a/wl_def.h	2023-01-17 21:39:16.000000000 -0500
++++ wolf4sdl-2.0+20210408_f31f41a.patched/wl_def.h	2023-01-18 03:22:12.893051223 -0500
+@@ -949,6 +949,8 @@
+ extern  int      param_mission;
+ extern  boolean  param_goodtimes;
+ extern  boolean  param_ignorenumchunks;
++extern  boolean  param_novert;
++extern  boolean  param_crosshair;
+ 
+ 
+ void            NewGame (int difficulty, int episode);
+diff -Naur wolf4sdl-2.0+20210408_f31f41a/wl_draw.c wolf4sdl-2.0+20210408_f31f41a.patched/wl_draw.c
+--- wolf4sdl-2.0+20210408_f31f41a/wl_draw.c	2023-01-17 21:39:16.000000000 -0500
++++ wolf4sdl-2.0+20210408_f31f41a.patched/wl_draw.c	2023-01-18 03:22:12.893051223 -0500
+@@ -956,6 +956,17 @@
+         SimpleScaleShape(viewwidth/2,SPR_DEMO,viewheight+1);
+ }
+ 
++void DrawCrosshair (void)
++{           
++    if (gamestate.victoryflag || gamestate.weapon < wp_pistol)
++        return;
++
++    const int c = (gamestate.health >= 50) ? 2 : (gamestate.health >= 25) ? 6 : 4;          
++    const int h = (viewsize == 21 && ingame) ? screenHeight : screenHeight - scaleFactor * STATUSLINES;
++
++    VL_Hlin (screenWidth / 2 - scaleFactor, h / 2,               2 * scaleFactor + 1, c);
++    VL_Vlin (screenWidth / 2,               h / 2 - scaleFactor, 2 * scaleFactor + 1, c);
++}
+ 
+ //==========================================================================
+ 
+@@ -1666,6 +1677,8 @@
+ #endif
+ 
+     DrawPlayerWeapon ();    // draw player's hands
++    if (param_crosshair)
++        DrawCrosshair ();
+ 
+     if(Keyboard(sc_Tab) && viewsize == 21 && gamestate.weapon != -1)
+         ShowActStatus();
+diff -Naur wolf4sdl-2.0+20210408_f31f41a/wl_main.c wolf4sdl-2.0+20210408_f31f41a.patched/wl_main.c
+--- wolf4sdl-2.0+20210408_f31f41a/wl_main.c	2023-01-17 21:39:16.000000000 -0500
++++ wolf4sdl-2.0+20210408_f31f41a.patched/wl_main.c	2023-01-18 03:40:19.681065262 -0500
+@@ -102,6 +102,10 @@
+ int     param_mission = 0;
+ boolean param_goodtimes = false;
+ boolean param_ignorenumchunks = false;
++boolean param_novert = false;
++boolean param_crosshair = false;
++extern boolean autorun;
++extern boolean autostrafe;
+ 
+ /*
+ =============================================================================
+@@ -1644,6 +1648,28 @@
+             fullscreen = false;
+             forcegrabmouse = true;
+         }
++        else IFARG("--novert")
++        {
++            param_novert = true;
++        }
++        else IFARG("--crosshair")
++        {
++            param_crosshair = true;
++        }
++        else IFARG("--strafe")
++        {
++            autostrafe = true;
++        }
++        else IFARG("--run")
++        {
++            autorun = true;
++        }
++        else IFARG("--modern")
++        {
++            autostrafe = true;
++            param_crosshair = true;
++            param_novert = true;
++        }
+         else IFARG("--res")
+         {
+             if(i + 2 >= argc)
+@@ -1824,6 +1850,11 @@
+             " --hard                 Sets the difficulty to hard for tedlevel\n"
+             " --nowait               Skips intro screens\n"
+             " --windowed[-mouse]     Starts the game in a window [and grabs mouse]\n"
++            " --novert               Suppresses vertical mouse movement\n"
++            " --crosshair            Shows a crosshair\n"
++            " --run                  Always run\n"
++            " --strafe               Always strafe\n"
++            " --modern               Same as --novert --crosshair --strafe\n"
+             " --res <width> <height> Sets the screen resolution\n"
+             "                        (must be multiple of 320x200 or 320x240)\n"
+             " --resf <w> <h>         Sets any screen resolution >= 320x200\n"
+diff -Naur wolf4sdl-2.0+20210408_f31f41a/wl_play.c wolf4sdl-2.0+20210408_f31f41a.patched/wl_play.c
+--- wolf4sdl-2.0+20210408_f31f41a/wl_play.c	2023-01-17 21:39:16.000000000 -0500
++++ wolf4sdl-2.0+20210408_f31f41a.patched/wl_play.c	2023-01-18 03:22:12.894051239 -0500
+@@ -260,10 +260,19 @@
+ void PollKeyboardButtons (void)
+ {
+     int i;
++    extern boolean autorun;
+ 
+     for (i = 0; i < NUMBUTTONS; i++)
+         if (Keyboard(buttonscan[i]))
+             buttonstate[i] = true;
++
++    if (autorun)
++    {
++        if (Keyboard(buttonscan[bt_run]))
++            buttonstate[bt_run] = false;
++        else
++            buttonstate[bt_run] = true;
++    }
+ }
+ 
+ 
+@@ -278,6 +287,9 @@
+ void PollMouseButtons (void)
+ {
+     int buttons = IN_MouseButtons ();
++	 /*
++    extern boolean mw_dn, mw_up;
++	 */
+ 
+     if (buttons & 1)
+         buttonstate[buttonmouse[0]] = true;
+@@ -285,6 +297,14 @@
+         buttonstate[buttonmouse[1]] = true;
+     if (buttons & 4)
+         buttonstate[buttonmouse[2]] = true;
++
++	 /* This doesn't work, sadly.
++    if (mw_dn)
++        buttonstate[bt_prevweapon] = true;
++    if (mw_up)
++        buttonstate[bt_nextweapon] = true;
++    mw_dn = mw_up = false;
++	 */
+ }
+ 
+ 
+@@ -320,15 +340,26 @@
+ void PollKeyboardMove (void)
+ {
+     int delta = buttonstate[bt_run] ? RUNMOVE * tics : BASEMOVE * tics;
++    extern boolean autostrafe;
+ 
+     if (Keyboard(dirscan[di_north]))
+         controly -= delta;
+     if (Keyboard(dirscan[di_south]))
+         controly += delta;
+     if (Keyboard(dirscan[di_west]))
+-        controlx -= delta;
++    {
++        if (autostrafe)
++            buttonstate[bt_strafeleft] = true;
++        else
++            controlx -= delta;
++    }
+     if (Keyboard(dirscan[di_east]))
+-        controlx += delta;
++    {
++        if (autostrafe)
++            buttonstate[bt_straferight] = true;
++        else
++            controlx += delta;
++    }
+ }
+ 
+ 
+@@ -356,7 +387,8 @@
+ #endif
+ 
+     controlx += mousexmove * 10 / (13 - mouseadjustment);
+-    controly += mouseymove * 20 / (13 - mouseadjustment);
++    if (!param_novert)
++        controly += mouseymove * 20 / (13 - mouseadjustment);
+ }
+ 
+ 
