@@ -1,0 +1,135 @@
+#!/bin/bash
+
+# Slackware build script for ezquake
+
+# Copyright 2023 Matt Dinslage, Springfield, MO
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=ezquake
+VERSION=${VERSION:-3.6.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+  BINSUFFIX="i386"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+  BINSUFFIX="i386"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+  BINSUFFIX="x86_64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf rm -rf $PRGNAM-source-$VERSION
+tar -xvf $CWD/$PRGNAM-source-$VERSION.tar.gz
+cd $PRGNAM-source-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# dont use precompiled binary, make our own
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+make
+
+# the ezquake-ubuntu-3.2.3-full.tar.gz file has some assets we need
+mkdir -p $PKG/usr/share/games/$PRGNAM
+bsdtar -x -o -C "$PKG/usr/share/games/$PRGNAM" -f "$CWD/ezquake-ubuntu-3.2.3-full.tar.gz"
+
+# create directories and install files
+mkdir -p $PKG/usr/games
+mkdir -p $PKG/usr/share/{pixmaps,applications}
+cat dist/linux/io.github.ezQuake.128.png > $PKG/usr/share/pixmaps/$PRGNAM.png
+cat dist/linux/io.github.ezQuake.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+# replace precompiled binary with ours
+rm -f $PKG/usr/share/games/$PRGNAM/$PRGNAM-linux-*
+cp $PRGNAM-linux-$BINSUFFIX $PKG/usr/share/games/$PRGNAM
+chmod 0755 $PKG/usr/share/games/$PRGNAM/$PRGNAM-linux-$BINSUFFIX
+
+# Fix permissions on assets directories and files
+find $PKG/usr/share/games/$PRGNAM -type d -exec chmod 0755 "{}" \;
+find $PKG/usr/share/games/$PRGNAM -type f \! -name "$PRGNAM-linux-$BINSUFFIX" \
+  -exec chmod 0644 "{}" \;
+
+# create shortcut to binary
+cat $CWD/ezquake.launcher > $PKG/usr/games/$PRGNAM
+chmod 0755 $PKG/usr/games/$PRGNAM
+
+# fix ezquake.desktop file
+sed -i \
+  -e "s|io.github.ezQuake|/usr/share/pixmaps/ezquake.png|" \
+  -e "s|Exec=ezquake.sh|Exec=ezquake|" \
+  $PKG/usr/share/applications/$PRGNAM.desktop
+
+# we don't need two copies of the LICENSE file
+rm -f $PKG/usr/share/games/$PRGNAM/LICENSE
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CHANGELOG LICENSE README.md $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
