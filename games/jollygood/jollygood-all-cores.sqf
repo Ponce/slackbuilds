@@ -1,0 +1,15 @@
+jollygood
+jg-bsnes
+jg-cega
+jg-gambatte
+jg-genplus
+jg-jollycv
+jg-mednafen
+jg-melonds
+jg-mgba
+jg-nestopia
+jg-picodrive
+jg-prosystem
+rgbds
+jg-sameboy
+jg-vecx
