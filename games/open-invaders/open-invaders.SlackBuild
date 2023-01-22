@@ -1,0 +1,172 @@
+#!/bin/bash
+
+# Slackware build script for open-invaders
+
+# Written by B. Watson (yalhcru@gmail.com)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# This isn't really that great a game. The developer spent a lot
+# of time on bling-ey graphics and sound, but it's missing some of
+# the basic gameplay elements that made Space Invaders a classic:
+# the enemies don't speed up during the level as you kill them,
+# and there are no UFOs (at least, not on the first 7 levels; maybe
+# later?). To be fair, the README says it's "still in development"
+# and not finished (maybe the author planned to add that stuff later,
+# but development stopped in 2007 or so).
+
+# I patched the game a bit to make it less annoying to play (made the
+# intro screens skippable).
+
+# The part of VERSION after the _ is the Debian patchlevel. They've
+# done a good bit of patching and bugfixing to keep this usable on a
+# modern system.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=open-invaders
+VERSION=${VERSION:-0.3_8}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+SRCVER="$( echo $VERSION | cut -d_ -f1 )"
+DEBVER="$( echo $VERSION | cut -d_ -f2 )"
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$SRCVER
+tar xvf $CWD/$PRGNAM-$SRCVER.tar.gz
+cd $PRGNAM-$SRCVER
+tar xvf $CWD/${PRGNAM}_$SRCVER-$DEBVER.debian.tar.xz
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# Make the intro skippable by keypress or joystick button. The damn
+# thing is like 10 seconds long. Also speed up the fadeout when
+# you exit the game via the menu, so it ends when the "goodbye"
+# sample is done playing.
+patch -p1 < $CWD/skippable_intro.diff
+
+# Exit with a meaningful error message, if HOME isn't set in the
+# environment (instead of crashing with a C++ exception).
+patch -p1 < $CWD/check_env_home.diff
+
+# Apply all of debian's patches. Some fix build failures, some
+# fix bugs in the game.
+for i in $( cat debian/patches/series ); do
+  patch -p1 < debian/patches/$i
+done
+
+# From debian/rules:
+sed -i 's/ALLEGRO_LINUX/ALLEGRO_UNIX/g' src/*.cc headers/*.h
+sed -i -e 's/laldmd/laldmb/g' -e 's/ldumbd/ldumb/g' src/Makefile.*
+
+# Fix for dumb-2.x API:
+sed -i '/dumb_load_mod_quick/s|)|,0)|' src/{intro,init,ending}.cc
+
+DOCDIR=/usr/doc/$PRGNAM-$VERSION
+PKGDOC=$PKG/$DOCDIR
+
+# The -Dnullptr=0 is a bit of a dirty hack. We use debian's
+# gcc6.patch, which fixes "return false" in a function returning
+# a pointer... but replaces 'false' with 'nullptr'. In our gcc 11,
+# we need std=gnu++98 to get it to build, which means nullptr isn't
+# defined. So define it. Not sure why C++11 needs yet another keyword
+# that's just an alias for 0 (it already had NULL). This kind of
+# stuff is why I never code in C++: it's a moving target, it has been
+# since day 1, and the C++ standards gurus make sure it keeps moving
+# perpetually.
+
+# Need this for dumb.h on 32-bit, it does no harm on 64-bit. See
+# /usr/include/dumb.h, lines 124-142.
+SLKCFLAGS+=" -D_FILE_OFFSET_BITS=64"
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS -std=gnu++98 -Dnullptr=0" \
+./configure \
+  --bindir=/usr/games \
+  --datadir=/usr/share/games \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --build=$ARCH-slackware-linux
+
+make open_invadersdatadir=$PKG/usr/share/games/$PRGNAM
+make install-strip \
+  open_invadersdatadir=/usr/share/games/$PRGNAM \
+  open_invadersdocdir=$DOCDIR \
+  DESTDIR=$PKG
+
+# Debian ships a man page, but I like mine better.
+mkdir -p $PKG/usr/man/man6
+gzip -9c < $CWD/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
+
+# Icons made from ship.pcx (debian's icon is fugly, sorry).
+for px in 48 64; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  cat $CWD/$px.png > $dir/$PRGNAM.png
+done
+
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# Use debian's .desktop, but with full path to binary, and get
+# rid of the -w argument (so the user can set fullscreen mode in
+# the config, and it'll actually work).
+mkdir -p $PKG/usr/share/applications
+sed '/^Exec/s,=.*,=/usr/games/open-invaders,' debian/$PRGNAM.desktop > \
+    $PKG/usr/share/applications/$PRGNAM.desktop
+
+# Docs already installed, get rid of useless ones and fix CRLFs.
+# ChangeLog is 0 bytes, INSTALL is generic autotools cruft.
+rm -f $PKGDOC/{ChangeLog,INSTALL}
+sed -i 's,\r,,' $PKGDOC/*
+
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
