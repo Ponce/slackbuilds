@@ -1,0 +1,156 @@
+#!/bin/bash
+
+# Slackware build script for heroes
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Old game I recall playing ~15 years ago. I liked it better then.
+
+# All-in-one build. No way am I having 5 builds for the data, sfx, etc
+# source packages.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=heroes
+VERSION=${VERSION:-0.21}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+# The various components have their own separate version numbering.
+# This thing hasn't been updated in 20 years so making these
+# overrideable is probably pointless.
+DATAVER=${DATAVER:-1.5}
+SFXVER=${SFXVER:-1.0}
+STRAXVER=${STRAXVER-1.0}
+STRAXHQVER=${STRAXHQVER-1.0}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+mkdir -p $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+TOPDIR="$( pwd )"
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+
+# This is needed to avoid the build process creating files in /root
+export HEROES_HOME_DIR=$TOPDIR
+
+# build_one() gets called multiple times, with args:
+# $1 - tarball name
+# $2 - tarball version
+# $3 - optional, patch to apply
+build_one() {
+  cd $TOPDIR
+  tar xvf $CWD/$1-$2.tar.bz2
+  cd $1-$2
+  chown -R root:root .
+  find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+          \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+  [ "$3" != "" ] && patch -p1 < "$3"
+
+  LDFLAGS="-lm" \
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  ./configure \
+    --prefix=/usr \
+    --bindir=/usr/games \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --disable-static \
+    --build=$ARCH-slackware-linux
+
+  make install-strip DESTDIR=$PKG
+
+  mkdir -p $PKGDOC/$1-$2
+  for i in ANNOUNCE AUTHORS COPYING ChangeLog NEWS README THANKS; do
+    [ -e "$i" ] && [ "$( stat -c "%s" $i )" -gt 2 ] && \
+      cat $i > $PKGDOC/$1-$2/$i || true
+  done
+}
+
+# The patch comes from Arch AUR. It fixes a couple of compile issues,
+# and also removes the -1 -2 -3 -4 options, makes 4x stretch the
+# default (so the window's big enough to *see* on a modern display),
+# makes fullscreen the default, and replaces the -F option with a -W
+# (windowed) option to turn off fullscreen. Note that the patched
+# game requires at least a 1280x800 display to work at all.
+build_one $PRGNAM $VERSION $CWD/$PRGNAM-$VERSION.patch
+
+# The rest of this stuff doesn't need patching.
+build_one $PRGNAM-data $DATAVER
+build_one $PRGNAM-sound-effects $SFXVER
+build_one $PRGNAM-sound-tracks $STRAXVER
+build_one $PRGNAM-hq-sound-tracks $STRAXHQVER
+
+# Because of bit-rot, the build process generates garbage man pages.
+# Also, the arch patch we applied changes some of the options, so we
+# need a man page that reflects the changes. These man pages came
+# from the source tarball, and heroes.6 has been edited as needed.
+mkdir -p $PKG/usr/man/man6
+install -m0644 -oroot -groot $CWD/man/*.6 $PKG/usr/man/man6
+gzip -9 $PKG/usr/man/man6/*
+
+# Picked one of the xpm files to use as an icon.
+XPM=$TOPDIR/$PRGNAM-$VERSION/misc/heroes-2.xpm
+for px in 16 22 32 48; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  convert -resize $size! $XPM $dir/$PRGNAM.png
+done
+mkdir -p $PKG/usr/share/pixmaps
+install -m0644 -oroot -groot $XPM $PKG/usr/share/pixmaps/$PRGNAM.xpm
+
+# Not going to bother with install-info in the doinst.sh and trying
+# to clean up /usr/info/dir after uninstalling the package. Not worth it.
+rm -f $PKG/usr/info/dir
+gzip -9 $PKG/usr/info/*.info*
+
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
