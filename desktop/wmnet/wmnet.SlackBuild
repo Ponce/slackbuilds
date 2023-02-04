@@ -1,15 +1,25 @@
 #!/bin/bash
 
 # Slackware build script for wmnet
-# Written by Cezary M. Kruk (c.kruk@bigfoot.com)
-
+# Written by Cezary M. Kruk (email removed)
 # Modified by the SlackBuilds.org project.
+# Modified and now maintained by B. Watson (urchlay@slackware.uk).
+
+# Original author didn't include a license. Modified version released
+# under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20230204 bkw: BUILD=2.
+# - take over maintenance.
+# - add patch to support >100MB/s.
+# - fix README and slack-desc.
+# - remove support for archaic ipchains, ipfwadm, ppp.
+# - simplify build.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=wmnet
 VERSION=${VERSION:-1.06}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -21,9 +31,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -56,30 +63,33 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# 20230204 bkw: This patch allows wmnet to correctly display rates
+# up to 999 terabytes/sec. Some day it too will be obsolete... I
+# considered changing the lowercase "b" (for bytes) to a capital B, to
+# match modern usage... but at the tiny font size wmnet uses, B looks
+# too much like the number 8.
+patch -p1 < $CWD/ludicrous_speed.diff
+
+# 20230204 bkw: Disable archaic methods of getting network status.
+# ipchains went away in Linux 2.6 (2003), ipfwadm has been gone since
+# Linux 2.2 (1999). Also, the PPP method is no longer needed, even if
+# someone's still using PPP in 2023 (generic "devstats" driver handles
+# it fine). Doing this makes the executable ~10% smaller.
+sed -i '/#define *USE_\(LINUX_PPP\|IPFWADM\|IPCHAINS\)/s,.*,/* & */,' config.h
 
 xmkmf
-mkdir -p $PKG/usr/man/man1
+make CFLAGS="$SLKCFLAGS"
+strip $PRGNAM
+make install install.man INSTMANFLAGS="-m 0644" DESTDIR=$PKG
+gzip -9 $PKG/usr/man/man*/*
 
-make \
-  CFLAGS="$SLKCFLAGS" \
-  INCDIR="-I/usr/include/X11" \
-  LIBDIR="-L/usr/lib${LIBDIRSUFFIX}/X11"
-make install DESTDIR=$PKG
-
-# Copying manual to the correct location
-gzip -9c wmnet.man > $PKG/usr/man/man1/wmnet.1.gz
-
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a Changelog README $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a Changelog README $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
