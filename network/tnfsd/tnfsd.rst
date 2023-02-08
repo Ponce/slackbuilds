@@ -1,8 +1,7 @@
 .. RST source for tnfsd(1) man page. Convert with:
 ..   rst2man.py tnfsd.rst > tnfsd.1
-.. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 20201019
+.. |version| replace:: 23.0207.1_95c5b55
 .. |date| date::
 
 =====
