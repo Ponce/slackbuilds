@@ -3,7 +3,7 @@
 # Slackware build script for nvidia-driver
 
 # Copyright 2012-2019 Edward W. Koenig, Vancouver, WA, US
-# Copyright 2020, 2021, 2022 Lenard Spencer, Orlando, FL, USA
+# Copyright 2020-2023 Lenard Spencer, Orlando, FL, USA
 #
 # All rights reserved.
 #
@@ -27,7 +27,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=nvidia-driver
-VERSION=${VERSION:-525.85.05}
+VERSION=${VERSION:-525.89.02}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -80,9 +80,8 @@ rm -rf $PKG
 rm -rf $TMP/$SRCNAM
 mkdir -p $TMP $PKG $OUTPUT $PKG/install
 mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/{drivers,extensions} \
-  $PKG/etc/OpenCL/vendors/ $PKG/usr/{bin,doc,man/man1,sbin} \
+  $PKG/etc/OpenCL/vendors/ $PKG/usr/{bin,doc,man/man1} \
   $PKG/usr/share/{applications,nvidia,pixmaps,egl/egl_external_platform.d} \
-  $PKG/usr/include/GL $PKG/etc/vulkan/{icd.d,implicit_layer.d} $PKG/etc/X11/xorg.conf.d \
   $PKG/etc/X11/glvnd/egl_vendor.d $PKG/lib/firmware/nvidia $PKG/var/log
 
 if [ "$COMPAT32" = "yes" ]; then
@@ -112,6 +111,11 @@ find -L . \
 # Compiling nvidia-installer from source
 
 cd $TMP/nvidia-installer-$VERSION
+
+# Install various files in $PKG instead of the root filesystem:
+  sed -i "s|/etc/vulkan|$PKG/etc/vulkan|" files.c
+  sed -i "s|/lib/firmware/nvidia|$PKG/lib/firmware/nvidia|" files.c
+  sed -i "s|\"/etc\"|\"$PKG/etc\"|" nvidia-installer.h
 
   chown -R root:root .
   find -L . \
@@ -158,27 +162,29 @@ cd $TMP/$SRCNAM
   --log-file-name=$PKG/var/log/nvidia-installer.log \
   --egl-external-platform-config-path=$PKG/usr/share/egl/egl_external_platform.d \
   --no-nvidia-modprobe \
+  --no-install-libglvnd \
+  --no-wine-files \
   --no-systemd \
   --no-peermem \
   $COMP32
 
-# Starting with the 465 driver, the installer now places a version-specific
-# binary blob in /lib/firmware/nvidia.  For sanity's sake, we will move
-# it into our package:
-mv /lib/firmware/nvidia/$VERSION $PKG/lib/firmware/nvidia
-
-# Move ICDs to $PKG and cleanup (no switch option in installer?)
-# (This is why there should not be a driver already installed)
-mv /etc/OpenCL/vendors/nvidia.icd $PKG/etc/OpenCL/vendors/nvidia.icd
-mv /etc/vulkan/icd.d/nvidia_icd.json $PKG/etc/vulkan/icd.d/nvidia_icd.json
-mv /etc/vulkan/implicit_layer.d/nvidia_layers.json $PKG/etc/vulkan/implicit_layer.d/nvidia_layers.json
-
+# If we are using Wine, then:
+if [ "${WINE:-yes}" != "no" ]; then
+  mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/nvidia/wine
+  install -m 755 _nvngx.dll $PKG/usr/lib$LIBDIRSUFFIX/nvidia/wine
+  install -m 755 nvngx.dll $PKG/usr/lib$LIBDIRSUFFIX/nvidia/wine
+fi
 # libOpenCL.so is now included in 15.0 (in ocl-icd),
 # so we don't need this one.
 rm -f $PKG/usr/lib${LIBDIRSUFFIX}/libOpenCL.so*
 if [ "${COMPAT32}" = "yes" ]; then
     rm -f $PKG/usr/lib/libOpenCL.so*
 fi
+# remove a pair of folders installed and used by nvidia-installer but
+# no longer needed (caused the "failed to remove some directories"
+# warning message):
+rm -rf /{usr,var}/lib/nvidia || true
+
 # Mitigate a bug in nvidia-installer that misplaces a symlink
 # (Thanks to marco70 on LQ for catching this:
 ( cd $PKG/usr/lib${LIBDIRSUFFIX}/gbm
