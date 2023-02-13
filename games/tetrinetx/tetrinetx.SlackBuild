@@ -1,0 +1,131 @@
+#!/bin/bash
+
+# Slackware build script for tetrinetx
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# The _15 in VERSION is the Debian patchlevel. They're currently
+# the only ones maintaining this at all.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=tetrinetx
+VERSION=${VERSION:-1.13.16+qirc_1.40c_15}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+SRCVER="$( echo $VERSION | cut -d_ -f1-2 | tr _ - )"
+DEBVER="$( echo $VERSION | cut -d_ -f3 )"
+DEBSRCVER="$( echo $VERSION | cut -d+ -f1 )"
+
+# We get two possible filenames for the tarball depending on what
+# exactly was used to download it.
+TARBALL="$CWD/$PRGNAM-$SRCVER.tar.gz"
+if [ ! -e "$TARBALL" ]; then
+  TARBALL="$( echo "$TARBALL" | sed 's,+,%2B,g' )"
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$SRCVER
+tar xvf $TARBALL
+cd $PRGNAM-$SRCVER
+tar xvf $CWD/${PRGNAM}_${DEBSRCVER}-${DEBVER}.debian.tar.xz
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# Incorporate all of Debian's changes. This includes IPv6 support,
+# and putting the config files in /etc/$PRGNAM and log file in /var.
+patch -p1 < debian/patches/debian-changes
+
+# Debian's patch breaks IPv4 support, fix.
+patch -p1 < $CWD/restore_ipv4.diff
+
+if [ "${IPV4:-no}" = "yes" ]; then
+  IPVER=4
+else
+  SLKCFLAGS+=" -DUSE_IPV6"
+  IPVER=6
+fi
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+
+# Easier to just do this, than to munge the compile script into doing
+# the right thing.
+${CC:-gcc} $SLKCFLAGS -o $PRGNAM src/main.c -ladns
+mkdir -p $PKG/usr/games $PKG/usr/man/man6 $PKG/etc/$PRGNAM $PKGDOC
+install -s -m0755 $PRGNAM $PKG/usr/games
+for i in bin/game*.{conf,secure,{p,}motd}; do
+  cp -a $i $PKG/etc/$PRGNAM/$( basename $i ).new
+done
+cp -a bin/game.*.example $PKG/etc/$PRGNAM
+
+# The Debian man page is useless, I wrote a better one.
+gzip -9c < $CWD/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
+
+# Log rotation looks broken: it doesn't restart the daemon after
+# rotating the log. tetrinetx doesn't allow a SIGHUP to reopen the
+# log, meaning we'd have to call the rc script to restart it. And if
+# we do, we kill any games in progress. There's nothing like apache's
+# "graceful" restart. Leave it out, and let the user deal with it (or
+# not; it would take a long time for the log to fill a modern drive).
+#mkdir -p $PKG/etc/logrotate.d
+#cp -a debian/logrotate $PKG/etc/logrotate.d/$PRGNAM
+
+# Bare-bones init script written by SlackBuild author.
+mkdir -p $PKG/etc/rc.d
+install -m0755 -oroot -groot $CWD/rc.$PRGNAM $PKG/etc/rc.d/rc.$PRGNAM.new
+
+# These dirs have to be writable by the user the daemon runs as.
+dirs="$PKG/var/games/$PRGNAM $PKG/var/log/$PRGNAM $PKG/var/run/$PRGNAM"
+mkdir -p $dirs
+chown games:games $dirs
+
+mkdir -p $PKGDOC
+cp -a AUTHORS COPYING ChangeLog README* $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+sed "s,@IPVER@,$IPVER," < $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
