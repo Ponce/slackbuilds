@@ -1,0 +1,89 @@
+--- a/jupyter_server/extension/utils.py
++++ b/jupyter_server/extension/utils.py
+@@ -36,20 +36,24 @@
+     underscore prefix.
+     """
+     try:
+-        func = getattr(obj, "_load_jupyter_server_extension")  # noqa B009
++        return getattr(obj, "_load_jupyter_server_extension")  # noqa B009
++    except AttributeError:
++        pass
++
++    try:
++        func = getattr(obj, "load_jupyter_server_extension")  # noqa B009
+     except AttributeError:
+-        func = getattr(obj, "load_jupyter_server_extension", None)
+-        warnings.warn(
+-            "A `_load_jupyter_server_extension` function was not "
+-            "found in {name!s}. Instead, a `load_jupyter_server_extension` "
+-            "function was found and will be used for now. This function "
+-            "name will be deprecated in future releases "
+-            "of Jupyter Server.".format(name=obj),
+-            DeprecationWarning,
+-        )
+-    except Exception:
+         msg = "_load_jupyter_server_extension function was not found."
+         raise ExtensionLoadingError(msg) from None
++
++    warnings.warn(
++        "A `_load_jupyter_server_extension` function was not "
++        "found in {name!s}. Instead, a `load_jupyter_server_extension` "
++        "function was found and will be used for now. This function "
++        "name will be deprecated in future releases "
++        "of Jupyter Server.".format(name=obj),
++        DeprecationWarning,
++    )
+     return func
+
+
+--- a/tests/extension/mockextensions/mockext_deprecated.py
++++ b/tests/extension/mockextensions/mockext_deprecated.py
+@@ -0,0 +1,12 @@
++"""A mock extension named `mockext_py` for testing purposes.
++"""
++# Function that makes these extensions discoverable
++# by the test functions.
++
++
++def _jupyter_server_extension_paths():
++    return [{"module": "tests.extension.mockextensions.mockext_deprecated"}]
++
++
++def load_jupyter_server_extension(serverapp):
++    pass
+--- a/tests/extension/test_utils.py
++++ b/tests/extension/test_utils.py
+@@ -1,10 +1,14 @@
+ import logging
+-import warnings
+ 
+ import pytest
+ 
+-from jupyter_server.extension.utils import get_loader, get_metadata, validate_extension
+-from tests.extension.mockextensions import mockext_sys
++from jupyter_server.extension.utils import (
++    ExtensionLoadingError,
++    get_loader,
++    get_metadata,
++    validate_extension,
++)
++from tests.extension.mockextensions import mockext_deprecated, mockext_sys
+ 
+ # Use ServerApps environment because it monkeypatches
+ # jupyter_core.paths and provides a config directory
+@@ -24,10 +28,11 @@
+ 
+ 
+ def test_get_loader():
+-    get_loader(mockext_sys)
+-    with warnings.catch_warnings():
+-        warnings.simplefilter("ignore")
+-        assert get_loader(object()) is None
++    assert get_loader(mockext_sys) == mockext_sys._load_jupyter_server_extension
++    with pytest.deprecated_call():
++        assert get_loader(mockext_deprecated) == mockext_deprecated.load_jupyter_server_extension
++    with pytest.raises(ExtensionLoadingError):
++        get_loader(object())
+ 
+ 
+ def test_get_metadata():
