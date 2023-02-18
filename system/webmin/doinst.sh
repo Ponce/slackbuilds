@@ -22,6 +22,5 @@ preserve_perms() {
   config $NEW
 }
 
-# Signal the startup script to do some post install configuration  
+# Signal the startup script to do some post install configuration
 touch etc/webmin/FIRSTRUN
-
