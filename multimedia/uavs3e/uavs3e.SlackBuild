@@ -2,7 +2,7 @@
 
 # Slackware build script for uavs3e
 
-# Copyright 2022 Vijay Marcel
+# Copyright 2022-2023 Vijay Marcel
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -30,18 +30,20 @@ BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 GIT=${GIT:-ea40065982019a5b43f4ff61e37ba1fe7a7dbfe8}
+sys_arch=${sys_arch:-$(getconf LONG_BIT)}
+
+if [ "$sys_arch" == "32" ]; then
+    echo "This program will not run on 32-bit systems" && exit 1
+fi
 
 if [ -z "$ARCH" ]; then
-  case "$( uname -m )" in
+case "$ARCH" in
     i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
-  esac
+esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -58,7 +60,7 @@ elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
+  SLKCFLAGS="-march=x86-64 -mtune=native -O2 -pipe -fPIC"
   LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
@@ -66,7 +68,7 @@ else
 fi
 
 set -e
-trap 'echo "$0 FAILED at line $LINENO!" | tee -a  $OUTPUT/error-${PRGNAM}.log' ERR
+trap 'echo "$0 FAILED at line $LINENO!" | tee -a $OUTPUT/error-${PRGNAM}.log' ERR
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -75,6 +77,7 @@ rm -rf $PRGNAM-$VERSION
 rm -rf $PRGNAM-$GIT
 tar xvf $CWD/$PRGNAM-$GIT.tar.gz
 cd $PRGNAM-$GIT
+
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -82,8 +85,10 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-sed -i '62 i set(libdir "lib64")'  src/CMakeLists.txt
-sed -i.bak '63d' src/CMakeLists.txt
+patch --verbose --unified < $CWD/cmakelist.patch
+cd src
+patch --verbose --unified < $CWD/src_cmakelist.patch
+cd ..
 
 cmake -B build/linux -S $TMP/$PRGNAM-$GIT  \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
@@ -93,7 +98,7 @@ cmake -B build/linux -S $TMP/$PRGNAM-$GIT  \
     -DBUILD_SHARED_LIBS:BOOL='ON' \
     -DCOMPILE_10BIT='1'
 
-make -C build/linux
+cmake --build build/linux
 make -C build/linux install DESTDIR=$PKG
 
 install -D -m755 $TMP/$PRGNAM-$GIT/build/linux/uavs3enc -t "${PKG}/usr/bin"
@@ -104,7 +109,8 @@ find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | gr
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a  COPYING README.md ProgGuide.docx  $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a COPYING README.md ProgGuide.docx  $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a $CWD/changelog $PKG/usr/doc/$PRGNAM-$VERSION/slack-changelog
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
