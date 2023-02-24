@@ -2,7 +2,7 @@
 
 # Slackware build script for filebot
 #
-# Copyright 2016  Jeremy Hansen <jebrhansen+SBo -at- gmail.com>
+# Copyright 2016-2023  Jeremy Hansen <jebrhansen+SBo -at- gmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,7 +25,9 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=filebot
-VERSION=${VERSION:-4.7.9}
+SRCNAM=FileBot
+VERSION=${VERSION:-4.9.6}
+JNAVER=${JNAVER:-5.13.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -38,9 +40,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -51,11 +50,17 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
-  DEBARCH="i386"
   LIBDIRSUFFIX=""
+  JNAARCH="x86"
 elif [ "$ARCH" = "x86_64" ]; then
-  DEBARCH="amd64"
   LIBDIRSUFFIX="64"
+  JNAARCH="x86-64"
+elif [ "$ARCH" = "arm" ]; then
+  LIBDIRSUFFIX=""
+  JNAARCH="arm"
+elif [ "$ARCH" = "aarch64" ]; then
+  LIBDIRSUFFIX=""
+  JNAARCH="aarch64"
 else
   echo "Package for $(uname -m) architecture is not available."
   exit 1
@@ -63,10 +68,16 @@ fi
 
 set -eu
 
-rm -rf $PKG
-mkdir -p $TMP $PKG $OUTPUT
+rm -rf $PKG $TMP/jna
+mkdir -p $TMP $PKG $OUTPUT $TMP/jna
+cd $TMP/jna
+unzip $CWD/jna-$JNAVER.jar
 cd $PKG
-ar p $CWD/${PRGNAM}_${VERSION}_${DEBARCH}.deb data.tar.xz | unxz | tar xv
+ar p $CWD/${SRCNAM}_${VERSION}_universal.deb data.tar.xz | unxz | tar xv
+
+mkdir -p $PKG/usr/share/filebot/lib/$(uname -m)
+cp $TMP/jna/com/sun/jna/linux-$JNAARCH/libjnidispatch.so $PKG/usr/share/filebot/lib/$(uname -m)
+cp $CWD/jna-$JNAVER.jar $PKG/usr/share/filebot/jar/jna.jar
 
 chown -R root:root .
 find -L . \
@@ -88,9 +99,17 @@ cat << EOF > $PKG/usr/bin/filebot
 #
 # Launcher for FileBot
 
-/usr/share/filebot/filebot.sh "$@"
+/usr/share/filebot/bin/filebot.sh "\$@"
 EOF
 chmod 0755 $PKG/usr/bin/filebot
+
+# Ensure it uses the proper jna library
+SEDSEARCH="-Djna.boot.library.name=jnidispatch.system"
+SEDREPLACE='-Djna.boot.library.path=\"$LIBRARY_PATH\" -Djna.library.path=\"$LIBRARY_PATH\" -Djava.library.path=\"$LIBRARY_PATH\"'
+sed -i "s|$SEDSEARCH|$SEDREPLACE|" $PKG/usr/share/filebot/bin/filebot.sh
+
+# Set the correct paths
+sed -i "s|LIBRARY_PATH=.*|LIBRARY_PATH=\$FILEBOT_HOME/lib/\$(uname -m):/usr/lib$LIBDIRSUFFIX|" $PKG/usr/share/filebot/bin/filebot.sh
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
