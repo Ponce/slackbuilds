@@ -1,0 +1,344 @@
+From: "FeRD (Frank Dana)" <ferdnyc@gmail.com>
+Date: Thu, 24 Feb 2022 07:29:08 -0500
+Subject: [PATCH] FFmpegWriter: Macro & member cleanup
+
+- The `fmt` class member, which was of type AVFormat*, was really
+  just an unnecessary copy of `(AVFormatContext*)oc->oformat`.
+  But we were ASSIGNING into its members, which we were definitely
+  not supposed to be doing. (And in recent FFmpegs, now that
+  `AVFormat` has been `const`d, we can't.) It's gone; now we just
+  use `oc->oformat` anywhere we used to access `fmt`.
+
+- The preprocessor macro to allocate a new _stream_ was a mess of
+  cross purposes: It did allocate a stream, but then it also
+  allocated a new AvCodecCtx on newer FFmpeg releases. Worse (and
+  always galling to me), it proceeded to assign to a variable
+  that WASN'T passed in to the macro, just taking it on faith that
+  it would only be used where that variable was defined. That's
+  just... ugh. So I broke it apart into two steps (stream creation
+  and context allocation), realized the stream creation code was
+  the same for all ffmpeg versions and didn't need to be a macro
+  at all, and now a 4-parameter, 6-line magical macro has been
+  replaced with a simple, zero-side-effect one-liner.
+
+- I also cleaned up the add_video_stream() code to be more like
+  the add_audio_stream() code, since they were bad-different for
+  no discernible reason.
+---
+ src/FFmpegUtilities.h |  37 +++++-------------
+ src/FFmpegWriter.cpp  | 105 ++++++++++++++++++++++++++++++--------------------
+ src/FFmpegWriter.h    |   3 +-
+ 3 files changed, 73 insertions(+), 72 deletions(-)
+
+diff --git a/src/FFmpegUtilities.h b/src/FFmpegUtilities.h
+index 42358ee..46fea61 100644
+--- a/src/FFmpegUtilities.h
++++ b/src/FFmpegUtilities.h
+@@ -200,13 +200,8 @@ inline static bool ffmpeg_has_alpha(PixelFormat pix_fmt) {
+     #define AV_OPTION_SET( av_stream, priv_data, name, value, avcodec) \
+             av_opt_set(priv_data, name, value, 0); \
+             avcodec_parameters_from_context(av_stream->codecpar, avcodec);
+-    #define AV_FORMAT_NEW_STREAM(oc, st_codec_ctx, av_codec, av_st) \
+-            av_st = avformat_new_stream(oc, NULL);\
+-            if (!av_st) \
+-                throw OutOfMemory("Could not allocate memory for the video stream.", path); \
+-            c = avcodec_alloc_context3(av_codec); \
+-            st_codec_ctx = c; \
+-            av_st->codecpar->codec_id = av_codec->id;
++    #define ALLOC_CODEC_CTX(ctx, codec, stream) \
++            ctx = avcodec_alloc_context3(codec);
+     #define AV_COPY_PARAMS_FROM_CONTEXT(av_stream, av_codec_ctx) \
+             avcodec_parameters_from_context(av_stream->codecpar, av_codec_ctx);
+ 
+@@ -244,16 +239,8 @@ inline static bool ffmpeg_has_alpha(PixelFormat pix_fmt) {
+     #define AV_OPTION_SET( av_stream, priv_data, name, value, avcodec) \
+             av_opt_set(priv_data, name, value, 0); \
+             avcodec_parameters_from_context(av_stream->codecpar, avcodec);
+-    #define AV_FORMAT_NEW_STREAM(oc, st_codec, av_codec, av_st) \
+-            av_st = avformat_new_stream(oc, NULL);\
+-            if (!av_st) \
+-                throw OutOfMemory("Could not allocate memory for the video stream.", path); \
+-            _Pragma ("GCC diagnostic push"); \
+-            _Pragma ("GCC diagnostic ignored \"-Wdeprecated-declarations\""); \
+-            avcodec_get_context_defaults3(av_st->codec, av_codec); \
+-            c = av_st->codec; \
+-            _Pragma ("GCC diagnostic pop"); \
+-            st_codec = c;
++    #define ALLOC_CODEC_CTX(ctx, codec, stream) \
++            ctx = avcodec_alloc_context3(codec);
+     #define AV_COPY_PARAMS_FROM_CONTEXT(av_stream, av_codec) \
+             avcodec_parameters_from_context(av_stream->codecpar, av_codec);
+ 
+@@ -284,12 +271,9 @@ inline static bool ffmpeg_has_alpha(PixelFormat pix_fmt) {
+     #define AV_OUTPUT_CONTEXT(output_context, path) oc = avformat_alloc_context()
+     #define AV_OPTION_FIND(priv_data, name) av_opt_find(priv_data, name, NULL, 0, 0)
+     #define AV_OPTION_SET(av_stream, priv_data, name, value, avcodec) av_opt_set (priv_data, name, value, 0)
+-    #define AV_FORMAT_NEW_STREAM( oc,  av_context,  av_codec, av_st) \
+-            av_st = avformat_new_stream(oc, av_codec); \
+-            if (!av_st) \
+-                throw OutOfMemory("Could not allocate memory for the video stream.", path); \
++    #define ALLOC_CODEC_CTX(ctx, av_codec, stream) \
+             avcodec_get_context_defaults3(av_st->codec, av_codec); \
+-            c = av_st->codec;
++            ctx = av_st->codec;
+     #define AV_COPY_PARAMS_FROM_CONTEXT(av_stream, av_codec)
+ 
+ #else
+@@ -319,12 +303,9 @@ inline static bool ffmpeg_has_alpha(PixelFormat pix_fmt) {
+     #define AV_OUTPUT_CONTEXT(output_context, path) oc = avformat_alloc_context()
+     #define AV_OPTION_FIND(priv_data, name) av_opt_find(priv_data, name, NULL, 0, 0)
+     #define AV_OPTION_SET(av_stream, priv_data, name, value, avcodec) av_opt_set (priv_data, name, value, 0)
+-    #define AV_FORMAT_NEW_STREAM( oc,  av_context,  av_codec, av_st) \
+-            av_st = avformat_new_stream(oc, av_codec); \
+-            if (!av_st) \
+-                throw OutOfMemory("Could not allocate memory for the video stream.", path); \
+-            avcodec_get_context_defaults3(av_st->codec, av_codec); \
+-            c = av_st->codec;
++    #define ALLOC_CODEC_CTX(ctx, av_codec, stream) \
++            avcodec_get_context_defaults3(stream->codec, av_codec); \
++            ctx = stream->codec;
+     #define AV_COPY_PARAMS_FROM_CONTEXT(av_stream, av_codec)
+ #endif
+ 
+diff --git a/src/FFmpegWriter.cpp b/src/FFmpegWriter.cpp
+index 823b345..c43dcff 100644
+--- a/src/FFmpegWriter.cpp
++++ b/src/FFmpegWriter.cpp
+@@ -81,7 +81,7 @@ static int set_hwframe_ctx(AVCodecContext *ctx, AVBufferRef *hw_device_ctx, int6
+ #endif // USE_HW_ACCEL
+ 
+ FFmpegWriter::FFmpegWriter(const std::string& path) :
+-		path(path), fmt(NULL), oc(NULL), audio_st(NULL), video_st(NULL), samples(NULL),
++		path(path), oc(NULL), audio_st(NULL), video_st(NULL), samples(NULL),
+ 		audio_outbuf(NULL), audio_outbuf_size(0), audio_input_frame_size(0), audio_input_position(0),
+ 		initial_audio_input_frame_size(0), img_convert_ctx(NULL), cache_size(8), num_of_rescalers(32),
+ 		rescaler_position(0), video_codec_ctx(NULL), audio_codec_ctx(NULL), is_writing(false), video_timestamp(0), audio_timestamp(0),
+@@ -123,41 +123,46 @@ void FFmpegWriter::Open() {
+ 
+ // auto detect format (from path)
+ void FFmpegWriter::auto_detect_format() {
+-	// Auto detect the output format from the name. default is mpeg.
+-	fmt = av_guess_format(NULL, path.c_str(), NULL);
+-	if (!fmt)
+-		throw InvalidFormat("Could not deduce output format from file extension.", path);
+ 
+ 	// Allocate the output media context
+ 	AV_OUTPUT_CONTEXT(&oc, path.c_str());
+-	if (!oc)
+-		throw OutOfMemory("Could not allocate memory for AVFormatContext.", path);
++	if (!oc) {
++		throw OutOfMemory(
++			"Could not allocate memory for AVFormatContext.", path);
++	}
+ 
+-	// Set the AVOutputFormat for the current AVFormatContext
+-	oc->oformat = fmt;
++	// Determine what format to use when encoding this output filename
++	oc->oformat = av_guess_format(NULL, path.c_str(), NULL);
++	if (oc->oformat == nullptr) {
++		throw InvalidFormat(
++			"Could not deduce output format from file extension.", path);
++	}
+ 
+-	// Update codec names
+-	if (fmt->video_codec != AV_CODEC_ID_NONE && info.has_video)
+-		// Update video codec name
+-		info.vcodec = avcodec_find_encoder(fmt->video_codec)->name;
++	// Update video codec name
++	if (oc->oformat->video_codec != AV_CODEC_ID_NONE && info.has_video)
++		info.vcodec = avcodec_find_encoder(oc->oformat->video_codec)->name;
+ 
+-	if (fmt->audio_codec != AV_CODEC_ID_NONE && info.has_audio)
+-		// Update audio codec name
+-		info.acodec = avcodec_find_encoder(fmt->audio_codec)->name;
++	// Update audio codec name
++	if (oc->oformat->audio_codec != AV_CODEC_ID_NONE && info.has_audio)
++		info.acodec = avcodec_find_encoder(oc->oformat->audio_codec)->name;
+ }
+ 
+ // initialize streams
+ void FFmpegWriter::initialize_streams() {
+-	ZmqLogger::Instance()->AppendDebugMethod("FFmpegWriter::initialize_streams", "fmt->video_codec", fmt->video_codec, "fmt->audio_codec", fmt->audio_codec, "AV_CODEC_ID_NONE", AV_CODEC_ID_NONE);
++	ZmqLogger::Instance()->AppendDebugMethod(
++		"FFmpegWriter::initialize_streams",
++		"oc->oformat->video_codec", oc->oformat->video_codec,
++		"oc->oformat->audio_codec", oc->oformat->audio_codec,
++		"AV_CODEC_ID_NONE", AV_CODEC_ID_NONE);
+ 
+ 	// Add the audio and video streams using the default format codecs and initialize the codecs
+ 	video_st = NULL;
+ 	audio_st = NULL;
+-	if (fmt->video_codec != AV_CODEC_ID_NONE && info.has_video)
++	if (oc->oformat->video_codec != AV_CODEC_ID_NONE && info.has_video)
+ 		// Add video stream
+ 		video_st = add_video_stream();
+ 
+-	if (fmt->audio_codec != AV_CODEC_ID_NONE && info.has_audio)
++	if (oc->oformat->audio_codec != AV_CODEC_ID_NONE && info.has_audio)
+ 		// Add audio stream
+ 		audio_st = add_audio_stream();
+ }
+@@ -228,9 +233,6 @@ void FFmpegWriter::SetVideoOptions(bool has_video, std::string codec, Fraction f
+ 		else {
+ 			// Set video codec
+ 			info.vcodec = new_codec->name;
+-
+-			// Update video codec in fmt
+-			fmt->video_codec = new_codec->id;
+ 		}
+ 	}
+ 	if (fps.num > 0) {
+@@ -294,9 +296,6 @@ void FFmpegWriter::SetAudioOptions(bool has_audio, std::string codec, int sample
+ 		else {
+ 			// Set audio codec
+ 			info.acodec = new_codec->name;
+-
+-			// Update audio codec in fmt
+-			fmt->audio_codec = new_codec->id;
+ 		}
+ 	}
+ 	if (sample_rate > 7999)
+@@ -634,7 +633,7 @@ void FFmpegWriter::WriteHeader() {
+ 		throw InvalidOptions("No video or audio options have been set.  You must set has_video or has_audio (or both).", path);
+ 
+ 	// Open the output file, if needed
+-	if (!(fmt->flags & AVFMT_NOFILE)) {
++	if (!(oc->oformat->flags & AVFMT_NOFILE)) {
+ 		if (avio_open(&oc->pb, path.c_str(), AVIO_FLAG_WRITE) < 0)
+ 			throw InvalidFile("Could not open or write file.", path);
+ 	}
+@@ -786,9 +785,9 @@ void FFmpegWriter::write_queued_frames() {
+     // Done writing
+     is_writing = false;
+ 
+-	// Raise exception from main thread
+-	if (has_error_encoding_video)
+-		throw ErrorEncodingVideo("Error while writing raw video frame", -1);
++    // Raise exception from main thread
++    if (has_error_encoding_video)
++        throw ErrorEncodingVideo("Error while writing raw video frame", -1);
+ }
+ 
+ // Write a block of frames from a reader
+@@ -1008,7 +1007,7 @@ void FFmpegWriter::Close() {
+ 	if (image_rescalers.size() > 0)
+ 		RemoveScalers();
+ 
+-	if (!(fmt->flags & AVFMT_NOFILE)) {
++	if (!(oc->oformat->flags & AVFMT_NOFILE)) {
+ 		/* close the output file */
+ 		avio_close(oc->pb);
+ 	}
+@@ -1044,21 +1043,27 @@ void FFmpegWriter::add_avframe(std::shared_ptr<Frame> frame, AVFrame *av_frame)
+ 
+ // Add an audio output stream
+ AVStream *FFmpegWriter::add_audio_stream() {
+-	AVCodecContext *c;
+-	AVStream *st;
+-
+ 	// Find the audio codec
+ 	const AVCodec *codec = avcodec_find_encoder_by_name(info.acodec.c_str());
+ 	if (codec == NULL)
+ 		throw InvalidCodec("A valid audio codec could not be found for this file.", path);
+ 
+ 	// Free any previous memory allocations
+-	if (audio_codec_ctx != NULL) {
++	if (audio_codec_ctx != nullptr) {
+ 		AV_FREE_CONTEXT(audio_codec_ctx);
+ 	}
+ 
+ 	// Create a new audio stream
+-	AV_FORMAT_NEW_STREAM(oc, audio_codec_ctx, codec, st)
++	AVStream* st = avformat_new_stream(oc, codec);
++	if (!st)
++		throw OutOfMemory("Could not allocate memory for the video stream.", path);
++
++	// Allocate a new codec context for the stream
++	ALLOC_CODEC_CTX(audio_codec_ctx, codec, st)
++#if (LIBAVFORMAT_VERSION_MAJOR >= 58)
++	st->codecpar->codec_id = codec->id;
++#endif
++	AVCodecContext* c = audio_codec_ctx;
+ 
+ 	c->codec_id = codec->id;
+ 	c->codec_type = AVMEDIA_TYPE_AUDIO;
+@@ -1129,20 +1134,36 @@ AVStream *FFmpegWriter::add_audio_stream() {
+ 
+ // Add a video output stream
+ AVStream *FFmpegWriter::add_video_stream() {
+-	AVCodecContext *c;
+-	AVStream *st;
+-
+ 	// Find the video codec
+ 	const AVCodec *codec = avcodec_find_encoder_by_name(info.vcodec.c_str());
+ 	if (codec == NULL)
+ 		throw InvalidCodec("A valid video codec could not be found for this file.", path);
+ 
++	// Free any previous memory allocations
++	if (video_codec_ctx != nullptr) {
++		AV_FREE_CONTEXT(video_codec_ctx);
++	}
++
+ 	// Create a new video stream
+-	AV_FORMAT_NEW_STREAM(oc, video_codec_ctx, codec, st)
++	AVStream* st = avformat_new_stream(oc, codec);
++	if (!st)
++		throw OutOfMemory("Could not allocate memory for the video stream.", path);
++
++	// Allocate a new codec context for the stream
++	ALLOC_CODEC_CTX(video_codec_ctx, codec, st)
++#if (LIBAVFORMAT_VERSION_MAJOR >= 58)
++	st->codecpar->codec_id = codec->id;
++#endif
++
++	AVCodecContext* c = video_codec_ctx;
+ 
+ 	c->codec_id = codec->id;
+ 	c->codec_type = AVMEDIA_TYPE_VIDEO;
+ 
++	// Set sample aspect ratio
++	c->sample_aspect_ratio.num = info.pixel_ratio.num;
++	c->sample_aspect_ratio.den = info.pixel_ratio.den;
++
+ 	/* Init video encoder options */
+ 	if (info.video_bit_rate >= 1000
+ #if (LIBAVCODEC_VERSION_MAJOR >= 58)
+@@ -1283,13 +1304,13 @@ AVStream *FFmpegWriter::add_video_stream() {
+ 
+ 	// Codec doesn't have any pix formats?
+ 	if (c->pix_fmt == PIX_FMT_NONE) {
+-		if (fmt->video_codec == AV_CODEC_ID_RAWVIDEO) {
++		if (oc->oformat->video_codec == AV_CODEC_ID_RAWVIDEO) {
+ 			// Raw video should use RGB24
+ 			c->pix_fmt = PIX_FMT_RGB24;
+ 
+ #if (LIBAVFORMAT_VERSION_MAJOR < 58)
+ 			// FFmpeg < 4.0
+-			if (strcmp(fmt->name, "gif") != 0)
++			if (strcmp(oc->oformat->name, "gif") != 0)
+ 				// If not GIF format, skip the encoding process
+ 				// Set raw picture flag (so we don't encode this video)
+ 				oc->oformat->flags |= AVFMT_RAWPICTURE;
+@@ -1305,7 +1326,7 @@ AVStream *FFmpegWriter::add_video_stream() {
+ 	// FFmpeg < 4.0
+ 	ZmqLogger::Instance()->AppendDebugMethod("FFmpegWriter::add_video_stream (" + (std::string)fmt->name + " : " + (std::string)av_get_pix_fmt_name(c->pix_fmt) + ")", "c->codec_id", c->codec_id, "c->bit_rate", c->bit_rate, "c->pix_fmt", c->pix_fmt, "oc->oformat->flags", oc->oformat->flags, "AVFMT_RAWPICTURE", AVFMT_RAWPICTURE);
+ #else
+-	ZmqLogger::Instance()->AppendDebugMethod("FFmpegWriter::add_video_stream (" + (std::string)fmt->name + " : " + (std::string)av_get_pix_fmt_name(c->pix_fmt) + ")", "c->codec_id", c->codec_id, "c->bit_rate", c->bit_rate, "c->pix_fmt", c->pix_fmt, "oc->oformat->flags", oc->oformat->flags);
++	ZmqLogger::Instance()->AppendDebugMethod("FFmpegWriter::add_video_stream (" + (std::string)oc->oformat->name + " : " + (std::string)av_get_pix_fmt_name(c->pix_fmt) + ")", "c->codec_id", c->codec_id, "c->bit_rate", c->bit_rate, "c->pix_fmt", c->pix_fmt, "oc->oformat->flags", oc->oformat->flags);
+ #endif
+ 
+ 	return st;
+diff --git a/src/FFmpegWriter.h b/src/FFmpegWriter.h
+index 79564b5..96d2902 100644
+--- a/src/FFmpegWriter.h
++++ b/src/FFmpegWriter.h
+@@ -158,8 +158,7 @@ namespace openshot {
+ 		bool write_header;
+ 		bool write_trailer;
+ 
+-		AVOutputFormat *fmt;
+-		AVFormatContext *oc;
++		AVFormatContext* oc;
+ 		AVStream *audio_st, *video_st;
+ 		AVCodecContext *video_codec_ctx;
+ 		AVCodecContext *audio_codec_ctx;
