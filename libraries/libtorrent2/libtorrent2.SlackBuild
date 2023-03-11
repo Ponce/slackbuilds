@@ -1,0 +1,152 @@
+#!/bin/bash
+
+# Slackware build script for libtorrent2
+
+# Copyright 2023 Steven Voges <Oregon, USA>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=libtorrent2
+SRCNAM=libtorrent
+VERSION=${VERSION:-2.0.8}
+ASIOGNUTLS=${ASIOGNUTLS:-a57d4d36923c5fafa9698e14be16b8bc2913700a}
+TRY_SIGNAL=${TRY_SIGNAL:-105cce59972f925a33aa6b1c3109e4cd3caf583d}
+DEPRECATED=${DEPRECATED:-ON}
+EXAMPLES=${EXAMPLES:-OFF}
+GNUTLS=${GNUTLS:-ON}
+PYTHON=${PYTHON:-ON}
+TESTS=${TESTS:-OFF}
+TOOLS=${TOOLS:-OFF}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+DEPS=$TMP/$SRCNAM-$VERSION/deps
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+
+tar xvf $CWD/try_signal-$TRY_SIGNAL.tar.gz -C \
+  $DEPS/try_signal --strip-components 1
+tar xvf $CWD/boost-asio-gnutls-$ASIOGNUTLS.tar.gz -C \
+  $DEPS/asio-gnutls --strip-components 1
+
+cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -Dbuild_examples=$EXAMPLES \
+    -Dbuild_tests=$TESTS \
+    -Dbuild_tools=$TOOLS \
+    -Ddeprecated-functions=$DEPRECATED \
+    -Dgnutls=$GNUTLS \
+    -Dpython-bindings=$PYTHON \
+    -Dpython-egg-info=$PYTHON \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install/strip DESTDIR=$PKG
+
+  if [ "$EXAMPLES" = "ON" ]; then
+    mkdir -p $PKG/usr/share/$SRCNAM/examples
+    cd examples
+    cp -a \
+      client_test connection_tester custom_storage dump_bdecode dump_torrent make_torrent \
+      simple_client stats_counters upnp_test $PKG/usr/share/$SRCNAM/examples
+    cd ..
+  fi
+  if [ "$TESTS" = "ON" ]; then
+    mkdir -p $PKG/usr/share/$SRCNAM/tests
+    cd test
+    cp -a \
+      test_* mutable_test_torrents ssl *.gz *.xml *.py utf8_test.txt \
+      $PKG/usr/share/$SRCNAM/tests
+    cd ..
+  fi
+  if [ "$TOOLS" = "ON" ]; then
+    mkdir -p $PKG/usr/share/$SRCNAM/tools
+    cd tools
+    cp -a \
+      dht dht_sample session_log_alerts \
+      $PKG/usr/share/$SRCNAM/tools
+    cd ..
+  fi
+
+cd ..
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  AUTHORS COPYING ChangeLog LICENSE NEWS README.rst docs \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
