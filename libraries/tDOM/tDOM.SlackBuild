@@ -2,7 +2,7 @@
 
 # Slackware build script for tDOM
 
-# Copyright 2013-2014 by Richard Ellis (USA)
+# Copyright 2013-2023 by Richard Ellis (USA)
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,13 +25,16 @@
 # 20220301 bkw: Modified by SlackBuilds.org: fix tarball handling.
 # No changes to package, so BUILD stays at 4.
 
+# 20220612 Mods by Ruben Schuller for building ver 0.9.2
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=tDOM
-VERSION=${VERSION:-0.8.3}
-BUILD=${BUILD:-4}
+VERSION=${VERSION:-0.9.2}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+TARNAM=$(echo $PRGNAM | tr A-Z a-z)
 
 # set these to false to omit building each as part of tDOM build
 BUILD_TNC=${BUILD_TNC:-true}           ; # build tnc XML validator module
@@ -60,28 +63,25 @@ if [ "$ARCH" = "i586" ]; then
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
+  CONFIGURE=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
+  CONFIGURE="--enable-64bit"
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
+  CONFIGURE=""
 fi
 
 set -e
 
-# 20220418 bkw: need this in case the source file has been downloaded
-# multiple times: it gets different gibberish (CGI params) appended
-# every time, if you use wget with its defaults.
-TARBALL="$CWD/$PRGNAM-$VERSION.tgz"
-[ -e "$TARBALL" ] || TARBALL="$( ls $TARBALL* | head -1 )"
-
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $TARBALL
-cd $PRGNAM-$VERSION
+rm -rf $TARNAM-$VERSION-src
+tar xvf $CWD/$TARNAM-$VERSION-src.tgz
+cd $TARNAM-$VERSION-src
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -89,57 +89,57 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
-# Upstream patch
-# https://github.com/tDOM/tdom/commit/3dd529139d2f44bb9ecfdcddd27b3d6a8df5ff41#diff-0
-patch -p1 < $CWD/tDOM-tcl8.6-compat.patch
-
-set -x
-# since we are building up to three different packages, reuse the build process
-function build {
-  case $1 in
-    tnc|tdomhtml)
-      local EXTRA="--with-tdom=$PKG/usr/lib${LIBDIRSUFFIX}"
-      local LINK="-L$PKG/usr/lib${LIBDIRSUFFIX}/tdom0.8.3/" ;;
-    *)
-      local EXTRA=""
-      local LINK="" ;;
-  esac
-  LDFLAGS="$LINK" \
-  CFLAGS="$SLKCFLAGS" \
-  CXXFLAGS="$SLKCFLAGS" \
-  ./configure \
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
     --prefix=/usr \
     --libdir=/usr/lib${LIBDIRSUFFIX} \
     --sysconfdir=/etc \
     --localstatedir=/var \
     --mandir=/usr/man \
-    $EXTRA \
-    --build=$ARCH-slackware-linux
+    --build=$ARCH-slackware-linux \
+    --enable-html5 \
+    $CONFIGURE
 
-  make
-  if [[ $1 == "tdom" ]] ; then
-    make test ; # tests are broken for tnc - bug reported to upstream
-                # tests do not exist for tdomhtml
-  fi
-  make install DESTDIR=$PKG
-}
+make
+make install DESTDIR=$PKG
 
-build tdom ; # always build tDOM
+if [ "$BUILD_TNC" == "true" ]; then
+	pushd extensions/tnc
+	CFLAGS="$SLKCFLAGS" \
+	CXXFLAGS="$SLKCFLAGS" \
+	./configure \
+	    --prefix=/usr \
+	    --libdir=/usr/lib${LIBDIRSUFFIX} \
+	    --sysconfdir=/etc \
+	    --localstatedir=/var \
+	    --mandir=/usr/man \
+	    --build=$ARCH-slackware-linux \
+	    --with-tdom=$PKG/usr/lib${LIBDIRSUFFIX} \
+	    $CONFIGURE
 
-if [[ $BUILD_TNC == "true" ]] ; then
-  pushd extensions/tnc
-  build tnc
-  popd
+	# we need to set the LDFLAGS here, the values from tdomConfig.sh aren't
+	# right until tdom is installed.
+	make LDFLAGS="-L$PKG/usr/lib${LIBDIRSUFFIX}/tdom${VERSION} -ltdomstub${VERSION}"
+	make install DESTDIR=$PKG
+	popd
 fi
 
-if [[ $BUILD_TDOMHTML == "true" ]] ; then
-  pushd extensions/tdomhtml
-  build tdomhtml
-  popd
-  rm $PKG/usr/man/mann/tdomhtml.n ; # this is an empty file in the src tarball - bug reported to upstream
-fi
+if [ "$BUILD_TDOMHTML" == "true" ]; then
+	pushd extensions/tdomhtml
+	CFLAGS="$SLKCFLAGS" \
+	CXXFLAGS="$SLKCFLAGS" \
+	./configure \
+	    --prefix=/usr \
+	    --libdir=/usr/lib${LIBDIRSUFFIX} \
+	    --sysconfdir=/etc \
+	    --localstatedir=/var \
+	    --mandir=/usr/man \
+	    --build=$ARCH-slackware-linux
 
-set +x
+	make install DESTDIR=$PKG
+	popd
+fi
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -147,9 +147,13 @@ find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | gr
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
+# this is empty
+rm -f $PKG/usr/man/mann/tdomhtml.n.gz
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+ls
 cp -a \
-  LICENSE NPL-1_1Final.html README \
+  LICENSE MPL_2.0.html README.md \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
