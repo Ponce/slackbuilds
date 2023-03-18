@@ -1,6 +1,6 @@
 #!/bin/sh
-USERDIR=$(pwd)
+#USERDIR=$(pwd)
 GAMES_TOME=/usr/share/games/tome-ah/bin
 cd $GAMES_TOME
-exec ${GAMES_TOME}/tome "$@"
-cd $USERDIR
+exec ${GAMES_TOME}/tome-x11 "$@"
+#cd $USERDIR
