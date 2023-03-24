@@ -1,0 +1,104 @@
+#!/bin/bash
+
+# Slackware build script for scrabbleai
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# This hasn't had any activity upstream since 2015, but it does work
+# fine and play a good game of Scrabble. Before you complain about old
+# code, remember that Scrabble itself was invented in 1938, and it's
+# still a fun game (if you don't agree, why are you building this?)
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=scrabbleai
+VERSION=${VERSION:-20150324_6f8db6b}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+ARCH=noarch
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# As written, the code expects to run from its own directory.
+# Patch does these things:
+# - Add #!/usr/bin/perl to the executable. Seriously, upstream?
+# - Look for perl modules, icons, dictionaries under /usr/share
+# - Load/save config and dictionary cache in ~/.config/ScrabbleAI
+# - Use network order (architecture neutral) for perl Storables,
+#   so the settings and library from ~/.config/ScrabbleAI don't
+#   depend on the arch that was used to create them. This matters
+#   to me because I use the same /home for both 32-bit and 64-bit
+#   on my test box.
+patch -p1 < $CWD/unix.diff
+
+mkdir -p $PKG/usr/games $PKG/usr/share/games/$PRGNAM
+install -m0755 $PRGNAM.pl $PKG/usr/games/$PRGNAM
+cp -a lib/ScrabbleAI $PKG/usr/share/games/$PRGNAM
+
+HICOLOR=$PKG/usr/share/icons/hicolor
+ICON=$HICOLOR/64x64/apps/$PRGNAM.png
+mkdir -p "$( dirname $ICON )"
+
+# Upstream icon is 62x63, center in a 64x64 image:
+convert -background none -extent 64x64 -gravity center \
+        lib/ScrabbleAI/GUI/images/s_tile.png \
+        $ICON
+
+# Now create smaller ones from that:
+for i in 16 22 32 48; do
+  size=${i}x${i}
+  dir=$HICOLOR/$size/apps
+  mkdir -p $dir
+  convert -resize $size $ICON $dir/$PRGNAM.png
+done
+
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# .desktop file written by SlackBuild author.
+mkdir -p $PKG/usr/share/applications
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+# Man page written by SlackBuild author. It contains my own observations
+# since upstream didn't include much documentation.
+mkdir -p $PKG/usr/man/man6
+gzip -9c < $CWD/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
+
+# Include links to the wordlists (*.txt) in the doc dir.
+# Do NOT include README.md: everything in it has been copied to
+# the man page, minus the Ubuntu and Fedora instructions.
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a LICENSE $PKGDOC
+ln -s ../../share/games/scrabbleai/ScrabbleAI/Backend/ospd.txt $PKGDOC
+ln -s ../../share/games/scrabbleai/ScrabbleAI/Backend/enable.txt $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
