@@ -3,7 +3,7 @@
 # Slackware build script for alacritty
 
 # Copyright 2017-2022 Andrew Clemons, Wellington New Zealand
-# Copyright 2022 Andrew Clemons, Tokyo Japan
+# Copyright 2022-2023 Andrew Clemons, Tokyo Japan
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -26,7 +26,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=alacritty
-VERSION=${VERSION:-0.11.0}
+VERSION=${VERSION:-0.12.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -101,11 +101,19 @@ mkdir vendor
 (
   cd vendor
 
-  grep -h -A 3 "\[\[package\]\]" $(find ../ -maxdepth 1 -mindepth 1 -name Cargo.lock | tr '\n' ' ') | \
-    sed 's/[[:space:]]*=[[:space:]]*/=/g;s/^--//;s/^\[\[/--\n[[/' | \
-    awk 'BEGIN { RS = "--\n" ; FS="\n" } { print $2, $3, $4 }' | sed 's/"//g;s/name=//;s/ version=/=/' | \
-    grep crates\.io-index | sed 's/ source=.*$//' | sort -u | while read -r dep ; do
+  grep -h -A 4 "\[\[package\]\]" \
+      $(find "../" -maxdepth 1 -mindepth 1 -name Cargo.lock | tr '\n' ' ') | \
+      sed 's/[[:space:]]*=[[:space:]]*/=/g;s/^--//;s/^\[\[/--\n[[/' | \
+      awk 'BEGIN { RS = "--\n" ; FS="\n" } { print $2, $3, $4, $5 }' | \
+      sed 's/"//g;s/name=//;s/ version=/=/' | \
+      grep " source=" | \
+      sed 's/ dependencies=.*$//' | \
+      sed 's/ source=[^ ]*//' | \
+      sed 's/ checksum=/=/' | \
+      sort -u | \
+      while read -r dep ; do
 
+    cksum="$(printf "%s\n" "$dep" | cut -d= -f3)"
     ver="$(printf "%s\n" "$dep" | cut -d= -f2)"
     dep="$(printf "%s\n" "$dep" | cut -d= -f1)"
 
@@ -124,9 +132,7 @@ mkdir vendor
       ) | sed '$ s/,$//'
 
       printf "    },\n"
-      printf '    "package": "'
-
-      sha256sum "$CWD/$dep-$ver.crate" | cut -f1 -d' ' | sed 's/$/"/'
+      printf '    "package": "%s"'  "$cksum"
 
       printf "}\n"
     } > $dep-$ver/.cargo-checksum.json
@@ -140,10 +146,17 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
+export PATH="/opt/rust16/bin:$PATH"
+if [ -z "$LD_LIBRARY_PATH" ]; then
+  export LD_LIBRARY_PATH="/opt/rust16/lib$LIBDIRSUFFIX"
+else
+  export LD_LIBRARY_PATH="/opt/rust16/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
+fi
+
 CARGO_HOME=.cargo \
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
-cargo build --release $CARGOTARGET
+cargo build --offline --release $CARGOTARGET
 
 mkdir -p $PKG/usr/bin/
 
