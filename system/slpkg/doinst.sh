@@ -9,6 +9,7 @@ config() {
 }
 
 config etc/slpkg/slpkg.toml.new
+config etc/slpkg/repositories.toml.new
 config etc/slpkg/blacklist.toml.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
