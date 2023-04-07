@@ -1,0 +1,133 @@
+#!/bin/bash
+
+# Slackware build script for gaiasky
+
+# Copyright 2023 Giancarlo Dessì, Cagliari, IT
+# Based on Booktab.SlackBuild written by Matteo Bernardini
+# at https://ponce.cc/slackware/testing/Booktab/ 
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=gaiasky
+VERSION=${VERSION:-"3.4.2"}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+SRCVERSION=$( echo ${VERSION//./_} )
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "x86_64" ]; then
+  SRCARCH="x86-64"
+  PKGARCH="$ARCH"
+elif [ "$ARCH" = "arm" ]; then
+  printf "\n$ARCH is unsupported for gaiasky...\n\n"
+  exit 1
+else
+  SRCARCH="x86"
+  PKGARCH="i586"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+rm -rf $TMP/$PRGNAM-$VERSION
+mkdir $TMP/$PRGNAM-$VERSION
+
+#Extract the application from the Ubuntu package
+ar xv $CWD/${PRGNAM}_linux_$SRCVERSION.deb data.tar.gz
+tar xvf data.tar.gz -C $TMP/$PRGNAM-$VERSION
+rm -f data.tar.gz
+
+cd $TMP/$PRGNAM-$VERSION
+
+# patch the application entry: as is provided it won't work 
+# in Slackware/KDE
+patch -p0 << 'EOF'
+--- opt/gaiasky/gaiasky.desktop	2023-04-05 16:00:00.000000000 +0200
++++ opt/gaiasky/gaiasky.desktop	2023-04-05 16:00:01.000000000 +0200
+@@ -3,6 +3,8 @@
+ Name=Gaia Sky
+ Comment=3D universe simulator for desktop and VR with support for more than a billion objects
+-Exec=gaiasky
++Exec=/opt/gaiasky/gaiasky
++GenericName=Desktop 3D universe viewer
+ Icon=/opt/gaiasky/gs_icon.svg
+ Terminal=false
+-Categories=Science;
++Categories=Education;Science;Astronomy;
++StartupNotify=true
+
+EOF
+
+chown -R root:root .
+
+# The application will be installed in /opt but some files will be moved or 
+# linked in /usr according to the standard of Slackware installations
+mkdir -p usr/share/applications
+mkdir -p usr/doc/$PRGNAM-$VERSION
+mkdir -p usr/bin
+
+# link the executable in /usr/bin
+cd usr/bin
+ln -s ../../opt/gaiasky/gaiasky gaiasky
+cd ../../
+
+# link the application desktop entry
+cp -a opt/gaiasky/gaiasky.desktop usr/share/applications/gaiasky.desktop
+
+# move the entire tree in package-gaiasky
+cp -a * $PKG/
+
+# strip ELF objects
+find $PKG/opt/gaiasky -type f -print0  | \
+  xargs -0 file -m /etc/file/magic/elf | \
+  grep 'ELF.*dynamic.*not stripped'    | \
+  cut -d: -f1 | xargs strip
+
+
+# move some documentation files in /usr/doc/gaiasky-x.y.z
+mv opt/gaiasky/*.md opt/gaiasky/releasenotes.txt $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
