@@ -27,7 +27,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=newsboat
-VERSION=${VERSION:-2.30.1}
+VERSION=${VERSION:-2.31}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -84,7 +84,7 @@ cd $PRGNAM-$VERSION
 
 # build offline
 # configuration tells cargo to use the configured directory
-# for dependencies intead of downloading from crates.io
+# for dependencies instead of downloading from crates.io
 mkdir .cargo
 cat << EOF >> .cargo/config
 [source.crates-io]
@@ -100,11 +100,19 @@ mkdir vendor
 (
   cd vendor
 
-  grep -h -A 3 "\[\[package\]\]" $(find ../ -maxdepth 1 -mindepth 1 -name Cargo.lock | tr '\n' ' ') | \
-    sed 's/[[:space:]]*=[[:space:]]*/=/g;s/^--//;s/^\[\[/--\n[[/' | \
-    awk 'BEGIN { RS = "--\n" ; FS="\n" } { print $2, $3, $4 }' | sed 's/"//g;s/name=//;s/ version=/=/' | \
-    grep crates\.io-index | sed 's/ source=.*$//' | sort -u | while read -r dep ; do
+  grep -h -A 4 "\[\[package\]\]" \
+      $(find "../" -maxdepth 1 -mindepth 1 -name Cargo.lock | tr '\n' ' ') | \
+      sed 's/[[:space:]]*=[[:space:]]*/=/g;s/^--//;s/^\[\[/--\n[[/' | \
+      awk 'BEGIN { RS = "--\n" ; FS="\n" } { print $2, $3, $4, $5 }' | \
+      sed 's/"//g;s/name=//;s/ version=/=/' | \
+      grep " source=" | \
+      sed 's/ dependencies=.*$//' | \
+      sed 's/ source=[^ ]*//' | \
+      sed 's/ checksum=/=/' | \
+      sort -u | \
+      while read -r dep ; do
 
+    cksum="$(printf "%s\n" "$dep" | cut -d= -f3)"
     ver="$(printf "%s\n" "$dep" | cut -d= -f2)"
     dep="$(printf "%s\n" "$dep" | cut -d= -f1)"
 
@@ -123,9 +131,7 @@ mkdir vendor
       ) | sed '$ s/,$//'
 
       printf "    },\n"
-      printf '    "package": "'
-
-      sha256sum "$CWD/$dep-$ver.crate" | cut -f1 -d' ' | sed 's/$/"/'
+      printf '    "package": "%s"'  "$cksum"
 
       printf "}\n"
     } > $dep-$ver/.cargo-checksum.json
@@ -142,6 +148,13 @@ find -L . \
 if [ "$CARGOTARGET" != "" ] ; then
   RELEASEDIR="$(echo "$CARGOTARGET" | cut -d' ' -f2)"
   sed -i "s|target/release|target/$RELEASEDIR/release|" Makefile
+fi
+
+export PATH="/opt/rust16/bin:$PATH"
+if [ -z "$LD_LIBRARY_PATH" ]; then
+  export LD_LIBRARY_PATH="/opt/rust16/lib$LIBDIRSUFFIX"
+else
+  export LD_LIBRARY_PATH="/opt/rust16/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
 fi
 
 export CARGO_HOME=.cargo
