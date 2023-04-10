@@ -6,84 +6,25 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-# 20220622 bkw, BUILD=2:
-# - strip binary (whoops).
-# - remove mention of retroarch support from README, it FTBFS.
-#   sooner or later I'll fix it or remove it entirely.
-# Note: I tried snes9x 1.61 on Slackware 15.0 with all updates, and
-# it still crashes as described below. Also tried latest post-1.61 git
-# and it has the same problem. So staying with 1.59 for now, sorry.
+# 20230410 bkw: update for 1.62.3.
+# Most of the work needed for this update was done by M.Dinslage,
+# to whom I owe thanks. I updated the man page, and added the
+# non-GUI binary plus a man page for it.
 
-# 20211014 bkw: *downgrade* to 1.59, for now at least. 1.60 crashes
-# immediately if built with gtk+2 and started with a ROM filename.
-# If you pick a ROM from within the app, it'll work sometimes, but
-# sometimes it'll crash. When build with gtk+3, it crashes any time
-# you try to open the Preferences dialog while a ROM is loaded. I
-# also tried the latest git, it acts the same as 1.60 (except that it
-# can't be built with gtk+2 any more). I can't get 1.59 to crash, so
-# that's what I'm packaging. I don't know if the issues with 1.60 are
-# something to do with -current (something that might be fixed before
-# 15.0 releases) or something broken upstream. If you're reading this
-# after Slackware 15.0 has been released, please remind me to look
-# into it again.
-
-# 20191126 bkw: update for 1.60. Upstream has switched from autotools
-# to meson for the build system, so this script can no longer build
-# old versions.
-
-# 20181201 bkw:
-# - update for 1.57.
-# - disable OSS audio by default, add OSS=yes option.
-# - autodetect RetroArch, add RETROARCH=yes|no option.
-# - document the above in the README.
-# - document PULSE=no in README.
-# - stop including snes9x.conf.default in the docdir, since it's
-#   outdated and will cause snes9x to segfault if you try to use it!
-# - since we now have 3 build options, make slack-desc show them.
-# - add patch from upstream to speed up linking the libretro core if
-#   -jX is in MAKEFLAGS.
-# - add patch fro upstream to stop segfaulting if the config file is
-#   missing the ScanlineIntensity variable. Means I can finaly remove
-#   the "you should delete your old config file" from the README.
-
-# 20180730 bkw:
-# - BUILD=2.
-# - add libretro/RetroArch, thanks to orbea.
-# - add --without-portaudio to configure args. snes9x runs about
-#   1 frame/sec if I start it up with the sound driver set to portaudio,
-#   and I've gotten a report of it blasting high-volume white noise
-#   thru the speakers if you switch to portaudio while a ROM is already
-#   running. I can't see any reason to use it in favor of pulse, alsa,
-#   oss, or sdl audio.
-# - don't extract windows, mac, old-school unix stuff from tarball.
-#   uses 50% less $TMP space.
-
-# 20180623 bkw: update for 1.56.2.
-# 20180611 bkw:
-# - update for 1.56.1.
-# - switch the UI from gtk3 to gtk2, as 14.2's gtk3 is too old.
-# - add undocumented PULSE=no build option (in anticipation of 15.0's
-#   pure-alsa-system).
-# - add SDL2 to REQUIRES. technically, it's not truly required: snes9x
-#   only uses SDL2 to support joysticks. playing with the keyboard/mouse
-#   would still work without it. 15.0 is coming soon, and will have SDL2
-#   in the core OS, so don't bother me about this decision.
-# - update README, the snes9x_gtk build went away in 2010, no need to
-#   mention it now. also add notes about upgrading from 1.55.
-# 20171221 bkw: use --without-system-zip to build bundled unzip, instead
-#               of adding minizip as a dependency.
-# 20171213 bkw: update for 1.55.
-# 20170302 bkw: use long-format github URL
-# 20161015 bkw: update for 1.54.1. script has changed enough that it
-# can't build 1.53 any more.
+# For older change-comments, see ChangeLog.old (it was getting too long
+# to keep in the script).
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=snes9x
-VERSION=${VERSION:-1.59}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.62.3}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+
+SPIRVVER="2021-01-15"
+VULKVER="1.3.246"
+GLSLANGVER="12.1.0"
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -102,6 +43,8 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
+# Note: the flags we set here are followed by -O3, meaning the
+# -O2 does nothing. *shrug*
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
@@ -122,63 +65,63 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-# Don't extract the stuff we don't need, this saves 7.9MB in $TMP.
-tar xvf $CWD/$PRGNAM-$VERSION.tar.?z \
-        --wildcards --exclude '*/win32/*' \
-        --exclude '*/macosx/*' --exclude '*/unix/*'
+# Don't extract the stuff we don't need, this saves a few MB in $TMP.
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz \
+        --wildcards \
+        --exclude '*/win32/*' \
+        --exclude '*/macosx/*'
 cd $PRGNAM-$VERSION
+
+tar xvf $CWD/glslang-$GLSLANGVER.tar.gz \
+  -C external/glslang --strip-components=1
+tar xvf $CWD/SPIRV-Cross-$SPIRVVER.tar.gz \
+  -C external/SPIRV-Cross --strip-components=1
+tar xvf $CWD/Vulkan-Headers-$VULKVER.tar.gz \
+  -C external/vulkan-headers --strip-components=1
+
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-cd gtk
-
 WITHPULSE=yes
 if [ "$PULSE" = "no" ] || ! pkg-config --exists libpulse; then
-  PULSEOPT="-D pulseaudio=false"
+  PULSEOPT="-DUSE_PULSEAUDIO=OFF"
   WITHPULSE=no
 fi
 
 WITHOSS=yes
 if [ "${OSS:-no}" = "no" ]; then
-  OSSOPT="-D oss=false"
+  OSSOPT="-DUSE_OSS=OFF"
   WITHOSS=no
 fi
 
-# 20211012 bkw: we can now build with gtk+3
-if [ "${GTK3:-yes}" = "yes" ]; then
-  GTKDEFS="-D gtk3=true -D gtk2=false"
-else
-  GTKDEFS="-D gtk3=false -D gtk2=true"
-fi
-
 SLKCFLAGS+=" -DNDEBUG"
-mkdir build
-cd build
-  CFLAGS="$SLKCFLAGS" \
-  CXXFLAGS="$SLKCFLAGS" \
-  meson .. \
+mkdir -p gtk/build
+cd gtk/build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_BINDIR=games \
     $PULSEOPT $OSSOPT \
-    $GTKDEFS \
-    --buildtype=release \
-    --infodir=/usr/info \
-    --libdir=/usr/lib${LIBDIRSUFFIX} \
-    --localstatedir=/var \
-    --mandir=/usr/man \
-    --prefix=/usr \
-    --sysconfdir=/etc \
-    -Dstrip=true
-  "${NINJA:=ninja}" -v
-  DESTDIR=$PKG $NINJA install
-  mv $PKG/usr/bin $PKG/usr/games
-cd ..
+    -DCMAKE_INSTALL_DATAROOTDIR=share \
+    -DUSE_SYSTEMZIP=OFF \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make VERBOSE=1
+  make install/strip DESTDIR=$PKG
+cd -
+
+# 20230410 bkw: Insidious weirdness: The bitmap icons all look the
+# same, but the .svg icon looks completely different. Just get rid
+# of it; we have the bitmap icons at every size we could want.
+rm -rf $PKG/usr/share/icons/hicolor/scalable
 
 # RetroArch support, contributed by orbea (Hunter Sezen).
 # Note that the source here is self-contained, there's no build-time
 # dependency on RetroArch or libretro or such.
 # snes9x_libretro-info originally came from:
 # https://raw.githubusercontent.com/libretro/libretro-super/383f18fd7c36ffd5fe76ebac58e9e596dde67e66/dist/info/snes9x_libretro.info
-# Renamed .info => -info to avoid confusing SBo tools that deal with
+# Renamed .info => .info.txt to avoid confusing SBo tools that deal with
 # SBo's .info files.
 # 20181201 bkw: made this optional, auto-detected, and controllable
 # via environment. It makes the build take 7x as long, no point wasting
@@ -197,24 +140,50 @@ esac
 if [ "$build_ra" = "yes" ]; then
   echo "=== Building libretro core"
   ( LIBNAM=${PRGNAM}_libretro
-    cd ../libretro
+    PKGLIB=$PKG/usr/lib$LIBDIRSUFFIX
+    cd libretro
     make LTO="-flto=jobserver"
-    install -sDm0755 $LIBNAM.so $PKG/usr/lib${LIBDIRSUFFIX}/libretro/$LIBNAM.so
-    install -Dm0644 $CWD/$LIBNAM-info \
-      $PKG/usr/lib${LIBDIRSUFFIX}/libretro/info/$LIBNAM.info
+    install -sDm0755 $LIBNAM.so $PKGLIB/libretro/$LIBNAM.so
+    install -Dm0644 -o root -g root $CWD/$LIBNAM.info.txt \
+      $PKGLIB/libretro/info/$LIBNAM.info
   )
 else
   echo "=== NOT building libretro core"
 fi
 
+# Go ahead and include the non-gui binary. Note that it doesn't
+# support OSS or Pulse (only ALSA), so the OSS and PULSE environment
+# vars don't affect it.
+cd unix
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  ./configure \
+    --prefix=/usr \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --docdir=/usr/doc/$PRGNAM-$VERSION \
+    --enable-gamepad \
+    --enable-gzip \
+    --enable-screenshot \
+    --enable-zip \
+    --without-system-zip \
+    --build=$ARCH-slackware-linux
+  make
+cd -
+
+# No 'make install' target.
+install -s -m0755 unix/snes9x $PKG/usr/games/snes9x
+
+# Man pages written by SlackBuild author.
 mkdir -p $PKG/usr/man/man6
 gzip -9c $CWD/snes9x-gtk.6 > $PKG/usr/man/man6/snes9x-gtk.6.gz
-ln -s $PRGNAM-gtk.6.gz $PKG/usr/man/man6/$PRGNAM.6.gz
-ln -s $PRGNAM-gtk $PKG/usr/games/$PRGNAM
+gzip -9c $CWD/snes9x.6 > $PKG/usr/man/man6/snes9x.6.gz
 
 PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
 mkdir -p $PKGDOC
-cp -a ../LICENSE ../README* ../docs/* $PKGDOC
+cp -a LICENSE README* docs/* unix/docs/* unix/snes9x.conf.default $PKGDOC
 cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
