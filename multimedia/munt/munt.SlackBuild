@@ -3,6 +3,7 @@
 # Slackware build script for munt
 
 # Copyright 2017 Dugan Chen Canada
+# Copyright 2023 B. Watson
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,10 +23,26 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20230410 bkw:
+# - new maintainer.
+# - update for v2.7.0 (sourceforge => github).
+# - include (some of) the ROMs in the package.
+# - add the mt32emu_alsadrv binaries (mt32d, xmt32).
+# - patch everything to use /usr/share/munt/roms/ as default path.
+#   user can still change this in the UI as needed, I just don't want
+#   it defaulting to ~/roms/ (need this so we can package the ROMs).
+# - add doinst.sh, since the new version has icons and a .desktop.
+# - add setcap stuff for jack.
+# - update README to document jack optional dep and the fact that the
+#   ROMs are included. also mention the actual binary names, since
+#   neither one's called "munt".
+
+# TODO someday: man pages.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=munt
-VERSION=${VERSION:-2.2.0}
+VERSION=${VERSION:-2.7.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -38,13 +55,17 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
 fi
+
+# 20230411 bkw: The various components have separate version numbers,
+# and it looks like upstream's tags are named after whichever
+# component was released last. The mt32emu_qt_1_11_1 tag includes
+# the previous release (2.7.0) of mt32emu. This is kinda confusing,
+# but whatever.
+GIT_TAG=${GIT_TAG:-mt32emu_qt_1_11_1}
 
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
@@ -69,16 +90,30 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+rm -rf $PRGNAM-$GIT_TAG
+tar xvf $CWD/$PRGNAM-$GIT_TAG.tar.gz
+cd $PRGNAM-$GIT_TAG
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
+# 20230411 bkw: Patch mt32emu-qt, mt32emu-smf2wav, mt32d, xmt32 to
+# look for ROMs in a systemwide directory (which is where we'll place
+# the ROMs, below).
+patch -p1 < $CWD/system_rom_path.diff
+
+# Allow mt32d, xmt32 to build in-tree, without the library already
+# installed. Also apply our SLKCFLAGS.
+sed -i \
+    -e "s,-O2,$SLKCFLAGS -I../build/mt32emu/include," \
+    -e "s,-lmt32emu,-L../build/mt32emu -lmt32emu," \
+    mt32emu_alsadrv/Makefile
+
+# 20230411 bkw: fix desktop-file-validate nitpick (a "hint", not an error).
+sed -i '/^Categories/s,$,Audio;,' mt32emu_qt/res/mt32emu-qt.desktop
+
+# 20230411 bkw: cmake accepts and ignores (!) -DCMAKE_INSTALL_DOCDIR.
+# Also there's no way to disable jack, if it's autodetected.
 mkdir -p build
 cd build
   cmake \
@@ -87,22 +122,121 @@ cd build
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DLIB_INSTALL_DIR=/usr/lib${LIBDIRSUFFIX} \
     -DCMAKE_BUILD_TYPE=Release .. \
-	-Dlibmt32emu_SHARED=ON
+    -Dlibmt32emu_SHARED=ON
   make
-  make install DESTDIR=$PKG
+  make install/strip DESTDIR=$PKG
 cd ..
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# This stuff isn't built by cmake. It's considered outdated, but at least
+# the mt32d binary might be useful for a headless/console-only system.
+make -C mt32emu_alsadrv
+install -s -m0755 mt32emu_alsadrv/{mt32d,xmt32} $PKG/usr/bin
 
+### Extract and install the ROMs.
+
+PKGROMS=$PKG/usr/share/$PRGNAM/roms
+mkdir -p $PKGROMS
+
+# The ROM zip files have at least 2 possible names each, depending on
+# what was used to download them. The URLs have spaces in them. The
+# spec says spaces have to be hex-escaped as %20. Plus, we can't have
+# spaces in the URLs in our .info files anyway: it would break every
+# tool that parses .info files, plus it would prevent curl from being
+# able to download them (it refuses to accept spaces in URLs).
+
+# So DOWNLOAD has the %20's in the URLs. But wget will "helpfully"
+# transform them back into spaces. On the other hand, "curl -O"
+# will save them as-is. I don't know what various browsers do, but
+# hopefully I've covered it here...
+
+ok=0
+for i in \
+  'Roland - CM32L - CONTROL.1989-12-05.v1.02.ROM.zip' \
+  'Roland%20-%20CM32L%20-%20CONTROL.1989-12-05.v1.02.ROM.zip'
+do
+  if [ -e "$CWD/$i" ]; then
+    unzip -p "$CWD/$i" \
+      "Roland - CM32L - CONTROL.1989-12-05.v1.02.ROM" \
+      > $PKGROMS/CM32L_CONTROL.ROM
+    ok=1
+    break
+  fi
+done
+
+[ "$ok" = "0" ] && echo "*** can't find CM32L control ROM zip file" && exit 1
+
+ok=0
+for i in \
+  'Roland - CM32L - PCM Maskrom.ROM.zip' \
+  'Roland%20-%20CM32L%20-%20PCM%20Maskrom.ROM.zip'
+do
+  if [ -e "$CWD/$i" ]; then
+    unzip -p "$CWD/$i" \
+      "Roland - CM32L - PCM Maskrom.ROM" \
+      > $PKGROMS/CM32L_PCM.ROM
+    ok=1
+    break
+  fi
+done
+
+[ "$ok" = "0" ] && echo "*** can't find CM32L PCM ROM zip file" && exit 1
+
+# We need 3 files from this one, and 2 of them have to be
+# interleaved... wrote a little tool to do the job. Only
+# including the v1.0.7 control ROM; it's the newest version
+# in the zip file. Also, in case something saves the file with
+# the ( character hex-escaped, allow for it.
+ok=0
+for i in \
+  'Roland MT32 (various OS _ extra ROMs.zip' \
+  'Roland%20MT32%20(various%20OS%20_%20extra%20ROMs.zip' \
+  'Roland%20MT32%20%28various%20OS%20_%20extra%20ROMs.zip'
+do
+  if [ -e "$CWD/$i" ]; then
+    unzip -p "$CWD/$i" r15449121.ic37.bin > $PKGROMS/MT32_PCM.ROM
+    unzip "$CWD/$i" mt32_1.0.7.ic26.bin mt32_1.0.7.ic27.bin
+
+    # The ROMs are stored on 2 chips, one with the even-numbered
+    # addresses and one with the odd. In theory, munt can use them
+    # as-is (the source called them "Mux0" and "Mux1" ROMs), but
+    # I couldn't get that to work. Easy enough to merge them together.
+    gcc -Wall -O2 -o interleave "$CWD/interleave.c"
+    ./interleave mt32_1.0.7.ic27.bin mt32_1.0.7.ic26.bin $PKGROMS/MT32_CONTROL.ROM
+
+    ok=1
+    break
+  fi
+done
+
+[ "$ok" = "0" ] && echo "*** can't find MT32 ROM zip file" && exit 1
+
+### ROMs extracted/installed, back to regular SBo style stuffs.
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
 mkdir -p $PKG/usr/doc
-mv $PKG/usr/share/doc/$PRGNAM $PKG/usr/doc/$PRGNAM-$VERSION
-rm -rf $PKG/usr/share
-cp -a README.txt $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+mv $PKG/usr/share/doc/$PRGNAM $PKGDOC
+rm -rf $PKG/usr/share/doc
+cp -a README* $PKGDOC
+mkdir -p $PKGDOC/mt32emu_alsadrv
+cp -a mt32emu_alsadrv/*.txt $PKGDOC/mt32emu_alsadrv
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+WITHJACK=WITHOUT
+
+# Only add capability stuff if not disabled, and if JACK support was
+# included.
+if pkg-config --exists jack && [ "${SETCAP:-yes}" = "yes" ]; then
+  WITHJACK=WITH
+  cat $CWD/setcap.sh >> $PKG/install/doinst.sh
+  # Only allow execution by audio group
+  chown root:audio $PKG/usr/bin/mt32emu-qt
+  chmod 0750 $PKG/usr/bin/mt32emu-qt
+fi
+
+sed "s,@WITHJACK@,$WITHJACK," < $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
