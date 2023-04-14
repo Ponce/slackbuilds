@@ -2,7 +2,7 @@
 
 __author__      = "Sander Granneman"
 __copyright__   = "Copyright 2021"
-__version__     = "1.5.1"
+__version__     = "1.5.2"
 __credits__     = ["Sander Granneman","Grzegorz Kudla","Hywell Dunn Davies"]
 __maintainer__  = ["Sander Granneman","Rob van Nues for SlackBuilds.org"]
 __email__       = ["sgrannem@staffmail.ed.ac.uk", "sborg63@disroot.org"]
@@ -25,7 +25,7 @@ setup(name='pyCRAC',
 	description='Python NextGen sequencing data processing software',
 	author='Sander Granneman',
 	author_email='sgrannem@staffmail.ed.ac.uk',
-	url='http://sandergranneman.bio.ed.ac.uk/Granneman_Lab/pyCRAC_software.html',
+	url='https://git.ecdf.ed.ac.uk/sgrannem/pycrac',
 	packages=['pyCRAC','pyCRAC.Parsers','pyCRAC.Classes','pyCRAC.Methods'],
 	install_requires=['numpy >= 1.5.1', 'cython >=0.19', 'pysam >= 0.6','six >= 1.9.0'],
 	scripts=[
@@ -55,8 +55,6 @@ setup(name='pyCRAC',
 					'pyCRAC/scripts/pyGTF2bedGraph.py',
 					'pyCRAC/scripts/pyFilterGTF.py',
 					'pyCRAC/scripts/pyNormalizeIntervalLengths.py',
-					'pyCRAC/crac_pipelines/CRAC_pipeline_PE.py',
-					'pyCRAC/crac_pipelines/CRAC_pipeline_SE.py',
 				],
 	classifiers=[   'Development Status :: 5 - Production/Stable',
 					'Environment :: Console',
