@@ -4,6 +4,7 @@
 # the Radio Shack TRS-80 Model I/III/4/4p emulator
 
 # Copyright 2009-2010, 2012 Niels Horn, Rio de Janeiro, Brazil
+# Copyright 2023, B. Watson
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,13 +24,28 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# revision date 2012/08/09
+# 20230418 bkw:
+# - new maintainer.
+# - update for v1.2.27 (make => meson, for one thing).
+# - patch to support system-wide ROM directory (which is shared
+#   with xtrs).
+# - remove disk images from package (they're in trs80-roms now).
+# - use upstream's icon and .desktop.
+# - include man page in package.
+# - new version defaults to enabling the floppy drive, which causes
+#   it to wait for a disk boot. add a README note explaining the
+#   situation.
+
+# 20230418 bkw: Note: the default build is for SDL 2. It's still
+# possible to build with SDL 1, but I haven't bothered adding an
+# option for that. If you *really* need SDL 1 for some reason, let
+# me know.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=sdltrs
-VERSION=${VERSION:-1.1.0}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-1.2.27}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -41,11 +57,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-SRCVERSION=$(echo $VERSION | tr . _)
-
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -58,61 +69,82 @@ OUTPUT=${OUTPUT:-/tmp}
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
-  ARCHQUADLET=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
-  ARCHQUADLET=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
-  ARCHQUADLET=""
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
-  ARCHQUADLET=""
 fi
 
 set -e
 
-rm -rf $TMP/${PRGNAM}_$SRCVERSION $PKG
+rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
+rm -rf $TMP/$PRGNAM-$VERSION
 cd $TMP
-tar xvf $CWD/${PRGNAM}_$SRCVERSION.tar.gz
-cd ${PRGNAM}_$SRCVERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
+cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+# upstream permissions are wonky, do not revert to template.
+find . -type f -a -exec chmod 644 {} + -o \
+       -type d -a -exec chmod 755 {} +
 
-# include -lX11 in the Makefile (sw-14.0)
-sed "/^LIBS/s/= /= -lX11 /" -i src/linux/Makefile
+# 20230417 bkw: Look in system-wide ROM directory by default.
+sed -i '/strcpy(romfile/s, ", "/usr/share/trs80-roms/,' src/trs_sdl_interface.c
 
-# the Makefile is in the src/linux directory
-make INCS="$SLKCFLAGS" -C src/linux
+mkdir build
+cd build
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  meson .. \
+    --buildtype=release \
+    --infodir=/usr/info \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    -Dstrip=true
+  "${NINJA:=ninja}" -v
+  install -D -m0755 -s $PRGNAM $PKG/usr/games/$PRGNAM
+cd ..
 
-# sdltrs does not have a "make install" option, so we'll do it manually
-mkdir -p $PKG/usr/bin
-cp -a src/linux/sdltrs $PKG/usr/bin
-strip --strip-unneeded $PKG/usr/bin/sdltrs
+# 20230418 bkw: use upstream's man page, but section 6.
+mkdir -p $PKG/usr/man/man6
+sed -e '/^\.TH/s, 1 , 6 ,' \
+    -e '/^\.TH/s,$, SlackBuilds.org,' \
+    src/$PRGNAM.1 \
+    | gzip -9c > $PKG/usr/man/man6/$PRGNAM.6.gz
 
-# Copy icon & desktop file to package
-mkdir -p $PKG/usr/share/{applications,pixmaps}
-cat $CWD/sdltrs.desktop > $PKG/usr/share/applications/sdltrs.desktop
-cat $CWD/sdltrs.png > $PKG/usr/share/pixmaps/sdltrs.png
+# 20230418 bkw: upstream's .desktop lacks categories.
+echo 'Categories=System;Emulator;' >> $PRGNAM.desktop
+install -D -m0644 $PRGNAM.desktop $PKG/usr/share/applications/$PRGNAM.desktop
 
-# Make a directory for the ROMs (not included) and copy included images
-mkdir -p $PKG/usr/share/sdltrs
-cp -a diskimages/* $PKG/usr/share/sdltrs
+# 20230418 bkw: use upstream's icon, but pre-resized.
+HICOLOR=$PKG/usr/share/icons/hicolor
+SVGICON=icons/$PRGNAM.svg
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/html
-cp -a BUILDING README $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a docs/* $PKG/usr/doc/$PRGNAM-$VERSION/html/
-find $PKG/usr/doc/$PRGNAM-$VERSION/ -type f -exec chmod 644 {} \;
+for px in 16 22 32 48 64 96 128; do
+  size=${px}x${px}
+  dir=$HICOLOR/$size/apps
+  mkdir -p $dir
+  rsvg-convert -w $px -h $px -o $dir/$PRGNAM.png $SVGICON
+done
+
+mkdir -p $HICOLOR/scalable/apps
+cp -a $SVGICON $HICOLOR/scalable/apps/$PRGNAM.svg
+
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a CHANGELOG.md README.md *LICENSE utilities html $PKGDOC
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-chmod 755 $PKG/usr/doc/$PRGNAM-$VERSION/html/images/
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
