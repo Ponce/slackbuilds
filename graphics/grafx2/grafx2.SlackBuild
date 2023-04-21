@@ -22,15 +22,29 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# Modified by B. Watson, 20230421. I'm not taking over this build;
+# I'm updating it at the request of the maintainer.
+# - updated for v2.8.3091.
+# - add gtk-update-icon-cache to doinst.sh.
+# - autodetect lua (allow LUA=no to override).
+# - make the slack-desc show whether or not lua scripting is built in.
+# - don't include the sample lua scripts if lua is disabled.
+# - move 32x32 bitmap icon to correct dir, install 48x48 icon.
+# - install man pages.
+# - make the .desktop file actually work (name executable 'grafx2').
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=grafx2
-VERSION=${VERSION:-2.5.1960}
+VERSION=${VERSION:-2.8.3091}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
-SRC=30
+# 20230421 bkw: depending on whether content-disposition is respected
+# or not, the file gets saved with one or the other of these 2 names.
+SRC1=65
+SRC2=$PRGNAM-$VERSION-HEAD-src.tgz
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -40,9 +54,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -66,10 +77,14 @@ else
   LIBDIRSUFFIX=""
 fi
 
-if [ "$LUA" = yes ]; then
+# 20230421 bkw: Assume the user wants lua scripting if lua is
+# installed... unless he says LUA=no.
+if [ -x /usr/bin/lua ] && [ "${LUA:-yes}" = "yes" ]; then
   LUA=""
+  WITHLUA="WITH"
 else
   LUA="NOLUA=1"
+  WITHLUA="WITHOUT"
 fi
 
 set -e
@@ -80,29 +95,53 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 mkdir -p $PRGNAM-$VERSION
 cd $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION-src.tgz || tar xvzf $CWD/$SRC
+tar xvf $CWD/$SRC1 || tar xvf $CWD/$SRC2
 cd $PRGNAM
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-cd src
 CFLAGS="$SLKCFLAGS" \
-make install prefix=/usr DESTDIR=$PKG $LUA
-cd ..
+  make -C src install V=1 PREFIX=/usr DESTDIR=$PKG $LUA
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# 20230421 bkw: shut sbopkglint up.
+echo "Placeholder; ignore me." > $PKG/usr/share/grafx2/scripts/libs/.emptydir.ok
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a doc/*.txt $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# 20230421 bkw: if we built the package without lua, don't include the
+# directory full of (now-useless) lua scripts.
+[ "$WITHLUA" = "WITHOUT" ] && rm -rf $PKG/usr/share/$PRGNAM/scripts
+
+# 20230421 bkw: The Makefile installs it as "grafx2-sdl", but the
+# .desktop file and man pages call it plain "grafx2". Symlink it so
+# either name is correct.
+strip $PKG/usr/bin/$PRGNAM-sdl
+ln -s $PRGNAM-sdl $PKG/usr/bin/$PRGNAM
+
+# 20230421 bkw: The 32x32 icon gets installed in the wrong place.
+# There's also a 48x48 icon hidden away, might as well install it, too.
+# Also link it to pixmap dir, for old-style WMs.
+HICOLOR=$PKG/usr/share/icons/hicolor
+mkdir -p $HICOLOR/{32x32,48x48}/apps
+mv $HICOLOR/scalable/apps/*.xpm $HICOLOR/32x32/apps
+cat misc/morphos/$PRGNAM.info > $HICOLOR/48x48/apps/$PRGNAM.png
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# 20230421 bkw: 'make install' doesn't install the man pages. Looks
+# like we have English and French ones. The .fr page is actually in
+# ASCII (not ISO-8859-1 nor UTF-8), so it goes in /usr/man/fr.
+mkdir -p $PKG/usr/man/man1 $PKG/usr/man/fr/man1
+gzip -9c < misc/unix/grafx2.1 > $PKG/usr/man/man1/grafx2.1.gz
+gzip -9c < misc/unix/grafx2.fr.1 > $PKG/usr/man/fr/man1/grafx2.1.gz
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+rm -f doc/COMPILING.txt   # don't need in package
+cp -a doc/*.txt $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@WITHLUA@,$WITHLUA," < $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
