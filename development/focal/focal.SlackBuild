@@ -1,0 +1,102 @@
+#!/bin/bash
+
+# Slackware build script for focal
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# VERSION is the date on the files inside the tarball.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=focal
+VERSION=${VERSION:-19950417}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+else
+  SLKCFLAGS="-O2"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM
+tar xvf $CWD/$PRGNAM.tar.gz
+cd $PRGNAM
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# Use our flags.
+sed -i "/^CFLAGS/s,-O -g,$SLKCFLAGS," Makefile
+
+# Fix compile issues on modern gcc. Yes, it uses the hated and
+# deprecated gets(). There are still some compiler warnings (implicit
+# int for e.g. "register c;") but they don't seem to do harm.
+sed -i '1iextern char *gets(char *s);' focal.h
+sed -i '67s,|,||,' focal3.c   # wrong: if (ln<1 | ln>99)
+sed -i 's,\<getline\>,Getline,g' *.c *.h
+
+make
+
+# Test the thing now that it's built.
+cat <<EOF | ./focal > test.out
+lib call queens.foc
+g
+quit
+EOF
+if grep -q 'Total 92 answers' test.out; then
+  echo "=== Self-test passed."
+else
+  echo "=== Self-test FAILED, bailing."
+  exit 1
+fi
+
+# beer.foc comes from https://www.99-bottles-of-beer.net/language-focal-2514.html
+# hello.foc comes from https://github.com/leachim6/hello-world but it had to
+# be modified (this FOCAL hates the line number with 4 parts).
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKG/usr/bin $PKGDOC $PKG/usr/share/$PRGNAM
+install -s -m0755 $PRGNAM $PKG/usr/bin/$PRGNAM
+install -oroot -groot -m0644 *.foc $CWD/*.foc $PKG/usr/share/$PRGNAM
+
+# Rename, in case KDE or XFCE thinks it should open this with Calligra
+# or MS-Word in Wine, based on the filename extension.
+mv focal.doc focal_doc.txt
+
+cp -a README focal_doc.txt $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
