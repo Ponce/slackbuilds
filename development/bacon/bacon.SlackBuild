@@ -1,0 +1,145 @@
+#!/bin/bash
+
+# Slackware build script for bacon
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=bacon
+VERSION=${VERSION:-4.6.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# The --enable-gui-* and --disable-gui-* don't actually work.
+# We can't run autoreconf either (fails).
+# The intent here is to build the fltk gui if fltk is installed and
+# not disabled with FLTK=no, or the tk gui if fltk is missing or
+# disabled.
+# Either way, we don't currently support the gtk 2 gui (it depends
+# on webkitgtk 2.x, which is outdated and gone from our repo) or the
+# gtk 3 gui (because I don't feel like dealing with webkit2gtk as a
+# dependency, not even an optional one).
+if [ "${FLTK:-yes}" = "yes" -a -x /usr/bin/fltk-config ]; then
+  GUI="FLTK=true TK=false GTK3=false GTK2=false"
+  GUITYPE=FLTK
+else
+  GUI="FLTK=false TK=true GTK3=false GTK2=false"
+  GUITYPE=TK
+fi
+
+# Keep the .xbm icon in a private directory, so nothing else accidentally
+# uses it (it's ugly).
+sed -i 's,/share/pixmaps/,/share/BaCon/,' bacon.bac
+
+# I use this when editing the script, to avoid the 5+ minute build time.
+# The C implementation is thousands of times faster than the shell script.
+if [ "${CHEAT:-no}" = "yes" -a -x /usr/bin/bacon ]; then
+  sed -i 's,\$(BSHELL) \./bacon\.sh,/usr/bin/bacon,' /tmp/SBo/bacon-4.6.1/Makefile.in
+fi
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --with-bash \
+  --build=$ARCH-slackware-linux
+
+# The -j1 really is needed here. Anyway the build process has a
+# 5+ minute "Converting 'bacon.bac'" that has to finish before
+# the other make targets can begin, so patching the Makefile to
+# support parallelism wouldn't actually speed it up noticeably.
+# The fakehome stuff is to keep it from creating or reading a
+# /root/.bacon/bacon.cfg file (we don't want to write outside of $TMP).
+mkdir -p `pwd`/fakehome
+HOME=`pwd`/fakehome make -j1 $GUI
+make -j1 install DESTDIR=$PKG $GUI
+
+gzip -9 $PKG/usr/man/man*/*
+
+# This is where we patched it to look for this icon:
+mv $PKG/usr/share/pixmaps/BaCon.xbm $PKG/usr/share/BaCon/
+
+# I should really do the whole /usr/share/icons and pre-scale them,
+# but for now:
+sed -i '/^Icon/s,\(=\)\(.*\),\1/usr/share/pixmaps/\2.png,' \
+       $PKG/usr/share/applications/*.desktop
+
+# The GUI has the documentation path baked in, so symlink it to the
+# the Slackware doc dir.
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a README* $PKGDOC
+ln -s ../../share/BaCon/documentation $PKGDOC/documentation
+ln -s ../../share/BaCon/LICENSE $PKGDOC/LICENSE
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+# The encscript synax file (bacon.st) gets installed to the right place.
+# Move the others to the right places.
+mkdir -p $PKG/usr/share/vim/vimfiles/syntax/
+mv $PKG/usr/share/BaCon/syntax/bacon.vim $PKG/usr/share/vim/vimfiles/syntax/bacon.vim
+mkdir -p $PKG/usr/share/gtksourceview-3.0/language-specs/
+mv $PKG/usr/share/BaCon/syntax/bacon.lang $PKG/usr/share/gtksourceview-3.0/language-specs/bacon.lang
+
+# The vim syntax file works, but won't be used automatically without this:
+mkdir -p $PKG/usr/share/vim/vimfiles/ftdetect
+echo "au! BufRead,BufNewFile *.bac,*.bacon   setfiletype bacon" > \
+     $PKG/usr/share/vim/vimfiles/ftdetect/bacon.vim
+
+mkdir -p $PKG/install
+sed "s,@GUITYPE@,$GUITYPE," < $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
