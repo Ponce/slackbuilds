@@ -8,4 +8,6 @@ if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
 fi
 
-chroot . /usr/bin/install-info --info-dir=/usr/info /usr/info/vice.info.gz
+if [ -x /usr/bin/install-info -a -e usr/info/vice.info.gz ]; then
+  /usr/bin/install-info usr/info/vice.info.gz usr/info/dir
+fi
