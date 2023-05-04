@@ -1,0 +1,99 @@
+#!/bin/bash
+
+# Slackware build script for pcbasic
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# The .deb is a "binary" package, but this is pure python, so this is
+# noarch. The python modules live in /usr/share/$PRGNAM and the main
+# /usr/bin/$PRGNAM script has been patched to load the modules from
+# there.
+
+# The html doc isn't included in the .deb; it has to be generated
+# by checking out the source tree and running "python3 -m make",
+# and it requires python/lxml and all its deps. So I just included a
+# pre-generated copy of it to make things simpler.
+
+# PyAudio and pygame are optional runtime deps, but I didn't mention
+# them in the README because "pcbasic --interface=pygame" says
+# "WARNING: The `pygame` interface is deprecated", and because
+# I couldn't get PyAudio (sound=portaudio in the config file) to
+# actually make any sound.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=pcbasic
+VERSION=${VERSION:-2.0.7}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+ARCH=noarch
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+# Extract the .deb directly to $PKG, so there's no source directory.
+# Feel free to use the "ar p ..." command in your own SlackBuild: it
+# extracts a .deb without creating any temp files.
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $PKG
+ar p $CWD/python3-${PRGNAM}_${VERSION}_all.deb data.tar.xz | tar xvfJ -
+tar xvf $CWD/$PRGNAM-doc-$VERSION.tar.xz
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# The .deb puts stuff in /usr/local, which I bet is a violation of Debian's
+# standards. It definitely violates ours. Note that the man page is installed
+# to usr/local/share/man/pcbasic.1.gz (with no man1/ dir). Also, they
+# have a bunch of symlinks for the various python 3.x versions, where 3.6
+# is the one that *isn't* a link.
+# Fortunately, the paths aren't hardcoded in the code, and we can move things
+# around as needed, without breaking everything.
+PYLIB=usr/share/$PRGNAM
+ICONDIR=usr/share/icons/hicolor/32x32/apps
+APPDIR=usr/share/applications
+
+mkdir -p usr/bin usr/man/man1 $PYLIB $ICONDIR $APPDIR
+mv usr/local/bin/* usr/bin
+mv usr/local/share/man/* usr/man/man1
+mv usr/local/lib/python3.6/dist-packages/* $PYLIB
+mv usr/local/share/applications/* $APPDIR
+mv usr/local/share/icons/* $ICONDIR
+rm -rf usr/local                      # no files left in this dir anyway...
+rm -rf usr/share/pcbasic/pcbasic/lib  # don't need this.
+
+# Make the main program look in our private dir for its python modules.
+sed -i -e '2iimport sys' \
+       -e "2isys.path.insert(0, '/usr/share/pcbasic')" \
+       usr/bin/pcbasic
+
+# Get rid of hardcoded incorrect path.
+sed -i 's,/usr/local/bin/,,' $APPDIR/*.desktop
+
+# Old-style icon.
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/32x32/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+ln -s ../../share/$PRGNAM/$PRGNAM-$VERSION.dist-info/licenses/LICENSE.md $PKGDOC
+ln -s ../../share/$PRGNAM/$PRGNAM/data/programs $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
