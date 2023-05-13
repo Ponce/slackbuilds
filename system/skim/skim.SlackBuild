@@ -3,6 +3,7 @@
 # Slackware build script for skim
 
 # Copyright 2019-2021 Benjamin Trigona-Harany <slackbuilds@jaxartes.net>
+# Copyright 2023 Andrew Clemons, Tokyo Japan
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -26,7 +27,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=skim
 BINNAM=sk
-VERSION=${VERSION:-0.9.4}
+VERSION=${VERSION:-0.10.4}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -45,9 +46,6 @@ if [ -z "$ARCH" ]; then
   fi
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -60,15 +58,15 @@ OUTPUT=${OUTPUT:-/tmp}
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
-  CARGOTARGET="--target i586-unknown-linux-gnu"
+  CARGOTARGET="--target $ARCH-unknown-linux-gnu"
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
-  CARGOTARGET="--target i686-unknown-linux-gnu"
-elif [ "$ARCH" = "x86_64" ]; then
+  CARGOTARGET="--target $ARCH-unknown-linux-gnu"
+elif [ "$ARCH" = "x86_64" ] || [ "$ARCH" = "aarch64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
-  CARGOTARGET="--target x86_64-unknown-linux-gnu"
+  CARGOTARGET="--target $ARCH-unknown-linux-gnu"
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
@@ -130,7 +128,7 @@ mkdir vendor
       sha256sum "$CWD/$dep-$ver.crate" | cut -f1 -d' ' | sed 's/$/"/'
 
       printf "}\n"
-    } | python -c "import sys, json; data = sys.stdin.read(); print json.dumps(json.loads(data), sort_keys=True, indent=4, separators=(',', ' : '))" > $dep-$ver/.cargo-checksum.json
+    } > $dep-$ver/.cargo-checksum.json
   done
 )
 
@@ -141,6 +139,13 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
+export PATH="/opt/rust16/bin:$PATH"
+if [ -z "$LD_LIBRARY_PATH" ]; then
+  export LD_LIBRARY_PATH="/opt/rust16/lib$LIBDIRSUFFIX"
+else
+  export LD_LIBRARY_PATH="/opt/rust16/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
+fi
+
 CARGO_HOME=.cargo \
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -148,16 +153,37 @@ cargo build --offline --release $CARGOTARGET
 
 mkdir -p $PKG/usr/bin/
 find target -name $BINNAM -exec install -m 755 {} $PKG/usr/bin/$BINNAM \;
+install -m 755 bin/sk-tmux $PKG/usr/bin/sk-tmux
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+WITH_VIM=${WITH_VIM:-yes}
+if [ "$WITH_VIM" = "yes" ] ; then
+  mkdir -p $PKG/usr/share/vim/vimfiles/plugin
+  install -m 0644 plugin/skim.vim $PKG/usr/share/vim/vimfiles/plugin
+
+  # neovim support
+  mkdir -p $PKG/usr/share/nvim/runtime/plugin
+  (
+    cd $PKG/usr/share/nvim/runtime
+
+
+    ln -s ../../../vim/vimfiles/plugin/skim.vim plugin/skim.vim
+  )
+else
+  mkdir -p $PKG/usr/share/skim/vim/
+  install -m 0644 plugin/skim.vim $PKG/usr/share/skim/vim/
+fi
 
 mkdir -p $PKG/usr/share/bash-completion/completions
 install -m 644 shell/completion.bash $PKG/usr/share/bash-completion/completions/skim
 
 mkdir -p $PKG/usr/man/man1
 cp -a man/man1/*.1 $PKG/usr/man/man1
-gzip -9 $PKG/usr/man/man1/*.1
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a -r \
