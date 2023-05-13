@@ -1,0 +1,200 @@
+#!/bin/bash
+
+# Slackware build script for jogamp
+
+# Copyright 2023 Giancarlo Dessì, Cagliari, IT
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=jogamp
+VERSION=${VERSION:-2.4.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+# The environment variable $JAVA_HOME is needed to pass the
+# path of the JDK installed. This should be available as
+# system environment variable. If not we have to pass it to
+# the script manually
+RTJAR=${RTJAR:-${JAVA_HOME}/lib/rt.jar}
+if [ "$JAVA_HOME" = "" ]; then
+	echo "* * * * * * * * * * *  WARNING  * * * * * * * * * * * *"
+	echo "*                                                     *"
+	echo "* CANNOT FIND THE HOME DIRECTORY OF JAVA SDK IN YOUR  *"
+	echo "* SYSTEM. PLEASE LAUNCH THIS SCRIPT PASSING THE       *"
+	echo "* ENVIRONMENT VARIABLE \$JAVA_HOME as following        *"
+	echo "*                                                     *"
+	echo "* \$JAVA_HOME=<path of your SDK> ./jogamp.SlackBuild   *"
+	echo "*                                                     *"
+	echo "* * * * * * * * * * * * * * * * * * * * * * * * * * * *"
+	exit 
+fi
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM
+mkdir $PRGNAM
+cd $PRGNAM
+tar xvf $CWD/gluegen-v$VERSION.tar.xz
+tar xvf $CWD/jcpp-v$VERSION.tar.xz
+cp -a jcpp-v$VERSION/src gluegen-v$VERSION/jcpp/
+mv gluegen-v$VERSION gluegen
+tar xvf $CWD/jogl-v$VERSION.tar.xz
+cp -a jcpp-v$VERSION/src jogl-v$VERSION/jcpp/
+mv jogl-v$VERSION jogl
+if [ "${JOAL:-yes}" = "yes" ]; then
+   tar xvf $CWD/joal-v$VERSION.tar.xz
+   cp -a jcpp-v$VERSION/src joal-v$VERSION/jcpp/
+   mv joal-v$VERSION joal
+fi
+if [ "${JOCL:-no}" != "no" ]; then
+   tar xvf $CWD/jocl-v$VERSION.tar.xz
+   cp -a jcpp-v$VERSION/src jocl-v$VERSION/jcpp/
+   mv jocl-v$VERSION jocl
+fi
+
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+unset CLASSPATH
+export SOURCE_LEVEL=1.8
+export TARGET_LEVEL=1.8
+export TARGET_RT_JAR=$RTJAR
+
+echo "************ Building of gluegen module *********************" 
+cd gluegen/make
+ant clean
+ant
+ant junit.run
+
+if [ "${JOAL}" != "no" ]; then
+echo "************ Building of Joal module *********************"
+   cd ../../joal/make
+   ant clean
+   ant
+else 
+echo "************ Bulding of Joal module skipped *******************"
+fi
+
+echo "************ Building of Jogl module *********************" 
+cd ../../jogl/make
+ant clean
+ant
+
+if [ "${JOCL}" = "yes" ]; then
+echo "************ Building of Jocl module *********************"
+   cd ../../jocl/make
+   ant
+else
+echo "************ Bulding of Jocl module skipped *******************"
+fi
+
+cd ../../
+
+# fix some bad perms in doc files that have to install
+chmod 644 gluegen/LICENSE.txt joal/LICENSE.txt 
+
+# Prepare the three of package
+mkdir -p $PKG/usr/share/java
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/jogamp
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/gluegen
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/jogl
+if [ "${JOAL}" != "no" ]; then
+ mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/joal
+fi
+if [ "${JOCL}" = "yes" ]; then
+ mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/jocl
+fi
+
+( cp -a gluegen/build/gluegen-rt.jar $PKG/usr/share/java )
+( cp -a gluegen/build/obj/*.so $PKG/usr/lib${LIBDIRSUFFIX}/jogamp )
+( cp -a gluegen/LICENSE.txt $PKG/usr/doc/$PRGNAM-$VERSION/gluegen )
+if [ "${JOAL}" != "no" ]; then 
+ ( cp -a joal/build/jar/joal.jar $PKG/usr/share/java )
+ ( cp -a joal/build/obj/*.so $PKG/usr/lib${LIBDIRSUFFIX}/jogamp )
+ ( cp -a joal/LICENSE.txt $PKG/usr/doc/$PRGNAM-$VERSION/joal )
+ ( cp -a joal/README.txt $PKG/usr/doc/$PRGNAM-$VERSION/joal )
+fi
+( cp -a jogl/build/jar/jogl-all.jar $PKG/usr/share/java )
+( cp -a jogl/build/lib/*.so $PKG/usr/lib${LIBDIRSUFFIX}/jogamp )
+( cp -a jogl/LICENSE.txt $PKG/usr/doc/$PRGNAM-$VERSION/jogl )
+( cp -a jogl/README.txt $PKG/usr/doc/$PRGNAM-$VERSION/jogl )
+if [ "${JOCL}" = "yes" ]; then 
+ ( cp -a jocl/build/jar/jocl.jar $PKG/usr/share/java )
+ ( cp -a jocl/build/obj/*.so $PKG/usr/lib${LIBDIRSUFFIX}/jogamp )
+ ( cp -a jocl/LICENSE.txt $PKG/usr/doc/$PRGNAM-$VERSION/jocl )
+ ( cp -a jocl/README.txt $PKG/usr/doc/$PRGNAM-$VERSION/jocl )
+fi
+
+( cd $PKG/usr/share/java ; rm -f jogl.jar )
+( cd $PKG/usr/share/java ; ln -sf jogl-all.jar jogl.jar )
+
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
