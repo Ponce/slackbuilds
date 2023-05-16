@@ -22,6 +22,13 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 2023-05-16 DW
+# Removed LIBDIRSUFFIX and made 'lib64' hard-coded as we're 64bit only
+# Simplified/moved ARCH parts
+# Moved broken symlinks out of doinst.sh to slackbuild
+# NOTE download page shows newer version available, but all file and
+# subdirectory locations have changed
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=cudatoolkit
@@ -32,12 +39,14 @@ BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
+if [ -z "$ARCH" ]; then
+  ARCH=$( uname -m )
+fi
 
-case "$( uname -m )" in
-  i?86) ARCH=i386 ;;
-  arm*) ARCH=arm ;;
-     *) ARCH=$( uname -m ) ;;
-esac
+if [ "$ARCH" != "x86_64" ]; then
+  echo "$ARCH architecture is unsupported." >/dev/stderr
+  exit 1
+fi
 
 # If the variable PRINT_PACKAGE_NAME is set, then this script will report what
 # the name of the created package would be, and then exit. This information
@@ -52,13 +61,6 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 set -e
-
-if [ "$ARCH" = "x86_64" ]; then
-  LIBDIRSUFFIX="64"
-else
-  printf "\n\n$ARCH is not supported... \n"
-  exit 1
-fi
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -75,13 +77,8 @@ cd $PRGNAM-$VERSION/builds
 cp -r cuda-toolkit "$PKG/usr/share/cuda"
 cp -r cublas/include/* "$PKG/usr/share/cuda/include/"
 mkdir -p $PKG/usr/lib64
-cp -r cublas/lib64/* "$PKG/usr/lib$LIBDIRSUFFIX/"
+cp -r cublas/lib64/* "$PKG/usr/lib64/"
 cp -r cuda-samples "$PKG/usr/share/cuda/samples"
-
-# Define compilers for CUDA to use.
-# This allows us to use older versions of GCC if we have to.
-# ln -s /usr/bin/gcc-8 "${PKG}/usr/share/cuda/bin/gcc"
-# ln -s /usr/bin/g++-8 "${PKG}/usr/share/cuda/bin/g++"
 
 # Put man in the standard place
 mv $PKG/usr/share/cuda/doc/man $PKG/usr/
@@ -99,18 +96,18 @@ find cuda-toolkit/targets -type f -name '*.so*' ! -path '*stubs/*' -print0 | whi
   _base=${_lib%.so.*}
   _current_soname=$(basename ${_lib%.*})
   while [[ $_current_soname != $(basename $_base) ]]; do
-    ln -sf ${_lib##*/} ${PKG}/usr/share/cuda/lib$LIBDIRSUFFIX/$_current_soname
+    ln -sf ${_lib##*/} ${PKG}/usr/share/cuda/lib64/$_current_soname
     _current_soname=${_current_soname%.*}
   done
 done
 
-# Install profile and ld.so.config files
-install -Dm755 "${CWD}/files/cuda.sh" "${PKG}/etc/profile.d/cuda.sh"
-install -Dm755 "${CWD}/files/cuda.csh" "${PKG}/etc/profile.d/cuda.csh"
+# Install profiles
+install -D -m 755 "${CWD}/files/cuda.sh" "${PKG}/etc/profile.d/cuda.sh"
+install -D -m 755 "${CWD}/files/cuda.csh" "${PKG}/etc/profile.d/cuda.csh"
 
 # Install pkgconfig files
-mkdir -p "$PKG"/usr/lib${LIBDIRSUFFIX}/pkgconfig
-cp "${CWD}"/files/*.pc "${PKG}"/usr/lib${LIBDIRSUFFIX}/pkgconfig
+mkdir -p "$PKG"/usr/lib64/pkgconfig
+cp "${CWD}"/files/*.pc "${PKG}"/usr/lib64/pkgconfig
 
 # Remove included copy of java and link to system java 8
 rm -fr  "${PKG}/usr/share/cuda/jre"
@@ -130,13 +127,13 @@ for f in $(find "$PKG"/usr/share/cuda -name Makefile); do
 done
 
 # Put libraries in the standard place
-mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}
-mv -fn $PKG/usr/share/cuda/targets/x86_64-linux/lib/* $PKG/usr/lib${LIBDIRSUFFIX}/
+mkdir -p $PKG/usr/lib64
+mv -fn $PKG/usr/share/cuda/targets/x86_64-linux/lib/* $PKG/usr/lib64/
 rm -rf $PKG/usr/share/cuda/targets/x86_64-linux/lib
 cd $PKG/usr/share/cuda
-ln -sf ../../lib${LIBDIRSUFFIX} lib${LIBDIRSUFFIX}
+ln -sf ../../lib64 lib64
 
-# Register application  NVVP and NSIGHT 
+# Register application  NVVP and NSIGHT
 mkdir -p $PKG/usr/share/applications
 cp $CWD/files/*.desktop $PKG/usr/share/applications
 
@@ -144,17 +141,24 @@ cp $CWD/files/*.desktop $PKG/usr/share/applications
 mkdir -p $PKG/usr/include
 mv -fn $PKG/usr/share/cuda/targets/x86_64-linux/include/* $PKG/usr/include/
 rm -rf $PKG/usr/share/cuda/targets/x86_64-linux/include
-cd $PKG/usr/share/cuda/
-ln -sf ../../include include
+( cd $PKG/usr/share/cuda/ ; ln -sf ../../include include )
+find $PKG/usr/include -type f | xargs chmod -c 0644
+
+# DW: moved here from doinst.sh. Link to 15.0 gcc
+(
+  cd $PKG/usr/share/cuda/bin/
+  ln -sf /usr/bin/gcc-11.2.0     gcc
+  ln -sf /usr/bin/g++-gcc-11.2.0 g++
+)
 
 rm -rf $PKG/usr/share/cuda/targets
 
 # These are already in the nvidia-driver package
-rm -f $PKG/usr/lib${LIBDIRSUFFIX}/libOpenCL.s*
+rm -f $PKG/usr/lib64/libOpenCL.s*
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -c n -l y $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
