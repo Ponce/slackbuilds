@@ -34,11 +34,15 @@ PKGTYPE=${PKGTYPE:-tgz}
 ORAVER="21"
 
 if [ -z "$ARCH" ]; then
-  case "$( uname -m )" in
-      i?86) ARCH=i386 ;;
-    x86_64) ARCH=x86_64 ;;
-         *) echo "Architecture not supported"; exit 0;
-  esac
+  ARCH=$( uname -m )
+fi
+
+# 2023-05-16 DW: moved above PRINT_PACKAGE_NAME
+if [ "$ARCH" = "x86_64" ]; then
+  LIBDIRSUFFIX="64"
+else
+  echo "$ARCH architecture is unsupported." >/dev/stderr
+  exit 1
 fi
 
 # If the variable PRINT_PACKAGE_NAME is set, then this script will report what
@@ -53,12 +57,6 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-
-if [ "$ARCH" = "x86_64" ]; then
-  LIBDIRSUFFIX="64"
-else
-  LIBDIRSUFFIX=""
-fi
 
 # recreating the name of the RPM
 RPMNAM="$PRGNAM-$VERSION-$RELEASE.$ARCH.rpm"
@@ -79,11 +77,11 @@ if [ "$LIBDIRSUFFIX" = "64" ]; then
     mv $PKG/usr/lib $PKG/usr/lib${LIBDIRSUFFIX}
 fi
 
-ORACLE_CLIENT_HOME="/usr/lib${LIBDIRSUFFIX}/oracle/${ORAVER}/\
-client${LIBDIRSUFFIX}"
+# 2023-05-16 DW: I think this is safer on a single line
+ORACLE_CLIENT_HOME="/usr/lib${LIBDIRSUFFIX}/oracle/${ORAVER}/client${LIBDIRSUFFIX}"
 
 # Testing if ORACLE already installed
-if [ ! -z "${ORACLE_HOME}" ]; then
+if [ "$ORACLE_HOME" ]; then
     # make symbolic links to client apps
     mkdir -p $PKG/$ORACLE_HOME/bin
     for app in $(ls $PKG/${ORACLE_CLIENT_HOME}/bin) ; do
@@ -92,18 +90,39 @@ if [ ! -z "${ORACLE_HOME}" ]; then
     done
 fi
 
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
 # Making csh file for profile.d
 mkdir -p $PKG/etc/profile.d/
 cat << EOF > $PKG/etc/profile.d/$PRGNAM.csh
 #!/bin/csh
 setenv ORACLE_CLIENT_HOME ${ORACLE_CLIENT_HOME}
 
-if ( -z "\$ORACLE_HOME" ) then
-    setenv ORACLE_HOME \$ORACLE_CLIENT_HOME
+# 2023-05-16 DW: csh syntax
+if ( ! \$?ORACLE_HOME ) then
+  setenv ORACLE_HOME \$ORACLE_CLIENT_HOME
 endif
 
-setenv PATH \$PATH:\$ORACLE_CLIENT_HOME/bin
-setenv CLASSPATH \$CLASSPATH:\$ORACLE_CLIENT_HOME/lib/ojdbc6.jar
+# 2023-05-16 DW: csh uses a lowercase path array
+set path = ( \$path \$ORACLE_CLIENT_HOME/bin )
+
+# 2023-05-16 DW: will set this, but braces to stop : modifier errors
+setenv PATH \${PATH}:\${ORACLE_CLIENT_HOME}/bin
+
+# 2023-05-16 DW: test if CLASSPATH is set or not to avoid errors
+if ( \$?CLASSPATH ) then
+  setenv CLASSPATH \${CLASSPATH}:\${ORACLE_CLIENT_HOME}/lib/ojdbc6.jar
+else
+  setenv CLASSPATH \${ORACLE_CLIENT_HOME}/lib/ojdbc6.jar
+endif
+
+# 2023-05-16 DW: it seems that this is also needed
+if ( \$?LD_LIBRARY_PATH ) then
+  setenv LD_LIBRARY_PATH \${LD_LIBRARY_PATH}:\${ORACLE_CLIENT_HOME}/lib
+else
+  setenv LD_LIBRARY_PATH \${ORACLE_CLIENT_HOME}/lib
+endif
 EOF
 
 # Making sh file for profile.d
@@ -117,6 +136,13 @@ fi
 
 export PATH=\$PATH:\$ORACLE_CLIENT_HOME/bin
 export CLASSPATH=\$CLASSPATH:\$ORACLE_CLIENT_HOME/lib/ojdbc6.jar
+
+# 2023-05-16 DW: add this here too JIC (untested)
+if [ "\$LD_LIBRARY_PATH" ]; then
+  export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:\$ORACLE_CLIENT_HOME/lib
+else
+  export LD_LIBRARY_PATH=\$ORACLE_CLIENT_HOME/lib
+fi
 EOF
 chmod 755 $PKG/etc/profile.d/*sh
 
@@ -125,17 +151,6 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-
-# Making doinst.sh file
-cat << EOF > $PKG/install/doinst.sh
-if ! grep $ORACLE_CLIENT_HOME/lib etc/ld.so.conf 1> /dev/null 2> /dev/null ; then
-  echo "$ORACLE_CLIENT_HOME/lib" >> etc/ld.so.conf
-fi
-
-if [ -x /sbin/ldconfig ]; then
-  /sbin/ldconfig 2> /dev/null
-fi
-EOF
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
