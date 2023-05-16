@@ -1,0 +1,446 @@
+diff --git a/dis.h b/dis.h
+index 607678d..c48a6c2 100644
+--- a/dis.h
++++ b/dis.h
+@@ -1,8 +1,7 @@
+ /*
+  * dis6502 by Robert Bond, Udi Finkelstein, and Eric Smith
+  *
+- * $Id: dis.h 26 2004-01-17 23:28:23Z eric $
+- * Copyright 2000-2016 Eric Smith <spacewar@gmail.com>
++ * Copyright 2000-2018 Eric Smith <spacewar@gmail.com>
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+@@ -21,7 +20,7 @@
+  */
+ 
+ 
+-extern int sevenbit;  /* if true, mask character data with 0x7f
++extern bool sevenbit;  /* if true, mask character data with 0x7f
+ 			 to ignore MSB */
+ 
+ typedef uint16_t addr_t;
+@@ -41,6 +40,10 @@ extern int base_address, vector_address;
+ extern int entry_count;
+ extern int entry_address[MAX_ENTRY];
+ 
++
++extern bool prodos;
++
++
+ extern int asmout;
+ extern unsigned char f[];
+ extern unsigned char d[];
+@@ -116,8 +119,9 @@ char *get_name(addr_t loc);
+ #define TSTOP 262
+ #define TRTSTAB 263
+ #define TJTAB2 264
+-#define EQS 265
+-#define OFS 266
++#define TJTAB 265
++#define EQS 266
++#define OFS 267
+ 
+ extern FILE *yyin, *yyout;
+ int lineno;
+diff --git a/initopts.c b/initopts.c
+index f33345c..f5bb146 100644
+--- a/initopts.c
++++ b/initopts.c
+@@ -1,10 +1,8 @@
+ /* 
+- * 
+- *  dis [-p predefineds] file
+- *
+- *  The -p option may be repeated.
++ * Copyright 2001-2018 Eric Smith <spacewar@gmail.com>
+  */
+ 
++#include <stdbool.h>
+ #include <stdint.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -37,7 +35,8 @@ void usage (void)
+                    "            -p <file>      predefs\n"
+ 	           "            -e <address>   alternate entry point address\n"
+ 	           "            -v <address>   alternate vector address\n"
+-	   	   "            -7             mask character data to 7-bit",
++	   	   "            -7             mask character data to 7-bit\n"
++	           "            -P             decode ProDOS MLI calls\n",
+ 	   progname);
+   exit (1);
+ }
+@@ -96,7 +95,10 @@ void initopts (int argc, char *argv[])
+ 		bopt = ATARI_BOOT;
+ 		break;
+ 	      case '7':
+-		sevenbit = 1;
++		sevenbit = true;
++		break;
++	      case 'P':
++		prodos = true;
+ 		break;
+ 	      default: crash("Invalid option letter");
+ 	      }
+diff --git a/lex.l b/lex.l
+index 1899887..3c637c6 100644
+--- a/lex.l
++++ b/lex.l
+@@ -1,8 +1,7 @@
+ /*
+  * dis6502 by Robert Bond, Udi Finkelstein, and Eric Smith
+  *
+- * $Id: lex.l 26 2004-01-17 23:28:23Z eric $
+- * Copyright 2001-2014 Eric Smith <eric@brouhaha.com>
++ * Copyright 2001-2018 Eric Smith <spacewar@gmail.com>
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+@@ -23,6 +22,7 @@
+ 
+ %{
+ #undef ECHO
++#include <stdbool.h>
+ #include <stdint.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -62,6 +62,8 @@ alphanum	[0-9a-zA-Z_]
+ 
+ \.[Jj][Tt][Aa][Bb]2	{ return TJTAB2; }
+ 
++\.[Jj][Tt][Aa][Bb]	{ return TJTAB; }
++
+ {digit}+		{
+ 			  (void)sscanf(yytext, "%d", &token.ival); 
+ 			  return NUMBER;
+diff --git a/main.c b/main.c
+index cdc3c23..a6f101d 100644
+--- a/main.c
++++ b/main.c
+@@ -1,8 +1,7 @@
+ /*
+  * dis6502 by Robert Bond, Udi Finkelstein, and Eric Smith
+  *
+- * $Id: main.c 26 2004-01-17 23:28:23Z eric $
+- * Copyright 2000-2016 Eric Smith <eric@brouhaha.com>
++ * Copyright 2000-2018 Eric Smith <spacewar@gmail.com>
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+@@ -21,6 +20,7 @@
+  */
+ 
+ 
++#include <stdbool.h>
+ #include <stdint.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -28,7 +28,8 @@
+ 
+ #include "dis.h"
+ 
+-int sevenbit = 0;  /* if true, mask character data with 0x7f to ignore MSB */
++bool sevenbit = false;  /* if true, mask character data with 0x7f to ignore MSB */
++bool prodos = false;
+ 
+ #define NTSTART 500
+ 
+@@ -44,6 +45,12 @@ int rtstab_addr [RTSTAB_MAX];		/* .rtstab directive */
+ int rtstab_size [RTSTAB_MAX];
+ int rtstab_count = 0;
+ 
++#define JTAB_MAX 50
++
++int jtab_addr [JTAB_MAX];		/* .jtab directive */
++int jtab_size [JTAB_MAX];
++int jtab_count = 0;
++
+ #define JTAB2_MAX 50
+ 
+ int jtab2_addr_low  [JTAB2_MAX];	/* .jtab2 directive */
+@@ -122,6 +129,18 @@ void trace_inst (addr_t addr)
+ 	  break;
+ 	}
+ 
++      // handle ProDOS MLI calls
++      if (prodos && (opcode == 0x20) && (operand == 0xbf00))
++	{
++	  f[addr++] |= TDONE;  // system call number
++	  uint16_t parameter_list = getword(addr);
++	  f[addr++] |= TDONE;
++	  f[addr++] |= TDONE;
++	  f[parameter_list] |= DREF;
++	  save_ref(istart, operand);
++	  continue;
++	}
++
+       /* Mark data references */
+ 
+       switch (ip->flag & ADRMASK)
+@@ -211,8 +230,7 @@ void start_trace (addr_t loc, char *name)
+ 
+ void do_ptrace (void)
+ {
+-  int i;
+-  for (i = 0; i<tstarti; i++)
++  for (int i = 0; i<tstarti; i++)
+     {
+       char *trace_sym = (char *) malloc (6);
+       sprintf (trace_sym, "P%04x", tstart [i]);
+@@ -223,16 +241,29 @@ void do_ptrace (void)
+ 
+ void do_rtstab (void)
+ {
+-  int i, j;
+-  int loc, code;
++  for (int i = 0; i < rtstab_count; i++)
++    {
++      int loc = rtstab_addr [i];
++      for (int j = 0; j < rtstab_size [i]; j++)
++	{
++	  char *trace_sym = (char *) malloc (6);
++	  int code = d [loc] + (d [loc + 1] << 8) + 1;
++	  sprintf (trace_sym, "T%04x", code);
++	  start_trace (code, trace_sym);
++	  loc += 2;
++	}
++    }
++}
+ 
+-  for (i = 0; i < rtstab_count; i++)
++void do_jtab (void)
++{
++  for (int i = 0; i < jtab_count; i++)
+     {
+-      loc = rtstab_addr [i];
+-      for (j = 0; j < rtstab_size [i]; j++)
++      int loc = jtab_addr [i];
++      for (int j = 0; j < jtab_size [i]; j++)
+ 	{
+ 	  char *trace_sym = (char *) malloc (6);
+-	  code = d [loc] + (d [loc + 1] << 8) + 1;
++	  int code = d [loc] + (d [loc + 1] << 8);
+ 	  sprintf (trace_sym, "T%04x", code);
+ 	  start_trace (code, trace_sym);
+ 	  loc += 2;
+@@ -242,16 +273,14 @@ void do_rtstab (void)
+ 
+ void do_jtab2 (void)
+ {
+-  int i, j;
+-  int loc_l, loc_h, code;
+-  for (i = 0; i < jtab2_count; i++)
++  for (int i = 0; i < jtab2_count; i++)
+     {
+-      loc_l = jtab2_addr_low [i];
+-      loc_h = jtab2_addr_high [i];
+-      for (j = 0; j < jtab2_size [i]; j++)
++      int loc_l = jtab2_addr_low [i];
++      int loc_h = jtab2_addr_high [i];
++      for (int j = 0; j < jtab2_size [i]; j++)
+ 	{
+ 	  char *trace_sym = (char *) malloc (6);
+-	  code = d [loc_l + j] + (d [loc_h + j] << 8);
++	  int code = d [loc_l + j] + (d [loc_h + j] << 8);
+ 	  sprintf (trace_sym, "T%04x", code);
+ 	  start_trace (code, trace_sym);
+ 	}
+@@ -295,6 +324,7 @@ int main (int argc, char *argv[])
+ 
+ 	do_ptrace ();
+ 	do_rtstab ();
++	do_jtab ();
+ 	do_jtab2 ();
+ 
+ 	trace_all ();
+@@ -308,7 +338,6 @@ int main (int argc, char *argv[])
+ void get_predef (void)
+ {
+ 	long loc, loc2;
+-	int i;
+ 	int size;
+ 	char *name;
+ 
+@@ -334,6 +363,20 @@ void get_predef (void)
+ 		  rtstab_addr [rtstab_count] = loc;
+ 		  rtstab_size [rtstab_count++] = size;
+ 		  break;
++		case TJTAB:
++		  if (yylex() != NUMBER)
++		    crash(".jtab needs an address operand");
++		  loc = token.ival;
++		  if (loc > 0x10000 || loc < 0)
++		    crash("Number out of range");
++		  if (yylex() != ',')
++		    crash(".jtab needs a comma");
++		  if (yylex() != NUMBER)
++		    crash(".jtab needs a comma");
++		  size = token.ival;
++		  jtab_addr [jtab_count] = loc;
++		  jtab_size [jtab_count++] = size;
++		  break;
+ 		case TJTAB2:
+ 		  if (yylex() != NUMBER)
+ 		    crash(".jtab2 needs a number operand");
+@@ -401,7 +444,7 @@ void get_predef (void)
+ 			    size = token.ival;
+ 			    f[loc] |= NAMED;
+ 			    save_name(loc, name);
+-			    for (i = 1; i < size; i++)
++			    for (int i = 1; i < size; i++)
+ 			      {
+ 				f [loc + i] |= OFFSET;
+ 				offset [loc + i] = -i;
+@@ -449,7 +492,6 @@ void loadboot (void)
+ 
+ 	FILE *fp;
+ 	int base_addr;
+-	register int i;
+ 	int len;
+ 
+ 	fp = fopen(file, "r");
+@@ -469,7 +511,7 @@ void loadboot (void)
+ 	if (fread((char *)&d[base_addr], 1, len, fp) != len) 
+ 		crash("input too short");
+ 
+-	for(i = base_addr; len > 0; len--) 
++	for(int i = base_addr; len > 0; len--) 
+ 		f[i++] |= LOADED;
+ 
+ 	start_trace(base_addr+6, "**BOOT**");
+@@ -481,7 +523,7 @@ void loadfile (void)
+ 	FILE *fp;
+ 	int base_addr;
+ 	int last_addr;
+-	register int i;
++	int i;
+ 	int had_header;
+ 	int tmp;
+ 
+@@ -603,13 +645,12 @@ void binaryloadfile (void)
+ 
+   if (entry_count)
+     {
+-      int i;
+-      char label [8];
+-      for (i = 0; i < entry_count; i++)
++      for (int j = 0; j < entry_count; j++)
+ 	{
+-	  snprintf (label, sizeof (label), "e_%04x", entry_address[i]);
++	  char *label = malloc(7);
++	  sprintf (label, "e_%04x", entry_address[j]);
+ 	  printf("label: %s\n", label);
+-	  start_trace (entry_address[i], label);
++	  start_trace (entry_address[j], label);
+ 	}
+     }
+   else
+diff --git a/print.c b/print.c
+index a049a91..1a3f25c 100644
+--- a/print.c
++++ b/print.c
+@@ -1,8 +1,7 @@
+ /*
+  * dis6502 by Robert Bond, Udi Finkelstein, and Eric Smith
+  *
+- * $Id: print.c 26 2004-01-17 23:28:23Z eric $
+- * Copyright 2000-2014 Eric Smith <eric@brouhaha.com>
++ * Copyright 2000-2018 Eric Smith <spacewar@gmail.com>
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+@@ -20,7 +19,7 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111 USA
+  */
+ 
+-
++#include <stdbool.h>
+ #include <stdint.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -247,7 +246,7 @@ int print_data (addr_t i)
+ 	i++;
+ 
+ 	for (j = 1; j < 8; j++) {
+-		if (f[i] & (JREF | SREF | DREF) || ((f[i] & LOADED) == 0)) 
++		if (f[i] & (JREF | SREF | DREF | ISOP) || ((f[i] & LOADED) == 0)) 
+ 			break;
+ 		else
+ 			printf(",$%02x", getbyte(i));
+diff --git a/ref.c b/ref.c
+index 879ddb1..5a40156 100644
+--- a/ref.c
++++ b/ref.c
+@@ -1,8 +1,7 @@
+ /*
+  * dis6502 by Robert Bond, Udi Finkelstein, and Eric Smith
+  *
+- * $Id: ref.c,v 1.5 2003/09/15 21:49:25 eric Exp $
+- * Copyright 2001-2003 Eric Smith <eric@brouhaha.com>
++ * Copyright 2001-2018 Eric Smith <spacewar@gmail.com>
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+@@ -21,6 +20,7 @@
+  */
+ 
+ 
++#include <stdbool.h>
+ #include <stdint.h>
+ #include <stdio.h>
+ 
+diff --git a/tbl.c b/tbl.c
+index 8a5f3b4..c42f56e 100644
+--- a/tbl.c
++++ b/tbl.c
+@@ -1,8 +1,7 @@
+ /*
+  * dis6502 by Robert Bond, Udi Finkelstein, and Eric Smith
+  *
+- * $Id: tbl.c 26 2004-01-17 23:28:23Z eric $
+- * Copyright 2001-2014 Eric Smith <eric@brouhaha.com>
++ * Copyright 2001-2018 Eric Smith <spacewar@gmail.com>
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+@@ -20,7 +19,7 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111 USA
+  */
+ 
+-
++#include <stdbool.h>
+ #include <stdint.h>
+ #include <stdio.h>
+ 
+@@ -83,6 +82,7 @@ struct info optbl[256] = {
+ 	[0x41] = { "eor", 2, INX },
+ 
+ 	[0x45] = { "eor", 2, ZPG },
++	[0x46] = { "lsr", 2, ZPG },
+ 
+         [0x48] = { "pha", 1, IMP },
+ 	[0x49] = { "eor", 2, IMM },
+diff --git a/trace_queue.c b/trace_queue.c
+index 332473c..dc8852f 100644
+--- a/trace_queue.c
++++ b/trace_queue.c
+@@ -1,8 +1,7 @@
+ /*
+  * dis6502 by Robert Bond, Udi Finkelstein, and Eric Smith
+  *
+- * $Id: trace_queue.c,v 1.2 2003/09/15 21:49:25 eric Exp $
+- * Copyright 2000-2003 Eric Smith <eric@brouhaha.com>
++ * Copyright 2000-2018 Eric Smith <spacewar@gmail.com>
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+@@ -20,7 +19,7 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111 USA
+  */
+ 
+-
++#include <stdbool.h>
+ #include <stdint.h>
+ #include <stdio.h>
+ #include "dis.h"
