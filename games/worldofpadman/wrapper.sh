@@ -7,4 +7,4 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-exec /opt/worldofpadman/@EXE@.@ARCH@ "$@"
+exec /opt/worldofpadman/@EXE@.@SRCARCH@ "$@"
