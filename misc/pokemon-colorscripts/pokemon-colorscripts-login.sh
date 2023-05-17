@@ -1,5 +1,5 @@
 #!/bin/sh
-# Print a random pokemon for interactive shells:
+# Print a random pokémon for interactive shells:
 
 case $- in
 *i* )  # We're interactive
