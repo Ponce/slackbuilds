@@ -1,0 +1,144 @@
+#!/bin/bash
+
+# Copyright 2008, 2009, 2010, 2011, 2013, 2014, 2016, 2017, 2018, 2020, 2021  Patrick J. Volkerding, Sebeka, MN, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=curl-quic
+TGZNAM=curl
+VERSION=${VERSION:-8.0.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) export ARCH=i586 ;;
+    arm*) export ARCH=arm ;;
+       *) export ARCH=$( uname -m ) ;;
+  esac
+fi
+
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+OUTPUT=${OUTPUT:-/tmp}
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "s390" ]; then
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+mkdir -p $OUTPUT
+
+rm -rf $PKG
+
+mkdir -p $PKG
+
+cd $TMP
+rm -rf $TGZNAM-$VERSION
+tar xvf $CWD/$TGZNAM-$VERSION.tar.?z* || exit 1
+cd $TGZNAM-$VERSION || exit 1
+
+chown -R root:root .
+find . \
+  \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+  -exec chmod 755 {} \+ -o \
+  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+  -exec chmod 644 {} \+
+
+set -e
+
+
+CFLAGS="$SLKCFLAGS " \
+./configure \
+  --prefix=/opt/$PRGNAM \
+  --libdir=/opt/$PRGNAM/usr/lib${LIBDIRSUFFIX} \
+  --mandir=/opt/$PRGNAM/usr/man \
+  --with-libssh2 \
+  --with-gssapi \
+  --enable-ares \
+  --enable-static=no \
+  --without-ca-bundle \
+  --with-nghttp3 \
+  --with-ngtcp2 \
+  --enable-websockets \
+  --with-ca-path=/etc/ssl/certs \
+  --with-gnutls || exit 1
+
+CFLAGS="$SLKCFLAGS " \
+make V=1
+make install DESTDIR=$PKG
+
+mkdir -p $PKG/usr/bin
+( cd $PKG/usr/bin
+ln -s ../../opt/curl-quic/bin/curl curl-quic )
+
+# Don't ship .la files:
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+
+rm $PKG/opt/$PRGNAM/usr/lib64/libcurl.la
+
+# We don't ship the related perl script (yet):
+rm -f $PKG/usr/man/man1/mk-ca-bundle.1
+
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
+
+
+#rm $PKG/usr/lib${LIBDIRSUFFIX}/libcurl.a
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  COPYING* README* \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat "$CWD/$PRGNAM.SlackBuild" >   $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Get rid of .deps cruft:
+rm -rf $PKG/usr/doc/$PRGNAM-$VERSION/examples/.deps
+
+# man pages from normal curl still work
+rm -rf $PKG/opt/$PRGNAM/usr/man
+
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
+
+
