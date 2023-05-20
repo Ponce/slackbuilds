@@ -1,5 +1,5 @@
---- vboxdrv.sh.orig	2021-10-18 19:58:10.000000000 +0200
-+++ vboxdrv.sh	2021-10-30 20:36:29.483575169 +0200
+--- vboxdrv.sh.orig	2022-10-18 19:12:50.063953481 +0200
++++ vboxdrv.sh	2022-10-18 19:16:35.153942968 +0200
 @@ -61,23 +61,8 @@
  export USERNAME
  export USER=$USERNAME
@@ -24,7 +24,7 @@
  if test -u "${VIRTUALBOX}"; then
      GROUP=root
      DEVICE_MODE=0600
-@@ -148,131 +133,12 @@
+@@ -173,131 +158,12 @@
      echo "${1}" >> "${LOG}"
  }
  
@@ -156,7 +156,7 @@
  # Returns path to module file as seen by modinfo(8) or empty string.
  module_path()
  {
-@@ -415,8 +281,6 @@
+@@ -532,8 +398,6 @@
          mkdir -p -m 0750 /dev/vboxusb 2>/dev/null
          chown root:vboxusers /dev/vboxusb 2>/dev/null
      fi
@@ -165,7 +165,7 @@
      succ_msg "VirtualBox services started"
  }
  
-@@ -497,102 +361,10 @@
+@@ -614,153 +478,10 @@
      fi
  }
  
@@ -203,6 +203,15 @@
  {
 -    begin_msg "Building VirtualBox kernel modules" console
 -    log "Building the main VirtualBox module."
+-
+-    # Detect if kernel was built with clang.
+-    unset LLVM
+-    vbox_cc_is_clang=$(kernel_get_config_opt "CONFIG_MODULE_SIG_HASH")
+-    if test "${vbox_cc_is_clang}" = "y"; then
+-        log "Using clang compiler."
+-        export LLVM=1
+-    fi
+-
 -    if ! myerr=`$BUILDINTMP \
 -        --save-module-symvers /tmp/vboxdrv-Module.symvers \
 -        --module-source "$MODULE_SRC/vboxdrv" \
@@ -245,31 +254,73 @@
 -    depmod -a
 -    sync
 -    succ_msg "VirtualBox kernel modules built"
--    # Secure boot on Ubuntu and Debian.
--    if test -n "$HAVE_SEC_BOOT" &&
--        type update-secureboot-policy >/dev/null 2>&1; then
--        SHIM_NOTRIGGER=y update-secureboot-policy --new-key
--    fi
--    if test -f "$DEB_PUB_KEY" && test -f "$DEB_PRIV_KEY"; then
--        HAVE_DEB_KEY=true
+-
+-    # Secure boot on Ubuntu, Debian and Oracle Linux.
+-    if test -n "$HAVE_SEC_BOOT"; then
+-        begin_msg "Signing VirtualBox kernel modules" console
+-
+-        # Generate new signing key if needed.
+-        [ -n "$HAVE_UPDATE_SECUREBOOT_POLICY_TOOL" ] && SHIM_NOTRIGGER=y update-secureboot-policy --new-key
+-
+-        # Check if signing keys are in place.
+-        if test ! -f "$DEB_PUB_KEY" || ! test -f "$DEB_PRIV_KEY"; then
+-            # update-secureboot-policy tool present in the system, but keys were not generated.
+-            [ -n "$HAVE_UPDATE_SECUREBOOT_POLICY_TOOL" ] && fail_msg "
+-
+-update-secureboot-policy tool does not generate signing keys
+-in your distribution, see below on how to generate them manually
+-"
+-
+-            # update-secureboot-policy not present in the system, recommend generate keys manually.
+-            failure "
+-
+-System is running in Secure Boot mode, however your distribution
+-does not provide tools for automatic generation of keys needed for
+-modules signing. Please consider to generate and enroll them manually:
+-
+-    sudo mkdir -p /var/lib/shim-signed/mok
+-    sudo openssl req -nodes -new -x509 -newkey rsa:2048 -outform DER -keyout $DEB_PRIV_KEY -out $DEB_PUB_KEY
+-    sudo sudo mokutil --import $DEB_PUB_KEY
+-    sudo reboot
+-
+-Restart \"rcvboxdrv setup\" after system is rebooted
+-"
+-        fi
+-
+-        # Check if signing tool is available.
+-        [ -n "$SIGN_TOOL" ] || failure "Unable to find signing tool"
+-
+-        # Get kernel signature hash algorithm from kernel config and validate it.
+-        sig_hashalgo=$(kernel_module_sig_hash)
+-        [ "$(module_sig_hash_supported $sig_hashalgo)" = "1" ] \
+-            || failure "Unsupported kernel signature hash algorithm $sig_hashalgo"
+-
+-        # Sign modules.
 -        for i in $MODULE_LIST; do
--            kmodsign sha512 /var/lib/shim-signed/mok/MOK.priv \
--                /var/lib/shim-signed/mok/MOK.der \
--                /lib/modules/"$KERN_VER"/misc/"$i".ko
+-            "$SIGN_TOOL" "$sig_hashalgo" "$DEB_PRIV_KEY" "$DEB_PUB_KEY" \
+-                /lib/modules/"$KERN_VER"/misc/"$i".ko 2>/dev/null || failure "Unable to sign $i.ko"
 -        done
--        # update-secureboot-policy "expects" DKMS modules.
--        # Work around this and talk to the authors as soon
--        # as possible to fix it.
--        mkdir -p /var/lib/dkms/vbox-temp
--        update-secureboot-policy --enroll-key 2>/dev/null ||
--            begin_msg "Failed to enroll secure boot key." console
--        rmdir -p /var/lib/dkms/vbox-temp 2>/dev/null
+-
+-        # Enroll signing key if needed.
+-        if test -n "$HAVE_UPDATE_SECUREBOOT_POLICY_TOOL"; then
+-            # update-secureboot-policy "expects" DKMS modules.
+-            # Work around this and talk to the authors as soon
+-            # as possible to fix it.
+-            mkdir -p /var/lib/dkms/vbox-temp
+-            update-secureboot-policy --enroll-key 2>/dev/null ||
+-                begin_msg "Failed to enroll secure boot key." console
+-            rmdir -p /var/lib/dkms/vbox-temp 2>/dev/null
+-
+-            # Indicate that key has been enrolled and reboot is needed.
+-            HAVE_DEB_KEY=true
+-        fi
+-        succ_msg "Signing completed"
 -    fi
-+   echo "Not implemented! Please use the virtualbox-kernel.SlackBuild available at SlackBuilds.org instead."
++    echo "Not implemented! Please use the virtualbox-kernel.SlackBuild available at SlackBuilds.org instead."
  }
  
  dmnstatus()
-@@ -642,20 +414,7 @@
+@@ -810,20 +531,7 @@
      stop && start
      ;;
  setup)
@@ -291,3 +342,12 @@
      ;;
  force-reload)
      stop
+@@ -833,7 +541,7 @@
+     dmnstatus
+     ;;
+ *)
+-    echo "Usage: $0 {start|stop|stop_vms|restart|setup|cleanup|force-reload|status}"
++    echo "Usage: $0 {start|stop|stop_vms|restart|setup|force-reload|status}"
+     exit 1
+ esac
+ 
