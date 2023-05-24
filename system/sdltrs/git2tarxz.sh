@@ -27,7 +27,7 @@ if [ "$1" != "" ]; then
   git reset --hard "$1" || exit 1
 fi
 
-VERTAG=$( git tag -l | tail -1 | sed 's,^v,,' )
+VERTAG=$( git tag --sort=version:refname | tail -1 | sed 's,^v,,' )
 
 GIT_SHA=$( git rev-parse --short HEAD )
 
