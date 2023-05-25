@@ -1,0 +1,146 @@
+#!/bin/bash
+
+# Slackware build script for ovcc
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# This started out as a Windows app, it expects everything to be
+# in the current directory (its .ini file, ROMs, "paks" which are
+# loadable shared libs). So use a wrapper script to symlink up a dir
+# in the user's $HOME, and keep the real binary out of $PATH.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=ovcc
+VERSION=${VERSION:-1.6.0+20230510_f6c395c}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# Do not trust precompiled stuff.
+rm -f testlib mpu/flt
+
+# Build everything stripped.
+sed -i '/^LDFLAGS /s|=|= -Wl,-s|' Makefile.common
+
+LIBDIR=/usr/lib$LIBDIRSUFFIX/$PRGNAM
+
+# Multiple Makefiles, no DESTDIR support.
+runmake() {
+  local destdir="$1"
+  [ -n "$1" ] && shift
+  make \
+    OPT="$SLKCFLAGS" \
+    prefix=$destdir/usr \
+    LIBDIR=$destdir/$LIBDIR \
+    EXEDIR=$destdir/usr/libexec/$PRGNAM \
+    "$@"
+}
+
+runmake
+runmake $PKG install
+
+# Shared libs are supposed to be +x.
+chmod 755 $PKG/usr/lib*/$PRGNAM/*.so
+
+# Wrapper script.
+mkdir -p $PKG/usr/games
+sed "s,@64@,$LIBDIRSUFFIX,g" $CWD/$PRGNAM.sh > $PKG/usr/games/$PRGNAM
+chmod +x $PKG/usr/games/$PRGNAM
+
+# ROMs. Same as what MAME/MESS uses.
+# from grepping the source, it needs these ROMs:
+# coco3.rom (coco3.zip; always required)
+# disk11.rom (coco3.zip; needed for libfd502.so)
+# rgbdos.rom (disk11.rom; needed for libharddisk.so, can be used by libfd502.so)
+# orch90.rom (coco_orch90.zip; liborch90.so)
+# hdbdwbck.rom (libbecker.so; coco3_hdb1.zip)
+
+unzip $CWD/coco3.zip -d $PKG/$LIBDIR
+unzip -p $CWD/coco_orch90.zip '*.ccc' > $PKG/$LIBDIR/orch90.rom
+unzip -p $CWD/coco3_hdb1.zip '*.rom' > $PKG/$LIBDIR/hdbdwbck.rom
+# Not 100% sure this is the correct ROM, but it seems to work:
+cat $CWD/disk11.rom > $PKG/$LIBDIR/rgbdos.rom
+
+# Icon converted from ovcc.app/Contents/Resources/Icon.icns. Use
+# adaptive resize because with plain -resize, the 16x16 and 22x22
+# icons are just a smear of grey. They still look awful though. But
+# upstream's windows icon (OVCC/CoCo/ovcc.ico) looks just as bad.
+for px in 16 22 32 48 64 96 128 256; do
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  convert -adaptive-resize $size $CWD/$PRGNAM.png $dir/$PRGNAM.png
+done
+
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# man page by SlackBuild author. I wasn't going to do this, but I can't find
+# any documentation at all on actually using ovcc, so I had to trial-and-error.
+# Hopefully documenting my results will save someone some time.
+mkdir -p $PKG/usr/man/man6
+gzip -9c < $CWD/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
+
+# .desktop file by SlackBuild author.
+mkdir -p $PKG/usr/share/applications
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+# Precious little documentation. README.md is mostly install instructions,
+# but it's all we have.
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a README.md $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
