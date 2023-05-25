@@ -27,8 +27,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=nvidia-legacy470-driver
-VERSION=${VERSION:-470.161.03}
-BUILD=${BUILD:-4}
+VERSION=${VERSION:-470.182.03}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -69,6 +69,14 @@ fi
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION$MULTI-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
+fi
+
+if [ "${PERSISTENCED:-no}" = "yes" ]; then
+  if [ `getent group nvidia > /dev/null` -o `getent passwd nvidia > /dev/null` ]; then
+    echo "User and/or group nvidia do not exist!"
+    echo "Please create user and group nvidia and rerun this script."
+    exit 1
+  fi
 fi
 
 SRCNAM=NVIDIA-Linux-$TARGET-${VERSION}
@@ -113,7 +121,7 @@ cd $TMP/nvidia-installer-$VERSION
 # Let's try to remove the conflicting files and GPU detection
   patch -p0 < $CWD/skip_conflict-GPU_detect.patch
 
-# Install the /etc/vulkan folder in $PKG instead of the root filesystem:
+# Install various files in $PKG instead of the root filesystem:
   sed -i "s|/etc/vulkan|$PKG/etc/vulkan|" files.c
   sed -i "s|/lib/firmware/nvidia|$PKG/lib/firmware/nvidia|" files.c
   sed -i "s|\"/etc\"|\"$PKG/etc\"|" nvidia-installer.h
@@ -142,7 +150,6 @@ mv -f $PKG/usr/man/man1/nvidia-installer.1.gz $TMP/$SRCNAM
 
 if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
     COMP32="--install-compat32-libs --compat32-prefix=$PKG/usr"
-    mkdir -p $PKG/usr/lib
 else
     if [ ! "$ARCH" = "x86_64" ]; then
         COMP32=""
@@ -303,32 +310,10 @@ if [ "${PERSISTENCED:-no}" = "yes" ]; then
   CFLAGS="$SLKCFLAGS" make
   install -m 755 _out/Linux_$TARGET/nvidia-persistenced $PKG/usr/bin/
   install -m 644 _out/Linux_$TARGET/nvidia-persistenced.1.gz $PKG/usr/man/man1/
-
-  if ! getent group nvidia > /dev/null 2>&1; then
-    echo "Creating the group nvidia:"
-    groupadd -g 365 nvidia || exit 1
-  fi
-  if ! getent passwd nvidia > /dev/null 2>&1; then
-    echo "Creating the user nvidia:"
-    useradd -u 365 -g 365 -c "Nvidia" -d /dev/null -s /bin/false nvidia || exit 1
-  fi
-  mkdir -p $PKG/var/run/nvidia-persistenced
-  chown nvidia:nvidia $PKG/var/run/nvidia-persistenced
-  mkdir -p $PKG/etc/rc.d
+# install rc.nvidia-perstistenced:
+  mkdir -p $PKG/etc/rc.d $PKG/var/run/nvidia-persistenced
   install -m 755 $CWD/rc.nvidia-persistenced $PKG/etc/rc.d/rc.nvidia-persistenced
-  sed -i "s|__USER__|nvidia|" $PKG/etc/rc.d/rc.nvidia-persistenced
-  cat <<EOF >> $PKG/install/doinst.sh
-# Create group and user nvidia if they don't already exist
-if ! getent group nvidia > /dev/null 2>&1; then
-  echo "Creating the group nvidia:"
-  groupadd -g 365 nvidia || exit 1
-fi
-if ! getent passwd nvidia > /dev/null 2>&1; then
-  echo "Creating the user nvidia:"
-  useradd -u 365 -g 365 -c "Nvidia" -d /dev/null -s /bin/false nvidia || exit 1
-fi
-
-EOF
+  chown nvidia:nvidia $PKG/var/run/nvidia-persistenced
 fi
 
 # Flag multlib as needed and build package.
