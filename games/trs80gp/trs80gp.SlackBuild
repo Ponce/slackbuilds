@@ -1,0 +1,144 @@
+#!/bin/bash
+
+# Slackware build script for trs80gp
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Note: I found no way to use this emulator without PulseAudio. This
+# is only a problem for holdouts like me, who hate pulse and
+# actively avoid using it. apulse won't work (it doesn't supply
+# libpulsecommon-*.so), and the emulator will segfault at startup if
+# it can't use pulse. The only workaround is to run "trs80gp -sx", but
+# that disables *all* audio, which is not really ideal. Closed source,
+# so no patching.
+
+# Dirt hack alert!
+#
+# The 32-bit x86 binary actually runs fine on Slackware 14.2. But on 15.0,
+# it crahes on startup:
+#
+# trs80gp: cairo-surface.c:1817: cairo_surface_set_device_scale: Assertion `status == CAIRO_STATUS_SUCCESS' failed.
+#
+# To make it run on 15.0, use the cairo shared libs from 14.2. Amazingly,
+# this actually works!
+#
+# So on i?86, /usr/games/trs80gp is a wrapper script that execs the
+# real binary with the old cairo libs preloaded. On all other arches,
+# /usr/games/trs80gp is the real binary.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=trs80gp
+VERSION=${VERSION:-2.4.11}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+case "$ARCH" in
+     i?86) DIR=linux-32 ;;
+   x86_64) DIR=linux-64 ;;
+      arm) DIR=rpi-32   ;;
+  aarch64) DIR=rpi-64   ;;
+esac
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+mkdir -p $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+unzip $CWD/$PRGNAM-$VERSION.zip
+chown -R root:root .
+# reset permissions, please do not revert to template.
+find . -type f -a -exec chmod 644 {} + -o -type d -a -exec chmod 755 {} +
+
+# Main binary, one dir per arch. No -s here, it's already stripped.
+if [ "$DIR" = "linux-32" ]; then
+  install -D -m0755 $DIR/$PRGNAM $PKG/usr/libexec/$PRGNAM/$PRGNAM
+  install -D -m0755 -oroot -groot $CWD/wrapper32.sh $PKG/usr/games/$PRGNAM
+  mkdir -p $PKG/usr/lib/$PRGNAM
+  cd $PKG/usr/lib/$PRGNAM
+  tar xvf $CWD/cairo-1.14.6-i586-2.txz \
+          --wildcards \
+          --strip-components=2 \
+          usr/lib/libcairo\*.so\*
+  cd -
+else
+  install -D -m0755 $DIR/$PRGNAM $PKG/usr/games/$PRGNAM
+fi
+
+# Rest of the goodies are in the Mac app bundle.
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+SFX=$PKG/usr/share/$PRGNAM/sounds
+DISKS=$PKG/usr/share/$PRGNAM/disks
+RES=mac/trs80gp.app/Contents/Resources
+mkdir -p $PKGDOC/html $SFX $DISKS
+
+# The sounds are meant to be used with the -sf option, to have
+# the emulator make mechanical disk noises during disk I/O.
+# Since it's closed-source, I can't patch it to look in our dir for
+# the wav files. They're disabled by default, anyway.
+cp -a $RES/*.wav $SFX
+
+# Note: doc.html is identical to help/all.html, don't bother.
+# Nothing seems to need $RES/*.png, don't bother.
+cp -a $RES/*.txt $PKGDOC
+cp -a $RES/help/*.{html,png} $PKGDOC/html
+
+# The emulator ships zipped disk images, but seems to require them
+# to be unzipped to actually use them. Takes up 10MB, but gives a
+# nice selection of DOSes and blank disks.
+for i in $RES/*.zip; do
+  unzip -LL $i -d $DISKS
+done
+
+# Stub man page by SlackBuild author. Just a pointer to the real docs.
+mkdir -p $PKG/usr/man/man6
+gzip -9c < $CWD/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
+
+# Icons converted with icns2png and resized with ImageMagick. Original
+# source mac/trs80gp.app/Contents/Resources/AppIcon.icns in the tarball.
+HICOLOR=$PKG/usr/share/icons/hicolor
+for i in $CWD/icons/*.png; do
+  px="$( basename $i .png )"
+  sz="${px}x${px}"
+  dir=$HICOLOR/$sz/apps
+  mkdir -p $dir
+  cat $i > $dir/$PRGNAM.png
+done
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# .desktop file written by SlackBuild author.
+mkdir -p $PKG/usr/share/applications
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
