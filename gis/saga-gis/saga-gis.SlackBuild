@@ -2,6 +2,7 @@
 
 # Slackware build script for saga-gis
 
+# Copyright 2023 Giancarlo Dessi, Cagliari, IT
 # Copyright 2014-2021 Benjamin Trigona-Harany <slackbuilds@jaxartes.net>
 # All rights reserved.
 #
@@ -22,13 +23,11 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# 20220301 bkw: Modified by SlackBuilds.org: fix wxPython/wxGTK3 conflict.
-
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=saga-gis
-VERSION=${VERSION:-7.9.0}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-9.0.1}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -46,6 +45,7 @@ if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
 fi
+
 
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
@@ -73,59 +73,47 @@ mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $SRCNAM-$VERSION
 tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
-cd $SRCNAM-$VERSION
+cd $SRCNAM-$VERSION/saga-gis
+
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \+ -o \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-if [ "$OPENCV" != "ON" ] ; then
-  sed -i "s/CVFOUND=1/true/g" configure
-fi
-
-sed -i "s/isinf/std::isinf/g" src/saga_core/saga_gui/wksp_map_layer.cpp
-
-# 20220308 bkw: no configure option or environment variable for the
-# wx config script to use, so force it this way:
-mkdir -p wxtmp
-ln -s /usr/lib$LIBDIRSUFFIX/wx/config/gtk3-unicode-3.0 wxtmp/wx-config
-export PATH=$(pwd)/wxtmp:$PATH
-
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-PYTHON=python3 \
-./configure \
-  --build=$ARCH \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --mandir=/usr/man \
-  --enable-python \
-  --disable-odbc \
-  --build=$ARCH-slackware-linux
-
-make
-make install DESTDIR=$PKG
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_MANDIR=/usr/man \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install/strip DESTDIR=$PKG
+cd ..
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
+# DCMAKE_INSTALL_MANDIR is not applied by the process we move files manually from /usr/share
+mv $PKG/usr/share/man $PKG/usr/
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mv $PKG/usr/share/metainfo $PKG/usr/share/appdata
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  AUTHORS COPYING ChangeLog NEWS README \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# fix some bad perms in doc files that have to install
+chmod 644 readme.md src/*.txt 
 
-rm -f $PKG/usr/lib*/*.la
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a readme.md src/gpl.txt src/lgpl.txt  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
