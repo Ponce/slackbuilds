@@ -9,12 +9,11 @@ config() {
 }
 
 config etc/sun/sun.toml.new
+config etc/sun/repositories.toml.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
 fi
 
-for file in sun_daemon.desktop ; do
-  cmp etc/xdg/autostart/${file} etc/xdg/autostart/${file}.sample 2> /dev/null && \
-        rm etc/xdg/autostart/${file}.sample
-done
+cmp etc/xdg/autostart/${file} etc/xdg/autostart/${file}.sample 2> /dev/null && \
+      rm etc/xdg/autostart/${file}.sample
