@@ -27,6 +27,12 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20230528 bkw: modified by SlackBuilds.org:
+# - use standard ARCH (not i386). note that this is cosmetic (the package
+#   contents do not change, only the filename of the .tgz package).
+# - speed up find and strip stuff (build now runs ~3.2x faster).
+# - fix permission on .desktop file.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=plexmediaserver
@@ -44,9 +50,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -59,15 +62,12 @@ OUTPUT=${OUTPUT:-/tmp}
 if [ "$ARCH" = "i586" ]; then
   DEBARCH="i386"
   LIBDIRSUFFIX=""
-  ARCH="i386"
 elif [ "$ARCH" = "i686" ]; then
   DEBARCH="i386"
   LIBDIRSUFFIX=""
-  ARCH="i386"
 elif [ "$ARCH" = "x86_64" ]; then
   DEBARCH="amd64"
   LIBDIRSUFFIX="64"
-  ARCH="x86_64"
 else
   echo "Package for $(uname -m) architecture is not available."
   exit 1
@@ -112,20 +112,24 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} + \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} +
 
 mkdir -p $PKG/usr/lib/
 mv usr/lib/plexmediaserver $PKG/usr/lib
 
-# Second attempt at stripping files with spaces in the names. D Woodfall
-find $PKG -type f -print0 | xargs -0 -I{} file "{}" | grep -e "executable" -e "shared object" |
- grep ELF | cut -f 1 -d : | xargs -I{} strip --strip-unneeded  "{}" 2> /dev/null || true
+# 20230528 bkw: This strip command is *way* faster than the find|grep|xargs
+# stuff (runs in about 1 sec, vs. over a minute) and has the same effect.
+strip --strip-unneeded \
+      $PKG/usr/lib/$PRGNAM/* \
+      $PKG/usr/lib/$PRGNAM/lib/*.so* \
+      $PKG/usr/lib/$PRGNAM/Resources/Python/lib/python*/site-packages/*/*.so \
+      2>/dev/null || true
 
-mkdir -p $PKG/usr/share/applications/
-mv usr/share/applications/plexmediaserver.desktop $PKG/usr/share/applications
-sed -i -e "s/x-www-browser/xdg-open/" $PKG/usr/share/applications/plexmediaserver.desktop
+DESKTOP=usr/share/applications/$PRGNAM.desktop
+install -D -m0644 $DESKTOP $PKG/$DESKTOP
+sed -i -e "s/x-www-browser/xdg-open/" $PKG/$DESKTOP
 
 mkdir -p $PKG/etc/rc.d
 cat $PKG/usr/lib/$PRGNAM/lib/$PRGNAM.init > $PKG/etc/rc.d/rc.$PRGNAM.new
