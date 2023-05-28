@@ -1,6 +1,22 @@
---- vboxdrv.sh.orig	2021-10-18 19:58:10.000000000 +0200
-+++ vboxdrv.sh	2021-10-30 20:36:29.483575169 +0200
-@@ -61,23 +61,8 @@
+--- vboxdrv.sh.orig	2023-01-11 18:59:15.000000000 +0100
++++ vboxdrv.sh	2023-03-11 16:35:46.673798632 +0100
+@@ -45,39 +45,13 @@
+   MODPROBE="$MODPROBE --allow-unsupported-modules"
+ fi
+ 
+-setup_log()
+-{
+-    test -n "${LOG}" && return 0
+-    # Rotate log files
+-    LOG="/var/log/vbox-setup.log"
+-    mv "${LOG}.3" "${LOG}.4" 2>/dev/null
+-    mv "${LOG}.2" "${LOG}.3" 2>/dev/null
+-    mv "${LOG}.1" "${LOG}.2" 2>/dev/null
+-    mv "${LOG}" "${LOG}.1" 2>/dev/null
+-}
+-
+ [ -f /etc/vbox/vbox.cfg ] && . /etc/vbox/vbox.cfg
+ export VBOX_KBUILD_TYPE
  export USERNAME
  export USER=$USERNAME
  
@@ -24,10 +40,16 @@
  if test -u "${VIRTUALBOX}"; then
      GROUP=root
      DEVICE_MODE=0600
-@@ -148,131 +133,12 @@
-     echo "${1}" >> "${LOG}"
+@@ -173,299 +147,12 @@
+     lsmod | grep -q "$1[^_-]"
  }
  
+-log()
+-{
+-    setup_log
+-    echo "${1}" >> "${LOG}"
+-}
+-
 -module_build_log()
 -{
 -    setup_log
@@ -153,10 +175,183 @@
 -    rm -rf /dev/vboxusb
 -}
 -
- # Returns path to module file as seen by modinfo(8) or empty string.
- module_path()
+-# Returns path to module file as seen by modinfo(8) or empty string.
+-module_path()
+-{
+-    mod="$1"
+-    [ -n "$mod" ] || return
+-
+-    modinfo "$mod" 2>/dev/null | grep -e "^filename:" | tr -s ' ' | cut -d " " -f2
+-}
+-
+-# Returns module version if module is available or empty string.
+-module_version()
+-{
+-    mod="$1"
+-    [ -n "$mod" ] || return
+-
+-    modinfo "$mod" 2>/dev/null | grep -e "^version:" | tr -s ' ' | cut -d " " -f2
+-}
+-
+-# Returns module revision if module is available in the system or empty string.
+-module_revision()
+-{
+-    mod="$1"
+-    [ -n "$mod" ] || return
+-
+-    modinfo "$mod" 2>/dev/null | grep -e "^version:" | tr -s ' ' | cut -d " " -f3
+-}
+-
+-# Reads kernel configuration option.
+-kernel_get_config_opt()
+-{
+-    opt_name="$1"
+-    [ -n "$opt_name" ] || return
+-
+-    # Check if there is a kernel tool which can extract config option.
+-    if test -x /lib/modules/"$KERN_VER"/build/scripts/config; then
+-        /lib/modules/"$KERN_VER"/build/scripts/config \
+-            --file /lib/modules/"$KERN_VER"/build/.config \
+-            --state "$opt_name" 2>/dev/null
+-    elif test -f /lib/modules/"$KERN_VER"/build/.config; then
+-        # Extract config option manually.
+-        grep "$opt_name" /lib/modules/"$KERN_VER"/build/.config | sed -e "s/^$opt_name=//" -e "s/\"//g"
+-    fi
+-}
+-
+-# Reads CONFIG_MODULE_SIG_HASH from kernel config.
+-kernel_module_sig_hash()
+-{
+-    kernel_get_config_opt "CONFIG_MODULE_SIG_HASH"
+-}
+-
+-# Returns "1" if kernel module signature hash algorithm
+-# is supported by us. Or empty string otherwise.
+-module_sig_hash_supported()
+-{
+-    sig_hashalgo="$1"
+-    [ -n "$sig_hashalgo" ] || return
+-
+-    # Go through supported list.
+-    [    "$sig_hashalgo" = "sha1"   \
+-      -o "$sig_hashalgo" = "sha224" \
+-      -o "$sig_hashalgo" = "sha256" \
+-      -o "$sig_hashalgo" = "sha384" \
+-      -o "$sig_hashalgo" = "sha512" ] || return
+-
+-    echo "1"
+-}
+-
+-# Returns "1" if module is signed and signature can be verified
+-# with public key provided in DEB_PUB_KEY. Or empty string otherwise.
+-module_signed()
+-{
+-    mod="$1"
+-    [ -n "$mod" ] || return
+-
+-    extraction_tool=/lib/modules/"$(uname -r)"/build/scripts/extract-module-sig.pl
+-    mod_path=$(module_path "$mod" 2>/dev/null)
+-    openssl_tool=$(which openssl 2>/dev/null)
+-    # Do not use built-in printf!
+-    printf_tool=$(which printf 2>/dev/null)
+-
+-    # Make sure all the tools required for signature validation are available.
+-    [ -x "$extraction_tool" ] || return
+-    [ -n "$mod_path"        ] || return
+-    [ -n "$openssl_tool"    ] || return
+-    [ -n "$printf_tool"     ] || return
+-
+-    # Make sure openssl can handle hash algorithm.
+-    sig_hashalgo=$(modinfo -F sig_hashalgo "$mod" 2>/dev/null)
+-    [ "$(module_sig_hash_supported $sig_hashalgo)" = "1" ] || return
+-
+-    # Generate file names for temporary stuff.
+-    mod_pub_key=$(mktemp -u)
+-    mod_signature=$(mktemp -u)
+-    mod_unsigned=$(mktemp -u)
+-
+-    # Convert public key in DER format into X509 certificate form.
+-    "$openssl_tool" x509 -pubkey -inform DER -in "$DEB_PUB_KEY" -out "$mod_pub_key" 2>/dev/null
+-    # Extract raw module signature and convert it into binary format.
+-    "$printf_tool" \\x$(modinfo -F signature "$mod" | sed -z 's/[ \t\n]//g' | sed -e "s/:/\\\x/g") 2>/dev/null > "$mod_signature"
+-    # Extract unsigned module for further digest calculation.
+-    "$extraction_tool" -0 "$mod_path" 2>/dev/null > "$mod_unsigned"
+-
+-    # Verify signature.
+-    rc=""
+-    "$openssl_tool" dgst "-$sig_hashalgo" -binary -verify "$mod_pub_key" -signature "$mod_signature" "$mod_unsigned" 2>&1 >/dev/null && rc="1"
+-    # Clean up.
+-    rm -f $mod_pub_key $mod_signature $mod_unsigned
+-
+-    # Check result.
+-    [ "$rc" = "1" ] || return
+-
+-    echo "1"
+-}
+-
+-# Returns "1" if externally built module is available in the system and its
+-# version and revision number do match to current VirtualBox installation.
+-# Or empty string otherwise.
+-module_available()
+-{
+-    mod="$1"
+-    [ -n "$mod" ] || return
+-
+-    [ "$VBOX_VERSION" = "$(module_version "$mod")" ] || return
+-    [ "$VBOX_REVISION" = "$(module_revision "$mod")" ] || return
+-
+-    # Check if module belongs to VirtualBox installation.
+-    #
+-    # We have a convention that only modules from /lib/modules/*/misc
+-    # belong to us. Modules from other locations are treated as
+-    # externally built.
+-    mod_path="$(module_path "$mod")"
+-
+-    # If module path points to a symbolic link, resolve actual file location.
+-    [ -L "$mod_path" ] && mod_path="$(readlink -e -- "$mod_path")"
+-
+-    # File exists?
+-    [ -f "$mod_path" ] || return
+-
+-    # Extract last component of module path and check whether it is located
+-    # outside of /lib/modules/*/misc.
+-    mod_dir="$(dirname "$mod_path" | sed 's;^.*/;;')"
+-    [ "$mod_dir" = "misc" ] || return
+-
+-    # In case if system is running in Secure Boot mode, check if module is signed.
+-    if test -n "$HAVE_SEC_BOOT"; then
+-        [ "$(module_signed "$mod")" = "1" ] || return
+-    fi
+-
+-    echo "1"
+-}
+-
+-# Check if required modules are installed in the system and versions match.
+-setup_complete()
+-{
+-    [ "$(module_available vboxdrv)"    = "1" ] || return
+-    [ "$(module_available vboxnetflt)" = "1" ] || return
+-    [ "$(module_available vboxnetadp)" = "1" ] || return
+-
+-    # All modules are in place.
+-    echo "1"
+-}
+-
+ start()
  {
-@@ -415,8 +281,6 @@
+     begin_msg "Starting VirtualBox services" console
+@@ -483,10 +170,6 @@
+     fi
+ 
+     if ! running vboxdrv; then
+-
+-        # Check if system already has matching modules installed.
+-        [ "$(setup_complete)" = "1" ] || setup
+-
+         if ! rm -f $DEVICE; then
+             failure "Cannot remove $DEVICE"
+         fi
+@@ -538,8 +221,6 @@
          mkdir -p -m 0750 /dev/vboxusb 2>/dev/null
          chown root:vboxusers /dev/vboxusb 2>/dev/null
      fi
@@ -165,7 +360,7 @@
      succ_msg "VirtualBox services started"
  }
  
-@@ -497,102 +361,10 @@
+@@ -620,153 +301,10 @@
      fi
  }
  
@@ -179,18 +374,18 @@
 -    for i in /lib/modules/*; do
 -        # Check whether we are only cleaning up for uninstalled kernels.
 -        test -n "${only_old}" && test -e "${i}/kernel/drivers" && continue
--        # We could just do "rm -f", but we only want to try deleting folders if
--        # we are sure they were ours, i.e. they had our modules in beforehand.
--        if    test -e "${i}/misc/vboxdrv.ko" \
--           || test -e "${i}/misc/vboxnetadp.ko" \
--           || test -e "${i}/misc/vboxnetflt.ko" \
--           || test -e "${i}/misc/vboxpci.ko"; then
--            rm -f "${i}/misc/vboxdrv.ko" "${i}/misc/vboxnetadp.ko" \
--                  "${i}/misc/vboxnetflt.ko" "${i}/misc/vboxpci.ko"
--            version=`expr "${i}" : "/lib/modules/\(.*\)"`
--            depmod -a "${version}"
--            sync
--        fi
+-
+-        unset do_update
+-        for j in $MODULE_LIST; do
+-            for mod_ext in ko ko.gz ko.xz ko.zst; do
+-                test -f "${i}/misc/${j}.${mod_ext}" && do_update=1 && rm -f "${i}/misc/${j}.${mod_ext}"
+-            done
+-        done
+-
+-        # Trigger depmod(8) only in case if directory content was modified
+-        # and save a bit of run time.
+-        test -n "$do_update" && depmod -a "$(basename "$i")" && sync
+-
 -        # Remove the kernel version folder if it was empty except for us.
 -        test   "`echo ${i}/misc/* ${i}/misc/.?* ${i}/* ${i}/.?*`" \
 -             = "${i}/misc/* ${i}/misc/.. ${i}/misc ${i}/.." &&
@@ -203,6 +398,15 @@
  {
 -    begin_msg "Building VirtualBox kernel modules" console
 -    log "Building the main VirtualBox module."
+-
+-    # Detect if kernel was built with clang.
+-    unset LLVM
+-    vbox_cc_is_clang=$(kernel_get_config_opt "CONFIG_CC_IS_CLANG")
+-    if test "${vbox_cc_is_clang}" = "y"; then
+-        log "Using clang compiler."
+-        export LLVM=1
+-    fi
+-
 -    if ! myerr=`$BUILDINTMP \
 -        --save-module-symvers /tmp/vboxdrv-Module.symvers \
 -        --module-source "$MODULE_SRC/vboxdrv" \
@@ -245,31 +449,73 @@
 -    depmod -a
 -    sync
 -    succ_msg "VirtualBox kernel modules built"
--    # Secure boot on Ubuntu and Debian.
--    if test -n "$HAVE_SEC_BOOT" &&
--        type update-secureboot-policy >/dev/null 2>&1; then
--        SHIM_NOTRIGGER=y update-secureboot-policy --new-key
--    fi
--    if test -f "$DEB_PUB_KEY" && test -f "$DEB_PRIV_KEY"; then
--        HAVE_DEB_KEY=true
+-
+-    # Secure boot on Ubuntu, Debian and Oracle Linux.
+-    if test -n "$HAVE_SEC_BOOT"; then
+-        begin_msg "Signing VirtualBox kernel modules" console
+-
+-        # Generate new signing key if needed.
+-        [ -n "$HAVE_UPDATE_SECUREBOOT_POLICY_TOOL" ] && SHIM_NOTRIGGER=y update-secureboot-policy --new-key
+-
+-        # Check if signing keys are in place.
+-        if test ! -f "$DEB_PUB_KEY" || ! test -f "$DEB_PRIV_KEY"; then
+-            # update-secureboot-policy tool present in the system, but keys were not generated.
+-            [ -n "$HAVE_UPDATE_SECUREBOOT_POLICY_TOOL" ] && fail_msg "
+-
+-update-secureboot-policy tool does not generate signing keys
+-in your distribution, see below on how to generate them manually
+-"
+-
+-            # update-secureboot-policy not present in the system, recommend generate keys manually.
+-            failure "
+-
+-System is running in Secure Boot mode, however your distribution
+-does not provide tools for automatic generation of keys needed for
+-modules signing. Please consider to generate and enroll them manually:
+-
+-    sudo mkdir -p /var/lib/shim-signed/mok
+-    sudo openssl req -nodes -new -x509 -newkey rsa:2048 -outform DER -addext \"extendedKeyUsage=codeSigning\" -keyout $DEB_PRIV_KEY -out $DEB_PUB_KEY
+-    sudo mokutil --import $DEB_PUB_KEY
+-    sudo reboot
+-
+-Restart \"rcvboxdrv setup\" after system is rebooted
+-"
+-        fi
+-
+-        # Check if signing tool is available.
+-        [ -n "$SIGN_TOOL" ] || failure "Unable to find signing tool"
+-
+-        # Get kernel signature hash algorithm from kernel config and validate it.
+-        sig_hashalgo=$(kernel_module_sig_hash)
+-        [ "$(module_sig_hash_supported $sig_hashalgo)" = "1" ] \
+-            || failure "Unsupported kernel signature hash algorithm $sig_hashalgo"
+-
+-        # Sign modules.
 -        for i in $MODULE_LIST; do
--            kmodsign sha512 /var/lib/shim-signed/mok/MOK.priv \
--                /var/lib/shim-signed/mok/MOK.der \
--                /lib/modules/"$KERN_VER"/misc/"$i".ko
+-            "$SIGN_TOOL" "$sig_hashalgo" "$DEB_PRIV_KEY" "$DEB_PUB_KEY" \
+-                /lib/modules/"$KERN_VER"/misc/"$i".ko 2>/dev/null || failure "Unable to sign $i.ko"
 -        done
--        # update-secureboot-policy "expects" DKMS modules.
--        # Work around this and talk to the authors as soon
--        # as possible to fix it.
--        mkdir -p /var/lib/dkms/vbox-temp
--        update-secureboot-policy --enroll-key 2>/dev/null ||
--            begin_msg "Failed to enroll secure boot key." console
--        rmdir -p /var/lib/dkms/vbox-temp 2>/dev/null
+-
+-        # Enroll signing key if needed.
+-        if test -n "$HAVE_UPDATE_SECUREBOOT_POLICY_TOOL"; then
+-            # update-secureboot-policy "expects" DKMS modules.
+-            # Work around this and talk to the authors as soon
+-            # as possible to fix it.
+-            mkdir -p /var/lib/dkms/vbox-temp
+-            update-secureboot-policy --enroll-key 2>/dev/null ||
+-                begin_msg "Failed to enroll secure boot key." console
+-            rmdir -p /var/lib/dkms/vbox-temp 2>/dev/null
+-
+-            # Indicate that key has been enrolled and reboot is needed.
+-            HAVE_DEB_KEY=true
+-        fi
+-        succ_msg "Signing completed"
 -    fi
-+   echo "Not implemented! Please use the virtualbox-kernel.SlackBuild available at SlackBuilds.org instead."
++    echo "Not implemented! Please use the virtualbox-kernel.SlackBuild available at SlackBuilds.org instead."
  }
  
  dmnstatus()
-@@ -642,20 +414,7 @@
+@@ -816,20 +354,7 @@
      stop && start
      ;;
  setup)
@@ -291,3 +537,12 @@
      ;;
  force-reload)
      stop
+@@ -839,7 +364,7 @@
+     dmnstatus
+     ;;
+ *)
+-    echo "Usage: $0 {start|stop|stop_vms|restart|setup|cleanup|force-reload|status}"
++    echo "Usage: $0 {start|stop|stop_vms|restart|setup|force-reload|status}"
+     exit 1
+ esac
+ 
