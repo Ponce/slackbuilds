@@ -1,0 +1,131 @@
+#!/bin/bash
+
+# Slackware build script for sndio
+
+# Copyright 2023 Ivan Kovmir <i@kovmir.eu>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd "$(dirname "$0")" ; CWD=$(pwd)
+
+PRGNAM=sndio
+VERSION=${VERSION:-1.9.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+NAMVER=$PRGNAM-$VERSION
+SNDIO_GID='17'  # Slackware's 'audio' group.
+SNDIO_UID='377' # A chosen ID for sndiod user.
+
+if [ -z "$ARCH" ]; then
+	case "$(uname -m)" in
+		i?86) ARCH=i586 ;;
+		arm*) ARCH=arm ;;
+		*) ARCH=$(uname -m) ;;
+	esac
+fi
+
+if [ -n "${PRINT_PACKAGE_NAME}" ]; then
+	echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+	exit 0
+fi
+
+TMP="${TMP:-/tmp/SBo}"
+SRC="$TMP/$NAMVER"
+PKG="$TMP/package-$PRGNAM"
+OUTPUT="${OUTPUT:-/tmp}"
+
+# Bail out if user or group isn't valid on your system
+# For slackbuilds.org, assigned postgres uid/gid are 377/377
+# See http://slackbuilds.org/uid_gid.txt
+if ! grep ^sndiod: /etc/passwd 2>&1 > /dev/null; then
+  echo "  You must have 'sndiod' user to run this script."
+  echo "    # mkdir /var/run/sndiod"
+  echo "    # useradd -u $SNDIO_UID -g $SNDIO_GID -d /var/run/sndiod sndiod"
+  exit 1
+fi
+
+if [ "$ARCH" = "i586" ]; then
+	SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+	SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+	SLKCFLAGS="-O2 -fPIC"
+else
+	SLKCFLAGS="-O2"
+fi
+
+set -e
+
+rm -rf "$PKG"
+mkdir -p "$TMP" "$PKG" "$OUTPUT"
+cd "$TMP"
+rm -rf "$PRGNAM-$VERSION"
+tar xvf "$CWD/$PRGNAM-$VERSION.tar.gz"
+cd "$PRGNAM-$VERSION"
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+INSTPREFIX='/usr'
+BINDIR="$INSTPREFIX/bin"         # Binaries
+LIBDIR="$INSTPREFIX/lib64"       # Libraries
+PKGCONFDIR="$LIBDIR/pkgconfig"   # pkg-config(1) files
+INCLUDEDIR="$INSTPREFIX/include" # Headers
+MANDIR="$INSTPREFIX/man"         # Man pages
+
+./configure \
+	--bindir="$BINDIR" \
+	--libdir="$LIBDIR" \
+	--pkgconfdir="$PKGCONFDIR" \
+	--includedir="$INCLUDEDIR" \
+	--mandir="$MANDIR"
+make
+make DESTDIR="$PKG" PREFIX="$INSTPREFIX" install
+
+# Strip symbols.
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Compress man pages.
+find "$PKG$INSTPREFIX/man" -type f -exec gzip {} +;
+
+# Some of the sndio's man pages are symlinks to other pages. Copressing man
+# pages gives them '.gz' extension, thus, breaking symlinks. The following loop
+# creates additional symlinks that redirect the exising links to compressed man
+# pages.
+linked_mans=('mio_open.3 sio_open.3 sioctl_open.3')
+for man in $linked_mans
+do
+	ln -s "$man.gz" "$PKG/usr/man/man3/$man"
+done
+
+mkdir -p "$PKG/install"
+mkdir -p "$PKG/usr/doc/$NAMVER"
+mkdir -p "$PKG/etc/rc.d"
+cat "$CWD/$PRGNAM.SlackBuild" > "$PKG/usr/doc/$NAMVER/$PRGNAM.SlackBuild"
+cat "$CWD/README"             > "$PKG/usr/doc/$NAMVER/README"
+cat "$CWD/README.SBo"         > "$PKG/usr/doc/$NAMVER/README.SBo"
+cat "$CWD/slack-desc"         > "$PKG/install/slack-desc"
+
+# rc script.
+cat "$CWD/rc.sndiod" > "$PKG/etc/rc.d/rc.sndiod"
+chmod 0755 "$PKG/etc/rc.d/rc.sndiod"
+
+cd "$PKG"
+/sbin/makepkg -l y -c n "$OUTPUT/$NAMVER-$ARCH-$BUILD$TAG.$PKGTYPE"
