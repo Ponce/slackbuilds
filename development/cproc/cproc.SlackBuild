@@ -1,0 +1,99 @@
+#!/bin/bash
+
+# Slackware build script for cproc
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Note: thought about including mcpp (either in this build
+# or a separate one) so cproc wouldn't have to use gcc's
+# preprocessor. There even used to be a development/mcpp
+# SlackBuild... for Slackware 12.1 (in 2010).
+# However, mcpp looks to be old and unmaintained upstream, and cproc
+# doesn't seem to support using it (would require patching, not gonna
+# do).
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=cproc
+VERSION=${VERSION:-20230502_0985a78}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# No need for LIBDIRSUFFIX (nothing gets installed there), can't
+# use regular SLKCFLAGS because they get passed to cproc itself, and
+# it doesn't support -fPIC, -march=, etc. -O2 is allowed, but ignored.
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
+
+# cproc needs to know the location of the ELF "interpreter" (the
+# runtime linker). The defaults in the configure script are OK for
+# x86_64 but wrong for aarch64. Rather than hardcode anything here,
+# look and see what's in use.
+ELFTERP="$( readelf -p .interp /bin/ls | sed -n '/\.so\./s,.* ,,p' )"
+
+# Non-standard configure (not autoconf). We have to set host and
+# target because otherwise it detects x86_64-slackware-linux, which
+# cproc doesn't support. In theory they could be different, which
+# would give us a cross compiler... but it would require the crt*.o
+# and a binutils for the target platform. Not gonna spend time on
+# that.
+./configure \
+  --host=$ARCH-linux-gnu \
+  --target=$ARCH-linux-gnu \
+  --with-ldso="$ELFTERP" \
+  --prefix=/usr
+
+make bootstrap
+
+# Manual install. It's only 2 binaries and 1 man page.
+# Use the binaries compiled by cproc, not gcc. stage2/ and stage3/ binaries
+# are identical (or else 'make bootstrap' would have failed, above). These
+# are already stripped.
+mkdir -p $PKG/usr/bin $PKG/usr/man/man1
+cp -a stage2/cproc{,-qbe} $PKG/usr/bin
+gzip -9c < $PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+
+# Self-test can be disabled, if some future version has issues.
+[ "${CHECK:-yes}" = "yes" ] && make check &> $PKGDOC/check-results.txt
+
+cp -a README* LICENSE* doc/* $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
