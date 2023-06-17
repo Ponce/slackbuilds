@@ -1,0 +1,160 @@
+#!/bin/bash
+
+# Slackware build script for lotus123
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# This is a very cool hack, though I'm not sure about my own sanity in
+# wanting to package it...
+
+# Purists take note: this really is i386, but since Slackware no
+# longer supports i386 or i486, ARCH is set to i586. That's the
+# minimum Slackware-supported ARCH this will run on.
+
+# I thought about creating and hosting a static binary for x86_64, but
+# statify doesn't support newer kernels (like, the one in Slack 15.0),
+# and Slackware doesn't ship static libraries except libc, so there's
+# no way to statically link ncurses (unless I build static ncurses
+# myself, which I don't much want to do).
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=lotus123
+SRCNAM=123elf
+DISKNAM=123UNIX
+VERSION=${VERSION:-1.0.0rc4}
+BINUTVER=${BINUTVER:-2.38}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+# Don't exit on bad arch/etc here, we want PRINT_PACKAGE_NAME to work.
+# Note that if ARCH=x86_64 or i686, we change it to i586 before
+# printing the package name.
+case "$ARCH" in
+  i?86) ARCH=i586 ;;
+
+  x86_64)
+    if [ "$( /bin/ls /lib/ld-*.so 2>/dev/null )" = "" ]; then
+      MULTI=fail
+    else
+      MULTI=ok
+      ARCH=i586
+    fi ;;
+
+  *) BADARCH=yes ;;
+esac
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+if [ "$BADARCH" = "yes" ]; then
+  cat <<EOF
+
+***********************************************************************
+Unsupported architecture: $ARCH
+This can only be built on i586, i686, and (maybe) x86_64 with multilib.
+***********************************************************************
+
+EOF
+  exit 1
+elif [ "$MULTI" = "fail" ]; then
+  cat <<EOF
+
+***********************************************************************
+Building on x86_64 is unsupported, and you don't have multilib, so
+it's actually impossible.
+***********************************************************************
+
+EOF
+  exit 1
+elif [ "$MULTI" = "ok" ]; then
+  # I haven't tested on multilib (I don't use it). Good luck.
+  cat <<EOF
+
+***********************************************************************
+Building on x86_64 is unsupported, but you have multilib, so we'll try.
+If it doesn't work, fix it and send the maintainer a patch, or else
+build the package on 32-bit x86 and install it on multilib x86_64.
+***********************************************************************
+
+EOF
+  sleep 3
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+cp $CWD/$DISKNAM?.IMG .
+tar xvf $CWD/binutils-$BINUTVER.tar.xz
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+
+# Fix hardcoded man page install path.
+ln -s share/man man
+sed -i 's,share/man,man,g' Makefile
+
+# Our binutils doesn't support COFF, so we have to use this:
+sh binutils.sh
+
+# Extract the files from the disk images.
+sh extract.sh
+
+# Rest of the build is simple from our POV.
+make
+make install prefix=$PKG/usr
+
+strip $PKG/usr/bin/123
+gzip -9 $PKG/usr/man/man*/*
+
+# Icon downloaded from:
+# https://www.deviantart.com/dharmapoa/art/Lotus-1-2-3-Icon-881499542
+# ...and resized with ImageMagick's convert.
+HICOLOR=$PKG/usr/share/icons/hicolor
+for i in $CWD/icons/*.png; do
+  px="$( basename $i .png )"
+  sz="${px}x${px}"
+  dir=$HICOLOR/$sz/apps
+  mkdir -p $dir
+  cat $i > $dir/$PRGNAM.png
+done
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# .desktop file by SlackBuild author.
+mkdir -p $PKG/usr/share/applications
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a *.md $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
