@@ -11,10 +11,10 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-if [ -e /etc/povray/@VERSION@/povray.conf.new ]; then
-    config /etc/povray/@VERSION@/povray.conf.new
+if [ -e etc/povray/@VERSION@/povray.conf.new ]; then
+    config etc/povray/@VERSION@/povray.conf.new
 fi
 
-if [ -e /etc/povray/@VERSION@/povray.ini.new ]; then
-    config /etc/povray/@VERSION@/povray.ini.new
+if [ -e etc/povray/@VERSION@/povray.ini.new ]; then
+    config etc/povray/@VERSION@/povray.ini.new
 fi
