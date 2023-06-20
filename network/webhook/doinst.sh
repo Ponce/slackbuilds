@@ -19,7 +19,7 @@ preserve_perms() {
 	config $NEW
 }
 
-preserve_perms /etc/rc.d/rc.webhook.new
-config /etc/webhook/hooks.json.new
-config /etc/default/webhook.new
-config /etc/logrotate.d/webhook.new
+preserve_perms etc/rc.d/rc.webhook.new
+config etc/webhook/hooks.json.new
+config etc/default/webhook.new
+config etc/logrotate.d/webhook.new
