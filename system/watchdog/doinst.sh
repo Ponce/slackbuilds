@@ -24,8 +24,8 @@ preserve_perms() {
 
 
 
-preserve_perms /etc/rc.d/init.d/watchdog.new
+preserve_perms etc/rc.d/init.d/watchdog.new
 
-config /etc/watchdog.conf.new
-config /etc/sysconfig/watchdog.new
+config etc/watchdog.conf.new
+config etc/sysconfig/watchdog.new
 
