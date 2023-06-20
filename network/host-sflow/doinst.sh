@@ -22,5 +22,5 @@ preserve_perms() {
   config $NEW
 }
 
-preserve_perms etc/init.d/hsflowd
+preserve_perms etc/rc.d/rc.hsflowd.new
 config etc/hsflowd.conf.new
