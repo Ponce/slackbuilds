@@ -3,7 +3,7 @@
 # Slackware build script for hdf5
 
 # Copyright 2007-2015 LukenShiro, Italy
-# Copyright 2020-2022  Matteo Bernardini <ponce@slackbuilds.org>, Pisa, Italy
+# Copyright 2020-2023  Matteo Bernardini <ponce@slackbuilds.org>, Pisa, Italy
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -26,7 +26,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=hdf5
-VERSION=${VERSION:-1.12.2}
+VERSION=${VERSION:-1.14.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -73,9 +73,9 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.?z*
-cd $PRGNAM-$VERSION
+rm -rf $PRGNAM-$VERSION-2
+tar xvf $CWD/$PRGNAM-$VERSION-2.tar.?z*
+cd $PRGNAM-$VERSION-2
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -83,6 +83,27 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
+# Run cmake just to create the pkgconfig files
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DHDF5_INSTALL_LIB_DIR=lib${LIBDIRSUFFIX} \
+    -DMAN_INSTALL_DIR=/usr/man \
+    -DBUILD_STATIC_LIBS=OFF \
+    -DHDF5_BUILD_HL_LIB=ON \
+    -DHDF5_BUILD_CPP_LIB=ON \
+    -DHDF5_BUILD_FORTRAN=ON \
+    -DHDF5_ENABLE_Z_LIB_SUPPORT=ON \
+    -DHDF5_ENABLE_SZIP_SUPPORT=ON \
+    -DHDF5_ENABLE_SZIP_ENCODING=ON \
+    -DUSE_LIBAEC=ON \
+    -DCMAKE_BUILD_TYPE=Release ..
+cd ..
+
+sed -e '/-Werror/d' -i configure
 # --with-ssl option removed
 CFLAGS="$SLKCFLAGS" \
 CPPFLAGS="$SLKCFLAGS" \
@@ -91,9 +112,10 @@ CPPFLAGS="$SLKCFLAGS" \
   --mandir=/usr/man \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --with-pthread \
+  --enable-hl \
   --enable-cxx \
   --enable-fortran \
+  --with-pic \
   --with-zlib \
   --with-szlib \
   --enable-static=no \
@@ -102,12 +124,15 @@ CPPFLAGS="$SLKCFLAGS" \
 make
 make install DESTDIR=$PKG
 
+install -D -m 0644 build/CMakeFiles/hdf5{,_hl}{,_cpp,_fortran}.pc \
+  -t $PKG/usr/lib$LIBDIRSUFFIX/pkgconfig/
+sed -i '/Requires/ s/-/ = /g' $PKG/usr/lib$LIBDIRSUFFIX/pkgconfig/*.pc
+sed -e "s|-I/build/hdf5/src/hdf5-$VERSION/src/H5FDsubfiling||g" \
+  -i $PKG/usr/lib$LIBDIRSUFFIX/libhdf5.settings -i $PKG/usr/bin/*
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 install -m 0644 $DOCFILES $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-
-# Remove unnecessary stuff
-rm -f $PKG/usr/lib${LIBDIRSUFFIX}/*.settings
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
