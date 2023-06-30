@@ -20,12 +20,17 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20230629 bkw: Modified by SlackBuilds.org, BUILD=5:
+# - fix the info files so the info command can actually display them.
+# - add doinst.sh to handle /usr/info/dir
+# - rm generic INSTALL from doc dir.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=guile1.8
 SRCNAM=guile
 VERSION=${VERSION:-1.8.8}
-BUILD=${BUILD:-4}
+BUILD=${BUILD:-5}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -37,9 +42,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -76,9 +78,9 @@ patch -p1 -i $CWD/guile-1.8.8-gcc46.patch
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} + -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+ -o -perm 440 -o -perm 400 \) -exec chmod 644 {} +
 
 CFLAGS="$SLKCFLAGS" \
 ./configure \
@@ -103,27 +105,48 @@ find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | gr
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-# Compress info files
-if [ -d $PKG/usr/info ]; then
-  ( cd $PKG/usr/info
-    rm -f dir
-    gzip -9 *
-    # rename it so that it will not overwrite Slackware's guile 2.0 package
-    for i in {1..7}
-    do
-      mv guile.info-$i.gz guile1.8.info-$i.gz
-    done
-    mv guile.info.gz guile1.8.info.gz
-    mv r5rs.info.gz r5rs1.8.info.gz
-  )
-fi
+# 20230629 bkw:
+#
+# Fix the info files. This is required for them to work with the info
+# command; simply renaming them doesn't work. If you try it, you won't
+# see the guile 1.8 stuff in the info directory... and if you try
+# "info guile1.8" or even "info /usr/info/guile1.8.info.gz" with the
+# previous BUILD (4), it will show you the guile 3.0 documentation
+# instead (seriously). Surgery is required.
+#
+# goops.info.gz and guile-tut.info.gz can stay as-is, they are not
+# included in Slackware's guile. r5rs.info is almost identical to
+# the one in Slackware, so leave it out of this package.
+#
+# This is a lot of work to do, but it results in proper info files:
+# they show up in the index (if you just type "info"), without
+# conflicting with Slackware's guile info files. And you can also run
+# "info guile1.8" to display them.
+#
+# The alternative to this messy solution would be to rm -rf $PKG/usr/info
+# and just not ship the .info files. But I kinda hate to do that.
+#
+rm -f $PKG/usr/info/{guile.*,r5rs*,dir}
+gzip -9 $PKG/usr/info/*.info
+GV="$( echo $VERSION | cut -d. -f1,2 )"
+( cd doc/ref
+  sed -i '/^guile\.info-/s,guile,guile'$GV, guile.info
+  sed -i \
+    -e '/\* Guile Ref/s,.*,* Guile '$GV' Reference: (guile'$GV').     The Guile '$GV' reference manual.,' \
+    -e '/^File: guile\.info/s,guile,guile'$GV, \
+    guile.info*
+  rename guile. guile$GV. guile.info*
+  for i in guile$GV.info*; do
+    gzip -9c < $i > $PKG/usr/info/$( basename $i ).gz
+  done
+)
 
 # Avoid duplicate with Slackware's guile.m4
 # It can detect newer (2.0) and older (1.8) version of guile installed on system
 mv $PKG/usr/share/aclocal/guile.m4 $PKG/usr/share/aclocal/guile18.m4
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS COPYING* GUILE-VERSION HACKING INSTALL LICENSE NEWS README* THANKS \
+cp -a AUTHORS COPYING* GUILE-VERSION HACKING LICENSE NEWS README* THANKS \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
@@ -132,7 +155,8 @@ sed -i '1s/guile/guile1.8/' -i $PKG/usr/bin/guile-config1.8
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/doinst.sh > $PKG/install/douninst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
-
