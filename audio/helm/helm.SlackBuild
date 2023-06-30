@@ -4,13 +4,21 @@
 
 # Written by Zbigniew Baniewski, <Zbigniew [dot] Baniewski [at] gmail [dot] com>
 
+# 20230630 bkw: Modified by SlackBuilds.org, BUILD=2:
+# - install plugins to /usr/lib64/lv2 on 64-bit.
+# - stop writing to /root/.helm during the build.
+# - install lv2 shared lib +x.
+# - add gtk-update-icon-cache to doinst.sh.
+
 # 20220323 bkw: Modified by SlackBuilds.org: fix 32-bit build.
+
+# TODO: since this uses jack, it needs the setcap stuff.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=helm
 VERSION=${VERSION:-0.9.0}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -32,9 +40,8 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 # 20220323 bkw: This is a lie: nothing actually uses SLKCFLAGS
-# or LIBDIRSUFFIX, after they get set here. Leaving in case the
-# maintainer wants to apply the flags (if not, please delete this
-# whole stanza).
+# after they get set here. Leaving in case the
+# maintainer wants to apply the flags.
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
@@ -74,23 +81,27 @@ cat $CWD/0001-doc-fix.patch | patch -p1 || exit 1
   sed -i 's,__sigemptyset,sigemptyset,' \
     JUCE/modules/juce_audio_formats/codecs/flac/libFLAC/cpu.c
 
-make
-make install DESTDIR=$PKG
+# 20230630 bkw: stop writing to /root/.helm/ during the build. More
+# complex than it needs to be, to support ccache usage.
+mkdir .tmphome
+export CCACHE_DIR=${CCACHE_DIR:-$HOME/.cache/ccache}
+export HOME=$(pwd)/.tmphome
+
+# 20230630 bkw: V=1 so I can see the actual compile commands.
+make V=1 LIBDIR=/usr/lib$LIBDIRSUFFIX
+make install DESTDIR=$PKG LIBDIR=/usr/lib$LIBDIRSUFFIX
+
+chmod +x $PKG/usr/lib*/lv2/*/*.so
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mv $PKG/usr/share/man $PKG/usr/
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a changelog COPYING \
-    $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a docs/helm_manual.pdf docs/thank_you.txt \
-    $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a changelog COPYING docs/helm_manual.pdf docs/thank_you.txt $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
