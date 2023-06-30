@@ -12,7 +12,3 @@ FILES="slpkg repositories blacklist rules"
 for file in $FILES; do
   config etc/slpkg/$file.toml.new
 done
-
-if [ -x /usr/bin/update-desktop-database ]; then
-  /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
-fi
