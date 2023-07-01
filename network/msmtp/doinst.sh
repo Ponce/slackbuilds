@@ -1,1 +1,6 @@
-chroot . /usr/bin/install-info /usr/info/msmtp.info.gz /usr/info/dir 2> /dev/null
+if [ -x /usr/bin/install-info -a -d usr/info ]; then
+  ( cd usr/info
+    rm -f dir
+    for i in *.info*; do /usr/bin/install-info $i dir 2>/dev/null; done
+  )
+fi
