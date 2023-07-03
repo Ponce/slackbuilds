@@ -25,8 +25,10 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=qutebrowser-bin
-VERSION=${VERSION:-2.5.4}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-2.5.4_5fa878c}
+SSLVERSION=${SSLVERSION:-3.1.1}
+COMMIT=5fa878c7d190ba227aa05ab01385e640fc7ff42b
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -57,14 +59,16 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG/opt $OUTPUT
 cd $PKG/opt
-tar xvf $CWD/qutebrowser-$VERSION.tar.gz
-mv qutebrowser-$VERSION qutebrowser
+tar xvf $CWD/qutebrowser-$COMMIT.tar.gz
+mv qutebrowser-$COMMIT qutebrowser
 cd qutebrowser
 sed -i.bak "s|\(run_venv(venv_dir, 'python', '-m', 'pip', 'install',\)|\1 \
 '--no-index', '--find-links=$CWD/',|" scripts/mkvenv.py
 
 sed -i "/env\['PATH'\] = str(bin_path) + os.pathsep + env\['PATH'\]/d" \
   scripts/asciidoc2html.py
+
+sed -i 's/_DEFAULT_WRAPPER = "PyQt5"/_DEFAULT_WRAPPER = "PyQt6"/' qutebrowser/qt/machinery.py
 
 chown -R root:root .
 find -L . \
@@ -73,7 +77,8 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-python3 scripts/mkvenv.py --skip-smoke-test
+python3 scripts/mkvenv.py --venv-dir .venv-qt6 --pyqt-version 6.5 \
+    --skip-smoke-test
 
 mv scripts/mkvenv.py.bak scripts/mkvenv.py
 
@@ -81,12 +86,12 @@ find ./ -type f -name '*.pyc' -delete
 find ./ -type d -name '__pycache__' -delete
 find ./ -type f -exec sed -i -e "s|$PKG||" {} \;
 find ./ -type f -exec sed -i -e \
-  '1,2 s|^#!/usr/bin/env python.*$|#!/opt/qutebrowser/.venv/bin/python3|' {} \;
-.venv/bin/python3 -m compileall scripts/__init__.py \
+  '1,2 s|^#!/usr/bin/env python.*$|#!/opt/qutebrowser/.venv-qt6/bin/python3|' {} \;
+.venv-qt6/bin/python3 -m compileall scripts/__init__.py \
   scripts/setupcommon.py scripts/utils.py -fq
-.venv/bin/python3 -m compileall .venv/lib -fq
+.venv-qt6/bin/python3 -m compileall .venv-qt6/lib -fq
 
-.venv/bin/python3 scripts/asciidoc2html.py
+.venv-qt6/bin/python3 scripts/asciidoc2html.py
 a2x -f manpage doc/qutebrowser.1.asciidoc
 gzip -9 doc/qutebrowser.1
 mkdir -p $PKG/usr/man/man1
@@ -99,12 +104,12 @@ install -m 0644 misc/org.qutebrowser.qutebrowser.desktop \
   $PKG/usr/share/applications
 for res in 16 24 32 48 64 96 128 256 512; do
   mkdir -p $PKG/usr/share/icons/hicolor/${res}x${res}/apps/;
-  install -m 0644 "icons/qutebrowser-${res}x${res}.png" \
+  install -m 0644 "qutebrowser/icons/qutebrowser-${res}x${res}.png" \
 "$PKG/usr/share/icons/hicolor/${res}x${res}/apps/qutebrowser.png"
 done
-install -m 0644 "icons/qutebrowser.svg" \
+install -m 0644 "qutebrowser/icons/qutebrowser.svg" \
   $PKG/usr/share/icons/hicolor/scalable/apps/
-install -m 0644 "icons/qutebrowser.xpm" $PKG/usr/share/pixmaps/
+install -m 0644 "qutebrowser/icons/qutebrowser.xpm" $PKG/usr/share/pixmaps/
 
 cp -a misc/userscripts $PKG/usr/share/qutebrowser
 cp -a scripts $PKG/usr/share/qutebrowser
@@ -120,6 +125,35 @@ cd $PKG/usr/share/qutebrowser/pdf.js
 unzip $CWD/pdfjs-*-dist.zip
 chown -R root:root $PKG/usr/share/qutebrowser/pdf.js
 find ./ -type f -exec chmod 644 {} \;
+
+cd $TMP
+rm -rf openssl-$SSLVERSION
+tar xvf $CWD/openssl-$SSLVERSION.tar.gz
+cd openssl-$SSLVERSION
+./config \
+ zlib \
+ enable-camellia \
+ enable-seed \
+ enable-rfc3779 \
+ enable-cms \
+ enable-md2 \
+ enable-rc5 \
+ enable-ssl3 \
+ enable-ssl3-method \
+ no-weak-ssl-ciphers \
+ no-mdc2 \
+ no-ec2m \
+ no-sm2 \
+ no-sm4 \
+ no-sse2 \
+ shared
+
+make
+
+mv libcrypto.so.3 libssl.so.3 $PKG/opt/qutebrowser
+cd $PKG/opt/qutebrowser
+ln -s libssl.so.3 libssl.so
+ln -s libcrypto.so.3 libcrypto.so
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
