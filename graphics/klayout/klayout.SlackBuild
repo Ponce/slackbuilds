@@ -1,0 +1,171 @@
+#!/bin/bash
+
+# Slackware build script for klayout
+
+# Copyright 2023, Lockywolf
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=klayout
+VERSION=${VERSION:-0.28.9}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+elif [ "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.*z?
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+mkdir builddir
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+QMAKE_CCACHE=1 \
+./build.sh \
+      -bin builddir/bin \
+      -build builddir/build \
+      -j4 \
+      -libcurl \
+      -libexpat \
+      -libpng
+#( cd $PKG
+  find builddir | xargs file | grep "executable" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || :
+  find builddir | xargs file | grep "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || :
+#)
+
+install -D -m 644 $CWD/klayout.desktop "$PKG"/usr/share/applications/klayoutEditor.desktop
+
+PYTHON_VERSION=$(python3 -c 'import sys; print("{}.{}".format(sys.version_info.major, sys.version_info.minor))')
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/python"${PYTHON_VERSION}"/site-packages/klayout
+cp -pdr builddir/bin/pymod/* $PKG/usr/lib$LIBDIRSUFFIX/python"${PYTHON_VERSION}"/site-packages/
+for d in tl db rdb; do
+  mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/python"${PYTHON_VERSION}"/site-packages/klayout/$d
+  cp -pd builddir/bin/pymod/klayout/$d/* $PKG/usr/lib$LIBDIRSUFFIX/python"${PYTHON_VERSION}"/site-packages/klayout/$d/
+#  chmod 644 $PKG/usr/lib$LIBDIRSUFFIX/python"${PYTHON_VERSION}"/site-packages/klayout/$d/*
+done
+find -L $PKG/usr/lib$LIBDIRSUFFIX/python"${PYTHON_VERSION}"/site-packages/klayout \
+ -type d -exec chmod 755 {} \; -o -type f -exec chmod 644 {} \;
+
+# lib
+
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/klayout
+cp -pd builddir/bin/*.so* $PKG/usr/lib$LIBDIRSUFFIX/klayout/
+chmod 644 $PKG/usr/lib$LIBDIRSUFFIX/klayout/*.so*
+
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/klayout/db_plugins
+cp -pd builddir/bin/db_plugins/*.so* $PKG/usr/lib$LIBDIRSUFFIX/klayout/db_plugins/
+chmod 644 $PKG/usr/lib$LIBDIRSUFFIX/klayout/db_plugins/*.so*
+
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/klayout/lay_plugins
+cp -pd builddir/bin/lay_plugins/*.so* $PKG/usr/lib$LIBDIRSUFFIX/klayout/lay_plugins/
+chmod 644 $PKG/usr/lib$LIBDIRSUFFIX/klayout/lay_plugins/*.so*
+
+# pymod
+# cd /tmp/klayout/%{_libdir}/klayout/pymod
+# #install pymod
+# for f in `find`; do
+#   if [ -f "$f" ]; then
+#     install -Dm644 "$f" "%{buildroot}%{python3_sitearch}/$f"
+#   fi
+# done
+
+# create and populate bindir
+mkdir -p $PKG/usr/bin
+cp -pd builddir/bin/klayout builddir/bin/strm* $PKG/usr/bin/
+chmod 755 $PKG/usr/bin
+
+# create and populate includes
+mkdir -p $PKG/usr/include/klayout
+mkdir -p $PKG/usr/include/klayout/atomic
+find . -name '*.h' -exec install -Dm644 {} $PKG/usr/include/klayout \;
+install -Dm644 $PKG/usr/include/klayout/atomic.h $PKG/usr/include/klayout/atomic/
+install -Dm644 $PKG/usr/include/klayout/atomic_msvc.h $PKG/usr/include/klayout/atomic/
+install -Dm644 $PKG/usr/include/klayout/spinlock.h $PKG/usr/include/klayout/atomic/
+
+#other
+install -Dm644 etc/klayout.desktop $PKG/usr/share/applications/klayout.desktop
+install -Dm644 etc/logo.png $PKG/usr/share/pixmaps/klayout.png
+
+# ldconfing idiocy
+for mfile in $(find $PKG/  -type f -exec file {} + | grep ELF | awk -F: '{print $1}') ; do
+  old_rpath=$(patchelf --print-rpath $mfile)
+  patchelf --set-rpath ${old_rpath}:/usr/lib$LIBDIRSUFFIX/klayout/ $mfile
+done
+
+
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  README.md CONTRIB COPYRIGHT \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
