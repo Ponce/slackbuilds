@@ -6,20 +6,15 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-# Note: this is not the latest version of ydotool, though it's newer
-# than the version that Debian packages. It uses the stable(ish)
-# libevdevplus and libuinputplus versions that Debian also packages.
-
-# Later ytodool, libevdevplus, and libuinputplus versions are
-# rapidly-moving targets for now. Plus, latest ydotool uses "CPM"
-# (Cmake Package Manager) to auto-download its dependencies, and I
-# haven't had time to figure out how to defeat that so the script can
-# run without doing network access...
+# 20230712 bkw: updated for v1.0.4. Many changes upstream.
+# - no longer need REQUIRES="libuinputplus libevdevplus".
+# - regenerated bundled man pages.
+# - updated README to mention the daemon, since it's now required.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=ydotool
-VERSION=${VERSION:-0.1.9}
+VERSION=${VERSION:-1.0.4}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -67,40 +62,52 @@ chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-# The cmake project version variables control the shared library's
-# version, which should match the actual ytodool version... version
-# 0.1.9 thinks it's 0.1.5.
-patch -p1 < $CWD/project_version.diff
+# Upstream's man pages are in scdoc format, which looks like a pretty
+# nice text-to-manpage mini-language. Rather than require scdoc as a
+# dependency, I just converted the man pages and included them with
+# the script. If they ever need to be generated again: install scdoc,
+# then run this with BUILD_MAN=yes, which will create $CWD/ydotool.1
+# and $CWD/ydotoold.8... then run "git add ydotool.1 ydotoold.8".
+
+# 20230712 bkw: cmake is harder to fake out than make by himself.
+BUILD_MAN="${BUILD_MAN:-no}"
+if [ "$BUILD_MAN" = "yes" ]; then
+  # BUILD_MAN=yes is a maintainer option, nobody else needs to use it.
+  if [ ! -x /usr/bin/scdoc ]; then
+    echo "*** $0: BUILD_MAN=yes requires scdoc to be installed."
+    exit 1
+  fi
+else
+  # Regular build, will use pre-generated man pages from $CWD, so
+  # disable it in CMakeLists.txt.
+  sed -i '/add_subdirectory(manpage)/d' CMakeLists.txt
+fi
 
 mkdir -p build
 cd build
   cmake \
-    -DDYNAMIC_BUILD=on \
-    -DSTATIC_BUILD=off \
-    -DCMAKE_CXX_FLAGS_RELEASE="$SLKCFLAGS -DNDEBUG" \
+    -DCMAKE_C_FLAGS_RELEASE="$SLKCFLAGS -DNDEBUG" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DLIB_SUFFIX=${LIBDIRSUFFIX} \
-    -DMAN_INSTALL_DIR=/usr/man \
+    -DCMAKE_INSTALL_MANDIR=/usr/man \
     -DCMAKE_BUILD_TYPE=Release ..
   make VERBOSE=1
   make install/strip DESTDIR=$PKG
 cd ..
 
-# Upstream's man pages are in scdoc format, which looks like a pretty
-# nice text-to-manpage mini-language. Rather than require scdoc as a
-# dependency, I just converted the man pages and included them with
-# the script. If they ever need to be generated again, use this:
+# 20230712 bkw: the daemon has a .8 man page, it should go here:
+mkdir -p $PKG/usr/sbin
+mv $PKG/usr/bin/ydotoold $PKG/usr/sbin
 
-if [ "${CONVERT_MAN:-no}" = "yes" ]; then
-  sed -i 's,\\fR,,' manpage/ydotool.1.scd
-  scdoc < manpage/ydotool.1.scd > $CWD/ydotool.1
-  scdoc < manpage/ydotoold.8.scd > $CWD/ydotoold.8
+if [ "$BUILD_MAN" = "yes" ]; then
+  cp build/manpage/ydotool{.1,d.8} $CWD
+else
+  mkdir -p $PKG/usr/man/man{1,8}
+  cat $CWD/ydotool.1 > $PKG/usr/man/man1/ydotool.1
+  cat $CWD/ydotoold.8 > $PKG/usr/man/man8/ydotoold.8
 fi
 
-PMAN=$PKG/usr/man
-mkdir -p $PMAN/man{1,8}
-gzip -9c < $CWD/$PRGNAM.1 > $PMAN/man1/$PRGNAM.1.gz
-gzip -9c < $CWD/${PRGNAM}d.8 > $PMAN/man8/${PRGNAM}d.8.gz
+gzip -9 $PKG/usr/man/man*/*
 
 # Install setuid unless disabled. See README for rationale.
 if [ "${SETUID:-yes}" = "yes" ]; then
