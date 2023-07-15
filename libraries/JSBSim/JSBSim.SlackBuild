@@ -1,0 +1,162 @@
+#!/bin/bash
+
+# Slackware build script for JSBsim
+
+# Copyright 2023 Brian Hoffpauir, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=JSBSim
+SRCNAM=${PRGNAM,,}
+VERSION=${VERSION:-1.1.13}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+elif [ "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+# OPTIONS
+# Build using Slackware's l/expat XML parsing library (default to ON)
+SYSTEM_EXPAT=${SYSTEM_EXPAT:-ON}
+# Share library between Python module and JSBSim executable (default to ON)
+# Otherwise build a static library.
+BUILD_SHARED_LIBS=${BUILD_SHARED_LIBS:-ON}
+# Build C++ API documentation (default to OFF; requires Doxygen and Graphviz)
+BUILD_DOCS=${BUILD_DOCS:-OFF}
+# This option is used for both build & install CMake cache variables
+BUILD_PYTHON_MODULE=${BUILD_PYTHON_MODULE:-ON} # (default to ON)
+# Ensure appropriate Python version 3 executable is used; can be overridden if needed
+PYTHON_EXECUTABLE=${PYTHON_EXECUTABLE:-"$(which python3)"}
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+mkdir -p build
+cd build
+  cmake -G "Unix Makefiles" \
+		-DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+		-DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DPYTHON_EXECUTABLE="$PYTHON_EXECUTABLE" \
+		-DSYSTEM_EXPAT="$SYSTEM_EXPAT" \
+		-DBUILD_SHARED_LIBS="$BUILD_SHARED_LIBS" \
+		-DBUILD_DOCS="$BUILD_DOCS" \
+		-DBUILD_PYTHON_MODULE="$BUILD_PYTHON_MODULE" \
+		-DINSTALL_JSBSIM_PYTHON_MODULE="$BUILD_PYTHON_MODULE" ..
+  make
+  make install/strip DESTDIR=$PKG
+cd ..
+
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+
+# JSBSim's CMake setup does not support GNUInstallDirs or a LIB_SUFFIX cache variable.
+# If a library directory suffix is set, move the libraries to that directory.
+if [ -n "$LIBDIRSUFFIX" ]; then
+  # Create /usr/lib64/ and /usr/lib64/pkgconfig
+  mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/{,pkgconfig}
+  # Move libAeromatic++ and libJSBSim
+  mv $PKG/usr/lib/libAeromatic++.* $PKG/usr/lib${LIBDIRSUFFIX}/
+  mv $PKG/usr/lib/libJSBSim.* $PKG/usr/lib${LIBDIRSUFFIX}/
+  mv $PKG/usr/lib/pkgconfig/JSBSim.pc $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig
+  # Set correct library directory in libJSBSim's pkgconfig:
+  sed -i "s|libdir=/usr/lib|libdir=/usr/lib${LIBDIRSUFFIX}|" \
+  $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/JSBSim.pc &>> /dev/null
+  # Remove possibly empty directories
+  rmdir --ignore-fail-on-non-empty \
+    $PKG/usr/lib/pkgconfig/ \
+    $PKG/usr/lib
+fi
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+# Copy repo docs and sample aircraft data
+cp -a \
+   README.md \
+   COPYING \
+   AUTHORS \
+   doc/DevelopersDocs.md \
+   doc/spreadsheets/ \
+   examples/ \
+   aircraft/ \
+   engine/ \
+   systems/ \
+   scripts/ \
+   $PKG/usr/doc/$PRGNAM-$VERSION
+
+if [[ "${BUILD_DOCS,,}" = "on" ]]; then # Also copy Doxygen output if built
+  cp -a \
+    build/documentation/html/ \
+    $PKG/usr/doc/$PRGNAM-$VERSION
+fi
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
