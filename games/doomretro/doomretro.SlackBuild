@@ -3,7 +3,7 @@
 # Slackware build script for doomretro
 
 # Copyright 2017 Dugan Chen Canada
-# Copyright 2020 B. Watson
+# Copyright 2020-2023 B. Watson
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,6 +23,11 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20230715 bkw: update for v4.9.2.
+# - finally fix the segfaults when the music changes.
+# - remove music note from README, since music works now.
+# - remove -nomusic from the .desktop file.
+
 # 20230114 bkw: update for v4.7.2, add note about music to README.
 # 20220611 bkw: update for v4.5.1, fix 16x16 icon path.
 # 20211006 bkw:
@@ -40,7 +45,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=doomretro
-VERSION=${VERSION:-4.7.2}
+VERSION=${VERSION:-4.9.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -78,10 +83,17 @@ fi
 
 set -e
 
+LIBNAM=SDL2_mixer
+LIBVER=${LIBVER:-2.0.4}
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
-cd $TMP
-rm -rf $PRGNAM-$VERSION
+TOPDIR=$TMP/$PRGNAM-build
+rm -rf $TOPDIR
+mkdir -p $TOPDIR
+cd $TOPDIR
+
+tar xvf $CWD/$LIBNAM-$LIBVER.tar.lz
 
 # All these --excludes save ~30MB in /tmp, and avoid the recursive chmod
 # tripping over broken symlinks.
@@ -91,11 +103,46 @@ tar xvf $CWD/$PRGNAM-$VERSION.tar.gz \
   --exclude=msvc \
   --exclude=SDL2\*
 
-cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
+# 20230715 bkw: This is an ugly way to fix an issue caused by Slackware's
+# SDL2_mixer package. doomretro uses SDL2_mixer's FluidSynth support for
+# its music. And SDL2_mixer-2.0.4 (what's in Slackware 15.0) has a crashing
+# bug: any time Mix_FreeMusic(handle) is called when the handle is using
+# fluidsynth, we get a use-after-free that causes the app to segfault.
+# More details, including a link to the patch I use, here:
+# https://github.com/FluidSynth/fluidsynth/issues/748
+# The fix, here, is to build a *static* patched SDL2_mixer for
+# doomretro to link with. Lot of work, but it does fix the issue. When
+# Slackware 15.1 releases, we should be able to get rid of this.
+
+mkdir -p $LIBNAM-install
+cd $LIBNAM-$LIBVER
+
+patch -p0 < $CWD/fix-sdl-mixer-fluidsynth.diff
+
+# N.B. --disable-music-mp3-mad-gpl because enabling it breaks the build,
+# as we have no static libmad.a. doesn't matter, because doomretro doesn't
+# use mp3 audio anyway.
+CFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=$TOPDIR/$LIBNAM-install \
+  --sysconfdir=/etc \
+  --disable-shared \
+  --enable-static \
+  --disable-dependency-tracking \
+  --disable-music-mp3-mad-gpl \
+  --build=$ARCH-slackware-linux
+
+make
+make install
+
+# this actually works fine, amazingly enough:
+export PKG_CONFIG_PATH=$TOPDIR/$LIBNAM-install/lib/pkgconfig:$PKG_CONFIG_PATH
+
+cd $TOPDIR/$PRGNAM-$VERSION
 mkdir -p build
 cd build
   cmake \
@@ -111,17 +158,22 @@ mv $PKG/usr/bin $PKG/usr/games
 mkdir -p $PKG/usr/share/applications
 cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
 
-mkdir -p $PKG/usr/share/icons/hicolor/{16x16,32x32,48x48,256x256}/apps
-convert res/$PRGNAM.ico[0] $PKG/usr/share/icons/hicolor/256x256/apps/$PRGNAM.png
-convert res/$PRGNAM.ico[1] $PKG/usr/share/icons/hicolor/48x48/apps/$PRGNAM.png
-convert res/$PRGNAM.ico[2] $PKG/usr/share/icons/hicolor/32x32/apps/$PRGNAM.png
-convert res/$PRGNAM.ico[3] $PKG/usr/share/icons/hicolor/16x16/apps/$PRGNAM.png
+hicolor=$PKG/usr/share/icons/hicolor
+mkdir -p $hicolor/{16x16,32x32,48x48,256x256}/apps
+convert res/$PRGNAM.ico[0] $hicolor/256x256/apps/$PRGNAM.png
+convert res/$PRGNAM.ico[1] $hicolor/48x48/apps/$PRGNAM.png
+convert res/$PRGNAM.ico[2] $hicolor/32x32/apps/$PRGNAM.png
+convert res/$PRGNAM.ico[3] $hicolor/16x16/apps/$PRGNAM.png
 mkdir -p $PKG/usr/share/pixmaps
 ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a CODEOWNERS LICENSE *.md $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# 20230715 bkw: include COPYING.txt from SDL2_mixer, since we statically
+# link it to the binary.
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a CODEOWNERS LICENSE *.md $PKGDOC
+cp -a $TOPDIR/$LIBNAM-$LIBVER/COPYING.txt $PKGDOC/COPYING-SDL2_mixer.txt
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
