@@ -2,7 +2,7 @@
 ..   rst2man.py clksignal-qt.rst > clksignal-qt.6
 .. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 20211219
+.. |version| replace:: 20230515
 .. |date| date::
 
 ============
@@ -36,6 +36,22 @@ automatically be started.
 
 Unlike **clksignal**, **clksignal-qt** *only* supports PulseAudio for
 audio output. No, it won't work with **apulse**\(1), either.
+
+FILES
+=====
+
+**clksignal-qt** looks for ROM files in several directories, including:
+
+/usr/share/clksignal-qt/ROMImages/
+  To populate this directory, install the **clksignal-roms** package from
+  SlackBuilds.org
+
+$HOME/.local/share/clksignal-qt/ROMImages/
+  Simply copy files here (or drag-and-drop them into the UI when asked to).
+
+Each of these directories has subdirectories named after the emulated
+system (e.g. **AppleII/**, **Vic20/**). To see the full list of systems,
+run **clksignal** *--help*.
 
 COPYRIGHT
 =========
