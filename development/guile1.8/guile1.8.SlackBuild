@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # Copyright 2013-2016 Willy Sudiarto Raharjo <willysr@slackbuilds.org>
+# Updated 2023, Lockywolf
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,12 +26,15 @@
 # - add doinst.sh to handle /usr/info/dir
 # - rm generic INSTALL from doc dir.
 
+# 20230716 Lockywolf: BUILD=6
+# - Add NO_DOCS option.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=guile1.8
 SRCNAM=guile
 VERSION=${VERSION:-1.8.8}
-BUILD=${BUILD:-5}
+BUILD=${BUILD:-6}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -82,6 +86,11 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} +
 
+if [[ "$NO_DOCS" == true ]] ; then
+  sed -i 's/scripts srfi doc examples test-suite benchmark-suite lang am/scripts srfi examples test-suite benchmark-suite lang am/g' Makefile.am ;
+  autoreconf -i
+fi
+
 CFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
@@ -102,8 +111,6 @@ rm -rf $PKG/usr/lib${LIBDIRSUFFIX}/*.la
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 # 20230629 bkw:
 #
@@ -127,19 +134,24 @@ for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; r
 # and just not ship the .info files. But I kinda hate to do that.
 #
 rm -f $PKG/usr/info/{guile.*,r5rs*,dir}
-gzip -9 $PKG/usr/info/*.info
-GV="$( echo $VERSION | cut -d. -f1,2 )"
-( cd doc/ref
-  sed -i '/^guile\.info-/s,guile,guile'$GV, guile.info
-  sed -i \
-    -e '/\* Guile Ref/s,.*,* Guile '$GV' Reference: (guile'$GV').     The Guile '$GV' reference manual.,' \
-    -e '/^File: guile\.info/s,guile,guile'$GV, \
-    guile.info*
-  rename guile. guile$GV. guile.info*
-  for i in guile$GV.info*; do
-    gzip -9c < $i > $PKG/usr/info/$( basename $i ).gz
-  done
-)
+if [[ "$NO_DOCS" != true ]] ; then
+  find $PKG/usr/man -type f -exec gzip -9 {} \;
+  for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+  gzip -9 $PKG/usr/info/*.info
+  GV="$( echo $VERSION | cut -d. -f1,2 )"
+  ( cd doc/ref
+    sed -i '/^guile\.info-/s,guile,guile'$GV, guile.info
+    sed -i \
+        -e '/\* Guile Ref/s,.*,* Guile '$GV' Reference: (guile'$GV').     The Guile '$GV' reference manual.,' \
+        -e '/^File: guile\.info/s,guile,guile'$GV, \
+        guile.info*
+    rename guile. guile$GV. guile.info*
+    for i in guile$GV.info*; do
+      gzip -9c < $i > $PKG/usr/info/$( basename $i ).gz
+    done
+  )
+fi
 
 # Avoid duplicate with Slackware's guile.m4
 # It can detect newer (2.0) and older (1.8) version of guile installed on system
