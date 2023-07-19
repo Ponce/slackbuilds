@@ -24,6 +24,9 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20230511 bkw: update for v1.9.22. upstream split the tools off into
+# a separate repo, I modified this script to build them and include them
+# in this package (like PV does with vim and ctags).
 # 20220614 bkw: update for v1.9.21 and 15.0.
 # 20210802 bkw: update for v1.9.19 and -current.
 # 20210304 bkw: update for v1.9.17.
@@ -41,7 +44,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=jack
-VERSION=${VERSION:-1.9.21}
+VERSION=${VERSION:-1.9.22}
+TOOLSVER=${TOOLSVER:-4}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -87,6 +91,8 @@ cd $TMP
 rm -rf $SRCNAM-$VERSION
 tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
 cd $SRCNAM-$VERSION
+TOPDIR="$(pwd)"
+tar xvf $CWD/jack-example-tools-$TOOLSVER.tar.gz
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
@@ -98,6 +104,8 @@ sed -i '/^Libs:/s,$, -lpthread,' jack.pc.in
 
 # 20220614 bkw: upstream disabled the tools by default in 1.9.21, way
 # to handle a point release... --example-tools turns it back on.
+# 20230511 bkw: aaand in 1.9.22, they removed the tools entirely. Again,
+# way to handle a point release...
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 LDFLAGS="-Wl,-s" \
@@ -108,24 +116,54 @@ LDFLAGS="-Wl,-s" \
   --htmldir=/usr/doc/$PRGNAM-$VERSION/html \
   --classic \
   --dbus \
-  --readline \
-  --example-tools \
   --alsa
 
 ./waf build
 ./waf install --destdir=$PKG
 
+# 20230511 bkw: now build the tools against the installed libs in $PKG.
+cd $TOPDIR
+sed "s,/usr,$PKG/usr,g" $PKG/usr/lib$LIBDIRSUFFIX/pkgconfig/jack.pc > jack.pc
+export PKG_CONFIG_PATH=$TOPDIR:$PKG_CONFIG_PATH
+cd jack-example-tools-$TOOLSVER
+mkdir build
+MFLAGS="$SLKCFLAGS -I$PKG/usr/include"
+cd build
+  CFLAGS="$MFLAGS" \
+  CXXFLAGS="$MFLAGS" \
+  LDFLAGS="-L$PKG/usr/lib$LIBDIRSUFFIX" \
+  meson .. \
+    --buildtype=release \
+    --infodir=/usr/info \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    -Dstrip=true
+  "${NINJA:=ninja}"
+  DESTDIR=$PKG $NINJA install
+cd ..
+
 gzip $PKG/usr/man/man?/*
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+PKGDOC2=$PKGDOC/jack-example-tools-$TOOLSVER
+mkdir -p $PKGDOC2
+cp -a LICENSE *.md $PKGDOC2
+cd $TOPDIR
+cp -a AUTHORS* COPYING* ChangeLog* README* $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 # Only add capability stuff if not disabled:
 if [ "${SETCAP:-yes}" = "yes" ]; then
-  cat $CWD/setcap.sh >> $PKG/install/doinst.sh
+  # 20230719 bkw: dynamically create the list instead of hardcoding.
+  # there's at least one symlink, hence find and xargs.
+  BINS="$( cd $PKG/usr/bin && find * -type l -o -print | xargs echo )"
+  sed "s,@BINS@,$BINS," < $CWD/setcap.sh >> $PKG/install/doinst.sh
   # Only allow execution by audio group
   chown root:audio $PKG/usr/bin/*
   chmod 0750 $PKG/usr/bin/*
