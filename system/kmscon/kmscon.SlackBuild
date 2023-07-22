@@ -6,16 +6,24 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20230722 bkw: switch to Aetf's fork, which looks actively
+# maintained. Thanks to lockywolf for finding it. Also, include
+# libtsm here instead of as a separate build: it's been on SBo for ~9
+# years and nothing but this ever depended on it.
+
 # 20210825 bkw: update to the last git commit, post v8 release. It's from
 # 2014, so I doubt there will be more version updates.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=kmscon
-VERSION=${VERSION:-8+20140708_0b34527}
+VERSION=${VERSION:-9.0.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+
+LIBNAM=libtsm
+LIBVER=${LIBVER:-4.0.2}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -50,50 +58,66 @@ fi
 
 set -e
 
-rm -rf $PKG
-mkdir -p $TMP $PKG $OUTPUT
-cd $TMP
-rm -rf $PRGNAM-$VERSION
+TOPDIR=$TMP/$PRGNAM-build
+rm -rf $PKG $TOPDIR
+mkdir -p $TOPDIR $PKG $OUTPUT
+cd $TOPDIR
 tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
-cd $PRGNAM-$VERSION
+tar xvf $CWD/$LIBNAM-$LIBVER.tar.gz
 chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
-# Fix build on -current: add #include <sys/sysmacros.h> to files that
-# use major() and minor()
-patch -p1 < $CWD/sysmacros.diff
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+LIBDOC=$PKGDOC/$LIBNAM-$LIBVER
+mkdir -p $LIBDOC
 
-[ -x configure ] || autoreconf -if
+# first, the library:
+cd $TOPDIR/$LIBNAM-$LIBVER
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install/strip DESTDIR=$PKG
+cd ..
 
-SLKCFLAGS="$SLKCFLAGS -DSIGUNUSED=SIGSYS"
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --disable-static \
-  --enable-shared \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --build=$ARCH-slackware-linux
+cp -a COPYING LICENSE_htable NEWS README* $LIBDOC
 
-make
-make install-strip DESTDIR=$PKG
+export PKG_CONFIG_PATH=$PKG/usr/lib$LIBDIRSUFFIX/pkgconfig:$PKG_CONFIG_PATH
+
+# now, build the app, using the lib we just built.
+cd $TOPDIR/$PRGNAM-$VERSION
+
+# meson is a moving target. this patch doesn't entirely fix things, we also
+# have to manually set some LDFLAGS and CFLAGS, below.
+patch -p1 < $CWD/meson-compat.diff
+
+mkdir build
+cd build
+  LDFLAGS="-L$PKG/usr/lib$LIBDIRSUFFIX -ldl" \
+  CFLAGS="-I$PKG/usr/include $SLKCFLAGS" \
+  meson .. \
+    --buildtype=release \
+    --infodir=/usr/info \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    -Dstrip=true
+  "${NINJA:=ninja}"
+  DESTDIR=$PKG $NINJA install
+cd ..
 
 gzip $PKG/usr/man/man1/$PRGNAM.1
-
-# we don't seem to need the .la files
-rm -f $PKG/usr/lib$LIBDIRSUFFIX/$PRGNAM/*.la
-
 mkdir -p $PKG/etc/$PRGNAM
 cat $CWD/$PRGNAM.conf > $PKG/etc/$PRGNAM/$PRGNAM.conf.new
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a COPYING NEWS README $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cp -a COPYING NEWS README* docs/*.txt $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
