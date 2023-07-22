@@ -4,6 +4,7 @@
 # Additional documentation for KiCad
 
 # Copyright 2010-2013  Niels Horn, Rio de Janeiro, RJ, Brazil
+# 2023/07/21 tjd: patched for 7.0.2 adding extra deps etc.
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,19 +24,20 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# Revision date: 2019-12-12
+# Revision date: 2023-07-23
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=kicad-doc
-VERSION=${VERSION:-5.1.5}
+VERSION=${VERSION:-7.0.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-
+DOCLANG=${DOCLANG:-en}
+ADWPVER=${ADWPVER:-20230721}
 ARCH="noarch"
 
-KICAD_VERSION=${KICAD_VERSION:-5.1.5}
+KICAD_VERSION=${KICAD_VERSION:-7.0.2}
 
 # If the variable PRINT_PACKAGE_NAME is set, then this script will report what
 # the name of the created package would be, and then exit. This information
@@ -57,6 +59,18 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
+#patch CmakeLists.txt to remove warning
+sed -i 's\2.8\2.8.12\g' CMakeLists.txt
+
+#note: to create asciidoctor-web-pdf-64bit-YYYYMMDD.tar.js once node.js is installed; in a
+#overlayfs chroot run npm -i -g asciidoctor-pdf
+#then tar.gz the contents of usr/lib64/node_modules from the overlay directory
+#eg. cd $OVERLAYCHANGESDIR/usr/lib64; tar -czf ~/asciidoctor-web-pdf-64bit-YYYYMMDD.tar.gz node_modules
+#
+tar -xzf $CWD/asciidoctor-web-pdf-64bit-$ADWPVER.tar.gz
+#make sure system can find asciidoctor-web-pdf stuff
+OLDPATH=$PATH
+PATH=$TMP/$PRGNAM-$VERSION/node_modules/asciidoctor-pdf/bin:$PATH; export PATH
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
@@ -68,19 +82,27 @@ mkdir -p build
 cd build
   cmake \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DLANGUAGES=en \
+    -DLANGUAGES=$DOCLANG \
+    -Wno-dev \
     -DBUILD_FORMATS='html;pdf' ../
   make
   make install DESTDIR=$PKG
 cd ..
 
+PATH=$OLDPATH; export PATH
+#tidy up huge stuff no longer needed.
+rm -rf node_modules
+#fix locations
+#mkdir -p $PKG/usr/doc/kicad-$KICAD_VERSION
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -ar $PKG/usr/share/doc/kicad/* $PKG/usr/doc/$PRGNAM-$VERSION/
+rm -rf $PKG/usr/share/doc
 # Create a link in the data-dir to the documentation
 mkdir -p $PKG/usr/share/kicad
 cd $PKG/usr/share/kicad
-  ln -sf ../../doc/kicad-$KICAD_VERSION/help
+  ln -sf ../../doc/$PRGNAM-$VERSION/help
 cd ..
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
