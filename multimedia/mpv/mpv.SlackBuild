@@ -27,8 +27,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=mpv
-VERSION=${VERSION:-0.35.1}
-WAF_VERSION=${WAF_VERSION:-2.0.24}
+VERSION=${VERSION:-0.36.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -72,9 +71,13 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
-cp $CWD/waf-$WAF_VERSION ./waf
-sed -i -e 's/python$/python3/' waf
-chmod +x waf
+
+# Needed for 15.0's older meson but disables RPI
+if [ "$(meson --version)" = "0.59.4" ]; then
+  echo "Using meson-0.59.4 for 15.0"
+  patch -p0 < $CWD/use_older_meson.diff
+fi
+
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -85,29 +88,31 @@ find -L . \
 DOCS="Copyright LICENSE.GPL LICENSE.LGPL README.md RELEASE_NOTES VERSION"
 MANUAL="DOCS/*.md DOCS/*.rst DOCS/*.txt"
 
-pipewire="--disable-pipewire" ; [ "${USE_PIPEWIRE:-no}" != "no" ] && pipewire=""
+pipewire="-Dpipewire=disabled" ; [ "${USE_PIPEWIRE:-no}" != "no" ] && pipewire="-Dpipewire=auto"
 
 # This leaves an opening for additional build options.
+# See `meson configure` to see what's available.
 BUILD_OPTS=${BUILD_OPTS:-""}
 
-# Setting CFLAGS and CXXFLAGS breaks configure.
-./waf configure \
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+meson \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --confdir=/etc/$PRGNAM \
+  --sysconfdir=/etc \
   --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --enable-libmpv-shared \
-  --enable-html-build \
-  --enable-dvdnav \
-  --enable-cdda \
-  --enable-dvbin \
+  -Dbuildtype=release \
+  -Dmanpage-build=enabled \
+  -Dlibmpv=true \
+  -Dhtml-build=enabled \
+  -Dcdda=enabled \
+  -Ddvdnav=enabled \
+  -Ddvbin=enabled \
   $pipewire \
-  $BUILD_OPTS
+  $BUILD_OPTS \
+  . build
 
-./waf build
-./waf --destdir=$PKG install
-
+DESTDIR=$PKG ${NINJA:=ninja} -C build -v install
 
 for f in $PKG/etc/mpv/*.conf ; do
   mv $f{,.new}
@@ -130,6 +135,8 @@ mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/manual
 for f in $MANUAL; do
   cp -a $f $PKG/usr/doc/$PRGNAM-$VERSION/manual/
 done
+cp -a $PKG/usr/share/doc/$PRGNAM/* $PKG/usr/doc/$PRGNAM-$VERSION
+rm -rf $PKG/usr/share/doc
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
