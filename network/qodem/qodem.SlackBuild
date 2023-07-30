@@ -1,0 +1,172 @@
+#!/bin/bash
+
+# Slackware build script for qodem
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Notes:
+# - Package includes both terminal (qodem) and X11 (qodem-x11) binaries.
+# - qodem-x11 always builds with its bundled copy of pdcurses, regardless of
+#   whether our PDCurses package is installed. Perfectly OK, just worth
+#   mentioning why PDCurses isn't a dependency.
+# - Two choices for ssh support: build with bundled cryptlib (like syncterm
+#   does), or run an external ssh command. Upstream's default is the latter,
+#   I won't change it. Plus, using the ssh binary has the useful side effect
+#   of respecting your ~/.ssh/config.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=qodem
+VERSION=${VERSION:-1.0.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-v$VERSION
+tar xvf $CWD/$PRGNAM-v$VERSION.tar.gz
+cd $PRGNAM-v$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
+
+# There's no configure option to override use of the system miniupnp
+# library; it'll fall back to its own bundled version if not found.
+# This makes it always use the bundled one, for a reproducible build
+# and to avoid a hidden dependency.
+sed -i '/Q_USE_SYSTEM_UPNP="yes"/s,yes,no,' configure
+
+# Use our flags for sub-makes.
+sed -i -e 's,-ggdb,,' \
+       -e "s,-O0,$SLKCFLAGS," \
+       lib/pdcurses/Makefile \
+       lib/upnp/Makefile
+
+# The X11 build runs external commands in a separate terminal. Change
+# the default terminal to something that actually exists on Slackware.
+# This is just the default (can still be changed in ~/.qodem/qodemrc).
+sed -i 's,x-terminal-emulator,xterm,g' source/{options,help}.c
+
+# Don't repeat myself (much, anyway):
+buildit() {
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  ./configure \
+    --prefix=/usr \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --docdir=/usr/doc/$PRGNAM-$VERSION \
+    --build=$ARCH-slackware-linux \
+    "$@"
+  make
+  make install-strip DESTDIR=$PKG
+}
+
+### this builds the terminal binary (qodem):
+buildit
+
+### now start over, prepare to build the x11 binary (qodem-x11):
+make distclean
+
+# we have to build these separately, for parallel builds (-jN, N>1):
+make -C lib/pdcurses
+make -C lib/upnp
+
+# sub-projects built, now we can build qodem-x11:
+buildit --enable-x11
+
+### everything else:
+
+# This script isn't useful. All it would ever do is "exec qodem-x11", since
+# our package includes that.
+rm -f $PKG/usr/bin/x$PRGNAM $PKG/usr/man/man1/x$PRGNAM.1
+
+# There was no documentation for the conversion scripts, so I wrote some:
+cat $CWD/qodem-convert.1 > $PKG/usr/man/man1/qodem-convert.1
+
+# All man pages in place, so:
+gzip -9 $PKG/usr/man/man*/*
+
+# useful-looking stuff in misc/, include in package:
+for i in ibbs syncterm; do
+  cp -a misc/convert_${i}.pl $PKG/usr/bin/qodem-convert-$i
+  ln -s qodem-convert.1.gz $PKG/usr/man/man1/qodem-convert-$i.1.gz
+done
+
+# qodem-x11 doesn't seem to use this font when in PETSCII mode, but
+# it works OK if you run qodem in a terminal using the font:
+mkdir -p $PKG/usr/share/fonts/TTF
+cp -a misc/fonts/C64_Pro_Mono-STYLE.ttf $PKG/usr/share/fonts/TTF
+
+# .desktop files written by SlackBuild author:
+mkdir -p $PKG/usr/share/applications
+install -oroot -groot -m0644 $CWD/$PRGNAM*.desktop $PKG/usr/share/applications
+
+# Upstream provided icons at various sizes:
+cp build/icons/qodem.png build/osx/icons/qodem-64.png
+for png in build/osx/icons/qodem-*.png; do
+  px="$( basename $png .png | cut -d- -f2 )"
+  size=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  cat $png > $dir/$PRGNAM.png
+done
+
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# Most of what's in docs/ is developer-oriented, but the PD
+# announcement is the closest thing we've got to a license...
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a C* README* docs/pd_announcement2.txt $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+# It works out OK to use the same script for doinst.sh and douninst.sh.
+# Result is that it truly does clean up after itself.
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/doinst.sh > $PKG/install/douninst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
