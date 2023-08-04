@@ -2,27 +2,29 @@
 
 # Slackware build script for Kobo Deluxe
 
-# Written by Rubén Llorente <porting@use.startmail.com>
+# Written by Rubén Llorente <email removed>
+# Updated and maintained by B. Watson <urchlay@slackware.uk>
 
-# This script is of public domain. It can be distributed, modified and used as desired.
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
-# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
-# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+# 20230804 bkw, BUILD=2:
+# - take over maintenance.
+# - relicense as WTFPL.
+# - install binary stripped.
+# - add patch from Debian to allow the game to be unpaused. apparently
+#   this has been broken at least since Slackware 15.0 released,
+#   maybe even before that.
+# - include upstream's icons in the package (and remove ours).
+# - update .desktop file.
+# - mention Bosconian in the README, since this game is basically a
+#   remake of it with a few enhancements.
+# - fix typos and grammar in man page, and extend the CONTROLS section.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=KoboDeluxe
 VERSION=${VERSION:-0.5.1}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -34,9 +36,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -66,20 +65,29 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT $PKG/install
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvjf $CWD/$PRGNAM-$VERSION.tar.bz2
-cp -t $TMP $CWD/kobodeluxe-0.5.1-glibc2.10.patch $CWD/kobodeluxe-gcc-4.3.patch
+tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
 cd $PRGNAM-$VERSION
+tar xvf icons.tar.gz
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
-# This patches are incuded to fix compilation bugs.
-# I want to thank the Arch comunity for making them availible.
-patch -p0 <$TMP/kobodeluxe-0.5.1-glibc2.10.patch
-patch -p0 <$TMP/kobodeluxe-gcc-4.3.patch
+# These patches are incuded to fix compilation bugs.
+# I want to thank the Arch community for making them availible.
+patch -p0 < $CWD/kobodeluxe-0.5.1-glibc2.10.patch
+patch -p0 < $CWD/kobodeluxe-gcc-4.3.patch
+
+# 20230804 bkw: patch from Debian. Without this, the game starts
+# up in Paused mode, and cannot be unpaused.
+patch -p1 < $CWD/ignore-appinputfocus.patch
+
+# 20230804 bkw: another Debian patch, prevents the game from looking
+# in the current directory for data.
+patch -p1 < $CWD/02_paths.patch
+
+# 20230804 bkw: fix typos/grammar and document the pause and screenshot
+# keystrokes.
+patch -p1 < $CWD/manpagefix.diff
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -95,18 +103,25 @@ CXXFLAGS="$SLKCFLAGS" \
   --build=$ARCH-slackware-linux
 
 make
-make install DESTDIR=$PKG
+make install-strip DESTDIR=$PKG
+gzip -9 $PKG/usr/man/man*/*
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+# 20230804 bkw: upstream included prescaled icons in icons.tar.gz.
+for i in icons/KDE/icons/*; do
+  size="$( basename $i )"
+  dir=$PKG/usr/share/icons/hicolor/$size/apps
+  mkdir -p $dir
+  cp -a $i/kobodl.png $dir
+done
 
 mkdir -p $PKG/usr/share/{applications,pixmaps}
-cat $CWD/$PRGNAM.png > $PKG/usr/share/pixmaps/$PRGNAM.png
 cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+ln -s ../icons/hicolor/48x48/apps/kobodl.png $PKG/usr/share/pixmaps
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a COPYING README* ChangeLog TODO $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a COPYING README* ChangeLog TODO $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
