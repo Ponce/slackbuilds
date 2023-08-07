@@ -3,7 +3,8 @@
 # Slackware build script for grc.
 #
 # Copyright 2015-2018  Edinaldo P. Silva, Rio de Janeiro, Brazil.
-# Copyright 2020 Ricardo J. Barberis <ricardo.barberis@gmail.com>
+# Copyright 2020 Ricardo J. Barberis
+# Copyright 2023 B. Watson
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,25 +24,23 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20230806 bkw:
+# - take over maintenance.
+# - ARCH=noarch since it's just python.
+# - update for v1.13.
+# - expand README, fix the fish command so it actually works.
+# - add profile script for (t)csh.
+# - preserve_perms for profile.d scripts in doinst.sh.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM="grc"
-VERSION=${VERSION:-1.11.3}
+VERSION=${VERSION:-1.13}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+ARCH=noarch
 
-if [ -z "$ARCH" ]; then
-  case "$( uname -m )" in
-    i?86) ARCH=i586 ;;
-    arm*) ARCH=arm ;;
-       *) ARCH=$( uname -m ) ;;
-  esac
-fi
-
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -50,20 +49,6 @@ fi
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
-
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
-fi
 
 set -e
 
@@ -74,33 +59,32 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
+
+# Hardcoded man path sucks...
+sed -i 's,/share/man,/man,' install.sh
 
 ./install.sh $PKG/usr $PKG
-
-mv $PKG/etc/grc.conf $PKG/etc/grc.conf.new
-
-# for Bash, Fish and Zsh.
-mv $PKG/etc/profile.d/grc.bashrc $PKG/etc/profile.d/grc.bashrc.new
-install -m644 grc.zsh $PKG/etc/profile.d/grc.zsh.new
-install -m644 grc.fish $PKG/etc/profile.d/grc.fish.new
+gzip -9 $PKG/usr/man/man*/*
 
 install -Dm644 _grc $PKG/usr/share/zsh/site-functions/_grc
 
-mv $PKG/usr/share/man $PKG/usr/man
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+mv $PKG/etc/grc.conf $PKG/etc/grc.conf.new
+mv $PKG/etc/profile.d/grc.sh $PKG/etc/profile.d/grc.sh.new
 
-DOCS="contrib debian/changelog debian/copyright CREDITS INSTALL \
-README.markdown Regexp.txt TODO"
+# Might as well include this, so enabling for bourne-like shells
+# will be a one-step process (chmod +x /etc/profile.d/grc.sh).
+mkdir -p $PKG/etc/default
+echo "GRC_ALIASES=true" > $PKG/etc/default/grc.new
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -r $DOCS $PKG/usr/doc/$PRGNAM-$VERSION/
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# 20230806 bkw: (t)csh support. For shiggles.
+install -m0644 -oroot -groot $CWD/grc.csh $PKG/etc/profile.d/grc.csh.new
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -r contrib debian/{changelog,copyright} CREDITS README* *.txt TODO $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
