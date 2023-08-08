@@ -2,9 +2,10 @@
 # Slackware build script for cronie
 
 # Copyright 2012, 2013  Chris Abela, Malta
-# Copyright 2014  Ryan P.C. McQuen | Everett, WA | ryanpcmcquen@member.fsf.org
-# Copyright 2017-2018  Aaditya Bagga <aaditya_gnulinux@zoho.com>
-# Copyright 2019 Ricardo J. Barberis <ricardo.barberis@gmail.com>
+# Copyright 2014  Ryan P.C. McQuen | Everett, WA
+# Copyright 2017-2018  Aaditya Bagga
+# Copyright 2019 Ricardo J. Barberis
+# Copyright 2023 B. Watson
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -24,10 +25,21 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20230808 bkw:
+# - take over maintenance.
+# - update for v1.6.1.
+# - update README for modern Slackware.
+# - remove useless INSTALL from doc dir.
+# - add contrib/* to doc dir.
+# - patch crond so it accepts (and ignores) "-l notice", so we don't have
+#   to change Slackware's init stuff.
+# - add /etc/rc.d/rc.crond and /etc/default/crond.
+# - gzip run-parts man page.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=cronie
-VERSION=${VERSION:-1.5.4}
+VERSION=${VERSION:-1.6.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -40,9 +52,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -75,11 +84,14 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
+
+# 20230808 bkw: add the -l <level> option to crond, to allow Slackware's
+# /etc/default/crond to work without being modified. this doesn't actually
+# support changing the loglevel; it just makes crond accept and ignore
+# the option.
+patch -p1 < $CWD/add-l-option.diff
 
 # Enable anacron by default
 [ "$ANACRON" = no ] && unset ANACRONFLAG || ANACRONFLAG="--enable-anacron"
@@ -97,10 +109,8 @@ CXXFLAGS="$SLKCFLAGS" \
   "$ANACRONFLAG"
 
 make
-make install DESTDIR=$PKG
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+make install-strip DESTDIR=$PKG
+gzip -9 $PKG/usr/man/man*/*
 
 mkdir -p $PKG/etc/cron.d  # The absence of this directory would be logged
 
@@ -112,21 +122,24 @@ chmod 600 $PKG/etc/cron.deny.new
 # These are copied from Slackware's dcron.SlackBuild
 cat $CWD/run-parts > $PKG/usr/bin/run-parts
 chmod 0755 $PKG/usr/bin/run-parts
-cat $CWD/run-parts.8 > $PKG/usr/man/man8/run-parts.8
+gzip -9c < $CWD/run-parts.8 > $PKG/usr/man/man8/run-parts.8.gz
 mkdir -p $PKG/etc/cron.{hourly,daily,weekly,monthly}
 mkdir -p $PKG/var/spool/cron/
 chmod 0700 $PKG/var/spool/cron/
 cat $CWD/crontab.root > $PKG/var/spool/cron/root.new
 chmod 0600 $PKG/var/spool/cron/root.new
+mkdir -p $PKG/etc/default $PKG/etc/rc.d
+cat $CWD/crond.default > $PKG/etc/default/crond.new # modified from Slackware
+cat $CWD/rc.crond > $PKG/etc/rc.d/rc.crond.new
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+# default permissions are +x for the init script, though doinst.sh
+# can change them.
+chmod 755 $PKG/etc/rc.d/rc.crond.new
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  AUTHORS COPYING ChangeLog INSTALL NEWS README \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a AUTHORS COPYING* ChangeLog NEWS README* contrib $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
