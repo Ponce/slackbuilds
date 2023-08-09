@@ -22,6 +22,13 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20230808 bkw: BUILD=2
+# - take over maintenance.
+# - binary in /usr/games.
+# - strip bin and shared lib.
+# - fix permission on appdata.
+# - include prescaled icons.
+
 # 20220320 bkw: Modified by SlackBuilds.org: fix 32-bit build.
 # The deps are different on 32-bit and 64-bit; see README.
 
@@ -33,7 +40,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=hedgewars
 VERSION=${VERSION:-1.0.0}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -80,11 +87,8 @@ rm -rf $PRGNAM-src-$VERSION
 tar xvjf $CWD/$PRGNAM-src-$VERSION.tar.bz2
 cd $PRGNAM-src-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find . -type f -a -exec chmod 644 {} + \
+    -o -type d -a -exec chmod 755 {} +
 
 patch -p1 < $CWD/fpc-3.2.0.patch
 patch -p1 < $CWD/include.qpainterpath.diff
@@ -98,24 +102,42 @@ cd build
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DLIB_SUFFIX=${LIBDIRSUFFIX} \
-    -DNOVIDEOREC=1 \
-    -DPHYSFS_SYSTEM=off \
-    -DNOSERVER=1 \
+    -DNOVIDEOREC=ON \
+    -DNOSERVER=ON \
     -DCMAKE_BUILD_TYPE=Release ..
   make VERBOSE=1
-  make install DESTDIR=$PKG
+  make install/strip DESTDIR=$PKG
 cd ..
+
+# It's a game, so:
+mv $PKG/usr/bin $PKG/usr/games
+
+# Cleanup on aisle 6:
+strip $PKG/usr/games/*
+sed -i '/^Exec/s,=,=/usr/games/,' $PKG/usr/share/applications/$PRGNAM.desktop
+chmod -x $PKG/usr/share/appdata/*
 
 # Include the man page.
 mkdir -p $PKG/usr/man/man6
-cp $TMP/$PRGNAM-src-$VERSION/man/hedgewars.6 $PKG/usr/man/man6
+gzip -9c < man/$PRGNAM.6 > $PKG/usr/man/man6/$PRGNAM.6.gz
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+# Don't need tiny XPM icon.
+rm -f $PKG/usr/share/pixmaps/*
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a COPYING INSTALL.md CREDITS README.md Fonts_LICENSE.txt ChangeLog.txt $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# Icons extracted from share/Icon.icns with icns2png.
+for i in $CWD/icons/*.png; do
+  px="$( basename $i .png )"
+  sz="${px}x${px}"
+  dir=$PKG/usr/share/icons/hicolor/$sz/apps
+  mkdir -p $dir
+  cat $i > $dir/$PRGNAM.png
+done
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a COPYING CREDITS README.md Fonts_LICENSE.txt ChangeLog.txt $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
