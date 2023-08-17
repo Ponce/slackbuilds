@@ -1,8 +1,7 @@
 .. RST source for sap2txt(1) man page. Convert with:
 ..   rst2man.py sap2txt.rst > sap2txt.1
-.. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 5.2.0
+.. |version| replace:: 5.3.0
 .. |date| date::
 
 =======

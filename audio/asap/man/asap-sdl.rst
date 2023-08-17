@@ -1,8 +1,7 @@
 .. RST source for asap-sdl(1) man page. Convert with:
 ..   rst2man.py asap-sdl.rst > asap-sdl.1
-.. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 5.2.0
+.. |version| replace:: 5.3.0
 .. |date| date::
 
 ========
@@ -33,8 +32,8 @@ The supported input formats are: SAP, CMC, CM3, CMR, CMS, DMC, DLT,
 MPT, MPD, RMT, TMC, TM8, TM2 or FC.
 
 During playback, you can press Enter to exit. In fact, the player
-doesn't exit at the end of the file (nor does it loop), so you *have*
-to press Enter after the song is over.
+doesn't exit at the end of the file (nor does it loop, unless the song
+does), so you *have* to press Enter after the song is over.
 
 There are no other controls during playback (no way to e.g. seek
 forwards or backwards).

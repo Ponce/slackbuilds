@@ -1,8 +1,7 @@
 .. RST source for asapconv(1) man page. Convert with:
 ..   rst2man.py asapconv.rst > asapconv.1
-.. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 5.2.0
+.. |version| replace:: 5.3.0
 .. |date| date::
 
 ========
