@@ -34,6 +34,13 @@
 # along with this program (most likely, a file named COPYING). If
 # not, see <http://www.gnu.org/licenses/>.
 
+# 20230818 bkw:
+# - Update for v3.4.
+# - Upstream includes a man page now, use it instead of Debian's.
+# - Use sed instead of a patch, for privacy in the HTML files.
+# - Move the .ini files to /usr/share/astyle.
+# - Install the shell completions (new in 3.4).
+
 # 20200113 bkw:
 # - Take over maintenance.
 # - Add man page and privacy patch, BUILD=2.
@@ -49,12 +56,10 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=astyle
-VERSION=${VERSION:-3.1}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-3.4}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-
-TARBALL="astyle_${VERSION}_linux.tar.gz"
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -92,37 +97,49 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM
-tar xvf $CWD/$TARBALL
-cd $PRGNAM
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
+cd $PRGNAM-$VERSION
 chown -R root:root .
 
 # Don't change this back to template please. Every file in the tarball
 # is +x, and *none* of them need to be.
-find -L .  -type d -a -exec chmod 755 {} \+ -o \
-           -type f -a -exec chmod 644 {} \+
+find -L .  -type d -a -exec chmod 755 {} + -o \
+           -type f -a -exec chmod 644 {} +
 
 DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION
 
-# This patch (from Debian) prevents the user's browser from trying to
-# load images from sourceforge, when viewing the *local* HTML docs in
-# a browser.
-patch -p1 < $CWD/privacy.patch
+# This prevents the user's browser from trying to load images from
+# sourceforge, when viewing the *local* HTML docs in a browser. It's
+# based on a patch from Debian.
+sed -i 's,<img[^>]*sflogo\.[^>]*>,Artistic Style on SourceForge.net,' doc/*.html
 
 CFLAGS="$SLKCFLAGS -Wl,-s" \
 CXXFLAGS="$SLKCFLAGS -Wl,-s" \
   make -C build/gcc release
   make -C build/gcc install prefix=$PKG/usr SYSCONF_PATH=$DOCDIR
 
-# Man page borrowed from Debian. It's kind of a placeholder, will
-# expand it someday.
 mkdir -p $PKG/usr/man/man1
-sed -e "s|@VERSION@|$VERSION|" \
-    -e "s|@DATE@|$( date +"%B %e, %Y" )|" \
-    $CWD/$PRGNAM.1 | \
-    gzip -9c > $PKG/usr/man/man1/$PRGNAM.1.gz
+gzip -9c < man/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
 
-cp -a *.md file $DOCDIR
+# 20230818 bkw: this stuff used to be in the doc dir. Makes more sense
+# to keep it in /usr/share... though I'll keep a symlink in the doc dir
+# for users of the old package.
+mkdir -p $PKG/usr/share/$PRGNAM
+cp -a file/* $PKG/usr/share/$PRGNAM
+ln -s ../../share/$PRGNAM $DOCDIR/file
+
+# 20230820 bkw: upstream added shell completion support.
+# The zsh completion is broken, apparently (doesn't work for me), but
+# I don't know (or care) enough about zsh to fix it. Patches welcome.
+mkdir -p $PKG/usr/share/bash-completion/completions \
+         $PKG/usr/share/zsh/site-functions \
+         $PKG/etc/fish/completions
+install -m0644 sh-completion/astyle.bash $PKG/usr/share/bash-completion/completions/astyle
+#install -m0644 sh-completion/astyle.zsh  $PKG/usr/share/zsh/site-functions/_astyle
+install -m0644 sh-completion/astyle.fish $PKG/etc/fish/completions
+
+cp -a *.md $DOCDIR
 sed -i 's,\r,,' $DOCDIR/file/*
 
 cat $CWD/$PRGNAM.SlackBuild > $DOCDIR/$PRGNAM.SlackBuild
