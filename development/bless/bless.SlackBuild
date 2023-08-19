@@ -6,6 +6,8 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20230819 bkw: update for v0.6.3.
+
 # 20230102 bkw: BUILD=3
 # - get rid of useless junk from doc dir.
 
@@ -20,8 +22,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=bless
-VERSION=${VERSION:-0.6.0}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-0.6.3}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -52,111 +54,47 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/${PRGNAM}_$VERSION.orig.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
-
-# Begin rant. FWIW, I'm not very impressed with bless:
-# - It has show-stopper bugs that were left in place when the maintainer
-#   abandoned it a few years ago (others have fixed the worst of them
-#   by now, patches included here).
-# - It starts up in Insert mode which definitely violates the principle
-#   of least surprise (in normal hex editors, overwrite is generally the
-#   default and often only mode). This is so annoying that I patched it.
-#   Even in overwrite mode, it'll let you append bytes to the end of
-#   the file, which a hex editor shouldn't do in its default mode.
-# - It ships with 3 .layout files that get installed in /usr/share, but
-#   the layout dialog is broken: you can't choose between the
-#   "system" layouts... now I've fixed this, at least.
-# - Finally, and maybe this is just my own personal bias, I don't see an
-#   obvious way to change the white background to black (if the .layout
-#   files are capable of it, great, but I tried really hard to get them
-#   to work and they don't seem to behave the way the docs say they do).
-#   This means I won't be using this application very much, as it hurts
-#   my eyes to look at it for more than a few minutes.
-# If it's so awful, why am I writing a SlackBuild for it? Because
-# it's a GUI hex editor that (a) uses GTK, (b) doesn't suck quite
-# as hard as ghex, and (c) doesn't require KDE and its horde of
-# daemons. Someone is going to be glad it's here. People who grew up
-# using GUIs are going to prefer this to a textmode app.
-# Here endeth the rant.
-
-# Patch from Debian. Might not be needed with newer versions of mono,
-# but no harm done.
-patch -p1 < $CWD/patches/force_gtk_action_namespace.patch
-
-# Patch from dead gna.org site:
-# http://web.archive.org/web/20170205194531/http://gna.org/bugs/?14878
-# Fixes "not enough space" error when trying to save.
-patch -p1 < $CWD/patches/fix_save.patch
-
-# Similar-named patch from Debian. This one fixes saving preferences.
-patch -p1 < $CWD/patches/fix_save_behaviour.patch
-
-# Patch from: https://bugs.launchpad.net/ubuntu/+source/bless/+bug/1622951
-# Fixes broken preferences saving.
-patch -p1 < $CWD/patches/fixxmltextwriter.patch
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
 # Make bless act like all other hex editors on the planet by NOT starting
 # up in Insert mode. I wouldn't have patched this, except that bless
 # doesn't auto-save the Insert/Overwrite state across sessions. You can
 # set the default via Edit/Preferences, but it doesn't remember the last
 # state if you just press Insert to toggle it.
-patch -p1 < $CWD/patches/default_overwrite.patch
+sed -i '/Default\.Editmode/s,Insert,Overwrite,' data/default-preferences.xml
 
-patch -p1 < $CWD/patches/disambiguate-system.range-and-gtk.range.patch
-
-# 20211210 bkw: make it look in the right place for its own layout files.
+# 20230819 bkw: make it look in the right place for its own layout files.
+# Debian does this with a patch (it's their only patch for 0.6.3) but I
+# prefer to use sed.
 sed -i '/FileResourcePath\.GetDataPath("data")/s,"data",".",' \
        src/gui/dialogs/LayoutSelectionDialog.cs
 
-# Grr. The configure script doesn't allow setting CS or MCS or CSC or
-# anything to override the compiler (like normal stuff does with CC).
-# FFS, it's even hardcoded in C# code...
-sed -i 's,gmcs,mcs,g' configure builder/ModuleBuilder.cs
+meson setup build -Dprefix=/usr -Dtests=false
+ninja -C build
+DESTDIR=$PKG ninja -C build install
 
-./configure \
-  --without-scrollkeeper \
-  --prefix=/usr \
-  --libdir=/usr/lib \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION
-
-# GRR. Even with --without-scrollkeeper we have to fake it out. I
-# could look into using rarian, but I'm not sure what good it would
-# do: the .xml and .html help files are already installed in the right
-# places, and help_script.sh knows how to display them when you click
-# Help/Contents or press F1.
-cp doc/user/bless-manual.omf.in doc/user/bless-manual.omf
-
-make
-make install DESTDIR=$PKG
-
-# --docdir is ignored.
 PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
-mkdir -p $PKG/usr/doc/
-mv $PKG/usr/share/doc/$PRGNAM $PKGDOC
-rm -rf $PKG/usr/share/{doc,omf} $PKGDOC/{INSTALL,README.packaging,bless.spec}
+mkdir -p $PKGDOC
+ln -s ../../share/help/C/bless $PKGDOC/html
+cp -a AUTHORS COPYING NEWS README $PKGDOC
 
 # The help script needed help.
 PKGHELP=$PKG/usr/share/$PRGNAM/help_script.sh
-sed "s/@VERSION@/$VERSION/g" $CWD/help_script.sh > $PKGHELP
+cat $CWD/help_script.sh > $PKGHELP
 chmod 755 $PKGHELP
 
 # Man page from Debian. Not much to it, but not much was needed.
 mkdir -p $PKG/usr/man/man1
 gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
 
-HICOLOR=$PKG/usr/share/icons/hicolor/48x48/apps
 PIXMAPS=$PKG/usr/share/pixmaps
-rm -f $PIXMAPS/*
-mkdir -p $HICOLOR
-mv $PKG/usr/share/$PRGNAM/bless-48x48.png $HICOLOR/$PRGNAM.png
-ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/$PRGNAM/bless-48x48.png
+mkdir -p $PIXMAPS
 ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PIXMAPS/$PRGNAM.png
 
-sed -i '/Icon=/s,=.*,=bless,' $PKG/usr/share/applications/$PRGNAM.desktop
+# 20230819 bkw: dup icon
+rm -f $PKG/usr/share/bless/bless-48x48.png
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/bless/bless-48x48.png
 
 cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 

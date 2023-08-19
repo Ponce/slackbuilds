@@ -5,4 +5,4 @@
 # and just use xdg-open for the HTML help in the user's default
 # browser.
 
-exec xdg-open /usr/doc/bless-@VERSION@/user/index.html
+exec xdg-open /usr/share/help/C/bless/index.html
