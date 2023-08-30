@@ -3,6 +3,7 @@
 # Slackware build script for earlyoom
 
 # Copyright 2022 Charadon US
+# Copyright 2023 B. Watson
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,11 +23,19 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20230829 bkw: BUILD=2
+# - add LICENSE and README.md to the doc dir.
+# - binary in /usr/sbin, man page in section 8, since this is admin stuff.
+# - have the init script delete the PID file after stop or force_stop.
+# - actually use SLKCFLAGS.
+# - make /etc/default/earlyoom a .new config file.
+# - add a bit more detail to README.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=earlyoom
 VERSION=${VERSION:-1.7}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -38,9 +47,6 @@ case "$( uname -m )" in
 esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}"  ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -52,16 +58,12 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
 fi
 
 set -e
@@ -73,32 +75,36 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
+# 20230829 bkw: don't generate the man page even if pandoc is installed,
+# since we're going to use a prebuilt one.
+sed -i '/^PANDOC *:=/d' Makefile
 
-make PREFIX=/usr
-make DESTDIR=$PKG PREFIX=/usr install-bin
-install -Dm644 earlyoom.default $PKG/etc/default/earlyoom
-install -Dm644 $CWD/earlyoom.1 $PKG/usr/man/man1/earlyoom.1
+# 20230829 bkw: no way to do this on the make command line:
+sed -i "/^CFLAGS/s,-Wall,& $SLKCFLAGS," Makefile
 
+# 20230829 bkw: note to self: non-canonical use of BINDIR here. It's not
+# the full path (/usr/sbin), it gets PREFIX prepended to it.
+make PREFIX=/usr BINDIR=/sbin
+strip $PRGNAM
+make DESTDIR=$PKG PREFIX=/usr BINDIR=/sbin install-bin
 
-rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+# 20230829 bkw: prebuilt man page is a bit different from the generated one:
+# - it's a section 8 page.
+# - it has the date and "Linux System Administrator's Manual" filled in.
+# - get rid of fancy unicode angle brackets for email addresses, just use <>.
+mkdir -p $PKG/usr/man/man8
+gzip -9 < $CWD/earlyoom.8 > $PKG/usr/man/man8/earlyoom.8.gz
 
 install -Dm644 $CWD/rc.earlyoom $PKG/etc/rc.d/rc.earlyoom.new
+install -Dm644 earlyoom.default $PKG/etc/default/earlyoom.new
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-#cp -a <documentation> $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a README* LICENSE* $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
