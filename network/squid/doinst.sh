@@ -26,5 +26,6 @@ preserve_perms etc/rc.d/rc.squid.new
 preserve_perms etc/squid/mime.conf.new
 preserve_perms etc/squid/squid.conf.new
 preserve_perms etc/squid/cachemgr.conf.new
+preserve_perms etc/squid/errorpage.css.new
 preserve_perms etc/logrotate.d/squid.new
 
