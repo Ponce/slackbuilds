@@ -11,3 +11,4 @@ jg-nestopia
 jg-picodrive
 jg-prosystem
 jg-vecx
+jg-geolith

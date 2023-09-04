@@ -13,3 +13,4 @@ jg-prosystem
 rgbds
 jg-sameboy
 jg-vecx
+jg-geolith
