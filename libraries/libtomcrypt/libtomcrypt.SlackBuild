@@ -2,6 +2,7 @@
 
 # Slackware build script for libtomcrypt
 
+# Copyright 2023 Steven Voges <Oregon, USA>
 # Copyright 2017 Andrzej Telszewski, Banie
 # All rights reserved.
 #
@@ -28,12 +29,10 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=libtomcrypt
-VERSION=${VERSION:-1.17}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.18.2}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-
-SRCNAM=crypt
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -43,9 +42,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -55,17 +51,21 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
+# Use upstream CFLAGS.
 if [ "$ARCH" = "i586" ]; then
-  # Use upstream CFLAGS.
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
-  # Use upstream CFLAGS.
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
-  # Use upstream CFLAGS.
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+elif [ "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
-  # Use upstream CFLAGS.
+  SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
 
@@ -75,7 +75,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$SRCNAM-$VERSION.tar.?z*
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
@@ -84,29 +84,34 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Note: -DTFM_DESC is left out, since it requires TomsFastMath.
-# Note: -ltfm is left out, since it requires TomsFastMath.
-CFLAGS="-DGMP_DESC -DLTM_DESC" \
-EXTRALIBS="-lgmp -ltommath" \
-make -f makefile.shared
+# -DTFM_DESC and -DUSE_TFM are left out, since it requires TomsFastMath.
+make -f makefile.shared \
+  CFLAGS="$SLCKFLAGS \
+    -DGMP_DESC \
+    -DLTM_DESC \
+    -DUSE_GMP \
+    -DUSE_LTM"
 
 make -f makefile.shared install \
+  PREFIX=/usr \
   LIBPATH=/usr/lib$LIBDIRSUFFIX \
-  INSTALL_USER=root \
-  INSTALL_GROUP=root \
+  INCPATH=/usr/include \
+  DATAPATH=/usr/data \
+  BINPATH=/usr/bin \
   DESTDIR=$PKG
 
-chmod 0644 $PKG/usr/include/*.h
 rm -f $PKG/usr/lib${LIBDIRSUFFIX}/*.a
-strip --strip-unneeded $PKG/usr/lib$LIBDIRSUFFIX/*.so.*.*.*
+rm -f $PKG/usr/lib${LIBDIRSUFFIX}/*.la
+chmod 0755 $PKG/usr/lib$LIBDIRSUFFIX/*.so.*.*.*
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a demos doc/crypt.pdf notes changes LICENSE README TODO \
+cp -a \
+  demos doc/crypt.tex notes LICENSE README.md changes \
   $PKG/usr/doc/$PRGNAM-$VERSION
-rmdir $PKG/usr/doc/$PRGNAM-$VERSION/demos/test
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-
-rm -f $PKG/usr/lib*/*.la
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
