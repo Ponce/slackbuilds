@@ -1,0 +1,69 @@
+#!/bin/bash
+
+declare -a UUIDS
+declare -a LOGFILES
+
+. /etc/rc.d/rc.bees.conf
+
+umount_uuid()
+{
+	UUID="$1"
+	MNT="/run/bees/mnt/$UUID"
+	# Try for up to 10 seconds and then bail out
+	for _ in {1..10} ; do
+		umount "$MNT" > /dev/null 2>&1
+		if mountpoint -q "$MNT" ; then
+			sleep 1
+		else
+			break
+		fi
+	done
+}
+
+bees_start()
+{
+	for i in "${!UUIDS[@]}" ; do
+		UUID="${UUIDS[$i]}"
+		LOGFILE="${LOGFILES[$i]}"
+		umount_uuid "$UUID"
+		nice -n 15 ionice -c 3 daemon --name="bees.$UUID" --output="$LOGFILE" -- beesd "$UUID"
+	done
+}
+
+bees_stop()
+{
+	for UUID in "${UUIDS[@]}" ; do
+		daemon --name="bees.$UUID" --stop
+		umount_uuid "$UUID"
+	done
+}
+
+bees_status()
+{
+	for UUID in "${UUIDS[@]}" ; do
+		daemon --name="bees.$UUID" --running --verbose
+	done
+}
+
+bees_forcestop()
+{
+	killall bees
+}
+
+case "$1" in
+	'start')
+		bees_start
+		;;
+	'stop')
+		bees_stop
+		;;
+	'status')
+		bees_status
+		;;
+	'forcestop')
+		bees_forcestop
+		;;
+	*)
+		echo "usage $0 start|stop|status|forcestop"
+		;;
+esac
