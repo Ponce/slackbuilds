@@ -12,7 +12,7 @@
 # a bit weird.
 
 PRGNAM=md2roff
-CLONE_URL=https://github.com/nereusx/md2roff
+CLONE_URL=https://codeberg.org/nereusx/md2roff
 
 set -e
 
