@@ -2,6 +2,7 @@
 
 # Copyright (c) 2007 Niki Kovacs <contact@kikinovak.net>
 # Copyright 2014 Ryan P.C. McQuen, WA, <ryanpcmcquen@member.fsf.org>
+# Copyright 2023 Jeremy Hansen <jebrhansen+SBo@gmail.com>
 #
 # Slackware build script for recode
 
@@ -38,10 +39,10 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=recode
-SRCNAM=Recode
-VERSION=${VERSION:-3.7_beta2}
-SRCVER=$(echo $VERSION | tr _ -)
-BUILD=${BUILD:-4}
+VERSION=${VERSION:-3.7.13}
+GNULIBVER=${GNULIBVER:-2752f1cb315fc461e3df263ab5bb03a354cf4308}
+BOOTSTRAPVER=${BOOTSTRAPVER:-037f83765b6e8f90dfabdfac4889be22a5a3f4a4}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -84,9 +85,12 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $SRCNAM-$SRCVER
-tar xvf $CWD/$SRCNAM-$SRCVER.tar.gz || tar xvf $CWD/v$SRCVER.tar.gz
-cd $SRCNAM-$SRCVER
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+# Extract git submodule archives to correct location
+tar xvf $CWD/gnulib-$GNULIBVER.tar.gz --strip-components=1 -C gnulib/
+tar xvf $CWD/bootstrap-$BOOTSTRAPVER.tar.gz --strip-components=1 -C gl-mod/bootstrap/
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -94,25 +98,29 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
-# allow recode to be built on a gcc that is not ancient -ryan
-sed -i "s/bool ignore : 2;/bool ignore : 1;/g" ./src/recodext.h
-
-# libdir and target are critical for x86_64
+./bootstrap --skip-po
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
-  --enable-static=no \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
   --infodir=/usr/info \
   --mandir=/usr/man \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --enable-static=no \
   --build=$ARCH-slackware-linux \
   --host=$ARCH-slackware-linux \
   --target=$ARCH-slackware-linux
 
 make
 make install-strip DESTDIR=$PKG
-gzip -9 $PKG/usr/man/man*/*
+
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 rm -f $PKG/usr/info/dir
 gzip -9 $PKG/usr/info/*.info*
@@ -121,8 +129,6 @@ mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a AUTHORS COPYING* NEWS README THANKS TODO \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-
-rm -f $PKG/usr/lib*/*.la
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
