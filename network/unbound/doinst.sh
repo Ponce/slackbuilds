@@ -35,3 +35,18 @@ if [ -r /etc/logrotate.d/unbound ] && [ $(stat -c "%U:%G" "/etc/logrotate.d/unbo
  echo "To fix it, simply run:"
  echo "# chown root:root /etc/logrotate.d/unbound"
 fi
+
+echo "----------------------------"
+echo "As of Unbound SlackBuild 1.18.0-2 DNSSEC is enabled by default."
+echo
+echo "You have two options:"
+echo
+echo "1) Run the following command to setup the root trust anchor (RECOMMENDED!)"
+echo "# sudo -u unbound unbound-anchor -f /etc/resolv.conf -R -a /var/lib/unbound/root.key"
+echo
+echo "2) Disable DNSSEC and unbound-anchor functionality."
+echo "Edit /etc/unbound/unbound.conf, and erase or comment the following line:"
+echo 'auto-trust-anchor-file: "/var/lib/unbound/root.key"'
+echo
+echo "This is a suitable option if you plan to use Unbound simply as a forwarding resolver."
+echo "----------------------------"

@@ -28,7 +28,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=unbound
 VERSION=${VERSION:-1.18.0}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -83,6 +83,10 @@ if ! grep -q ^"$UB_USER": /etc/passwd ; then
   exit 1
 fi
 
+# This needs to be set. Otherwise Unbound
+# will build against Python 2.
+UNB_PY_VERSION=${UNB_PY_VERSION:-3.9}
+
 set -e
 
 rm -rf $PKG
@@ -100,6 +104,7 @@ find -L . \
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
+PYTHON_VERSION="$UNB_PY_VERSION" \
 ./configure \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
@@ -111,9 +116,15 @@ CXXFLAGS="$SLKCFLAGS" \
   --with-ssl \
   --enable-dnscrypt \
   --disable-static \
+  --enable-sha2 \
+  --enable-subnet \
+  --with-pythonmodule \
+  --with-pyunbound \
   --with-username=$UB_USER \
   --with-pidfile=/var/run/unbound/unbound.pid \
+  --with-rootkey-file=/var/lib/unbound/root.key \
   --build=$ARCH-slackware-linux \
+  --host=$ARCH-slackware-linux \
 
 make
 make install DESTDIR=$PKG
@@ -142,7 +153,13 @@ touch -r doc/Changelog $PKG/usr/doc/$PRGNAM-$VERSION/Changelog
 # 3) Change timestamps to ASCII format (from Epoch).
 # 4) Turn off chroot.
 # 5) Disable systemd socket activation.
-# 6) Set num-threads to $(nproc). Still disabled by default.
+# 6) Set num-threads to $(nproc).
+# 7) Use root-hints file.
+# 8) Set DNS prefetch to "yes".
+# 9) Harden against out of zone rrsets (harden-glue).
+# 10) Harden against receiving dnssec-stripped data (harden-dnssec-stripped).
+# 11) Enable aggressive NSEC, root-key-sentinel and RFC8145 (trust anchor
+# signaling).
 cp -a $PKG/etc/unbound/unbound.conf $PKG/etc/unbound/unbound.conf.upstream
 sed -i \
 -e 's/# control-interface:/control-interface:/g' \
@@ -151,17 +168,29 @@ sed -i \
 -e 's/# use-systemd: no/use-systemd: no/g' \
 -e 's/# logfile: ""/logfile: "\/var\/log\/unbound\/unbound.log"/g' \
 -e 's/# chroot: "\/etc\/unbound"/chroot: ""/g' \
--e 's/# num-threads: 1/# num-threads: '$(nproc)' # Set to nproc by SlackBuild. Uncomment to enable threading/g' \
+-e 's/# num-threads: 1/num-threads: '$(nproc)' # Set to the value of nproc by SlackBuild/g' \
+-e 's/# root-hints: ""/root-hints: "\/etc\/unbound\/root.hints"/g' \
+-e 's/# prefetch: no/prefetch: yes/g' \
+-e 's/# harden-glue: yes/harden-glue: yes/g' \
+-e 's/# harden-dnssec-stripped: yes/harden-dnssec-stripped: yes/g' \
+-e 's/# aggressive-nsec: yes/aggressive-nsec: yes/g' \
+-e 's/# trust-anchor-signaling: yes/trust-anchor-signaling: yes/g' \
+-e 's/# root-key-sentinel: yes/root-key-sentinel: yes/g' \
+-e '/# auto-trust-anchor-file: ".*/a\        auto-trust-anchor-file: "/var/lib/unbound/root.key"' \
 $PKG/etc/unbound/unbound.conf \
 
 mkdir -p $PKG/var/run/unbound
 mkdir -p $PKG/var/log/unbound
+mkdir -p $PKG/var/lib/unbound
 mkdir -p $PKG/etc/logrotate.d
 
 chown $UB_USER:$UB_GROUP $PKG/var/run/unbound/
 chown $UB_USER:$UB_GROUP $PKG/var/log/unbound/
+chown $UB_USER:$UB_GROUP $PKG/var/lib/unbound/
 
 cp -a $CWD/unbound.logrotate $PKG/etc/logrotate.d/unbound.new
+cp -a $CWD/root.hints $PKG/etc/unbound/root.hints
+chown root:root $PKG/etc/unbound/root.hints
 chown root:root $PKG/etc/logrotate.d/unbound.new
 mv $PKG/etc/unbound/unbound.conf $PKG/etc/unbound/unbound.conf.new
 install -m 0644 -D $CWD/rc.unbound $PKG/etc/rc.d/rc.unbound.new
