@@ -2,6 +2,7 @@
 
 # SlackBuild script for OTB
 
+# Copyright 2023 Giancarlo Dessi, Cagliari, IT
 # Copyright 2014-2021 Benjamin Trigona-Harany <slackbuilds@jaxartes.net>
 # All rights reserved.
 #
@@ -27,7 +28,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=OTB
-VERSION=${VERSION:-7.3.0}
+VERSION=${VERSION:-8.1.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -40,9 +41,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -68,6 +66,20 @@ fi
 
 set -e
 
+# Search for optional dependencies
+if pkg-config --exists ompi; then
+  BUILD_MPI="" ; [ "${MPI:-ON}" = "ON" ] && BUILD_MPI="-DOTB_USE_MPI=ON "
+else
+  BUILD_MPI=""
+fi
+
+# glfw3 will be enabled only if environment variable MONTEVERDI is set to ON
+if pkg-config --exists glfw3; then
+  WITH_GLFW="" ; [ "${GLFW:-ON}" = "ON" ] && WITH_GLFW="-DOTB_USE_GLFW=ON "
+else
+  WITH_GLFW=""
+fi
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
@@ -86,18 +98,12 @@ sed -i "s/lib\b/lib${LIBDIRSUFFIX}/" \
   CMake/OTBModuleExternal.cmake \
   CMake/OTBStandaloneModuleMacros.cmake \
   CMake/OTBApplicationMacros.cmake
-sed -i '1i\using namespace std;' \
-  Modules/ThirdParty/OssimPlugins/src/gdal/*.cpp \
-  Modules/ThirdParty/OssimPlugins/src/ossim/*.{h,cpp} \
-  Modules/ThirdParty/OssimPlugins/src/ossim/otb/*.cpp \
-  Modules/Adapters/OSSIMAdapters/src/*.cxx
-sed -i "s/[{]0.0[}]//" \
-  Modules/{Learning,Segmentation,Filtering,Registration}/*/include/*.h \
-  Modules/Core/Common/include/otbImageRegionAdaptativeSplitter.h \
-  Modules/Core/Transform/include/otbImageToGenericRSOutputParameters.h
 
 MONTEVERDI=${MONTEVERDI:-OFF}
-BUILD_MONTEVERDI="-DOTB_USE_QWT=$MONTEVERDI -DOTB_USE_GLEW=$MONTEVERDI -DOTB_USE_OPENGL=$MONTEVERDI"
+BUILD_MONTEVERDI="-DOTB_USE_QWT=$MONTEVERDI \
+     -DOTB_USE_GLEW=$MONTEVERDI \
+     -DOTB_USE_OPENGL=$MONTEVERDI \
+     $WITH_GLFW"
 BUILD_QT="-DOTB_USE_QT=${QTGUI:-ON}"
 
 mkdir -p build
@@ -120,11 +126,12 @@ cd build
     -DOTB_INSTALL_PYTHON_DIR=$(python3 -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())") \
     -DOTB_WRAP_PYTHON=ON \
     -DOTB_INSTALL_DOC_DIR=doc/$PRGNAM-$VERSION \
-    -DGDAL_CONFIG_CHECKING=OFF \
+    -DGDAL_CONFIG_CHECKING=ON \
+    $BUILD_MPI \
     $BUILD_MONTEVERDI \
     $BUILD_QT \
     ..
-
+  make
   make install DESTDIR=$PKG
 cd ..
 
