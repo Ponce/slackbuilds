@@ -1,0 +1,141 @@
+#!/bin/bash
+
+# Copyright 2023  Jake Day, Maryville, TN, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=sunshine
+VERSION=${VERSION:-0.20.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+	case "$(uname -m)" in
+	i?86) ARCH=i586 ;;
+	arm*) ARCH=arm ;;
+	*) ARCH=$(uname -m) ;;
+	esac
+fi
+
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+	echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+	exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+DIRNAME=Sunshine-$VERSION
+
+MOONLIGHT=${MOONLIGHT:-2bb026c763fc18807d7e4a93f918054c488f84e1}
+ENET=${ENET:-880e41f3ab572ad6d8f064c6cc77e04f46d00956}
+SIMWEBSRV=${SIMWEBSRV:-v3.1.1}
+VIGEMCLIENT=${VIGEMCLIENT:-dc2f3da093938c3dcc8b7697707b7017e4a917fa}
+MINIUPNP=${MINIUPNP:-fb5c328a5e8fd57a3ec0f5d33915377a5d3581f3}
+NVCODECHDRS=${NVCODECHDRS:-dc3e4484dc83485734e503991fe5ed3bdf256fba}
+TPCIRCBUF=${TPCIRCBUF:-8833b3a73fab6530cc51e2063a85cced01714cfb}
+FFMPEG=${FFMPEG:-6deb7d7366fc6e09afb3cb235cab6780bfa550b9}
+NANORS=${NANORS:-e9e242e98e27037830490b2a752895ca68f75f8b}
+TRAY=${TRAY:-14b7797ac230ac4edeec9b82563a7a73a16572da}
+
+DEPS=$PKG/$DIRNAME/third-party
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $PKG
+rm -rf $DIRNAME
+tar xvf $CWD/$DIRNAME.tar.gz
+
+tar xvf $CWD/moonlight-common-c-$MOONLIGHT.tar.gz -C \
+	$DEPS/moonlight-common-c/ --strip-components 1
+tar xvf $CWD/enet-$ENET.tar.gz -C \
+	$DEPS/moonlight-common-c/enet/ --strip-components 1
+tar xvf $CWD/Simple-Web-Server-$SIMWEBSRV.tar.gz -C \
+	$DEPS/Simple-Web-Server/ --strip-components 1
+tar xvf $CWD/ViGEmClient-$VIGEMCLIENT.tar.gz -C \
+	$DEPS/ViGEmClient/ --strip-components 1
+tar xvf $CWD/miniupnp-$MINIUPNP.tar.gz -C \
+	$DEPS/miniupnp/ --strip-components 1
+tar xvf $CWD/nv-codec-headers-$NVCODECHDRS.tar.gz -C \
+	$DEPS/nv-codec-headers/ --strip-components 1
+tar xvf $CWD/TPCircularBuffer-$TPCIRCBUF.tar.gz -C \
+	$DEPS/TPCircularBuffer/ --strip-components 1
+tar xvf $CWD/build-deps-$FFMPEG.tar.gz -C \
+	$DEPS/ffmpeg-linux-x86_64/ --strip-components 1
+tar xvf $CWD/nanors-$NANORS.tar.gz -C \
+	$DEPS/nanors/ --strip-components 1
+tar xvf $CWD/tray-$TRAY.tar.gz -C \
+	$DEPS/tray/ --strip-components 1
+
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+# Make sure top-level perms are correct:
+chmod 0755 .
+
+cd $DIRNAME
+mkdir build
+cd build
+
+npm install
+
+BRANCH=master BUILD_VERSION=$VERSION COMMIT=release \
+  cmake -D CMAKE_INSTALL_PREFIX=/usr -D SUNSHINE_ASSETS_DIR="share/assets/sunshine" ..
+make
+
+cd $PKG
+
+mkdir -p $PKG/usr/share/assets/sunshine
+cp -a $DIRNAME/src_assets/common/assets/* $PKG/usr/share/assets/sunshine/
+cp -a $DIRNAME/src_assets/linux/assets/* $PKG/usr/share/assets/sunshine/
+cp -a $DIRNAME/node_modules $PKG/usr/share/assets/sunshine/web/
+mkdir -p $PKG/usr/lib/udev/rules.d
+cp -a $DIRNAME/src_assets/linux/misc/85-sunshine.rules $PKG/usr/lib/udev/rules.d/
+mkdir -p $PKG/usr/share/icons
+cp -a $DIRNAME/sunshine.svg $PKG/usr/share/icons/
+mkdir -p $PKG/usr/bin
+cp -a $DIRNAME/build/sunshine-$VERSION $PKG/usr/bin/sunshine-$VERSION
+cp -a $DIRNAME/build/sunshine $PKG/usr/bin/sunshine
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+	$PKG/$DIRNAME/README.rst \
+	$PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild >$PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc >$PKG/install/slack-desc
+cat $CWD/doinst.sh >$PKG/install/doinst.sh
+
+rm -rf $DIRNAME
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF |
+	cut -f 1 -d : | xargs strip --strip-unneeded 2>/dev/null || true
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
