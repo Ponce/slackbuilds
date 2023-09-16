@@ -1,0 +1,176 @@
+#!/bin/bash
+
+# Slackware build script for beegfs
+
+# Copyright 2023 GUAN Xin <guanx.bac@gmail.com> from Beijing
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=beegfs
+VERSION=${VERSION:-7.4.0p1}
+VERSION_MAJOR=$(echo $VERSION | cut -d. -f1,1)
+SRCNAM=v$VERSION_MAJOR
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+KERNEL=${KERNEL:-$(uname -r)}
+PKGVER=${VERSION}_$(echo $KERNEL | tr - _)
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$PKGVER-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+BEEGFS_CTL_SETUID=${BEEGFS_CTL_SETUID:-no}
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+elif [ "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.bz2
+cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+zcat $CWD/hwaddr_out-of-bound.patch.gz | patch -p1 --verbose
+
+make BEEGFS_CFLAGS="$SLKCFLAGS" USER_CXXFLAGS="$SLKCFLAGS" BEEGFS_VERSION=$VERSION common-all
+make BEEGFS_CFLAGS="$SLKCFLAGS" USER_CXXFLAGS="$SLKCFLAGS" BEEGFS_VERSION=$VERSION DESTDIR=$PKG common-install
+install -o 0 -g 0 -d -m 0755 $PKG/etc/rc.d/init.d
+install -o 0 -g 0 -p -m 0755 -t $PKG/etc/rc.d/init.d common_package/build/dist/etc/init.d/*
+install -o 0 -g 0 -d -m 0755 $PKG/etc/beegfs/lib
+install -o 0 -g 0 -p -m 0755 -t $PKG/etc/beegfs/lib common_package/scripts/etc/beegfs/lib/*
+
+make BEEGFS_CFLAGS="$SLKCFLAGS" USER_CXXFLAGS="$SLKCFLAGS" BEEGFS_VERSION=$VERSION daemons
+make BEEGFS_CFLAGS="$SLKCFLAGS" USER_CXXFLAGS="$SLKCFLAGS" BEEGFS_VERSION=$VERSION DESTDIR=$PKG daemons-install
+install -o 0 -g 0 -d -m 0755 $PKG/etc/rc.d/init.d
+install -o 0 -g 0 -d -m 0755 $PKG/etc/default
+install -o 0 -g 0 -d -m 0755 $PKG/etc/beegfs
+install -o 0 -g 0 -d -m 0755 $PKG/opt/beegfs/sbin
+for i in mgmtd meta storage helperd; do
+  install -o 0 -g 0 -p -m 0755 -t $PKG/etc/rc.d/init.d $i/build/dist/etc/init.d/*
+  install -o 0 -g 0 -p -m 0644 -t $PKG/etc/default $i/build/dist/etc/default/*
+  install -o 0 -g 0 -p -m 0600 -t $PKG/etc/beegfs $i/build/dist/etc/beegfs-$i.conf
+done
+for i in mgmtd meta storage; do
+    install -o 0 -g 0 -p -m 0755 -t $PKG/opt/beegfs/sbin $i/build/dist/sbin/*
+done
+
+make BEEGFS_CFLAGS="$SLKCFLAGS" USER_CXXFLAGS="$SLKCFLAGS" BEEGFS_VERSION=$VERSION utils
+make BEEGFS_CFLAGS="$SLKCFLAGS" USER_CXXFLAGS="$SLKCFLAGS" BEEGFS_VERSION=$VERSION DESTDIR=$PKG utils-install
+if [ "`echo $BEEGFS_CTL_SETUID | tr 'a-z' 'A-Z'`" = YES ]; then
+  chown 0:0 $PKG/opt/beegfs/sbin/beegfs-ctl
+  chmod 4755 $PKG/opt/beegfs/sbin/beegfs-ctl
+fi
+install -o 0 -g 0 -d -m 0755 $PKG/etc/bash_completion.d
+install -o 0 -g 0 -p -m 0644 -t $PKG/etc/bash_completion.d utils/scripts/etc/bash_completion.d/*
+install -o 0 -g 0 -d -m 0755 $PKG/etc/rc.d/init.d
+install -o 0 -g 0 -p -m 0755 -t $PKG/etc/rc.d/init.d mon/build/dist/etc/init.d/*
+install -o 0 -g 0 -d -m 0755 $PKG/etc/default
+install -o 0 -g 0 -p -m 0644 -t $PKG/etc/default mon/build/dist/etc/default/*
+install -o 0 -g 0 -d -m 0755 $PKG/etc/beegfs
+install -o 0 -g 0 -p -m 0600 -t $PKG/etc/beegfs mon/build/dist/etc/beegfs-mon.auth
+install -o 0 -g 0 -p -m 0600 -t $PKG/etc/beegfs mon/build/dist/etc/beegfs-mon.conf
+install -o 0 -g 0 -d -m 0755 $PKG/usr/bin
+for i in beegfs-check-servers beegfs-df beegfs-net; do
+  install -o 0 -g 0 -p -m 0755 -t $PKG/usr/bin utils/scripts/$i
+done
+ln -sf /opt/beegfs/sbin/beegfs-ctl $PKG/usr/bin
+ln -sf /opt/beegfs/sbin/beegfs-fsck $PKG/usr/bin
+install -o 0 -g 0 -d -m 0755 $PKG/sbin
+install -o 0 -g 0 -p -m 0755 -t $PKG/sbin utils/scripts/fsck.beegfs
+
+install -o 0 -g 0 -d -m 0755 $PKG/opt/beegfs/src/client/client_module_$VERSION_MAJOR
+cp -at $PKG/opt/beegfs/src/client/client_module_$VERSION_MAJOR client_module/build client_module/source
+rm -fr $PKG/opt/beegfs/src/client/client_module_$VERSION_MAJOR/build/dist
+chown -R 0:0 $PKG/opt/beegfs/src/client/client_module_$VERSION_MAJOR
+chmod -R og-w $PKG/opt/beegfs/src/client/client_module_$VERSION_MAJOR
+install -o 0 -g 0 -d -m 0755 $PKG/etc/rc.d/init.d
+install -o 0 -g 0 -p -m 0755 -t $PKG/etc/rc.d/init.d client_module/build/dist/etc/init.d/*
+install -o 0 -g 0 -d -m 0755 $PKG/etc/default
+install -o 0 -g 0 -p -m 0644 -t $PKG/etc/default client_module/build/dist/etc/default/*
+install -o 0 -g 0 -d -m 0755 $PKG/etc/beegfs
+install -o 0 -g 0 -p -m 0644 -t $PKG/etc/beegfs client_module/build/dist/etc/beegfs-client-autobuild.conf
+install -o 0 -g 0 -p -m 0644 -t $PKG/etc/beegfs client_module/build/dist/etc/beegfs-client-build.mk
+install -o 0 -g 0 -p -m 0755 -t $PKG/etc/beegfs client_module/build/dist/etc/beegfs-client-mount-hook.example
+install -o 0 -g 0 -p -m 0600 -t $PKG/etc/beegfs client_module/build/dist/etc/beegfs-client.conf
+install -o 0 -g 0 -p -m 0600 -t $PKG/etc/beegfs client_module/build/dist/etc/beegfs-mounts.conf
+install -o 0 -g 0 -d -m 0755 $PKG/etc/beegfs/lib
+install -o 0 -g 0 -p -m 0755 -t $PKG/etc/beegfs/lib client_module/scripts/etc/beegfs/lib/*
+make -C client_module/build BEEGFS_VERSION=$VERSION KRELEASE=$KERNEL
+make BEEGFS_VERSION=$VERSION DESTDIR=$PKG PREFIX= KVER=$KERNEL client-install
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE.txt README.md $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+( cd $PKG
+  find etc -type f -regextype posix-extended -regex '^etc/(default/.+|beegfs/.+\.(conf|auth))$' \
+    -exec mv {} {}.new \; \
+    -exec printf 'config %s.new\n' {} >> $PKG/install/doinst.sh \;
+  printf '\n' >> $PKG/install/doinst.sh
+)
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$PKGVER-$ARCH-$BUILD$TAG.$PKGTYPE
