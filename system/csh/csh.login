@@ -41,7 +41,11 @@ if ("$TERM" == "unknown") setenv TERM linux
 if $?tcsh then
 	set prompt = "%n@%m:%~%# "
 else
-	set _promptchar = $prompt
+   if ( `whoami` == "root" ) then
+	  set _promptchar = "#"
+   else
+	  set _promptchar = "%"
+   endif
    # cache the hostname, assume it will never change (usually true)
 	set _hostname = `hostname`
 	alias _setprompt 'set prompt="$user@${_hostname}:$cwd$_promptchar "'

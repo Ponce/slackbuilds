@@ -35,7 +35,7 @@ bad idea. Remove csh first, install tcsh, then install csh.
 
 As far as I know, nothing in Slackware depends on tcsh, so if you
 mess things up, you won't break your OS. You can always put things
-back to Slackware's default state by removing both csh and tsch, then
+back to Slackware's default state by removing both csh and tcsh, then
 reinstalling tcsh.
 
 
@@ -47,7 +47,7 @@ shipped /etc/csh.login (from the etc package) contains tcsh-specific
 code, which prevents the /etc/profile.d/*.csh scripts from running. This
 won't prevent you from logging in, but your environment won't be set up
 correctly, you'll see "[: No match." errors, and your prompt won't show
-your username, hostname, current directory as tsch does.
+your username, hostname, current directory as tcsh does.
 
 To fix this, you can replace /etc/csh.login with the /etc/csh.login.new
 installed with the csh package. It behaves the same as the original,
@@ -58,6 +58,13 @@ for tcsh, and has conditional code to make csh behave correctly.
 
 If you don't want to replace Slackware's csh.login, just rm
 /etc/csh.login.new and forget about it.
+
+Unfortunately, some of the /etc/profile.d/*.csh scripts shipped
+with Slackware (or various SBo packages) aren't compatible with the
+original csh. Specifically, qt5.csh will cause an "Illegal variable
+name" error. You can ignore this, or you can fix it by editing
+/etc/profile.d/qt5.csh and changing "$?" to "$status" (on line 27, in
+Slackware 15.0).
 
 
 Other notes
@@ -70,10 +77,6 @@ re-read the NEW FEATURES section in tcsh's man page (it describes the
 tcsh features you won't find in csh).
 
 NEVER make csh the default shell for the root account! In fact, it's
-probably a bad idea to ever change root's default shell on any Linux or
-UNIX system, especially a third-party one that isn't shipped with the OS.
-
-The man page for csh states that "Words can be no longer than 1024
-characters", but this build of csh increases the limit to 8192 (actually,
-BUFSIZ as defined in stdio.h). This was done so Slackware's profile.d
-scripts will work correctly (particularly coreutils-dircolor.sh).
+probably a bad idea to ever change root's default shell on any Linux
+or UNIX system, especially to a third-party one that isn't shipped
+with the OS.
