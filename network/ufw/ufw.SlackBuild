@@ -6,6 +6,7 @@
 # Copyright 2013 Ricardson Williams <ricardsonwilliams@gmail.com>
 # Copyright 2014-2015 Rodolfo Gouveia <rgouveia@cosmico.net>
 # Copyright 2016 Brenton Earl <brent@exitstatusone.com>
+# Copyright 2023 Jay Lanagan <j@lngn.net>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -28,7 +29,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=ufw
-VERSION=${VERSION:-0.36}
+VERSION=${VERSION:-0.36.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -41,9 +42,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -52,20 +50,6 @@ fi
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
-
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
-fi
 
 set -e
 
@@ -83,22 +67,31 @@ find -L . \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 patch -p1 --verbose < $CWD/ufw.conf.patch
-patch -p1 --verbose < $CWD/ufw-0.35-fix-iptables-path.patch
 
-# Python3 support
-if $(python3 -c 'import sys' 2>/dev/null); then
-  python3 setup.py install --root=$PKG
-fi
-
-python setup.py install --root=$PKG
+python3 setup.py install --root=$PKG
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mv $PKG/usr/share/man $PKG/usr/man
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+# Compress and link manpages, if any:
+if [ -d $PKG/usr/man ]; then
+  ( cd $PKG/usr/man
+    for manpagedir in $(find . -type d -name "man*") ; do
+      ( cd $manpagedir
+        for eachpage in $( find . -type l -maxdepth 1) ; do
+          ln -s $( readlink $eachpage ).gz $eachpage.gz
+          rm $eachpage
+        done
+        gzip -9 *.*
+      )
+    done
+  )
+fi
+
+mkdir -p $PKG/etc/rc.d
+cat $TMP/$PRGNAM-$VERSION/doc/initscript.example > $PKG/etc/rc.d/rc.ufw
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a AUTHORS ChangeLog* COPYING README* TODO doc/*.example $PKG/usr/doc/$PRGNAM-$VERSION
