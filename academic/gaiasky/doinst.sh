@@ -3,5 +3,5 @@ if [ -x /usr/bin/update-desktop-database ]; then
 fi
 
 if [ -x /sbin/setcap ]; then
-    /sbin/setcap cap_ipc_lock,cap_sys_nice=ep /opt/gaiasky/gaiasky
+    /sbin/setcap cap_ipc_lock,cap_sys_nice=ep /usr/lib64/zulu-openjdk17/bin/java
 fi
