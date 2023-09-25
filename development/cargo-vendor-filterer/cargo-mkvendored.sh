@@ -47,11 +47,14 @@ cd $SRCNAM-$VERSION || exit 1
 if [ ! -e "Cargo.toml" ]; then
   echo "No Cargo.toml file in $SRCNAM-$VERSION dir" 1>&2
   exit 1
+elif [ -e "$CWD/Cargo-toml.patch" ]; then
+  echo "INFO: Applying Cargo.toml patch"
+  patch -Np1 < $CWD/Cargo-toml.patch
 fi
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i586 ;;
+    i?86) ARCH=i686 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
@@ -90,7 +93,7 @@ fi
 # Configure cargo-vendor-filterer
   cat << EOF >> Cargo.toml
 [package.metadata.vendor-filter]
-platforms = ["x86_64-unknown-linux-gnu", "i686-unknown-linux-gnu"]
+platforms = ["x86_64-unknown-linux-gnu", "i686-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
 all-features = true
 exclude-crate-paths = [
   { name = "openssl-src", exclude = "openssl" },
