@@ -23,10 +23,11 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=planetblupi
-VERSION=${VERSION:-1.14.2}
+VERSION=${VERSION:-1.15.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+BINDIR=/usr/games
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -79,12 +80,51 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
+## slackware's SDL2_ttf is outdated, using more recent one
+tar xvf $CWD/SDL_ttf-release-2.20.2.tar.gz
+pushd SDL_ttf-release-2.20.2
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+ -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  mkdir -p $PKG/usr/share/planetblupi
+  cp -a libSDL2_ttf*.so* $PKG/usr/share/planetblupi
+cd ..
+cp -a SDL_ttf.h ../src/
+export CMAKE_LIBRARY_PATH=$PKG/usr/share/planetblupi
+popd
+sed -i 's/<SDL_ttf.h>/"SDL_ttf.h"/' src/text.cxx
+# planetblupi expects to find its files in (binary path)/../share/planetblupi
+# Hence we are installing planetblupi binary in /usr/libexec
+# and a shell wrapper in /usr/games.
+BINDIR=/usr/libexec
+mkdir -p $PKG/usr/games
+cat <<EOF > $PKG/usr/games/planetblupi
+#!/bin/bash
+export LD_LIBRARY_PATH=/usr/share/planetblupi:\$LD_LIBRARY_PATH
+exec "$BINDIR/planetblupi" "$@"
+EOF
+chmod 755 $PKG/usr/games/planetblupi
+## End of SDL2_ttf block
+
 mkdir -p build
 cd build
   cmake \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=lib$LIBDIRSUFFIX \
+    -DCMAKE_INSTALL_BINDIR:PATH=$BINDIR \
+    -Wno-dev \
     -DCMAKE_BUILD_TYPE=Release ..
   make
   make install DESTDIR=$PKG
