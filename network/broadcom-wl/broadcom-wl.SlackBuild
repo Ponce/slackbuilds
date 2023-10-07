@@ -1,0 +1,128 @@
+#!/bin/bash
+
+# Slackware build script for broadcom-wl
+#
+# SlackBuild formerly known as 'broadcom-sta' on slackbuilds.org
+#
+# Changed the name of the package to match the patchset in use, this is
+# re-based on patches for Arch Linux. See:
+# https://gitlab.archlinux.org/archlinux/packaging/packages/broadcom-wl-dkms
+#
+# Copyright 2015-2019 Andreas Voegele <andreas@andreasvoegele.com>
+# Copyright 2022-23 Jay Lanagan (j@lngn.net), Detroit, MI, USA.
+#
+# Permission to use, copy, modify, and distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=broadcom-wl
+VERSION=${VERSION:-6.30.223.271}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+KERNEL=${KERNEL:-$( uname -r )}
+IFNAME=${IFNAME:-wlan}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+case "$ARCH" in
+  i?86)
+    SRCNAM=hybrid-v35-nodebug-pcoem
+    ;;
+  x86_64)
+    SRCNAM=hybrid-v35_64-nodebug-pcoem
+    ;;
+  *)
+    echo "$ARCH is not supported..."
+    exit 1
+    ;;
+esac
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+mkdir $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$( echo $VERSION | tr . _ ).tar.gz
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+if [ "$IFNAME" != "eth" ]; then
+  sed -i "/BRCM_WLAN_IFNAME/s/eth/$IFNAME/" src/wl/sys/wl_linux.c
+fi
+
+patch -p2 < $CWD/patches/000-remove-time_date-macros.patch || exit 1
+patch -p1 < $CWD/patches/001-null-pointer-fix.patch || exit 1
+patch -p1 < $CWD/patches/002-rdtscl.patch || exit 1
+patch -p1 < $CWD/patches/003-linux47.patch || exit 1
+patch -p1 < $CWD/patches/004-linux48.patch || exit 1
+patch -p1 < $CWD/patches/005-debian-fix-kernel-warnings.patch || exit 1
+patch -p1 < $CWD/patches/006-linux411.patch || exit 1
+patch -p1 < $CWD/patches/007-linux412.patch || exit 1
+patch -p1 < $CWD/patches/008-linux415.patch || exit 1
+patch -p1 < $CWD/patches/009-fix_mac_profile_discrepancy.patch || exit 1
+patch -p1 < $CWD/patches/010-linux56.patch || exit 1
+patch -p1 < $CWD/patches/011-linux59.patch || exit 1
+patch -p1 < $CWD/patches/012-linux517.patch || exit 1
+patch -p1 < $CWD/patches/013-linux518.patch || exit 1
+patch -p1 < $CWD/patches/014-linux414.patch || exit 1
+patch -p1 < $CWD/patches/015-linux600.patch || exit 1
+patch -p1 < $CWD/patches/016-linux601.patch || exit 1
+
+# See https://lkml.org/lkml/2019/3/1/643
+sed -i 's/get_ds()/KERNEL_DS/g' src/wl/sys/wl_iw.c
+sed -i 's/get_ds()/KERNEL_DS/g' src/wl/sys/wl_cfg80211_hybrid.c
+
+env -u ARCH make -C /lib/modules/$KERNEL/build M=$(pwd) clean
+env -u ARCH make -C /lib/modules/$KERNEL/build M=$(pwd)
+
+mkdir -p $PKG/lib/modules/$KERNEL/kernel/extra
+cp wl.ko $PKG/lib/modules/$KERNEL/kernel/extra
+
+mkdir -p $PKG/etc/modprobe.d
+cat $CWD/b43_blacklist.conf.new > $PKG/etc/modprobe.d/b43_blacklist.conf.new
+
+mkdir -p $PKG/usr/doc/$PRGNAM-${VERSION}_$( echo $KERNEL | tr - _ )
+cp -a lib/LICENSE.txt $PKG/usr/doc/$PRGNAM-${VERSION}_$( echo $KERNEL | tr - _ )
+chmod 644 $PKG/usr/doc/$PRGNAM-${VERSION}_$( echo $KERNEL | tr - _ )/*
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-${VERSION}_$( echo $KERNEL | tr - _ )/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+zcat $CWD/doinst.sh.gz > $PKG/install/doinst.sh
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-${VERSION}_$( echo $KERNEL | tr - _ )-$ARCH-$BUILD$TAG.$PKGTYPE
