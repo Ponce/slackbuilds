@@ -3,7 +3,7 @@
 # Slackware build script for fwupd
 
 # Copyright 2017-2022 Andrew Clemons, Wellington New Zealand
-# Copyright 2022 Andrew Clemons, Tokyo Japan
+# Copyright 2022-2023 Andrew Clemons, Tokyo Japan
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -26,8 +26,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=fwupd
-VERSION=${VERSION:-1.7.10}
-BUILD=${BUILD:-4}
+VERSION=${VERSION:-1.9.6}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -50,16 +50,19 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
+  uefi_capsule="enabled"
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
+  uefi_capsule="enabled"
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
+  uefi_capsule="enabled"
+elif [ "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  uefi_capsule="enabled"
 else
   SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
+  uefi_capsule="disabled"
 fi
 
 set -e
@@ -77,6 +80,9 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
+# to use updated meson
+export PYTHONPATH=/opt/python3.9/site-packages/
+
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 meson --prefix=/usr \
@@ -85,15 +91,21 @@ meson --prefix=/usr \
   --libexecdir=/usr/libexec \
   --buildtype=release \
   --mandir=/usr/man \
+  -Db_lto=true \
   -Dbuild=all \
-  -Defi_binary=true \
-  -Dlzma=true \
-  -Dplugin_flashrom=false \
-  -Dplugin_modem_manager=true \
-  -Dplugin_tpm=false \
-  -Dsupported_build=true \
-  -Dsystemd=false \
+  -Dconsolekit=disabled \
+  -Delogind=disabled \
+  -Dfirmware-packager=true \
   -Dgcab:docs=false \
+  -Dhsi=enabled \
+  -Dlvfs=true \
+  -Dman=true \
+  -Dpassim=disabled \
+  -Dplugin_amdgpu=disabled \
+  -Dplugin_redfish=disabled \
+  -Dplugin_uefi_capsule=$uefi_capsule \
+  -Dsupported_build=enabled \
+  -Dsystemd=disabled \
   build
 
 "${NINJA:=ninja}" -C build
@@ -105,17 +117,16 @@ find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | gr
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-mv $PKG/etc/fwupd/daemon.conf $PKG/etc/fwupd/daemon.conf.new
-mv $PKG/etc/fwupd/msr.conf $PKG/etc/fwupd/msr.conf.new
-mv $PKG/etc/fwupd/redfish.conf $PKG/etc/fwupd/redfish.conf.new
-mv $PKG/etc/fwupd/remotes.d/dell-esrt.conf $PKG/etc/fwupd/remotes.d/dell-esrt.conf.new
+mv $PKG/usr/bin/{,fwupd-}dbxtool
+mv $PKG/usr/bin/{,fwupd-}gcab
+
+mv $PKG/etc/fwupd/fwupd.conf $PKG/etc/fwupd/fwupd.conf.new
 mv $PKG/etc/fwupd/remotes.d/fwupd-tests.conf $PKG/etc/fwupd/remotes.d/fwupd-tests.conf.new
 mv $PKG/etc/fwupd/remotes.d/lvfs-testing.conf $PKG/etc/fwupd/remotes.d/lvfs-testing.conf.new
 mv $PKG/etc/fwupd/remotes.d/lvfs.conf $PKG/etc/fwupd/remotes.d/lvfs.conf.new
 mv $PKG/etc/fwupd/remotes.d/vendor-directory.conf $PKG/etc/fwupd/remotes.d/vendor-directory.conf.new
 mv $PKG/etc/fwupd/remotes.d/vendor.conf $PKG/etc/fwupd/remotes.d/vendor.conf.new
-mv $PKG/etc/fwupd/thunderbolt.conf $PKG/etc/fwupd/thunderbolt.conf.new
-mv $PKG/etc/fwupd/uefi_capsule.conf $PKG/etc/fwupd/uefi_capsule.conf.new
+mv $PKG/etc/grub.d/35_fwupd $PKG/etc/grub.d/35_fwupd.new
 
 rm -rf $PKG/usr/share/installed-tests
 
@@ -124,7 +135,7 @@ sed 's|@libexecdir@|/usr/libexec|' data/org.freedesktop.fwupd.service.in > $PKG/
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  AUTHORS CODE_OF_CONDUCT.md COMMITMENT CONTRIBUTING.md COPYING MAINTAINERS README.md RELEASE \
+  CODE_OF_CONDUCT.md COMMITMENT CONTRIBUTING.md COPYING MAINTAINERS README.md RELEASE SECURITY.md \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
