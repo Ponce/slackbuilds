@@ -24,9 +24,7 @@ set -e
 # filled by the SLACKBUILD
 NAME='REPL_NAME'
 VERSION='REPL_VERSION'
-LANGUAGE="REPL_LANGUAGE"
-
-ARCH=$(getconf LONG_BIT)
+ARCH='ARCH'
 
 notify() {
   local title="$1"
@@ -46,7 +44,7 @@ notify() {
 update() {
 	echo "$0: Extracting files to $INSTALL_DIRECTORY." >> $LOG_FILE
 	rm -rf $INSTALL_DIRECTORY/*
-	tar --strip-components=1 -xJf /opt/$NAME/tor-browser-linux${ARCH}-${VERSION}_${LANGUAGE}.tar.xz \
+	tar --strip-components=1 -xJf /opt/$NAME/tor-browser-linux-${ARCH}-${VERSION}.tar.xz \
 		-C $INSTALL_DIRECTORY >> $LOG_FILE 2>&1 || notify "Error" \
 		"The tor-browser archive could not be extracted to your home directory. \
 		\nCheck permissions of $INSTALL_DIRECTORY. \
