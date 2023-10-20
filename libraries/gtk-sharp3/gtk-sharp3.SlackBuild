@@ -28,8 +28,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=gtk-sharp3
-SRCNAM=gtk-sharp
-VERSION=${VERSION:-2.99.3}
+SRCNAM=GtkSharp
+VERSION=${VERSION:-3.22.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -71,7 +71,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $SRCNAM-$VERSION
-tar xvf $CWD/$SRCNAM-$VERSION.tar.xz
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
 cd $SRCNAM-$VERSION
 chown -R root:root .
 find -L . \
@@ -80,26 +80,36 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
-# Switch away from deprecated gmcs mono compiler
-sed -i 's|gmcs|mcs|' configure configure.ac
+# Correct outdated references
+sed -i 's|gdk_api_includes|gio_api_includes|' \
+  Source/{gdk,gio,gtk}/generated/meson.build \
+  Source/sample/valtest/generated/meson.build
 
-# Fix compile issues
-sed -i 's|MONO_PROFILE_ENTER_LEAVE|1 << 12|' gtk/gui-thread-check/profiler/gui-thread-check.c
-sed -i '12i \\nusing Range=Gtk.Range;' sample/test/TestRange.cs
+# Mono packages use /usr/lib regardless of arch
+patch -p 1 < $CWD/gtk-sharp3-nolibdir.patch
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --disable-static \
-  --build=$ARCH-slackware-linux
+mkdir build
+cd build
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  meson .. \
+    --buildtype=release \
+    --infodir=/usr/info \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    -Dinstall=true \
+    -Dstrip=true
+  "${NINJA:=ninja}"
+  DESTDIR=$PKG $NINJA install
+cd ..
 
-make
-make install DESTDIR=$PKG
+# Some packages expect a libcairo-2 library to be here
+# I'm not sure how frequently these folders change, so we will automate it
+APIVER=$(grep ^apiversion Source/meson.build | cut -d\' -f2)
+PUBTOKEN=$(grep assemblyIdentity Source/policy.config.in | cut -d\" -f4)
+ln -s /usr/lib${LIBDIRSUFFIX}/libcairo.so $PKG/usr/lib/mono/gac/cairo-sharp/${APIVER}__${PUBTOKEN}/libcairo-2.dll.so
 
 rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
 
@@ -108,7 +118,7 @@ find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | gr
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 install -m0644 \
-  AUTHORS COPYING HACKING NEWS README \
+  AUTHORS LICENSE README.md \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
