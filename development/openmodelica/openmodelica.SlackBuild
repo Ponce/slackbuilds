@@ -1,0 +1,151 @@
+#!/bin/bash
+
+# Slackware build script for openmodelica
+
+# Copyright 2023, Lockywolf
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=openmodelica
+VERSION=${VERSION:-1.22.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+TARNAM=OpenModelica
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+elif [ "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $TARNAM-$VERSION
+tar xvf $CWD/$TARNAM-$VERSION.tar.gz
+cd $TARNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} + -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} +
+
+
+tar -xzvf $CWD/OMCompiler-3rdParty-d19136844b49720ae3a8957f0fb1e137c7055b43.tar.gz --strip-components=1 -C OMCompiler/3rdParty
+tar -xzvf $CWD/OMOptim-e4f55f722185f7c71cfb12598a5a4e17373057b7.tar.gz --strip-components=1 -C OMOptim
+tar -xzvf $CWD/OMSens-8216eaefbb4ea2ff0c7a17a3487dcc2a8a17667d.tar.gz --strip-components=1 -C OMSens
+tar -xzvf $CWD/OMSens_Qt-ff2ade18e7058f611ddfd575ccbd24f388615d3f.tar.gz --strip-components=1 -C OMSens_Qt
+tar -xzvf $CWD/OMSimulator-614c663834e5b3b10b515100da304b8ff5cc85a7.tar.gz --strip-components=1 -C OMSimulator
+tar -xzvf $CWD/OpenModelica-common-08a01802db5ba5edb540383c46718b89ff229ef2.tar.gz --strip-components=1 -C OMOptim/common
+tar -xzvf $CWD/OpenModelica-common-08a01802db5ba5edb540383c46718b89ff229ef2.tar.gz --strip-components=1 -C OMSens_Qt/common
+tar -xzvf $CWD/OMSimulator-3rdParty-bb0bdbe0ba2d37235369f41f22ec341b91b64656.tar.gz --strip-components=1 -C OMSimulator/3rdParty
+
+source /etc/profile.d/zulu-openjdk17.sh
+
+mkdir -p build
+cd build
+sed -i '/file(DOWNLOAD/,+15d' ../OMCompiler/Compiler/boot/CMakeLists.txt
+sed -i "s|execute_process(COMMAND tar xzf sources.tar.gz --strip-components=1|execute_process(COMMAND tar xzf $CWD/OMBootstrapping-c289e97c41d00939a4a69fe504961b47283a6d8e.tar.gz --strip-components=1|g" ../OMCompiler/Compiler/boot/CMakeLists.txt
+mkdir -p bomc
+#ln -s $CWD/c289e97c41d00939a4a69fe504961b47283a6d8e.tar.gz ./bomc/sources.tar.gz
+find ../OMCompiler/Compiler/ -iname '*.mo' -exec sed -i "s|usr/lib/|usr/lib$LIBDIRSUFFIX/|g" {} +
+find ../OMSens/ -iname '*.xml' -exec sed -i "s|usr/lib/omlibrary|usr/lib$LIBDIRSUFFIX/omlibrary|g" {} +
+
+sed -i "s|/usr/lib/omc/|/usr/lib$LIBDIRSUFFIX/omc/|g" ../doc/manpages/omc.1
+
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+    -DMAN_INSTALL_DIR=/usr/man \
+    -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+    -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install/strip DESTDIR=$PKG
+cd ..
+
+rm -rf $PKG/usr/share/cmake/
+
+mkdir -p $PKG/usr/share/omc/
+mv $PKG/usr/share/zmq $PKG/usr/share/omc/
+
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/
+mv $PKG/usr/doc/*.txt $PKG/usr/doc/$PRGNAM-$VERSION/
+mv $PKG/usr/doc/zmq $PKG/usr/doc/$PRGNAM-$VERSION/
+mv $PKG/usr/share/doc/OpenModelica $PKG/usr/doc/$PRGNAM-$VERSION/
+mv $PKG/usr/share/doc/omc $PKG/usr/doc/$PRGNAM-$VERSION/
+cp -a \
+   doc OSMC-License.txt README.md BUGREPORTING.md  CONTRIBUTING.md \
+   CITATION.cff \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+chmod 644 $PKG/usr/doc/$PRGNAM-$VERSION/doc/UsersGuide/source/media/omedit-dpi-settings-02.png
+chmod 644 $PKG/usr/doc/$PRGNAM-$VERSION/doc/UsersGuide/source/media/omedit-dpi-settings-01.png
+chmod 644 $PKG/usr/doc/$PRGNAM-$VERSION/doc/UsersGuide/source/media/fmiExport.png
+chmod 644 $PKG/usr/doc/$PRGNAM-$VERSION/doc/SimulationRuntime/cpp/Images/EventHandling.jpg
+rmdir $PKG/usr/share/doc
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
