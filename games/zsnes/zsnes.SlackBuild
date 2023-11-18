@@ -2,52 +2,26 @@
 
 # Slackware build script for zsnes
 
-# Copyright (c) 2008, Antonio Hernández Blas <email removed>
-# Copyright (c) 2010, 2012, Carlos Corbacho <email removed>
-# Copyright (c) 2018, B. Watson <urchlay@slackware.uk>
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-# 1.- Redistributions of source code must retain the above copyright
-#     notice, this list of conditions and the following disclaimer.
-#
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY
-# EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
-# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Written by B. Watson (urchlay@slackware.uk)
 
-# 20211230 bkw:
-# - statifier's never going to work on current/15.0, its author hasn't
-#   updated it since 2016. so get rid of the 64-bit download and code
-#   to support it. sorry.
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-# 20211215 bkw: BUILD=5
-# - fix -current 32-bit build.
-# - new-style icons.
-# - TODO: statified binary needs updating. Except statifier seems not
-#   to work on -current. Sigh.
-# - TODO: investigate fork: https://github.com/xyproto/zsnes
+# Note: this is a completely new-from-template znes.SlackBuild,
+# written from scratch, for the "LTS" 2.x fork from xyproto. It shares
+# no code with the old zsnes.SlackBuild for the 1.51 release.
 
-# 20180123 bkw: Finally, 64-bit support! Sort-of. Using a dirty hack.
-# Also, move binary to /usr/games and man page to section 6.
+# TODO: build a static 32-bit binary for x86_64 users. Can't be done
+# on Slackware (we don't have static X11, SDL, png16, nor GL libs),
+# but maybe it could be done on some other distro (one that uses musl,
+# maybe), then hosted as a DOWNLOAD_X86_64.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=zsnes
-VERSION=${VERSION:-1.51b}
-BUILD=${BUILD:-5}
+VERSION=${VERSION:-2.0.12}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-
-ZSNESSRC="$(echo $VERSION | tr -d .)src"
-ZSNESDIR="_$(echo $VERSION | tr . _)"
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -57,87 +31,89 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
+# No SLKCFLAGS here. Upstream's got a set of flags they've tested with,
+# and most of the code's in asm anyway.
+case "$ARCH" in
+  i?86)               ;;
+  x86_64) MULTI=yes   ;;
+  *)      BADARCH=yes ;;
+esac
+
+# Hang on to this for use in error message, below.
+OLDARCH="$ARCH"
+
+# Always uses MMX extensions so i686 is correct.
+# PRINT_PACKAGE_NAME and the actual package name will always say i686.
+ARCH="i686"
+
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
+fi
+
+if [ "$MULTI" = "yes" ]; then
+  echo "=== Attempting multilib build on $OLDARCH..."
+  CTEST=$TMP/`mcookie`.c
+  echo 'main(){}' > $CTEST
+  if ! gcc -w -m32 -o /dev/null $CTEST 2>/dev/null; then
+    echo "*** You don't have multilib installed, bailing."
+    exit 1
+  fi
+  echo "=== Multilib gcc is installed..."
+  rm -f $CTEST
+fi
+
+if [ "$BADARCH" = "yes" ]; then
+  echo "*** Sorry, $PRGNAM can't be built on $OLDARCH." ; exit 1
 fi
 
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-else
-  printf "\n  Error: $PRGNAM won't compile on $ARCH\n\n"
-  exit 1
-fi
-
 set -e
 
 rm -rf $PKG
-mkdir -p $TMP $PKG/usr $OUTPUT
+mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM$ZSNESSRC.tar.bz2
-# Fix the directory tree in zsnes:
-mv $PRGNAM$ZSNESDIR $PRGNAM-$VERSION
-mv $PRGNAM-$VERSION/src/* $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
-
 chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
-# GCC 4.7 fixes from Debian
-cat $CWD/0012-Fix-build-with-gcc-4.7.patch | patch -p2 --verbose
+# Patch does these things:
+# - Install binary to /usr/games
+# - Fix install permissions for icon, .desktop, metainfo (no +x).
+# - Install man page to /usr/man (not /usr/share/man)
+# - Change the section in the man page to 6, install in man6.
+# - Use the github URL in the man page, not zsnes.com.
+# - Use full path to binary in .desktop file.
+# I wanted to build a static binary, but Slackware doesn't ship a
+# full set of static libs, plus glibc's getpwnam() and getpwuid()
+# are used (which use dlopen() to load a shared lib at runtime).
+patch -p1 < $CWD/sbo.diff
 
-# Fix for libpng16 (thanks to Arch Linux)
-# https://projects.archlinux.org/svntogit/community.git/plain/trunk/zsnes-1.51-libpng15.patch?h=packages/zsnes
-patch -p1 < $CWD/zsnes-1.51-libpng15.patch
+# Build options.
+# Disabling WITH_AO doesn't seem particularly useful, but allow it.
+# Disabling WITH_DEBUGGER might make sense for slow systems.
+A=no ; D=no
+[ "${AO:-yes}"       = "yes" ] && ARGS+="WITH_AO=yes "       && A=yes
+[ "${DEBUGGER:-yes}" = "yes" ] && ARGS+="WITH_DEBUGGER=yes " && D=yes
+echo "::: running: make $ARGS"
 
-CFLAGS="$SLKCFLAGS -fcommon -std=c++11" \
-force_arch="$ARCH" \
-./configure \
-  --prefix=/usr \
-  --enable-release \
-  --disable-cpucheck \
-  --disable-debugger
-
-CFLAGS="$SLKCFLAGS -fcommon -std=c++11" \
-force_arch="$ARCH" \
-make
+make $ARGS
 make install DESTDIR=$PKG
-mv $PKG/usr/bin $PKG/usr/games # configure ignores --bindir, grr!
-strip $PKG/usr/games/$PRGNAM
+gzip -9 $PKG/usr/man/man*/*
 
-# Man page belongs in section 6, since this is a game.
-mkdir -p $PKG/usr/man/man6
-sed '/^\.TH/s,1$,6,' $PKG/usr/man/man1/$PRGNAM.1 | \
-    gzip -9c > $PKG/usr/man/man6/$PRGNAM.6.gz
-rm -rf $PKG/usr/man/man1
-
-# Add a .desktop file and icon for good menu integration
-mkdir -p $PKG/usr/share/applications $PKG/usr/share/pixmaps
-install -m 0644 $CWD/zsnes.desktop $PKG/usr/share/applications/zsnes.desktop
-
-for px in 16 32 48 64; do
-  size=${px}x${px}
-  dir=$PKG/usr/share/icons/hicolor/$size/apps
-  mkdir -p $dir
-  convert -resize $size $CWD/$PRGNAM.png $dir/$PRGNAM.png
-done
-
-ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a docs/* $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a COPYING* README* TODO* $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s,@A@,$A," -e "s,@D@,$D," < $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
