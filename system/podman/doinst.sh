@@ -11,8 +11,6 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/containers/libpod.conf.new
 config etc/containers/registries.conf.new
 config etc/containers/mounts.conf.new
-config etc/containers/seccomp.json.new
 config etc/containers/policy.json.new
