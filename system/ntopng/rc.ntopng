@@ -1,0 +1,104 @@
+#!/bin/sh
+
+# /etc/rc.d/rc.ntopng : start/stop/restart ntopng
+# usage: ./rc.ntopng { start | stop | restart }
+
+# Thanks to andarius <andarius@errantnutron.com> for donating
+# time and the various cleanups in the script and the start|stop|restart
+# functions.
+
+NTOPUID=ntopng
+NTOPGID=ntopng
+NTOPLOG=/var/log/ntopng/ntopng.log
+DATE=$(date +%a\ %b\ %d\ %T\ %Y)
+RETVAL=0
+
+# Sanity Checking
+if [  ! -r "/var/lib/ntopng/" ]; then
+    echo "Can not read ntopng state directory. Exiting..."
+    exit 1
+fi
+
+ntopng_start() {
+    echo -n $"Starting ntopng ...  "
+    if [ -r /var/run/ntopng.pid ]; then
+        if $(! /sbin/pidof ntopng > /dev/null 2>&1 ) ; then
+            echo "Removing an old /var/run/ntopng.pid"
+            rm -f /var/run/ntopng.pid
+        fi
+    fi
+
+    /usr/bin/ntopng   --scripts-dir=/usr/share/ntopng/scripts \
+                      --install-dir=/usr/share/ntopng \
+                      --httpdocs-dir=/usr/share/ntopng/httpdocs \
+                      --user=$NTOPUID \
+                      --daemon \
+                      --pid=/var/run/ntopng.pid >> $NTOPLOG 2>&1 &
+    disown
+    return 0
+    RETVAL=$?
+
+    if [ $RETVAL -eq 0 ]; then
+        touch /var/lock/ntopng
+        sleep 2
+        echo "Done"
+    else
+        echo "Failed"
+    fi
+    return $RETVAL
+}
+
+ntopng_stop() {
+    echo -n $"Stopping ntopng ...  "
+    RETVAL=$?
+    if [ $RETVAL -eq 0 ]; then
+        if [ -r /var/run/ntopng.pid ]; then
+            pkill ntopng
+            # Give it some time to die gracefully
+            for second in 0 1 2 3 4 5 6 7 8 9 10 ; do
+                if $(! /sbin/pidof ntopng > /dev/null 2>&1 ) ; then
+                    # ntopng is a dirty little daemon:
+                    rm -f /var/run/ntopng.pid
+                    break
+                fi
+                sleep 1
+            done
+
+            if [ "$second" = "10" ]; then
+              echo "\nWARNING: ntopng did not exit normally, killing!"
+              pkill ntopng
+              sleep 10
+            else
+                # Yes there are two spaces as this is the way ntopng writes
+                # their logfiles.
+                echo "$DATE  EXIT: ntopng stopped by user: $USER (UID: $EUID)" >> $NTOPLOG
+                echo "Done"
+            fi
+        fi
+        rm -f /var/lock/ntopng
+    fi
+    return $RETVAL
+}
+
+# Lets see how we are being called:
+case "$1" in
+    start)
+        ntopng_start
+        ;;
+    stop)
+        ntopng_stop
+        ;;
+    restart|reload)
+        ntopng_stop
+        # Takes a few to recover and be able to start again:
+        sleep 10
+        ntopng_start
+        ;;
+    *)
+        echo ""
+        echo "Usage: $(basename $0) {start | stop | restart }"
+        RETVAL=1
+esac
+
+exit $RETVAL
+#EOF

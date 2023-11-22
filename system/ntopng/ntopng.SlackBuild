@@ -1,0 +1,187 @@
+#!/bin/bash
+
+# Slackware build script for ntopng
+
+# Copyright 2023, Lockywolf
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=ntopng
+PRGNAM2=nDPI
+VERSION=${VERSION:-6.0}
+VERSION2=${VERSION2:-4.8}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+MUID=${MUID:-212}
+MGID=${MGID:-212}
+NTOPUSER=${NTOPUSER:-ntopng}
+NTOPGROUP=${NTOPGROUP:-ntopng}
+
+if ! getent group ntopng 2>&1 > /dev/null; then
+  echo "  You must have an ntopng group to run this script."
+  echo "    # groupadd -g $MGID ntopng"
+  exit 1
+elif ! getent passwd ntopng 2>&1 > /dev/null; then
+  echo "  You must have a ntopng user to run this script."
+  echo "    # useradd -u $MUID -g $MGID -d /var/lib/ntopng ntopng"
+  exit 1
+fi
+
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O0 -fPIC -ggdb"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION $PRGNAM2-$VERSION2
+#tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM2-$VERSION2.tar.gz
+cd $PRGNAM2-$VERSION2
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} + -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} +
+
+./autogen.sh
+CXX='ccache g++' \
+CC='ccache gcc'   \
+   CFLAGS="$SLKCFLAGS" \
+   CXXFLAGS="$SLKCFLAGS" ./configure  --with-pcre \
+  --with-maxminddb
+make
+
+export NDPI_HOME=$TMP/$PRGNAM2-$VERSION2
+
+rm -rf ntopng-dist-222d5a0e9ce7b60689b014898f3fc84b3c493687
+tar xvf $CWD/ntopng-dist-222d5a0e9ce7b60689b014898f3fc84b3c493687.tar.gz
+
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+
+#cd ../$PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} + -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} +
+
+rmdir httpdocs/dist
+mv ../ntopng-dist-222d5a0e9ce7b60689b014898f3fc84b3c493687 httpdocs/dist
+
+./autogen.sh
+CXX='ccache g++' \
+CC='ccache gcc'   \
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --datadir=/var/lib/ntopng \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --disable-static \
+  --with-pcre \
+  --with-maxminddb \
+  --build=$ARCH-slackware-linux
+sed -i 's|-lhiredis|-lhiredis -lpcre|g' Makefile
+
+sed -i  's|callbacks_dir = ntop->getValidPath(callbacks_dir);|callbacks_dir = "/usr/share/ntopng/scripts/callbacks";|g' src/Prefs.cpp
+
+make
+make install DESTDIR=$PKG
+cp packages/wizard/ntopng-config $PKG/usr/bin
+
+strip $PKG/usr/bin/ntopng
+
+rm $PKG/usr/share/ntopng/httpdocs/geoip/README.geolocation.md
+
+install -D -m 0644 $CWD/rc.$PRGNAM $PKG/etc/rc.d/rc.$PRGNAM.new
+
+mkdir -p $PKG/var/{lib,log}/$PRGNAM
+chown ntopng:ntopng $PKG/var/{lib,log}/$PRGNAM
+
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/etc/logrotate.d $PKG/etc/rc.d
+install -m 0644 $CWD/$PRGNAM.logrotate $PKG/etc/logrotate.d/$PRGNAM.new
+# sed \
+#   -e "s%@NTOPUSER@%$NTOPUSER%" \
+#   -e "s%@NTOPGROUP@%$NTOPGROUP%" \
+#   $CWD/rc.ntopng > $PKG/etc/rc.d/rc.ntopng.new
+cat $CWD/rc.ntopng > $PKG/etc/rc.d/rc.ntopng.new
+
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/nDPI
+
+cp -a *.md COPYING LICENSE $PKG/usr/doc/$PRGNAM-$VERSION
+
+( cd $TMP/$PRGNAM2-$VERSION2
+  cp -a *.md COPYING $PKG/usr/doc/$PRGNAM-$VERSION/nDPI )
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
