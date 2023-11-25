@@ -5,4 +5,4 @@ if [ ! -d "$PLUGIN_DIR" ]; then
     mkdir -p $PLUGIN_DIR
 fi
 
-ln -s /usr/bin/docker-compose $PLUGIN_DIR/docker-compose
+ln -sf /usr/bin/docker-compose $PLUGIN_DIR/docker-compose
