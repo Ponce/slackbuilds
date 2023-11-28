@@ -23,3 +23,8 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.kea.new
+config etc/kea/kea-ctrl-agent.conf.new
+config etc/kea/kea-dhcp-ddns.conf.new
+config etc/kea/kea-dhcp4.conf.new
+config etc/kea/kea-dhcp6.conf.new
+config etc/kea/keactrl.conf.new
