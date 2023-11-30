@@ -1,0 +1,136 @@
+#!/bin/bash
+
+# Slackware build script for python3-numpy-legacy
+
+# Copyright 2015-2023 Christoph Willing  Brisbane, Australia
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Based with thanks on original numpy scripts by
+# Aleksandar Samardzic <asamardzic@gmail.com> and Serban Udrea <S.Udrea@gsi.de>
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=python3-numpy-legacy
+SRCNAM=numpy
+VERSION=${VERSION:-1.24.4}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+LIBDIRSUFFIX=""
+if [ "$ARCH" = "x86_64" ]; then
+  LIBDIRSUFFIX="64"
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG/opt/$PRGNAM $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# You may want to force numpy to link against a special kind of ATLAS
+#
+ATLAS_SHARED="${ATLAS_SHARED:-yes}"
+ATLAS_SHARED=$(echo "$ATLAS_SHARED"|cut -b 1|tr a-z A-Z)
+ATLAS_NO_THREADS="${ATLAS_NO_THREADS:-no}"
+ATLAS_NO_THREADS=$(echo "$ATLAS_NO_THREADS"|cut -b 1|tr a-z A-Z)
+
+if [ "$ATLAS_SHARED" = "Y" ]; then
+  if [ "$ATLAS_NO_THREADS" = "Y" ]; then
+    echo -e "[atlas]\natlas_libs = satlas" >> site.cfg
+    echo -e "lapack_libs = satlas\nlapack_atlas = satlas\n" >> site.cfg
+  fi
+else
+  if [ "$ATLAS_NO_THREADS" = "Y" ]; then
+    echo -e "[atlas]\natlas_libs = f77blas,cblas,atlas" >> site.cfg
+    echo -e "lapack_libs = lapack\nlapack_atlas = lapack\n" >> site.cfg
+  else
+    echo -e "[atlas]\natlas_libs = ptf77blas,ptcblas,atlas" >> site.cfg
+    echo -e "lapack_libs = ptlapack\nlapack_atlas = ptlapack\n" >> site.cfg
+  fi
+fi
+
+NO_UMFPACK=${NO_UMFPACK:-yes}
+case "$NO_UMFPACK" in
+ [yY]|[yY][eE][sS]) NO_UMFPACK="y" ;;
+                 *) NO_UMFPACK="" ;;
+esac
+
+if [ ! "$NO_UMFPACK" ]; then
+  echo -e "[amd]\nlibrary_dirs = /usr/lib${LIBDIRSUFFIX}" >> site.cfg
+  echo -e "include_dirs = /usr/include/amd\namd_libs = amd\n" >> site.cfg
+  echo -e "[umfpack]\nlibrary_dirs = /usr/lib${LIBDIRSUFFIX}" >> site.cfg
+  echo -e "include_dirs = /usr/include/umfpack\numfpack_libs = umfpack\n" \
+          >> site.cfg
+fi
+
+DEBUG=${DEBUG:-no}
+case "$DEBUG" in
+ [yY]|[yY][eE][sS]) DEBUG="y" ;;
+                 *) DEBUG="" ;;
+esac
+
+if [ ! "$DEBUG" ]; then
+  NPY_RELAXED_STRIDES_CHECKING=${NPY_RSC:-1} python3 setup.py install --install-platlib usr/lib${LIBDIRSUFFIX} --root $PKG/opt/$PRGNAM
+
+  find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+ | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+else
+  NPY_RELAXED_STRIDES_CHECKING=${NPY_RSC:-1} python3 setup.py build --debug
+  python3 setup.py install --install-platlib usr/lib${LIBDIRSUFFIX} --root $PKG/opt/$PRGNAM
+fi
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CITATION.bib INSTALL.rst LICENSE.txt README.md THANKS.txt \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+find $PKG/usr/doc -type f -exec chmod 0644 {} \;
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
