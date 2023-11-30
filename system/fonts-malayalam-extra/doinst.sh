@@ -16,7 +16,6 @@ if [ -x /usr/bin/mkfontdir ]; then
   )
 fi
 
-
 [ "$DISPLAY" != "" ] && xset fp rehash 2>/dev/null
 
 if [ -x /usr/bin/fc-cache ]; then
