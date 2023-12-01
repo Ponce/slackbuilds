@@ -1,0 +1,198 @@
+#!/bin/bash
+
+# Slackware build script for openresty
+
+# Copyright 2008 Cherife Li <cherife-#-dotimes.com>
+# Copyright 2011 Diogo Leal <diogo@diogoleal.com>
+# Copyright 2012-13 Francisco Ambrozio <sbo@franciscoambrozio.com>
+# Copyright 2014-2017 Larry Hajali <larryhaja[at]gmail[dot]com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Special thanks to Thomas Morper for some configuration adjustments tips
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=openresty
+VERSION=${VERSION:-1.21.4.3}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+   LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+   LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+   SLKCFLAGS="-O2 -fPIC"
+   LIBDIRSUFFIX="64"
+else
+   SLKCFLAGS=""
+   LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/opt/openresty \
+  --conf-path=/etc/openresty/nginx.conf \
+  --pid-path=/var/run/openresty.pid \
+  --user=${NGINXUSER:=nobody} \
+  --group=${NGINXGROUP:=nogroup} \
+  --error-log-path=/var/log/openresty/error.log \
+  --http-log-path=/var/log/openresty/access.log \
+  --with-file-aio \
+  --with-select_module \
+  --with-poll_module \
+  --with-threads \
+  --with-http_ssl_module \
+  --with-http_v2_module \
+  --with-http_realip_module \
+  --with-http_addition_module \
+  --with-http_xslt_module${DYNAMIC_MODULE} \
+  --with-http_image_filter_module${DYNAMIC_MODULE} \
+  --with-http_sub_module \
+  --with-http_dav_module \
+  --with-http_flv_module \
+  --with-http_mp4_module \
+  --with-http_gunzip_module \
+  --with-http_gzip_static_module \
+  --with-http_auth_request_module \
+  --with-http_random_index_module \
+  --with-http_secure_link_module \
+  --with-http_degradation_module \
+  --with-http_slice_module \
+  --with-http_stub_status_module \
+  --with-http_perl_module${DYNAMIC_MODULE} \
+  --with-mail${DYNAMIC_MODULE} \
+  --with-mail_ssl_module \
+  --with-stream${DYNAMIC_MODULE} \
+  --with-stream_ssl_module \
+  --with-stream_realip_module \
+  --with-stream_ssl_preread_module \
+  --with-cpp_test_module \
+  --with-compat \
+  --with-pcre \
+  --with-pcre-jit \
+  --with-libatomic \
+  $GEOIP_MOD \
+  $GPERF_MOD \
+  $ADD_MODULE
+
+gmake
+gmake install \
+  DESTDIR=$PKG \
+  INSTALLDIRS=vendor \
+  INSTALLVENDORMAN3DIR=/usr/man/man3
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/man/man8
+install -m 0644 ./build/nginx-1.21.4/docs/man/nginx.8 $PKG/usr/man/man8
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+
+find $PKG -name perllocal.pod \
+  -o -name ".packlist" \
+  -o -name "*.bs" \
+  | xargs rm -f
+
+find $PKG/opt/openresty/ -type d -empty -delete
+
+find $PKG -perm 444 -exec chmod 0644 {} \;
+find $PKG -perm 555 -exec chmod 0755 {} \;
+
+# Make the temp path.
+mkdir -p $PKG/var/lib/$PRGNAM
+chmod 0700 $PKG/var/lib/$PRGNAM
+chown $NGINXUSER $PKG/var/lib/$PRGNAM
+
+# Move html directory
+#mkdir -p $PKG/var/www
+#mv $PKG/usr/html $PKG/var/www
+
+# Add an init script
+mkdir -p $PKG/etc/rc.d
+cat $CWD/rc.openresty > $PKG/etc/rc.d/rc.openresty.new
+
+mkdir -p $PKG/etc/logrotate.d
+sed -e "s,@USER@,$NGINXUSER," -e "s,@GROUP@,$NGINXGROUP," $CWD/openresty.logrotate \
+  > $PKG/etc/logrotate.d/openresty.new
+
+# Set the permissions for the log directory.
+chown $NGINXUSER $PKG/var/log/$PRGNAM
+chmod 750 $PKG/var/log/$PRGNAM
+
+# Create sub-directory for virtual servers.
+mkdir $PKG/etc/$PRGNAM/conf.d
+
+mkdir -p $PKG/usr/doc/openresty-$VERSION
+#cp -a CHANGES* LICENSE README $PKG/usr/doc/openresty-$VERSION
+cat $CWD/openresty.SlackBuild > $PKG/usr/doc/openresty-$VERSION/openresty.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+install -m 0755 $PKG/opt/openresty/nginx/sbin/nginx /usr/bin/openresty
+
+# Don't clobber config files
+for i in $(find $PKG/etc/$PRGNAM -type f ! -name "*\.default"); do
+  mv "$i" "$i".new
+done
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
