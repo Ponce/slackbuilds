@@ -28,10 +28,9 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM="mongodb"
 VERSION=${VERSION:-7.0.4}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-MAKEJOBS=${MAKEJOBS:-1}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -101,6 +100,9 @@ find -L . \
 # thanks gentoo, also for these patches
 for i in $CWD/patches/* ; do patch -p1 < $i ; done
 
+sed -i "s|GCC 11.3|GCC 11.2|g" SConstruct
+sed -i "s|__GNUC_MINOR__ < 3|__GNUC_MINOR__ < 2|g" SConstruct
+
 scons_opts=(
   --disable-warnings-as-errors
   --use-system-boost
@@ -115,12 +117,20 @@ scons_opts=(
   --ssl
 )
 
+# Thanks to Lockywolf
+# scons can use multiple jobs. For convenience, read MAKEFLAGS from the environment, if set
+JOBS="$( echo $MAKEFLAGS | sed 's,.*-j *\([0-9][0-9]*\)*.*,\1,' )"
+# or if no MAKEFLAGS, use the number of cores minus 1
+JOBS="${JOBS:-$(( $( nproc ) - 1 ))}"
+# or 1, if we really have one core
+[ "$JOBS" = "0" ] && JOBS=1
+
 if [ "$ARCH" = "x86_64" ]; then
   PREFIX=${PKG}/usr CFLAGS="$SLKCFLAGS" CXXFLAGS="$SLKCFLAGS" LDFLAGS="-L /lib$LIBDIRSUFFIX -L/usr/lib$LIBDIRSUFFIX" \
-    ./buildscripts/scons.py "${scons_opts[@]}" --jobs="$MAKEJOBS" install-core
+    ./buildscripts/scons.py "${scons_opts[@]}" --force-jobs --jobs="$JOBS" install-core
 else
   PREFIX=${PKG}/usr CFLAGS="$SLKCFLAGS" CXXFLAGS="$SLKCFLAGS" LDFLAGS="-L /lib$LIBDIRSUFFIX -L/usr/lib$LIBDIRSUFFIX" \
-    ./buildscripts/scons.py "${scons_opts[@]}" --jobs="$MAKEJOBS" --wiredtiger=off install-core
+    ./buildscripts/scons.py "${scons_opts[@]}" --force-jobs --jobs="$JOBS" --wiredtiger=off install-core
 fi
 
 # manual install
@@ -137,6 +147,7 @@ for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; r
 
 mkdir -p ${PKG}/usr/doc/${PRGNAM}-${VERSION}
 cp distsrc/* ${PKG}/usr/doc/${PRGNAM}-${VERSION}
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/etc/{logrotate,rc}.d
 cat $CWD/files/mongodb.conf > $PKG/etc/mongodb.conf.new
