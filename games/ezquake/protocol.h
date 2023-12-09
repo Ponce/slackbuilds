@@ -67,6 +67,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 # define MVD_PEXT1_HIDDEN_MESSAGES   (1 <<  5) // dem_multiple(0) packets are in format (<length> <type-id>+ <packet-data>)*
 //# define MVD_PEXT1_SERVERSIDEWEAPON2 (1 <<  6) // Server-side weapon selection supports clc_mvd_weapon_full_impulse.
 												 // Can be defined in a project Makefile
+#define MVD_PEXT1_WEAPONPREDICTION	(1 <<  7) // Send weapon and attack related data for weapon prediction
+#define MVD_PEXT1_SIMPLEPROJECTILE	(1 <<  8) // Projectiles are sent as simple semi-stateless ents
 
 # if defined(MVD_PEXT1_DEBUG_ANTILAG) || defined(MVD_PEXT1_DEBUG_WEAPON)
 #  define MVD_PEXT1_DEBUG
@@ -238,6 +240,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 # define svc_fte_voicechat		84
 #endif // FTE_PEXT2_VOICECHAT
 
+#ifdef MVD_PEXT1_SIMPLEPROJECTILE
+#define	svc_packetsprojectiles		100		// [...]
+#define	svc_deltapacketsprojectiles	101		// [...]
+#endif
+
 //==============================================
 
 // client to server
@@ -249,6 +256,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	clc_delta		5		// [byte] sequence number, requests delta compression of message
 #define clc_tmove		6		// teleport request, spectator only
 #define clc_upload		7		// teleport request, spectator only
+
+#ifdef MVD_PEXT1_SIMPLEPROJECTILE
+#define clc_ackframe	50
+#endif
 
 #ifdef FTE_PEXT2_VOICECHAT
 #define clc_voicechat	83		// FTE voice chat.
@@ -272,6 +283,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // others
 #define clc_mvd_weapon_full_impulse		128	// if set, each weapon set as a byte, rather than packing two into one
+#if defined(MVD_PEXT1_DEBUG_ANTILAG) || defined(MVD_PEXT1_DEBUG_WEAPON)
+#define MVD_PEXT1_DEBUG
+#define MVD_PEXT1_ANTILAG_CLIENTPOS       128 // flag set on the playernum if the client positions are also included
+
+#define clc_mvd_debug 201
+
+#define clc_mvd_debug_type_antilag 1
+#define clc_mvd_debug_type_weapon  2
+#endif
 
 //==============================================
 
@@ -293,6 +313,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	PF_PMC_MASK		7
 #define	PF_ONGROUND		(1<<14)			// ZQuake extension
 #define	PF_SOLID		(1<<15)			// ZQuake extension
+#define	PF_FTE_EXTRA	(1<<16)			// FTE extension
 
 // encoded player move types
 #define PMC_NORMAL				0		// normal ground movement
@@ -463,6 +484,24 @@ typedef struct entity_state_s {
 	byte	trans;
 } entity_state_t;
 
+#ifdef MVD_PEXT1_SIMPLEPROJECTILE
+#define MAX_SIMPLEPROJECTILES	64
+typedef struct sprojectile_state_s
+{
+	int		number;			// edict index
+	int		flags;			// nolerp, etc
+	int		owner;
+
+	int		fproj_num;
+	float	time_offset;
+	float	time;
+	vec3_t	origin;
+	vec3_t	angles;
+	int		modelindex;
+	vec3_t	velocity;
+} sprojectile_state_t;
+#endif
+
 #define	MAX_PACKET_ENTITIES			64	// doesn't include nails
 #define MAX_PEXT256_PACKET_ENTITIES 256	// up to 256 ents, look FTE_PEXT_256PACKETENTITIES
 #define	MAX_MVD_PACKET_ENTITIES		300	// !!! MUST not be less than any of above values!!!
@@ -470,6 +509,10 @@ typedef struct entity_state_s {
 typedef struct packet_entities_s {
 	int				num_entities;
 	entity_state_t	entities[MAX_MVD_PACKET_ENTITIES];
+#ifdef MVD_PEXT1_SIMPLEPROJECTILE
+	int		num_sprojectiles;
+	sprojectile_state_t sprojectiles[MAX_SIMPLEPROJECTILES];
+#endif
 } packet_entities_t;
 
 typedef struct usercmd_s {
@@ -480,6 +523,7 @@ typedef struct usercmd_s {
 	short	upmove;
 	byte	buttons;
 	byte	impulse;
+	byte	impulse_pred; //this is our impulse, even if it was overrode by serversideweapon
 } usercmd_t;
 
 //==============================================
