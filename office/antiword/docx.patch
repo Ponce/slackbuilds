@@ -1,0 +1,182 @@
+Description: Try to reduce confusion around docx files
+ Now also checks for XML files and HTML files
+Author: Olly Betts <olly@survex.com>
+Bug-Debian: https://bugs.debian.org/758959
+Bug-Debian: https://bugs.debian.org/791532
+Forwarded: no
+Last-Update: 2015-01-11
+
+--- a/Docs/antiword.1
++++ b/Docs/antiword.1
+@@ -14,7 +14,11 @@
+ .br
+ A wordfile named - stands for a Word document read from the standard input.
+ .br
+-Only documents made by MS Word version 2 and version 6 or later are supported.
++Only the binary format documents made by MS Word version 2, 6, 7, 97, 2000 and
++2003 are supported.  Newer Word versions default to using a completely
++different format consisting of XML files in a ZIP container (usually with a
++".docx" file extension) which antiword doesn't support.  It also doesn't
++support the "flat" XML format which MS Word 2003 supported.
+ .SH OPTIONS
+ .TP
+ .BI "\-a " papersize
+--- a/antiword.h
++++ b/antiword.h
+@@ -695,6 +695,9 @@
+ extern BOOL	bIsWordForDosFile(FILE *, long);
+ extern BOOL	bIsRtfFile(FILE *);
+ extern BOOL	bIsWordPerfectFile(FILE *);
++extern BOOL	bIsZipFile(FILE *);
++extern BOOL	bIsXMLFile(FILE *);
++extern BOOL	bIsHTMLFile(FILE *);
+ extern BOOL	bIsWinWord12File(FILE *, long);
+ extern BOOL	bIsMacWord45File(FILE *);
+ extern int	iGuessVersionNumber(FILE *, long);
+--- a/main_u.c
++++ b/main_u.c
+@@ -187,10 +187,29 @@
+ 			werr(0, "%s is not a Word Document."
+ 				" It is probably a Rich Text Format file",
+ 				szFilename);
+-		} if (bIsWordPerfectFile(pFile)) {
++		} else if (bIsWordPerfectFile(pFile)) {
+ 			werr(0, "%s is not a Word Document."
+ 				" It is probably a Word Perfect file",
+ 				szFilename);
++		} else if (bIsZipFile(pFile)) {
++			werr(0, "%s is not a Word Document."
++				" It seems to be a ZIP file, so is probably"
++				" an OpenDocument file, or a \"docx\" file"
++				" from MS Word 2007 or newer"
++				" (antiword only handles binary format"
++				" documents from MS Word 2003 and earlier)",
++				szFilename);
++		} else if (bIsXMLFile(pFile)) {
++			werr(0, "%s is not a Word Document."
++				" It seems to be an XML file, perhaps"
++				" the XML format from MS Word 2003"
++				" (antiword only handles binary format"
++				" documents from MS Word 2003 and earlier)",
++				szFilename);
++		} else if (bIsHTMLFile(pFile)) {
++			werr(0, "%s is not a Word Document."
++				" It is probably an HTML file",
++				szFilename);
+ 		} else {
+ #if defined(__dos)
+ 			werr(0, "%s is not a Word Document or the filename"
+--- a/wordlib.c
++++ b/wordlib.c
+@@ -41,7 +41,7 @@
+ BOOL
+ bIsWordForDosFile(FILE *pFile, long lFilesize)
+ {
+-	static UCHAR	aucBytes[] =
++	static const UCHAR	aucBytes[] =
+ 		{ 0x31, 0xbe, 0x00, 0x00, 0x00, 0xab };	/* Word for DOS */
+ 
+ 	DBG_MSG("bIsWordForDosFile");
+@@ -64,7 +64,7 @@
+ static BOOL
+ bIsWordFileWithOLE(FILE *pFile, long lFilesize)
+ {
+-	static UCHAR	aucBytes[] =
++	static const UCHAR	aucBytes[] =
+ 		{ 0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1 };
+ 	int	iTailLen;
+ 
+@@ -108,7 +108,7 @@
+ BOOL
+ bIsRtfFile(FILE *pFile)
+ {
+-	static UCHAR	aucBytes[] =
++	static const UCHAR	aucBytes[] =
+ 		{ '{', '\\', 'r', 't', 'f', '1' };
+ 
+ 	DBG_MSG("bIsRtfFile");
+@@ -122,7 +122,7 @@
+ BOOL
+ bIsWordPerfectFile(FILE *pFile)
+ {
+-	static UCHAR	aucBytes[] =
++	static const UCHAR	aucBytes[] =
+ 		{ 0xff, 'W', 'P', 'C' };
+ 
+ 	DBG_MSG("bIsWordPerfectFile");
+@@ -131,13 +131,65 @@
+ } /* end of bIsWordPerfectFile */
+ 
+ /*
++ * This function checks whether the given file is or is not a ZIP file
++ */
++BOOL
++bIsZipFile(FILE *pFile)
++{
++	static const UCHAR	aucBytes[] =
++		{ 'P', 'K', 0x03, 0x04 };
++
++	DBG_MSG("bIsZipFile");
++
++	return bCheckBytes(pFile, aucBytes, elementsof(aucBytes));
++} /* end of bIsZipFile */
++
++/*
++ * This function checks whether the given file is or is not a XML file
++ */
++BOOL
++bIsXMLFile(FILE *pFile)
++{
++	static const UCHAR	aucBytes[] =
++		{ '<', '?', 'x', 'm', 'l' };
++
++	DBG_MSG("bIsXMLFile");
++
++	return bCheckBytes(pFile, aucBytes, elementsof(aucBytes));
++} /* end of bIsXMLFile */
++
++/*
++ * This function checks whether the given file is or is not a HTML file
++ */
++BOOL
++bIsHTMLFile(FILE *pFile)
++{
++	static const UCHAR	aucBytes[2][5] = {
++		{ '<', 'h', 't', 'm', 'l' },
++		{ '<', 'H', 'T', 'M', 'L' },
++	};
++	int	iIndex;
++
++	DBG_MSG("bIsHTMLFile");
++
++	for (iIndex = 0; iIndex < (int)elementsof(aucBytes); iIndex++) {
++		if (bCheckBytes(pFile,
++				aucBytes[iIndex],
++				elementsof(aucBytes[iIndex]))) {
++			return TRUE;
++		}
++	}
++	return FALSE;
++} /* end of bIsHTMLFile */
++
++/*
+  * This function checks whether the given file is or is not a "Win Word 1 or 2"
+  * document
+  */
+ BOOL
+ bIsWinWord12File(FILE *pFile, long lFilesize)
+ {
+-	static UCHAR	aucBytes[2][4] = {
++	static const UCHAR	aucBytes[2][4] = {
+ 		{ 0x9b, 0xa5, 0x21, 0x00 },	/* Win Word 1.x */
+ 		{ 0xdb, 0xa5, 0x2d, 0x00 },	/* Win Word 2.0 */
+ 	};
+@@ -171,7 +223,7 @@
+ BOOL
+ bIsMacWord45File(FILE *pFile)
+ {
+-	static UCHAR	aucBytes[2][6] = {
++	static const UCHAR	aucBytes[2][6] = {
+ 		{ 0xfe, 0x37, 0x00, 0x1c, 0x00, 0x00 },	/* Mac Word 4 */
+ 		{ 0xfe, 0x37, 0x00, 0x23, 0x00, 0x00 },	/* Mac Word 5 */
+ 	};

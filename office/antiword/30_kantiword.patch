@@ -1,0 +1,205 @@
+Description: Improve kantiword scripts and use secure temp files
+ Closes: #259999, #363428, [CVE-2005-3126]
+Author: <eriks@debian.org>
+Bug-Debian: http://bugs.debian.org/259999
+Bug-Debian: http://bugs.debian.org/363428
+Last-Update: 2009-06-07
+
+--- antiword-0.37~/Unix-only/KDE3-only/kantiword.sh	2009-06-07 00:47:17.000000000 +0200
++++ antiword-0.37/Unix-only/KDE3-only/kantiword.sh	2009-06-07 00:57:27.564012775 +0200
+@@ -3,69 +3,145 @@
+ # Script to make drag and drop in KDE possible
+ #set -x
+ #
++CONFS=$(kde-config --path config | tr ':' ' ')
++CONF_FILE=kantiwordrc
++mapping=
+ 
+-if [ $# -lt 2 ]
+-then
+-	exit 0
++# default output format is PDF
++format="-a"
++ext=pdf
++
++for i in $CONFS; do
++    if [ -r "$i/$CONF_FILE" ]; then
++        ENCODING=$(grep ^encoding "$i/$CONF_FILE" | tr -d '[:blank:]' | cut -d '=' -f 2)
++        if [ -f "/usr/share/antiword/$ENCODING.txt" ]; then
++            mapping="-m $ENCODING.txt"
++        fi
++        FORMAT=$(grep ^output_format "$i/$CONF_FILE" | tr -d '[:blank:]' | cut -d '=' -f 2)
++        if [ "$FORMAT" = "PS" ]; then
++            # switch to output format PS, Cyrillic is better supported
++            format="-p"
++            ext=ps
++        fi
++        break
++    fi
++done
++
++DESKTOP=$(kde-config --userpath desktop)
++
++if [ $# -lt 2 ]; then
++    echo "Would you like to install an icon on your Desktop, where you"
++    echo "will be able to drop an *.doc file on to? It will be displayed"
++    echo "as a PDF document or as plain text (if no PDF viewer available)."
++    echo -n "[Y/n]: > "
++    read n
++    if [ "x$n" = "xy" ] || [ "x$n" = "xY" ] || [ "x$n" = "x" ]; then
++        if [ -r /etc/papersize ]; then
++            n=$(cat /etc/papersize)
++        fi
++        if [ "x$n" != "xa4" ] && [ "x$n" != "xletter" ]; then
++            echo
++            echo "Type"
++            echo "'a' for output papersize A4,"
++            echo "'l' for letter or"
++            echo "'n' for cancel."
++            echo -n "[a/l/N]: > "
++            read n
++        fi
++        if [ "x$n" = "xa" ] || [ "x$n" = "xa4" ]; then
++            cp -f /usr/share/antiword/kantiword.eu.desktop "$DESKTOP/kantiword.desktop"
++        elif [ "x$n" = "xl" ] || [ "x$n" = "xletter" ]; then
++            cp -f /usr/share/antiword/kantiword.us.desktop "$DESKTOP/kantiword.desktop"
++        fi
++    fi
++    exit 0
+ fi
+ 
+ # Determine the temp directory
+-if [ -d "$TMPDIR" ] && [ -w "$TMPDIR" ]
+-then
+-	tmp_dir=$TMPDIR
+-elif [ -d "$TEMP" ] && [ -w "$TEMP" ]
+-then
+-	tmp_dir=$TEMP
++if [ -d "$TMPDIR" ] && [ -w "$TMPDIR" ]; then
++    tmp_dir="$TMPDIR"
++elif [ -d "$TEMP" ] && [ -w "$TEMP" ]; then
++    tmp_dir="$TEMP"
+ else
+-	tmp_dir="/tmp"
+-fi                        
++    tmp_dir="/tmp"
++fi
+ 
+ # Try to create the temp files in a secure way
+-if [ -x /bin/tempfile ]
+-then
+-	out_file=`/bin/tempfile -d "$tmp_dir" -p antiword -s ".ps"` || exit 1
+-	err_file=`/bin/tempfile -d "$tmp_dir" -p antiword -s ".err"`
+-	if [ $? -ne 0 ]
+-	then
+-		rm -f "$out_file"
+-		exit 1
+-	fi
+-elif [ -x /bin/mktemp ]
+-then
+-	out_file=`/bin/mktemp -q -p "$tmp_dir" antiword.ps.XXXXXXXXX` || exit 1
+-	err_file=`/bin/mktemp -q -p "$tmp_dir" antiword.err.XXXXXXXXX`
+-	if [ $? -ne 0 ]
+-	then
+-		rm -f "$out_file"
+-		exit 1
+-	fi
++if [ -x /bin/tempfile ]; then
++    out_file=$(/bin/tempfile -d "$tmp_dir" -p antiword -s ".$ext") || exit 1
++    err_file=$(/bin/tempfile -d "$tmp_dir" -p antiword -s ".err")
++    txt_file=$(/bin/tempfile -d "$tmp_dir" -p antiword -s ".txt")
++    if [ $? -ne 0 ]; then
++        rm -f "$out_file"
++        exit 1
++    fi
++elif [ -x /bin/mktemp ]; then
++    out_file=$(/bin/mktemp -q -p "$tmp_dir" antiword.$ext.XXXXXXXXX) || exit 1
++    err_file=$(/bin/mktemp -q -p "$tmp_dir" antiword.err.XXXXXXXXX)
++    txt_file=$(/bin/mktemp -q -p "$tmp_dir" antiword.txt.XXXXXXXXX)
++    if [ $? -ne 0 ]; then
++        rm -f "$out_file"
++        exit 1
++    fi
+ else
+-	# Creating the temp files in an un-secure way
+-	out_file=$tmp_dir"/antiword.$$.ps"
+-	err_file=$tmp_dir"/antiword.$$.err"
++    # Creating the temp files in an un-secure way
++    out_file="$tmp_dir/antiword.$$.$ext"
++    err_file="$tmp_dir/antiword.$$.err"
++    txt_file="$tmp_dir/antiword.$$.txt"
+ fi
+ 
+-# Determine the paper size
+-paper_size=$1
+-shift
++error=0
++# filename is empty, user had clicked on icon, so print a help message
++# in err_file
++if [ -z $2 ]; then
++    cat >"$err_file" <<EOF
++    You should drag any *.doc file and drop it on this icon for
++    displaying. Kantiword can not do anything with an empty filename.
+ 
+-# Make the PostScript file
+-antiword -p $paper_size -i 0 "$@" 2>"$err_file" >"$out_file"
+-if [ $? -ne 0 ]
+-then
+-	# Something went wrong
+-	if [ -r "$err_file" ] && [ -s "$err_file" ]
+-	then
+-		konsole --caption "Error from Antword" -e less "$err_file"
+-	fi
+-	# Clean up
+-	rm -f "$out_file" "$err_file"
+-	exit 1
++EOF
++error=1
++else
++    # Determine the paper size
++    paper_size=$1
++    shift
++
++    # Make the output file (default PDF)
++    antiword $mapping $format $paper_size -i 0 "$@" 2>"$err_file" >"$out_file"
++    if [ $? -ne 0 ]; then
++        error=1
++    fi
++fi
++if [ $error -ne 0 ]; then
++    # Something went wrong
++    if [ -r "$err_file" ] && [ -s "$err_file" ]; then
++       if [ -x /usr/bin/konsole ]; then
++           /usr/bin/konsole --hold --caption "Error from Antiword" -e more "$err_file"
++       else
++           /usr/bin/X11/xterm -T "Error from Antiword" -e less "$err_file"
++       fi
++    fi
++    # Clean up
++    rm -f "$out_file" "$err_file" "$txt_file"
++    exit 1
+ fi
+ 
+-# Show the PostScript file
+-gv "$out_file" -nocentre -media $paper_size
++# Show the PDF file
++if [ "$ext" = "pdf" -a -x /usr/bin/kpdf ]; then
++    /usr/bin/kpdf "$out_file"
++elif [ "$ext" = "pdf" -a -x /usr/bin/xpdf ]; then
++    /usr/bin/xpdf "$out_file" -paper=$paper_size
++elif [ -x /usr/bin/gv ]; then
++    /usr/bin/gv "$out_file" --nocenter --media=$paper_size
++else
++    # no viewer available, so display as plain text
++    antiword $mapping "$@" 2>"$err_file" >"$txt_file"
++    if [ -x /usr/bin/konsole ]; then
++        /usr/bin/konsole --hold --caption "Text output from Antiword" -e more "$txt_file"
++    else
++        /usr/bin/X11/xterm -T "Text output from Antiword" -e less "$txt_file"
++    fi
++fi
+ 
+ # Clean up
+-rm -f "$out_file" "$err_file"
++rm -f "$out_file" "$err_file" "$txt_file"
+ exit 0
