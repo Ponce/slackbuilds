@@ -6,4 +6,9 @@ if [ -e usr/share/icons/hicolor/icon-theme.cache ]; then
     /usr/bin/gtk-update-icon-cache -f usr/share/icons/hicolor >/dev/null 2>&1
   fi
 fi
-ln -sf "$(which node)" "/usr/share/stremio/node"
+which_node=$(which node 2>/dev/null)
+if [ $? -eq 0 ]; then
+    ln -sf "$which_node" "/usr/share/stremio/node"
+else
+    ln -sf "/usr/bin/node" "/usr/share/stremio/node"
+fi
