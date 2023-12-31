@@ -2,7 +2,8 @@
 
 # Slackware build script for dnscrypt-proxy
 
-# Copyright 2019 T3slider <t3slider@gmail.com>
+# Copyright 2023 thnkman <thnkman@proton.me>
+# Based on Marco Bonetti's <sid77@slackware.it> tor script.
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,101 +23,87 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# Thanks to Larry Hajali for work on README.Slackware, the basis for the sample
-# dnsmasq configuration, and the idea for an init script. His contributions
-# significantly improved the value of this script!
-
 cd $(dirname $0) ; CWD=$(pwd)
 
+set -e
+
 PRGNAM=dnscrypt-proxy
-VERSION=${VERSION:-2.0.45}
+VERSION=${VERSION:-2.1.5}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
-DOMAIN=github.com
-ORG=jedisct1
+DNSCRYPT_USER=${TOR_USER:-dnscrypt}
+DNSCRYPT_UID=${TOR_UID:-293}
+DNSCRYPT_GROUP=${TOR_GROUP:-dnscrypt}
+DNSCRYPT_GID=${TOR_GID:-293}
 
 if [ -z "$ARCH" ]; then
-  case "$( uname -m )" in
+    case "$( uname -m )" in
     i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
-  esac
+    esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
-  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
-  exit 0
+    echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+    exit 0
 fi
 
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  LIBDIRSUFFIX="64"
-else
-  LIBDIRSUFFIX=""
+bailout() {
+    echo -e "\nYou must have a $DNSCRYPT_USER user and $DNSCRYPT_GROUP group to run this script. "
+    echo -e    "Something like this should suffice for most systems: "
+    echo -e    "# groupadd -g $DNSCRYPT_GID $DNSCRYPT_GROUP "
+    echo -e    "# useradd -u $DNSCRYPT_UID -g $DNSCRYPT_GID -c \"DNSCrypt-proxy\" -d /dev/null -s /bin/false $DNSCRYPT_USER \n"
+    exit 1
+}
+
+if ! grep -q "^$DNSCRYPT_USER:" /etc/passwd; then
+    bailout
+elif ! grep -q "^$DNSCRYPT_GROUP:" /etc/group; then
+    bailout
 fi
 
-set -e
-
 rm -rf $PKG
-mkdir -p $TMP $PKG $OUTPUT
+mkdir -p $TMP/$PRGNAM-$VERSION $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-mkdir -p $PRGNAM-$VERSION/src/$DOMAIN/$ORG
-cd $PRGNAM-$VERSION/src/$DOMAIN/$ORG
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-mv $PRGNAM-$VERSION $PRGNAM
-cd $TMP/$PRGNAM-$VERSION
+
+if [ $ARCH == i586 ]; then
+    tar xvf $CWD/$PRGNAM-linux_i386-$VERSION.tar.gz --transform="s/linux-i386/$PRGNAM-$VERSION/"
+elif [ $ARCH == x86_64 ]; then
+    tar xvf $CWD/$PRGNAM-linux_x86_64-$VERSION.tar.gz --transform="s/linux-x86_64/$PRGNAM-$VERSION/"
+fi
+
+cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
+
+find -L . $CWD \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
   -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-export GO111MODULE=auto
-export GOPATH="$TMP/$PRGNAM-$VERSION"
+mkdir -p $PKG/usr/{bin,doc/$PRGNAM-$VERSION} \
+    $PKG/etc/{$PRGNAM,rc.d} \
+    $PKG/var/{log,run}/$PRGNAM \
+    $PKG/install
 
-go install -a -x ./...
+find . $CWD -mindepth 1 -type f \( -name '*.txt' -o -name '*.toml' -o -name '*.pem' \) -exec cp {} $PKG/etc/$PRGNAM/ \; -o \
+    \( -name 'LICENSE' \) -exec cp {} $PKG/usr/doc/$PRGNAM-$VERSION/ \; -o \
+    \( -name 'README.Slackware' \) -exec cp {} $PKG/usr/doc/$PRGNAM-$VERSION/ \; -o \
+    \( -name "$PRGNAM" \) -exec cp {} $PKG/usr/bin/ \; -o \
+    \( -name "$PRGNAM.toml" \) -exec cp {} $PKG/etc/$PRGNAM/ \; -o \
+    \( -name "rc.$PRGNAM" \) -exec cp {} $PKG/etc/rc.d/ \; -o \
+    \( -name 'slack-desc' \) -exec cp {} $PKG/install/ \; 
 
-cd $TMP/$PRGNAM-$VERSION/src/$DOMAIN/$ORG/$PRGNAM
-
-mkdir -p $PKG/usr/sbin
-
-install -m 755 "$TMP/$PRGNAM-$VERSION/bin/${PRGNAM}" $PKG/usr/sbin/${PRGNAM}
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-mkdir -p $PKG/var/log/$PRGNAM $PKG/etc/default $PKG/etc/$PRGNAM
-chmod 0700 $PKG/var/log/$PRGNAM
-sed "s/@VERSION@/$VERSION/" $CWD/$PRGNAM.default > $PKG/etc/default/$PRGNAM.new
-install -D -m 0755 $CWD/rc.$PRGNAM $PKG/etc/rc.d/rc.$PRGNAM.new
-install -D -m 0644 $CWD/$PRGNAM.toml $PKG/etc/$PRGNAM/$PRGNAM.toml.new
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  ChangeLog LICENSE README.md utils $PRGNAM/example-* \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-sed "s/@VERSION@/$VERSION/g" $CWD/README.Slackware > $PKG/usr/doc/$PRGNAM-$VERSION/README.Slackware
-cat $CWD/dnsmasq.conf > $PKG/usr/doc/$PRGNAM-$VERSION/dnsmasq.conf
-cat $CWD/named.conf > $PKG/usr/doc/$PRGNAM-$VERSION/named.conf
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-
-mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
-cat $CWD/doinst.sh > $PKG/install/doinst.sh
+chown $DNSCRYPT_USER:$DNSCRYPT_GROUP $PKG/var/{log,run}/$PRGNAM \
+    $PKG/etc/$PRGNAM/*
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

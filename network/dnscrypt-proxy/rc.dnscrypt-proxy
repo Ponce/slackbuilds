@@ -1,134 +1,79 @@
-#!/bin/bash
+#!/bin/sh
 
-CONFIGFILE="/etc/default/dnscrypt-proxy"
-DAEMON="/usr/sbin/dnscrypt-proxy"
+# Init file for dnscrypt-proxy
 
-. $CONFIGFILE
+PRGNAM=dnscrypt-proxy
 
-start_instance() {
-    if [ ! -r ${DNSCRYPTCONFIG[$1]} ]; then
-        echo "No configuration for instance $1 found!"
-        return
-    fi
-    if [ -z ${PIDFILE[$1]} ]; then
-        echo "No PID configuration for instance $1 found!"
-        return
-    fi
-    if [ -z ${USER[$1]} ]; then
-        echo "No user configuration for instance $1 found!"
-        return
-    fi
-    if [ -r ${PIDFILE[$1]} ]; then
-        echo "dnscrypt-proxy (instance $1) already running!"
-        return
-    fi
+CONFDIR="/etc/dnscrypt-proxy"
+LOGDIR="/var/log/dnscrypt-proxy"
+RUNDIR="/var/run/dnscrypt-proxy"
 
-    mkdir -p $(dirname ${PIDFILE[$1]})
-    # The child (unprivileged) process needs write access or the PID will not
-    # be written.
-    chmod 0700 $(dirname ${PIDFILE[$1]})
-    chown ${USER[$1]} $(dirname ${PIDFILE[$1]})
+OPTS="-config $CONFDIR/dnscrypt-proxy.toml -pidfile $RUNDIR/dnscrypt-proxy.pid -logfile $LOGDIR/dnscrypt-proxy.log"
 
-    # The new Go-based dnscrypt-proxy no longer has the ability to daemonize.
-    # In the absence of a standard Slackware daemon tool we'll use nohup. :(
-    nohup $DAEMON -config ${DNSCRYPTCONFIG[$1]} -pidfile ${PIDFILE[$1]} >> /dev/null 2>&1 &
-}
-
-stop_instance() {
-    if [ ! -r ${DNSCRYPTCONFIG[$1]} ]; then
-        echo "No configuration for instance $1 found!"
-        return
-    fi
-    if [ -z ${PIDFILE[$1]} ]; then
-        echo "No PID configuration for instance $1 found!"
-        return
-    fi
-    if [ ! -r ${PIDFILE[$1]} ]; then
-        echo "dnscrypt-proxy (instance $1) is not running!"
-        return
-    fi
-    echo "Stopping dnscrypt-proxy (instance $1)..."
-    kill $(cat ${PIDFILE[$1]})
-}
-
-status_instance() {
-    if [ ! -r ${DNSCRYPTCONFIG[$1]} ]; then
-        echo "No configuration for instance $1 found!"
-        return
-    fi
-    if [ -z ${PIDFILE[$1]} ]; then
-        echo "No PID configuration for instance $1 found!"
-        return
-    fi
-    if [ ! -r ${PIDFILE[$1]} ]; then
-        echo "dnscrypt-proxy (instance $1) is not running."
-        return
-    fi
-    PID=$(cat ${PIDFILE[$1]})
-    if [ -z "$PID" ]; then
-        echo "PID file is empty! dnscrypt-proxy (instance $1) does not appear to be running, but there is a stale PID file."
-    elif kill -0 $PID ; then
-        echo "dnscrypt-proxy (instance $1) is running."
-    else
-        echo "dnscrypt-proxy (instance $1) is not running, but there is a stale PID file."
-    fi
-}
+PID=$(cat /var/run/dnscrypt-proxy/dnscrypt-proxy.pid 2>/dev/null)
 
 start() {
-    for i in `/usr/bin/seq 0 $((${#DNSCRYPTCONFIG[@]}-1))`
-    do
-        start_instance $i
-    done
+	echo "Starting DNSCrypt-proxy"
+	/usr/bin/dnscrypt-proxy $OPTS &
 }
 
 stop() {
-    for i in `/usr/bin/seq 0 $((${#DNSCRYPTCONFIG[@]}-1))`
-    do
-        stop_instance $i
-    done
+	echo "Stopping DNSCrypt-proxy"
+
+if [ -z $PID ]; then
+	echo "Not running"
+	exit 0
+fi
+if kill -15 $PID 2>/dev/null; then
+	echo "Stopped"
+	rm $RUNDIR/dnscrypt-proxy.pid 2>/dev/null
+else
+	sleep 1
+	if kill -9 $PID 2>/dev/null; then
+		echo "Killed"
+		rm $RUNDIR/dnscrypt-proxy.pid 2>/dev/null
+	else
+		echo "Error"
+		exit 1
+	fi
+fi
 }
 
 status() {
-    for i in `/usr/bin/seq 0 $((${#DNSCRYPTCONFIG[@]}-1))`
-    do
-        status_instance $i
-    done
+	if [ -z $PID ]; then
+		echo "Not running"
+		exit 1
+	elif kill -0 $PID; then
+		echo $(ps aux | grep $PID)
+		exit 0
+	else
+		echo "$RUNDIR/dnscrypt-proxy.pid present, but $PID is not running. Removing PID file."
+		rm $RUNDIR/dnscrypt-proxy.pid 2>/dev/null
+		exit 1
+	fi
 }
 
 case "$1" in
-    'start')
-        start
-        ;;
-    'stop')
-        stop
-        ;;
-    'restart')
-        stop
-        start
-        ;;
-    'status')
-        status
-        ;;
-    *_start)
-        INSTANCE=`echo $1 | /bin/cut -d '_' -f 1`
-        start_instance $INSTANCE
-        ;;
-    *_stop)
-        INSTANCE=`echo $1 | /bin/cut -d '_' -f 1`
-        stop_instance $INSTANCE
-        ;;
-    *_restart)
-        INSTANCE=`echo $1 | /bin/cut -d '_' -f 1`
-        stop_instance $INSTANCE
-        sleep 1
-        start_instance $INSTANCE
-        ;;
-    *_status)
-        INSTANCE=`echo $1 | /bin/cut -d '_' -f 1`
-        status_instance $INSTANCE
-        ;;
-    *)
-        echo "Usage: $0 {start|stop|restart|status|#_start|#_stop|#_restart}"
-        exit 1
-        ;;
+	start)
+		start
+	;;
+
+	stop)
+		stop
+	;;
+
+	restart)
+		stop
+		sleep 3
+		start
+	;;
+
+	status)
+		status
+	;;
+
+	*)
+		echo "Usage: $0 (start|stop|restart|status)"
 esac
+
+
