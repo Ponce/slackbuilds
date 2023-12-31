@@ -22,20 +22,41 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-cd $(dirname $0) ; CWD=$(pwd)
+cd $(dirname $0) || exit 1 ; CWD=$(pwd)
 
 PRGNAM=yabridge
-VERSION=${VERSION:-5.0.5}
+VERSION=${VERSION:-5.1.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-
+ARG_CLAP=${ARG_CLAP:-NO}
+ARG_VST3=${ARG_VST3:-YES}
+ARG_WINEDGB=${ARG_WINEDGB:-NO}
+#false/true
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
     i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
+fi
+
+if [[ "$ARG_CLAP" = "YES" || "$ARG_CLAP" = "true" ]]; then
+  ARG_CLAP="true"
+else
+  ARG_CLAP="false"
+fi
+
+if [[ "$ARG_VST3" = "YES" || "$ARG_VST3" = "true" ]]; then
+  ARG_VST3="true"
+else
+  ARG_VST3="false"
+fi
+
+if [[ "$ARG_WINEDGB" = "YES" || "$ARG_WINEDGB" = "true" ]]; then
+  ARG_WINEDGB="true"
+else
+  ARG_WINEDGB="false"
 fi
 
 # If the variable PRINT_PACKAGE_NAME is set, then this script will report what
@@ -57,15 +78,24 @@ which wine64 &>/dev/null
 WINE64_IN_PATH=$?
 
 if [ "$ARCH" = "i586" ] || [ "$ARCH" = "i686" ]; then
+  LIBDIRSUFFIX=""
   if (($WINE_IN_PATH)); then
     echo "This  script look for wine in PATH and needs it for compiling and using yabridge on i586"
     exit 1
   fi
 elif [ $ARCH = "x86_64" ]; then
+  LIBDIRSUFFIX="64"
   if (($WINE_IN_PATH)) || (($WINE64_IN_PATH)); then
     echo "This  script look for wine and wine64 in PATH and needs them both for compiling and using yabridge on x86_64"
     exit 1
   fi
+fi
+
+export PATH="/opt/rust16/bin:$PATH"
+if [ -z "$LD_LIBRARY_PATH" ]; then
+   export LD_LIBRARY_PATH="/opt/rust16/lib$LIBDIRSUFFIX"
+else
+   export LD_LIBRARY_PATH="/opt/rust16/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
 fi
 
 TMP=${TMP:-/tmp/SBo}
@@ -94,8 +124,9 @@ sed -i "s|bitsery_dep = dependency('bitsery', version : '>=5.2.0')|bitsery_dep =
 sed -i "s|bitsery_dep = dependency('bitsery', 'Bitsery', version : '>=5.2.0')|bitsery_dep = dependency('Bitsery', version : '>=5.2.0')|g" meson.build
 
 mkdir subprojects/vst3
-cp -a /usr/include/vst3sdk/* subprojects/vst3/
+tar xvzf $CWD/vst3sdk-3.7.7.tar.gz --strip-components=1 -C subprojects/vst3
 cp yabridge-html-docs-plus-build-files-$VERSION/meson.build subprojects/vst3
+
 if [ "$ARCH" = "i586" ] || [ "$ARCH" = "i686" ]; then
   meson setup \
     build \
@@ -105,6 +136,9 @@ if [ "$ARCH" = "i586" ] || [ "$ARCH" = "i686" ]; then
     --unity-size=1000 \
     --wrap-mode=nodownload \
     -Dbitbridge=true \
+    -Dclap=$ARG_CLAP \
+    -Dvst3=$ARG_VST3 \
+    -Dwinedgb=$ARG_WINEDGB \
     -Dsystem-asio=true \
     -Dbuild.cpp_args='-m32' \
     -Dbuild.cpp_link_args='-m32'
@@ -117,6 +151,9 @@ elif [ "$ARCH" = "x86_64" ]; then
     --unity-size=1000 \
     --wrap-mode=nodownload \
     -Dbitbridge=true \
+    -Dclap=$ARG_CLAP \
+    -Dvst3=$ARG_VST3 \
+    -Dwinedgb=$ARG_WINEDGB \
     -Dsystem-asio=true
 else
   echo "Unsupported architecture"
@@ -147,14 +184,30 @@ install -dm755 "$PKG/usr/bin"
 if [ "$ARCH" = "i586" ] || [ "$ARCH" = "i686" ]; then
   install yabridge-host-32.exe{,.so} "$PKG/usr/bin"
   install -dm755 "$PKG/usr/lib"
-  install libyabridge-{vst2,vst3,clap}.so "$PKG/usr/lib"
-  install libyabridge-chainloader-{vst2,vst3,clap}.so "$PKG/usr/lib"
+  install libyabridge-vst2.so "$PKG/usr/lib"
+  install libyabridge-chainloader-vst2.so "$PKG/usr/lib"
+  if [ $ARG_VST3 = "true" ]; then
+    install libyabridge-vst3.so "$PKG/usr/lib"
+    install libyabridge-chainloader-vst3.so "$PKG/usr/lib"
+  fi
+  if [ $ARG_CLAP = "true" ]; then
+    install libyabridge-clap.so "$PKG/usr/lib"
+    install libyabridge-chainloader-clap.so "$PKG/usr/lib"
+  fi
 elif [ "$ARCH" = "x86_64" ]; then
   install yabridge-host.exe{,.so} "$PKG/usr/bin"
   install yabridge-host-32.exe{,.so} "$PKG/usr/bin"
   install -dm755 "$PKG/usr/lib64"
-  install libyabridge-{vst2,vst3,clap}.so "$PKG/usr/lib64"
-  install libyabridge-chainloader-{vst2,vst3,clap}.so "$PKG/usr/lib64"
+  install libyabridge-vst2.so "$PKG/usr/lib64"
+  install libyabridge-chainloader-vst2.so "$PKG/usr/lib64"
+  if [ $ARG_VST3 = "true" ]; then
+    install libyabridge-vst3.so "$PKG/usr/lib64"
+    install libyabridge-chainloader-vst3.so "$PKG/usr/lib64"
+  fi
+  if [ $ARG_CLAP = "true" ]; then
+    install libyabridge-clap.so "$PKG/usr/lib64"
+    install libyabridge-chainloader-clap.so "$PKG/usr/lib64"
+  fi
 fi
 
 install ../tools/yabridgectl/target/release/yabridgectl "$PKG/usr/bin"
