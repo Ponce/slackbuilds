@@ -5,7 +5,7 @@
 # installed.  It is only needed if you are upgrading the version and
 # need new vendored rust libs.
 #
-# create $PRGNAM-vendored-sources-$VERSION-$BUILD.tar.xz
+# create $PRGNAM-vendored-sources-$VERSION-$VSBUILD.tar.xz
 # requires network access, but does not require root privilege.
 # requires that $PRGNAM's REQUIRES need to be installed first
 
