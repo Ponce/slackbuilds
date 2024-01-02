@@ -1,12 +1,16 @@
 #!/bin/bash
 
-# Create $PRGNAM-vendored-sources-$VERSION-$BUILD.tar.xz
+# Create $PRGNAM-vendored-sources-$VERSION-$VSBUILD.tar.xz
 # Requires network access, but does not require root privilege.
 # Requires that $PRGNAM's REQUIRES need to be installed first (rust16)
 # and cargo-vendor-filterer installed to include just the linux deps
 #
 # Expects to be run within a slackbuild dir with the source archive
 # already downloaded.
+#
+# Variables to use in your SlackBuild:
+# VSBUILD         # same use as BUILD but for vendored sources
+# VSDIR=/sub/dir/ # (optional) alternate location in src for vendor dir
 
 INFO="$( echo *.info )"
 if [ ! -e "$INFO" ]; then
@@ -35,14 +39,14 @@ cd $WORKDIR
 mkdir -p cargohome
 export CARGO_HOME=$(pwd)/cargohome
 
-egrep "^BUILD=|^SRCNAM=" $CWD/$SBUILD > sbvars
+egrep "^BUILD=|^VSBUILD=|^VSDIR=|^SRCNAM=" $CWD/$SBUILD > sbvars
 source ./sbvars
 
 # if no SRCNAM in slackbuild set to PRGNAM
 SRCNAM=${SRCNAM:-$PRGNAM}
 
 tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
-cd $SRCNAM-$VERSION || exit 1
+cd $SRCNAM-$VERSION/$VSDIR || exit 1
 
 if [ ! -e "Cargo.toml" ]; then
   echo "No Cargo.toml file in $SRCNAM-$VERSION dir" 1>&2
@@ -122,8 +126,8 @@ EOF
 cd -
 
 cd $WORKDIR
-tar cvfJ $CWD/$SRCNAM-vendored-sources-$VERSION-$BUILD.tar.xz \
-         $SRCNAM-$VERSION/{vendor,.cargo}
-md5sum $CWD/$SRCNAM-vendored-sources-$VERSION-$BUILD.tar.xz
+tar cvfJ $CWD/$SRCNAM-vendored-sources-$VERSION-$VSBUILD.tar.xz \
+         $SRCNAM-$VERSION/$VSDIR/{vendor,.cargo}
+md5sum $CWD/$SRCNAM-vendored-sources-$VERSION-$VSBUILD.tar.xz
 cd $CWD
 rm -rf $WORKDIR
