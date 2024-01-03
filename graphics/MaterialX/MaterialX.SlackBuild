@@ -1,0 +1,215 @@
+#!/bin/bash
+
+# Slackware build script for MaterialX
+
+# Copyright 2023 Giancarlo Dessi, Cagliari, IT
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=MaterialX
+VERSION=${VERSION:-1.38.8}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+EXTVERSION=20240101
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+if [ -d /usr/share/cmake-3.28 ]; then
+   # This prevents some cmake warnings in current 
+   CMAKE_POLICY="-DCMAKE_POLICY_DEFAULT_CMP0148=OLD "
+else
+   CMAKE_POLICY=""
+fi
+
+if pkg-config --exists OpenImageIO; then
+  WITHOIIO=""; \
+   [ "${OIIO:-yes}" = "yes" ] && WITHOIIO="-DMATERIALX_BUILD_OIIO=ON "
+else
+  WITHOIIO=""
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+
+BUILDOPTIONS=""
+GUI=no
+SET_GRAPH_EDITOR=no
+SET_VIEWER=no
+
+# Some third-part modules are build as internal but are not included in the
+# source tarball because should be added in a git repository of 
+# MaterialX cloned with git -recursive, so we have to do the following steps
+
+if [ ${VIEWER:-yes} = "yes" ]; then
+  tar xvf $CWD/nanogui-$EXTVERSION.tar.gz
+  tar xvf $CWD/glfw-$EXTVERSION.tar.gz
+  tar xvf $CWD/nanobind-$EXTVERSION.tar.gz
+  tar xvf $CWD/nanovg-$EXTVERSION.tar.gz
+  tar xvf $CWD/robin-map-$EXTVERSION.tar.gz
+  rm -rf nanogui-$EXTVERSION/ext/glfw
+  rm -rf nanogui-$EXTVERSION/ext/nanovg
+  rm -rf nanogui-$EXTVERSION/ext/nanobind
+  mv glfw-$EXTVERSION nanogui-$EXTVERSION/ext/glfw
+  mv nanovg-$EXTVERSION nanogui-$EXTVERSION/ext/nanovg
+  mv nanobind-$EXTVERSION nanogui-$EXTVERSION/ext/nanobind
+  rm -rf nanogui-$EXTVERSION/ext/robin_map
+  mv robin-map-$EXTVERSION nanogui-$EXTVERSION/ext/nanobind/ext/robin_map
+  rm -rf source/MaterialXView/NanoGUI
+  mv nanogui-$EXTVERSION source/MaterialXView/NanoGUI
+
+  BUILDOPTIONS="-DMATERIALX_BUILD_VIEWER=ON -DNANOGUI_PREFERRED_BACKEND=OpenGL "
+  GUI=yes
+  SET_VIEWER=yes
+
+  sed -i ./source/MaterialXView/NanoGUI/resources/bin2c.cmake -e \
+   "s/cmake_minimum_required (VERSION 2.8.12)/cmake_minimum_required (VERSION 3.5)/g"
+fi
+
+if [ ${EDITOR:-yes} = "yes" ]; then
+  tar xvf $CWD/imgui-$EXTVERSION.tar.gz
+  tar xvf $CWD/imgui-node-editor-$EXTVERSION.tar.gz
+  rm -rf source/MaterialXGraphEditor/External/ImGui*
+  mv imgui-$EXTVERSION source/MaterialXGraphEditor/External/ImGui
+  mv imgui-node-editor-$EXTVERSION source/MaterialXGraphEditor/External/ImGuiNodeEditor 
+
+  BUILDOPTIONS="$BUILDOPTIONS -DMATERIALX_BUILD_GRAPH_EDITOR=ON "
+  GUI=yes
+  SET_GRAPH_EDITOR=yes
+
+  sed -i ./source/MaterialXGraphEditor/External/Glfw/CMakeLists.txt -e \
+   "s/cmake_minimum_required(VERSION 3.1)/cmake_minimum_required (VERSION 3.5)/g"
+fi
+
+if [ $GUI = "yes" ]; then
+  cp -a $CWD/materialx.png $CWD/*.desktop ./
+fi
+
+if [ ${PYTHON:-yes} = "yes" ]; then
+ BUILDOPTIONS="$BUILDOPTIONS -DMATERIALX_BUILD_PYTHON=ON -DMATERIALX_INSTALL_PYTHON=ON "
+ patch -p1 < $CWD/fix-setup_py_in.patch
+else
+ BUILDOPTIONS="$BUILDOPTIONS -DMATERIALX_BUILD_PYTHON=OFF "
+fi
+
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr/share/MaterialX \
+    -DMATERIALX_BUILD_SHARED_LIBS=ON \
+    -DMATERIALX_INSTALL_LIB_PATH=../../lib${LIBDIRSUFFIX} \
+    $WITHOIIO \
+    $BUILDOPTIONS \
+    $CMAKE_POLICY \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install/strip DESTDIR=$PKG
+cd ..
+
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+
+# fix wrong, redundant, and/or non standard installation path
+rm -rf $PKG/tmp
+rm -f $PKG/usr/share/MaterialX/*.md $PKG/usr/share/MaterialX/LICENSE
+
+# add symbolic links to executable and include files
+mkdir -p $PKG/usr/include
+cd $PKG/usr/include
+ln -s ../share/MaterialX/include MaterialX
+
+if [ $GUI = "yes" ]; then
+ mkdir -p $PKG/usr/bin
+ mkdir -p $PKG/usr/share/applications
+ mkdir -p $PKG/usr/share/icons/hicolor/256x256/apps
+ cp -a $TMP/$PRGNAM-$VERSION/materialx.png $PKG/usr/share/icons/hicolor/256x256/apps
+ cd $PKG/usr/bin
+fi
+
+if [ "$SET_GRAPH_EDITOR" = "yes" ]; then
+ echo "Creating symbolic links and desktop entry for MaterialX Graph Editor ..."
+ ln -s ../share/MaterialX/bin/MaterialXGraphEditor MaterialXGraphEditor
+ cp -a $TMP/$PRGNAM-$VERSION/MaterialXGraphEditor.desktop \
+   $PKG/usr/share/applications/MaterialXGraphEditor.desktop
+fi
+
+if [ "$SET_VIEWER" = "yes" ]; then
+ echo "Creating symbolic links and desktop entry for MaterialX View ..."
+ ln -s ../share/MaterialX/bin/MaterialXView MaterialXView
+ cp -a $TMP/$PRGNAM-$VERSION/MaterialXView.desktop \
+   $PKG/usr/share/applications/MaterialXView.desktop
+fi
+
+cd $TMP/$PRGNAM-$VERSION
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a  *.md LICENSE $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
