@@ -1,0 +1,218 @@
+#!/bin/bash
+#
+# Slackware build script for greetd
+#
+# Copyright 2023-2024 Jay Lanagan (j@lngn.net), Detroit, MI, USA.
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=greetd
+PRGUID=greeter
+PRGGID=greeter
+VERSION=${VERSION:-0.9.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+bailout() {
+  printf "This requires a \"greeter\" user and group.\n"
+  printf "groupadd -g 381 greeter\n"
+  printf "useradd -d /var/lib/greeter -u 381 -g greeter -G video -s /bin/false greeter"
+  exit 1
+}
+
+if ! getent group $PRGGID 2>/dev/null 1>/dev/null ; then
+  bailout
+elif ! getent passwd $PRGUID 2>/dev/null 1>/dev/null ; then
+  bailout
+fi
+
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+elif [ "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+export PATH="/opt/rust16/bin:$PATH"
+if [ -z "$LD_LIBRARY_PATH" ]; then
+  export LD_LIBRARY_PATH="/opt/rust16/lib$LIBDIRSUFFIX"
+else
+  export LD_LIBRARY_PATH="/opt/rust16/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$VERSION.tar.?z
+cd $PRGNAM-$VERSION
+
+# build offline
+# configuration tells cargo to use the configured directory
+# for dependencies instead of downloading from crates.io
+# borrowed from alacritty slackbuild
+mkdir .cargo
+cat << EOF >> .cargo/config
+[source.crates-io]
+registry = 'https://github.com/rust-lang/crates.io-index'
+replace-with = 'vendored-sources'
+
+[source.vendored-sources]
+directory = '$(pwd)/vendor'
+EOF
+
+# deps and versions come from Cargo.lock
+mkdir vendor
+(
+  cd vendor
+
+  grep -h -A 4 "\[\[package\]\]" \
+      $(find "../" -maxdepth 1 -mindepth 1 -name Cargo.lock | tr '\n' ' ') | \
+      sed 's/[[:space:]]*=[[:space:]]*/=/g;s/^--//;s/^\[\[/--\n[[/' | \
+      awk 'BEGIN { RS = "--\n" ; FS="\n" } { print $2, $3, $4, $5 }' | \
+      sed 's/"//g;s/name=//;s/ version=/=/' | \
+      grep " source=" | \
+      sed 's/ dependencies=.*$//' | \
+      sed 's/ source=[^ ]*//' | \
+      sed 's/ checksum=/=/' | \
+      sort -u | \
+      while read -r dep ; do
+
+    cksum="$(printf "%s\n" "$dep" | cut -d= -f3)"
+    ver="$(printf "%s\n" "$dep" | cut -d= -f2)"
+    dep="$(printf "%s\n" "$dep" | cut -d= -f1)"
+
+    tar xvf $CWD/$dep-$ver.crate
+
+    touch $dep-$ver/.cargo-ok
+
+    # generate checksum
+    {
+      printf "{\n"
+      printf '    "files": {\n'
+
+      (
+        cd $dep-$ver
+        find . -type f -print0 | xargs -0 sha256sum | sed -n '/\.cargo-checksum\.json/!p' | sed 's/\.\///;s/^\([^ ]*\)[[:space:]][[:space:]]*\(.*\)$/"\2":"\1",/'
+      ) | sed '$ s/,$//'
+
+      printf "    },\n"
+      printf '    "package": "%s"'  "$cksum"
+
+      printf "}\n"
+    } > $dep-$ver/.cargo-checksum.json
+  done
+)
+
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+ -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Set /bin/bash rather than /bin/sh as default shell
+sed -i -e 's,vt = 1,vt = 7,g' config.toml
+sed -i -e 's,bin/sh,bin/bash,g' config.toml
+
+# Adding extra parms to default config to ensure our envir is good
+cat <<EOT >> config.toml
+
+[system]
+source_profile = "true"
+runfile = "/var/run/greetd.run"
+EOT
+
+## to do online rust build uncomment these two lines
+#cargo fetch --locked --target "$ARCH-unknown-linux-gnu"
+#cargo build --frozen --release --all-features
+
+## and comment the line below this
+cargo build --offline --frozen --release --all-features
+make -C man all
+
+install -Dm0755 -t "$PKG/usr/bin/" "target/release/agreety"
+install -Dm0755 -t "$PKG/usr/bin/" "target/release/fakegreet"
+install -Dm0755 -t "$PKG/usr/bin/" "target/release/$PRGNAM"
+install -Dm0644 -t "$PKG/etc/$PRGNAM/" config.toml
+install -Dm0644 "$CWD/$PRGNAM.pam" "$PKG/etc/pam.d/$PRGNAM"
+make -C man DESTDIR="$PKG" MANDIR=/usr/man PREFIX=/usr install
+
+cd $TMP/$PRGNAM-$VERSION
+
+find $PKG | xargs file | egrep "ELF.*executable" | cut -f 1 -d : \
+          | xargs strip --strip-unneeded 2> /dev/null
+
+# move this file to 'rc.4.local' for Slackware to boot directly
+# to greetd from init level 4 startup
+mkdir -p $PKG/etc/rc.d
+cp -a $CWD/rc.4.$PRGNAM $PKG/etc/rc.d/rc.4.$PRGNAM
+chmod 0644 $PKG/etc/rc.d/rc.4.$PRGNAM
+
+# create this in pkg to ensure it exists with proper perms
+mkdir -p $PKG/var/lib/$PRGNAM
+chown -R $PRGUID:$PRGGID $PKG/var/lib/$PRGNAM
+
+gzip -9 $PKG/usr/man/man?/*
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE README.md \
+      $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
