@@ -3,7 +3,7 @@
 # Slackware build script for cryptography
 
 # Copyright 2014-2018 Markus Reichelt, Aachen, DE
-# Copyright 2021-2023 Willy Sudiarto Raharjo <willysr@slackbuilds.org>
+# Copyright 2021-2024 Willy Sudiarto Raharjo <willysr@slackbuilds.org>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -29,10 +29,12 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=cryptography
-VERSION=${VERSION:-38.0.4}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-41.0.7}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+VSBUILD=${VSBUILD:-1}
+VSDIR=${VSDIR:-/src/rust/}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -72,59 +74,8 @@ mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-vendored-sources-$VERSION-$VSBUILD.tar.?z
 cd $PRGNAM-$VERSION
-
-# build offline
-# configuration tells cargo to use the configured directory
-# for dependencies intead of downloading from crates.io
-mkdir .cargo
-cat << EOF >> .cargo/config
-[source.crates-io]
-registry = 'https://github.com/rust-lang/crates.io-index'
-replace-with = 'vendored-sources'
-
-[source.vendored-sources]
-directory = '$(pwd)/src/rust/vendor'
-EOF
-
-(
-  cd src/rust
-
-  # deps and versions come from Cargo.lock
-  mkdir vendor
-  cd vendor
-
-  grep -h -A 3 "\[\[package\]\]" $(find ../ -maxdepth 1 -mindepth 1 -name Cargo.lock | tr '\n' ' ') | \
-    sed 's/[[:space:]]*=[[:space:]]*/=/g;s/^--//;s/^\[\[/--\n[[/' | \
-    awk 'BEGIN { RS = "--\n" ; FS="\n" } { print $2, $3, $4 }' | sed 's/"//g;s/name=//;s/ version=/=/' | \
-    grep crates\.io-index | sed 's/ source=.*$//' | sort -u | while read -r dep ; do
-
-    ver="$(printf "%s\n" "$dep" | cut -d= -f2)"
-    dep="$(printf "%s\n" "$dep" | cut -d= -f1)"
-
-    tar xvf $CWD/$dep-$ver.crate
-
-    touch $dep-$ver/.cargo-ok
-
-    # generate checksum
-    {
-      printf "{\n"
-      printf '    "files": {\n'
-
-      (
-        cd $dep-$ver
-        find . -type f -print0 | xargs -0 sha256sum | sed -n '/\.cargo-checksum\.json/!p' | sed 's/\.\///;s/^\([^ ]*\)[[:space:]][[:space:]]*\(.*\)$/"\2":"\1",/'
-      ) | sed '$ s/,$//'
-
-      printf "    },\n"
-      printf '    "package": "'
-
-      sha256sum "$CWD/$dep-$ver.crate" | cut -f1 -d' ' | sed 's/$/"/'
-
-      printf "}\n"
-    } > $dep-$ver/.cargo-checksum.json
-  done
-)
 
 chown -R root:root .
 find -L . \
@@ -133,10 +84,24 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-export CARGO_HOME=.cargo
+# prevent cargo from using the network.
+# this only works because we have a vendored sources tarball with
+# everything cargo would have downloaded.
+export CARGO_NET_OFFLINE=true
 
-sed -i '/install_requires/d' setup.py
-python3 setup.py install --root=$PKG
+# prevent cargo from writing outside of $TMP
+export CARGO_HOME=$(pwd)/$VSDIR/.cargo
+
+export PATH="/opt/rust16/bin:$PATH"
+if [ -z "$LD_LIBRARY_PATH" ]; then
+  export LD_LIBRARY_PATH="/opt/rust16/lib$LIBDIRSUFFIX"
+else
+  export LD_LIBRARY_PATH="/opt/rust16/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
+fi
+
+export PYTHONPATH=/opt/python3.9/site-packages/
+python3 -m build --no-isolation
+python3 -m installer -d "$PKG" dist/*.whl
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
