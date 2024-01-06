@@ -20,8 +20,6 @@ fi
 
 config etc/rc.d/rc.atop.new
 config etc/logrotate.d/psacct.new
-config etc/logrotate.d/psaccs_atop.new
-config etc/logrotate.d/psaccu_atop.new
 
 touch var/log/atop/daily.log
 
