@@ -1,4 +1,5 @@
 #!/bin/bash
+
 # Copyright (C) 2023 Hao Chi Kiang <no@no.noooo.ooo>
 # All rights reserved.
 #
@@ -8,7 +9,7 @@
 # 1. Redistributions of this script must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 #
-#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
 #  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
 #  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
 #  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
@@ -18,27 +19,25 @@
 #  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
+
 
 # revision date: 2023/11/11
 
 cd $(dirname $0) ; CWD=$(pwd)
+
 PRGNAM=doublecmd-qt5
 UPSTR_PRGNAME=doublecmd
-VERSION=${VERSION:-1.0.11}
+VERSION=${VERSION:-1.1.9}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
-OUTPUT=${OUTPUT:-/tmp}
-TMP=${TMP:-/tmp/SBo}
-PKG=$TMP/package-$PRGNAM
 PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
- case "$( uname -m )" in
-   i?86) ARCH=i586 ;;
-   arm*) ARCH=arm ;;
-   *) ARCH=$( uname -m ) ;;
- esac
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
 fi
 
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
@@ -46,25 +45,41 @@ if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   exit 0
 fi
 
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
 if [ "$ARCH" = "i586" ]; then
-    SLKLAZBUILDFLAGS="--cpu=i586"
+  SLKLAZBUILDFLAGS="--cpu=i386"
+  CPU_TARGET=i386
 elif [ "$ARCH" = "i686" ]; then
-    SLKLAZBUILDFLAGS="--cpu=i686"
+  SLKLAZBUILDFLAGS="--cpu=i386"
+  CPU_TARGET=i386
 elif [ "$ARCH" = "x86_64" ]; then
-    SLKLAZBUILDFLAGS="--cpu=x86_64"
+  SLKLAZBUILDFLAGS="--cpu=x86_64"
+  CPU_TARGET=$ARCH
+elif [ "$ARCH" = "aarch64" ]; then
+  SLKLAZBUILDFLAGS="--cpu=aarch64"
+  CPU_TARGET=$ARCH
 else
-    SLKLAZBUILDFLAGS=""
+  SLKLAZBUILDFLAGS=""
+  CPU_TARGET=$ARCH
 fi
 
 set -e
 
 rm -rf $PKG
-mkdir -p "$TMP" $PKG
-rm -rf "$TMP"/$PRGNAM-$VERSION
-mkdir "$TMP"/$PRGNAM-$VERSION
-cd "$TMP/$PRGNAM-$VERSION"
-tar -zxvf "$CWD"/${UPSTR_PRGNAME}-$VERSION-src.tar.gz
-cd ${UPSTR_PRGNAME}-${VERSION}
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+mkdir $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+tar -zxvf $CWD/$UPSTR_PRGNAME-$VERSION-src.tar.gz
+cd $UPSTR_PRGNAME-$VERSION
+
+# 20240113 ALe: this symlink is mistargeted... removed
+rm -rf doublecmd.app/Contents/MacOS/doublecmd
+
 chown -R root:root .
 chmod -R u+w,go+r-w,a-s .
 find -L . \
@@ -80,8 +95,8 @@ cp -a /usr/share/lazarus ./
 sed -e 's/LIB_SUFFIX=.*/LIB_SUFFIX=/g' -i install/linux/install.sh
 sed -e "s@=\$(which lazbuild)@=\"\$(which lazbuild) --lazarusdir=$(pwd)/lazarus\"@" -i build.sh
 sed -e '/doublecmd.zdli/d' -i install/linux/install.sh
-lcl=qt5 CPU_TARGET=$ARCH ./build.sh components
-lcl=qt5 CPU_TARGET=$ARCH ./build.sh plugins
+lcl=qt5 CPU_TARGET=$CPU_TARGET ./build.sh components
+lcl=qt5 CPU_TARGET=$CPU_TARGET ./build.sh plugins
 /usr/bin/lazbuild \
     $SLKLAZBUILDFLAGS \
     --lazarusdir="$(pwd)/lazarus" \
@@ -89,24 +104,28 @@ lcl=qt5 CPU_TARGET=$ARCH ./build.sh plugins
     --bm="NoDebug Full Optimizations" \
     --widgetset=qt5
 
-# Strip everything.
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-    | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
 # Install it into the package
 chmod +x ./install/linux/install.sh
 sed -i "s|share/doublecmd/doc|doc/${PRGNAM}-${VERSION}|g" ./install/linux/install.sh
 sed -i "s|share/man|man|g" ./install/linux/install.sh
 ./install/linux/install.sh --install-prefix="$PKG"
 
+# make plugins executable:
+chmod -R +x $PKG/usr/lib/doublecmd/plugins/*
+
+# Strip everything.
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
 # Gzip man page
 gzip $PKG/usr/man/man1/doublecmd.1
 
-# Make package.
-mkdir -p $PKG/install
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cat "$CWD"/slack-desc > $PKG/install/slack-desc
-cat "$CWD"/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
