@@ -2,10 +2,10 @@
 
 # Slackware build script for Free Pascal
 
-# Written by Andre Barboza <email removed>.
-# Modified by the SlackBuilds.org project.
+# Maintained by Antonio Leal <antonioleal@yahoo.com>.
 # Previously maintained by B. Watson <urchlay@slackware.uk>.
-# Now maintained by Antonio Leal <antonioleal@yahoo.com>.
+# Modified by the SlackBuilds.org project.
+# Written by Andre Barboza <email removed>.
 
 # Redistribution and use of this script, with or without modification, is
 # permitted provided that the following conditions are met:
@@ -24,7 +24,11 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# 20230814 AL: BUILD=2
+# 20231229 ALe: BUILD=3
+# Imported Debian patches to support -fPIC option, improved timestamps.
+# Added fpc source code with option to exclude it.
+
+# 20230814 ALe: BUILD=2
 # - tested conflict with ptop: it no longer exists because in ptop SlackBuild
 #   the name /usr/bin/ptop.py is now being used.
 
@@ -49,7 +53,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 PRGNAM=fpc
 VERSION=${VERSION:-3.2.2}
 BINVER=${BINVER:-3.2.2}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -84,6 +88,13 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 set -e
+
+fixperms() {
+  chown -R root:root .
+  find -L . -type l -o \
+            -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+}
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -123,9 +134,15 @@ cd $TMP/${PRGNAM}build-$VERSION/${PRGNAM}build-$VERSION
 sed -i "s,\\(as\\|control\\) it's,\\1 its," install/man/man?/*.?
 
 # 20210905 bkw: patch taken from Debian with many thanks. Installs the
-# IDE's data files somewhere besides /usr/bin, and patches the IDE to
-# look for them there.
-patch -p1 < $CWD/fix-IDE-data-file-location.patch
+# - IDE's data files somewhere besides /usr/bin, and patches the IDE to look for them there.
+patch -p1 < $CWD/patches/fix-IDE-data-file-location.patch
+# 20240113 ALe: Patches imported from Debian fpc_3.2.2+dfsg-20.debian.tar.xz :
+# - Fixed liking with libc when PIC is enabled (x86_64 specific)
+patch -p1 < $CWD/patches/Fix-liking-with-libc-when-PIC-is-enabled.patch
+# - Add glibc2.34.patch to adjust startup code for glibc2.34 (Closes: #1016556)
+patch -p1 < $CWD/patches/glibc2.34.patch
+# - Reproducibility never ends: add honor_SOURCE_DATE_EPOCH_in_date.patch to improve some timestamps in binaries
+patch -p1 < $CWD/patches/honor_SOURCE_DATE_EPOCH_in_date.patch
 
 # 20210905 bkw: don't let the NOGDB=1 scare you. During the compile
 # we get this message:
@@ -143,6 +160,17 @@ if [ "$SRCARCH" = "x86_64" ]; then
   ln -s ../lib$LIBDIRSUFFIX/fpc/$VERSION/ppcx64
 else
   ln -s ../lib$LIBDIRSUFFIX/fpc/$VERSION/ppc386
+fi
+
+# 20231229 ALe: Optionally exclude the source from the package.
+# Source is required by some apps (e.g lazarus IDE).
+if [ "${SRC:-yes}" = "yes" ]; then
+    mkdir -p $PKG/usr/src
+    ( cd $PKG/usr/src
+    tar xvf $CWD/fpc-$VERSION.source.tar.gz
+    fixperms
+    ln -s fpc-$VERSION fpc
+    )
 fi
 
 # copy docs
@@ -193,8 +221,6 @@ cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 # fix permissions for program docs and demos.
-chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+fixperms
 
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
