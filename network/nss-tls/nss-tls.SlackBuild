@@ -1,0 +1,120 @@
+#!/bin/bash
+
+# Slackware build script for nss-tls
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Notes:
+
+# Building with --buildtype=debug makes the daemon write HTTP request
+# and response headers to its stdout. This isn't very useful, so this
+# script doesn't support it.
+
+# It would be nice if the daemon would log to syslog, or had some
+# runtime-configurable verbose/debug options.
+
+# I wish git would work with this. If it would, it'd be possible
+# to use 'hosts: files tls' in nsswitch.conf (curl and alpine still
+# wouldn't work, but there are decent workarounds for those).
+
+# By default, when the daemon runs as root, it switches UID/GID to
+# daemon/daemon. This seems fine to me. It would be possible to
+# reserve a UID/GID and build with -Duser=<blah> -Dgroup=<blah>, if
+# there were any real need for it.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=nss-tls
+VERSION=${VERSION:-1.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
+
+# This patch makes the client and server agree on the per-user socket path.
+patch -p1 < $CWD/per_user_dir.diff
+
+mkdir build
+cd build
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  meson .. \
+    --buildtype=release \
+    --infodir=/usr/info \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    -Dstrip=true
+  "${NINJA:=ninja}"
+  DESTDIR=$PKG $NINJA install
+cd ..
+
+gzip -9 $PKG/usr/man/man*/*
+rm -f $PKG/etc/nss-tls.conf
+cat $CWD/nss-tls.conf > $PKG/etc/nss-tls.conf.new
+
+install -D -m0755 -oroot -groot $CWD/nss-tlsd-user.sh $PKG/usr/bin/nss-tlsd-user
+
+mkdir -p $PKG/etc/rc.d $PKG/etc/default
+cat $CWD/rc.nss-tlsd > $PKG/etc/rc.d/rc.nss-tlsd
+cat $CWD/nss-tlsd.default > $PKG/etc/default/nss-tlsd.new
+chmod 755 $PKG/etc/rc.d/rc.nss-tlsd
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a AUTHORS COPYING README* $PKGDOC
+cat $CWD/README_SBo.txt > $PKGDOC/README_SBo.txt
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

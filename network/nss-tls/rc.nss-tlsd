@@ -1,0 +1,55 @@
+#!/bin/sh
+
+# rc.nss-tlsd - by B. Watson (urchlay@slackware.uk). Part of the
+# SlackBuilds.org nss-tlsd package. WTFPL licensed.
+
+DAEMON=/usr/sbin/nss-tlsd
+PIDFILE=/run/nss-tlsd.pid
+
+[ -f /etc/default/nss-tlsd ] && . /etc/default/nss-tlsd
+
+# we try to make sure not only that the PID file exists, but that the
+# PID is actually that of a running nss-tlsd process. the 'cut' stuff
+# is in case the package was upgraded, which results in /proc/<pid>/exe
+# pointing to "/usr/sbin/nss-tlsd (deleted)".
+daemon_is_running() {
+  [ -e "$PIDFILE" ] || return 1
+  [ "$( readlink /proc/$( cat $PIDFILE )/exe 2>/dev/null | cut -d' ' -f1 )" = "$DAEMON" ] || return 1
+  return 0
+}
+
+start_daemon() {
+  if daemon_is_running; then
+    echo "$DAEMON is already running, PID $( cat $PIDFILE )"
+  else
+    echo "Starting $DAEMON"
+    nohup $DAEMON $NSS_TLSD_OPTS >/dev/null 2>&1 &
+    echo "${!}" > $PIDFILE
+  fi
+}
+
+stop_daemon() {
+  if daemon_is_running; then
+    echo "Stopping $DAEMON"
+    kill "$( cat $PIDFILE )"
+    sleep 1
+    kill -9 "$( cat $PIDFILE )" >/dev/null 2>&1
+	 rm -f $PIDFILE
+  else
+    echo "$DAEMON not running"
+  fi
+}
+
+# most rc scripts don't need this: daemons will fail to start as non-root.
+# this one is designed to work either way.
+if [ "$(id -u)" != "0" ]; then
+  echo "$0: must run as root."
+  exit 1
+fi
+
+case "$1" in
+  start|"") start_daemon ;;
+  stop) stop_daemon ;;
+  restart) stop_daemon; sleep 1; start_daemon ;;
+  *) echo "Usage: $0 start|stop|restart" ;;
+esac
