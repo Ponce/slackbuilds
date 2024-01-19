@@ -1,0 +1,60 @@
+variables:
+  FF_DISABLE_UMASK_FOR_DOCKER_EXECUTOR: "true"
+  # renovate: datasource=gitlab-releases depName=gitlab-org/cli
+  GLAB_VERSION: 1.36.0
+  # renovate: datasource=docker depName=aclemons/sbo-maintainer-tools versioning=docker
+  SBO_MAINTAINER_TOOLS_IMAGE: aclemons/sbo-maintainer-tools:0.9.0-15.0@sha256:bad368eb4e28aac3076c6775b4a8ec96f564434657a4b853f9f961cdeed88404
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+
+default:
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+
+pr-checks:
+  script: |
+    set -e
+    set -o pipefail
+
+    apk add git
+
+    wget --quiet "https://gitlab.com/gitlab-org/cli/-/releases/v$GLAB_VERSION/downloads/glab_""$GLAB_VERSION""_Linux_x86_64.tar.gz"
+    tar -xf "glab_""$GLAB_VERSION""_Linux_x86_64.tar.gz" bin/glab
+    chmod 0755 bin/glab
+    mv bin/glab /usr/local/bin
+    rm -rf bin
+
+    docker pull "$SBO_MAINTAINER_TOOLS_IMAGE"
+
+    git diff-tree --name-only --diff-filter=d --no-commit-id -r $CI_MERGE_REQUEST_DIFF_BASE_SHA $CI_COMMIT_SHA | sed '/^\./d' | sed -n '/[^\/][^\/]*\/[^\/][^\/]*\//p' | xargs -I xx dirname xx | sort -u | while read -r project ; do
+      mkfifo pipe
+      tee sbolint-output < pipe &
+      exec 3>pipe
+
+      set +e
+
+      docker run --rm -v "$(pwd):/work" -w /work "$SBO_MAINTAINER_TOOLS_IMAGE" sbolint "$project" >&3 2>&1
+      sbolint_status="$?"
+      set -e
+
+      exec 3>&-
+      rm pipe
+
+      {
+        if [[ "$sbolint_status" -eq 0 ]] ; then
+          printf '#### ✅ sbolint - %s\n\n' "$project ✅"
+        else
+          printf '#### ⛔️ sbolint - %s\n\n' "$project ⛔️"
+        fi
+
+        printf '```\n'
+        cat sbolint-output
+        rm sbolint-output
+        printf '```\n'
+      } > comment-output
+
+      GITLAB_TOKEN="$MR_AUTOMATION_TOKEN" glab mr --repo "$CI_PROJECT_PATH" comment $(echo "$CI_OPEN_MERGE_REQUESTS" | cut -d '!' -f2) --unique=true --message "$(cat comment-output)"
+    done
