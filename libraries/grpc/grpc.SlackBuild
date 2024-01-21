@@ -3,6 +3,7 @@
 # Slackware build script for grpc
 
 # Copyright 2019-2020 Larry Hajali <larryhaja[at]gmail[dot]com>
+# Copyright 2024 Isaac Yu <isaacyu@protonmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -26,8 +27,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=grpc
-VERSION=${VERSION:-1.28.1}
-CPP_VERSION=${UPB_VERSION:-20200225.2}
+VERSION=${VERSION:-1.48.4}
+OPENCENSUS_VERSION=${OPENCENSUS_VERSION:-0.3.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -40,9 +41,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -74,9 +72,12 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
-rm -rf third_party/abseil-cpp
-tar xvf $CWD/abseil-cpp-${CPP_VERSION}.tar.gz -C third_party
-ln -s abseil-cpp-${CPP_VERSION} third_party/abseil-cpp
+
+# Use third party opencensus-proto tarball
+rm -rf third_party/opencensus-proto
+tar xvf $CWD/opencensus-proto-${OPENCENSUS_VERSION}.tar.gz -C third_party
+ln -s opencensus-proto-${OPENCENSUS_VERSION} third_party/opencensus-proto
+
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -84,35 +85,58 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Fix Makefile
-# Ref: https://github.com/grpc/grpc/issues/14844
-patch -p1 < $CWD/grpc-use-shell-loop-instead-makefile-function.patch
+sed -i 's|^prefix ?= /usr/local|prefix ?= /usr|' Makefile
 
-sed -i 's|^prefix ?= .*|prefix ?= /usr|' Makefile
-sed -i "s|\$(prefix)/lib|\$(prefix)/lib${LIBDIRSUFFIX}|" Makefile
-sed -i "/libdir/s|/lib|/lib${LIBDIRSUFFIX}|" Makefile
-sed -i 's|^GTEST_LIB =.*||' Makefile
+# Build instructions adapted from the Arch Linux PKGBUILD:
+# https://gitlab.archlinux.org/archlinux/packaging/packages/grpc/-/blob/main/PKGBUILD
+# However, this SlackBuild does not build tests (therefore, grpc-cli will not be installed)
+cmake -Bbuild \
+  -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+  -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+  -DCMAKE_INSTALL_PREFIX=/usr \
+  -DgRPC_INSTALL_LIBDIR=lib${LIBDIRSUFFIX} \
+  -DgRPC_INSTALL_CMAKEDIR=lib${LIBDIRSUFFIX}/cmake/$PRGNAM \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DgRPC_INSTALL=ON \
+  -DBUILD_SHARED_LIBS=ON \
+  -DCMAKE_CXX_STANDARD=17 \
+  -DCMAKE_SKIP_INSTALL_RPATH=ON \
+  -DgRPC_BUILD_TESTS=OFF \
+  -DgRPC_BUILD_CODEGEN=ON \
+  -DgRPC_BUILD_CSHARP_EXT=ON \
+  -DgRPC_BACKWARDS_COMPATIBILITY_MODE=OFF \
+  -DgRPC_ZLIB_PROVIDER='package' \
+  -DgRPC_CARES_PROVIDER='package' \
+  -DgRPC_RE2_PROVIDER='package' \
+  -DgRPC_SSL_PROVIDER='package' \
+  -DgRPC_PROTOBUF_PROVIDER='package' \
+  -DgRPC_PROTOBUF_PACKAGE_TYPE='MODULE' \
+  -DgRPC_BENCHMARK_PROVIDER:STRING='package' \
+  -DgRPC_ABSL_PROVIDER:STRING='package' \
+  -DgRPC_USE_PROTO_LITE=OFF \
+  -DgRPC_BUILD_GRPC_CPP_PLUGIN=ON \
+  -DgRPC_BUILD_GRPC_CSHARP_PLUGIN=ON \
+  -DgRPC_BUILD_GRPC_NODE_PLUGIN=ON \
+  -DgRPC_BUILD_GRPC_OBJECTIVE_C_PLUGIN=ON \
+  -DgRPC_BUILD_GRPC_PHP_PLUGIN=ON \
+  -DgRPC_BUILD_GRPC_PYTHON_PLUGIN=ON \
+  -DgRPC_BUILD_GRPC_RUBY_PLUGIN=ON \
+  -GNinja 
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-make shared plugins V=1
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-make install prefix=$PKG/usr V=1
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-make install-grpc-cli prefix=$PKG/usr V=1
+cd build
+  cmake --build .
+  cmake --install . --prefix "$PKG/usr"
+cd ../
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-# Clean up
-find $PKG -type f -name '*.a' -exec rm -f {} \;
-find $PKG/usr/include -type f -exec chmod 0644 {} \;
-find $PKG/usr/share -type f -exec chmod 0644 {} \;
+# All the .md files
+MD=( BUILDING.md CODE-OF-CONDUCT.md CONCEPTS.md CONTRIBUTING.md \
+  GOVERNANCE.md MAINTAINERS.md MANIFEST.md README.md SECURITY.md TROUBLESHOOTING.md)
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS *.md LICENSE OWNERS $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS ${MD[@]} LICENSE OWNERS $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
