@@ -1,0 +1,104 @@
+#!/bin/bash
+
+# Slackware build script for dog
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Notes:
+
+# This is written in rust, which annoys me (not the language, but its
+# build system). Fortunately it works with the rust included in
+# Slackware 15.0 (no need for rustup).
+
+# I considered just doing a binary repack, but upstream doesn't
+# provide a 32-bit x86 binary...
+
+# The vendored sources were made thus:
+## tar xvf dog-0.1.0.tar.gz
+## cd dog-0.1.0
+## cargo vendor
+## cd ..
+## tar cvfJ dog-0.1.0-vendored-sources.tar.xz dog-0.1.0/vendor/
+# It's a bunch of .crate files, like 70 of them. I would not have
+# packaged this if I didn't have a place to host my own tarball
+# with all the vendor stuff (if I had to list 70 .crate files in
+# my .info file, I'd just forget about this).
+
+# The man page was generated with:
+## pandoc --standalone -t man /tmp/SBo/dog-0.1.0/man/dog.1.md > dog.1
+# (adapted from the Justfile)
+
+# Linode has some docs on using this:
+# https://www.linode.com/docs/guides/use-dog-linux-dns-client/
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=dog
+VERSION=${VERSION:-0.1.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# It's in rust, we don't need any C flags. Also, no lib|lib64 here.
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION-vendored-sources.tar.xz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
+
+# Contents of config.toml came from 'cargo vendor' output.
+mkdir -p .cargo
+cat $CWD/config.toml > .cargo/config.toml
+
+# Setting CARGO_HOME prevents writing a 0-byte /root/.cargo/.package-cache
+CARGO_HOME=`pwd`/.cargo-home cargo build --release
+
+install -D -s -m0755 -oroot -groot target/release/dog $PKG/usr/bin/dog
+
+# Pregenerated (tiny) man page to avoid dependency on (huge) pandoc.
+mkdir -p $PKG/usr/man/man1
+gzip -9c < $CWD/dog.1 > $PKG/usr/man/man1/dog.1.gz
+
+# Completions for various shells. They all seem to work.
+PSH=$PKG/usr/share
+install -D -m0644 completions/dog.bash $PSH/bash-completion/completions/dog
+install -D -m0644 completions/dog.fish $PSH/fish/completions/dog.fish
+install -D -m0644 completions/dog.zsh  $PSH/zsh/site-functions/_dog
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a README* LICENCE $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
