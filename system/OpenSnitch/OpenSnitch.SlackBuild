@@ -1,0 +1,224 @@
+#!/bin/bash
+
+# Slackware build script for OpenSnitch
+
+# Copyright 2024 Isaac Yu <isaacyu@protonmail.com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=OpenSnitch
+VERSION=${VERSION:-1.6.4}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+SRCNAM=opensnitch
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Install eBPF modules if eBPF=yes is passed
+if [ ${eBPF:-no} = yes ]; then
+  cd ebpf_prog
+  KDIR="/usr/src/linux"
+
+  # set -fno-stack-protector to work around a clang regression
+  # this is fine - bpf programs do not use stack protectors
+  # Reference: https://aur.archlinux.org/cgit/aur.git/tree/PKGBUILD?h=opensnitch-ebpf-module
+  CLANG="clang -fno-stack-protector" ARCH="$ARCH" KERNEL_DIR="$KDIR" KERNEL_HEADERS="$KDIR" make
+
+  # Remove debug info
+  llvm-strip -g opensnitch*.o
+
+  # Finalize eBPF module installation
+  install -Dm644 opensnitch*.o -t $PKG/usr/lib/opensnitchd/ebpf
+
+  cd ../
+fi
+
+# site-packages directory
+SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])")
+
+# Prevent creation of cache files in /root/.cache/go-build
+export GOCACHE="${GOCACHE:-"$TMP/$SRCNAM-$VERSION/go-cache"}"
+export GOMODCACHE="${GOMODCACHE:-"$TMP/$SRCNAM-$VERSION/go"}"
+
+# Generate protobuf files
+cd proto
+make
+cd ../
+
+# Fix version number
+sed -i "s/1.6.2/$VERSION/g" daemon/core/version.go
+
+# Workaround for namespace conflict
+# Taken from https://github.com/pentoo/pentoo-overlay/blob/master/app-admin/opensnitch/opensnitch-1.6.4.ebuild
+# For more details, refer to https://github.com/evilsocket/opensnitch/issues/496
+# and https://github.com/evilsocket/opensnitch/pull/442
+sed -i 's/^import ui_pb2/from . import ui_pb2/' ui/opensnitch/ui_pb2_grpc.py
+
+# Fix an issue with setup.py installing to python's site-packages instead of /usr
+# prefer scaled SVG instead of pixellated 48x48 PNG
+patch -p1 < $CWD/patches/fix-setup.py.patch
+
+# Modify the go.mod file for the offline build
+patch -p1 < $CWD/patches/modify-go.mod-file.patch
+
+# Remove debian patch
+patch -p1 < $CWD/patches/remove-debian-path.patch
+
+# Use system python packages
+patch -p1 < $CWD/patches/use-system-python-packages.patch
+
+# Generate resource files
+pyrcc5 -o ui/opensnitch/{resources_rc.py,/res/resources.qrc}
+
+# Set up vendored modules
+cd daemon
+mkdir -p vendor
+cat $CWD/modules.txt > vendor/modules.txt
+for DIR in $(grep -o "^# .* " vendor/modules.txt | cut -d' ' -f2)
+do
+  NAME=$(echo $DIR | sed 's/[./]v[0-9]\+$//' | xargs basename)
+  DIR=vendor/$DIR
+  echo $DIR
+  if [ $DIR = "vendor/github.com/golang/protobuf" ]; then
+    tar xvf $CWD/$NAME-[0-9]*.tar.gz
+  elif [ $DIR = "vendor/github.com/mdlayher/netlink" ]; then
+    tar xvf $CWD/$NAME-[0-9].[0-9].[0-9].tar.gz
+  elif [ $DIR = "vendor/github.com/varlink/go" ]; then
+    tar xvf $CWD/$NAME-[0-9].[0-9].[0-9].tar.gz
+  elif [ $DIR = "vendor/github.com/vishvananda/netlink" ]; then
+    tar xvf $CWD/$NAME-[a-z]*.tar.gz
+  elif [ $DIR = "vendor/google.golang.org/genproto" ]; then
+    tar xvf $CWD/go-$NAME-*.tar.gz
+  elif [ $DIR = "vendor/google.golang.org/protobuf" ]; then
+    tar xvf $CWD/$NAME-go-*.tar.gz
+  else
+    tar xvf $CWD/$NAME-*.tar.gz
+  fi
+  mkdir -p $(dirname $DIR)
+  [ $DIR != "vendor/google.golang.org/genproto" ] && mv $NAME-* $DIR || mv go-$NAME-* $DIR
+done
+
+# Build the opensnitch daemon
+CGO_CFLAGS="$SLKCFLAGS" \
+CGO_CXXFLAGS="$SLKCFLAGS" \
+go build -mod vendor -o opensnitchd
+
+# Install the opensnitch daemon
+install -Dm755 opensnitchd $PKG/usr/bin/opensnitchd
+
+# Now that the opensnitch daemon is installed, install the ui:
+cd ../ui
+python3 setup.py install --root=$PKG
+cd ../
+
+# configuration files
+mkdir -p $PKG/etc/opensnitchd
+cp daemon/default-config.json $PKG/etc/opensnitchd/default-config.json.new
+cp daemon/system-fw.json $PKG/etc/opensnitchd/system-fw.json.new
+
+# logrotate
+mkdir -p $PKG/etc/logrotate.d
+cp utils/packaging/daemon/deb/debian/opensnitch.logrotate $PKG/etc/logrotate.d/opensnitch.new
+
+# Create log files in such a way that they won't clobber existing ones
+# This was taken from ponce's clamav SlackBuild
+mkdir -p $PKG/var/log
+touch $PKG/var/log/opensnitchd.log.new
+chmod 0660 $PKG/var/log/opensnitchd.log.new
+
+# Generate translations
+LANGS=( de_DE es_ES eu_ES fi_FI fr_FR hu_HU ja_JP lt_LT nb_NO nl_NL pt_BR ro_RO ru_RU tr_TR zh_TW )
+cd ui/i18n/
+sh generate_i18n.sh
+for LANG in "${LANGS[@]}"
+do
+  install -Dm644 locales/$LANG/opensnitch-$LANG.ts $PKG/$SITE_PACKAGES/opensnitch/i18n/locales/$LANG
+done
+cd ../../
+
+# Install rc script
+mkdir -p $PKG/etc/rc.d
+cat $CWD/rc.opensnitchd > $PKG/etc/rc.d/rc.opensnitchd.new
+chmod 0644 $PKG/etc/rc.d/rc.opensnitchd.new
+
+# Remove tests from the site-packages directory
+rm -rf "$PKG/$SITE_PACKAGES/tests"
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE README.md $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
