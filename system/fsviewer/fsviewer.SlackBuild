@@ -6,6 +6,9 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20240122 bkw: switch to roblillack's fork, v0.2.6+20220428_38b38a6.
+# Get rid of old patches (no longer needed), and add a new patch to
+# give the window a working close button.
 # 20230708 bkw: BUILD=3, install to the same Applications dir as
 # windowmaker's WPrefs.app (and no creating /usr/GNUstep, which was
 # never a good idea).
@@ -14,8 +17,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=fsviewer
-VERSION=${VERSION:-0.2.6}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-0.2.6+20220428_38b38a6}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -55,55 +58,46 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-app-$VERSION
-tar xvf $CWD/$PRGNAM-app-$VERSION.tar.bz2
-cd $PRGNAM-app-$VERSION
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
-# The WINGs API has changed slightly in the newer versions of WindowMaker
-patch -p1 < $CWD/wingsfix.diff
+# 20240123 bkw: add a close button to the top-level window.
+patch -p1 < $CWD/close_button.diff
 
-# See README.patch.txt for info
-if [ "${TITLEBAR:-no}" = "yes" ]; then
-  patch -p1 < $CWD/titlebar.diff
-fi
+# 20240122 bkw: install to /usr/lib(64), then mv the bin dir.
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr/lib$LIBDIRSUFFIX \
+    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+    -DMAN_INSTALL_DIR=/usr/man \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install/strip DESTDIR=$PKG
+cd ..
 
-# dirty hack way to handle this. easier than dealing with autocrap.
-cp $CWD/get-wraster-flags .
-chmod +x get-wraster-flags
+mv $PKG/usr/lib*/bin $PKG/usr/bin
 
-# gcc 10+ needs this.
-SLKCFLAGS="$SLKCFLAGS -Wl,--allow-multiple-definition"
+# 20240123 bkw: symlink to the binary, same as the package name.
+ln -s FSViewer $PKG/usr/bin/$PRGNAM
 
-PATH=".:$PATH" \
-LIBS="-lWUtil -lX11 -lm -lXpm" \
-CFLAGS="$SLKCFLAGS -std=gnu89" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --with-appspath=/usr/lib$LIBDIRSUFFIX/GNUstep/Applications \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --build=$ARCH-slackware-linux
-
-# fix broken gobbledegook emitted by autoconf. Life is too short
-# to spend time fixing it 'correctly'.
-GCCMAJVER=$( gcc --version | head -1 | cut -d' ' -f3 | cut -d. -f1 )
-[ "$GCCMAJVER" -ge 5 ] && sed -i 's,-MT *\$@,-M,' */Makefile */*/Makefile
-
-make
-make install-strip DESTDIR=$PKG
-
-mkdir -p $PKG/usr/bin
+# 20240123 bkw: cmake doesn't build this, it was in the old package,
+# fortunately it's easy enough to include in the new one. I have no
+# idea what it's good for...
+sed -i '/config\.h/d' defs/chdef.c
+make -C defs chdef LDFLAGS="-lWINGs -lWUtil"
 install -s -m0755 defs/chdef $PKG/usr/bin
-ln -s ../lib$LIBDIRSUFFIX/GNUstep/Applications/FSViewer.app/FSViewer $PKG/usr/bin/$PRGNAM
 
-gzip -9 $PKG/usr/man/man1/*
+mkdir -p $PKG/usr/man/man1
+for i in man/*.1x; do
+  gzip -9 < $i > $PKG/usr/man/man1/$( basename $i ).gz
+done
 
 # .desktop file comes from the Polish Linux Distro, and has been modified
 # to add the icon and to pass desktop-file-validate.
@@ -113,13 +107,13 @@ cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
 # I like the look of FSViewer2.xpm better. You could use FSViewer.xpm if
 # you prefer.
 mkdir -p $PKG/usr/share/pixmaps
-ln -s ../../lib$LIBDIRSUFFIX/GNUstep/Applications/FSViewer.app/xpm/FSViewer2.xpm \
+ln -s ../../lib$LIBDIRSUFFIX/GNUstep/Apps/FSViewer.app/xpm/FSViewer2.xpm \
   $PKG/usr/share/pixmaps/$PRGNAM.xpm
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS COPYING ChangeLog NEWS README docs/* \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a AUTHORS COPYING ChangeLog NEWS README* docs/* $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
