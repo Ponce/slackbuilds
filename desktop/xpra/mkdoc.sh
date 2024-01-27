@@ -12,7 +12,7 @@ source ./xpra.info
 OUTDIR=xpra-$VERSION-prebuilt-docs
 TARBALL=$OUTDIR.tar.xz
 
-RPMFILE=xpra-common-4.4.3-10.el8.noarch.rpm
+RPMFILE=xpra-common-5.0.4-10.r0.el8.x86_64.rpm
 URL=https://www.xpra.org/dists/CentOS/8/x86_64/$RPMFILE
 
 # only download the file if we don't already have it.
