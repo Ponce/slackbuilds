@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+
+
+get_child_pids() {
+  if [[ -z "$1" ]]; then echo "get_child_pids:error: \$1 is empty " 1>&2 ; exit 1 ; fi
+  local parent_pid=$1
+  ps -o pid --no-headers --ppid $parent_pid
+}
+
+# Function to recursively get all descendant PIDs
+get_descendant_pids() {
+  if [[ -z "$1" ]]; then echo "get_descendant_pids:error: \$1 is empty " 1>&2 ; exit 1 ; fi
+  local parent_pid=$1
+  local child_pids=$(get_child_pids $parent_pid)
+  for pid in $child_pids; do
+    echo $pid
+    get_descendant_pids $pid
+  done
+}
+
+export LC_ALL=C
+function qnd_waitpid()
+(
+    while ps -p $1 &> /dev/null
+    do
+	sleep 5
+    done
+)
+cd /tmp
+
+source /etc/smokeping/slave_config.conf || { printf "/etc/smokeping/slave_config.conf not found\n" ; exit 1; }
+LOGFILE=${LOGFILE:-/var/log/smokeping-slave.log}
+CACHEDIR=${CACHEDIR:-/var/lib/smokeping/slave-cache}
+SLAVE_SECRET_PATH=${SLAVE_SECRET_PATH:-/etc/smokeping/slave_secret.conf}
+SMOKEPING_USER=${SMOKEPING_USER:-smokeping}
+if [[ "$MASTER_URL" == "" ]] ; then
+    printf "Set MASTER_URL= in /etc/smokeping/slave_config.conf\n"
+    exit 1
+fi
+if [[ ! -e "$SLAVE_SECRET_PATH" ]] ; then
+    printf "set SLAVE_SECRET_PATH in /etc/smokeping/slave_config.conf\n"
+fi
+chmod a-rwx "$SLAVE_SECRET_PATH"
+SMOKEPING_PIDFILE=/run/smokeping-slave.pid
+
+
+start()
+{
+    cd /var/lib/smokeping/
+
+    mkdir -p "$CACHEDIR"
+    chown $SMOKEPING_USER $CACHEDIR
+
+    touch "$LOGFILE"
+    chown $SMOKEPING_USER "$LOGFILE"
+
+    while true
+    do
+        /sbin/setcap 'CAP_NET_RAW+eip CAP_NET_ADMIN+eip'  /usr/sbin/fping
+        printf "\nStarting smokeping: %s\n" "$(date +'%Y-%m-%dT%H:%M:%S')" >> "$LOGFILE"
+        unset LC_ALL
+        unset LC_COLLATE
+        rm -rf "$CACHEDIR"/*.cache
+        printf '\nMONITOR:%s New process\n' $(date +'%Y-%m-%dT%H:%M:%S') >> $LOGFILE
+
+        /bin/su $SMOKEPING_USER -s/bin/bash -c "\
+           /usr/bin/smokeping \
+           --nodaemon \
+           --master-url=$MASTER_URL\
+           --cache-dir=$CACHEDIR  \
+           --shared-secret=$SLAVE_SECRET_PATH \
+           --logfile=$LOGFILE &>> $LOGFILE"
+        sync
+        sleep 1
+#        qnd_waitpid $(cat "$CACHEDIR"/smokeping.pid)
+        printf "MONITOR:Smokeping died: %s\n" "$(date +'%Y-%m-%dT%H:%M:%S')" | tee "$LOGFILE"
+        sleep 5
+    done & >/dev/null 2>&1
+    WRAPPER_PID=$!
+    echo "$WRAPPER_PID" > /run/smokeping-slave.pid
+}
+
+stop()
+{
+    printf "Killing smokeping slave.\n"
+
+    child_pids=$(get_descendant_pids $(cat  "$SMOKEPING_PIDFILE"))
+
+    printf "PIDS=%s" "$(cat "$SMOKEPING_PIDFILE") $child_pids"
+    /bin/kill --timeout 3000 TERM --timeout 1000 KILL --signal QUIT $(cat "$SMOKEPING_PIDFILE") $child_pids
+    
+}
+
+
+case "$1" in
+  start)
+    printf "case up\n"
+    start
+    exit "$?"
+    ;;
+  stop)
+    printf "case down\n"
+    stop
+    exit "$?"
+    ;;
+  status)
+    if [[ -e "$SMOKEPING_PIDFILE" && "" != $(cat  "$SMOKEPING_PIDFILE") ]] ; then
+      pstree -s -p $(cat  "$SMOKEPING_PIDFILE")
+    else
+      printf "smokeping slave is not running or not running from this service.\n"
+    fi
+    ;;
+  restart)
+    if ! stop
+    then
+      exit "$?"
+    fi
+    if ! start
+    then
+      exit "$?"
+    fi
+    ;;
+  *) printf "usage: {up,down,restart,status}\n"
+esac
+

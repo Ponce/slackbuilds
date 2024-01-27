@@ -1,0 +1,145 @@
+#!/bin/bash
+
+#SMOKEPING_VERSION="2.8.3"
+SMOKEPING_PIDFILE="/run/smokeping/smokeping.pid"
+SMOKEPING_USER=@SMOKEPING_USER@
+SMOKEPING_PATH=@SMOKEPING_PATH@
+SMOKEPING_CONFIG_PATH=@SMOKEPING_CONFIG_PATH@
+SMOKEPING_LOG_PATH="/var/log/smokeping.nosyslog.log"
+
+get_child_pids() {
+  if [[ -z "$1" ]]; then echo "get_child_pids:error: \$1 is empty " 1>&2 ; exit 1 ; fi
+  local parent_pid=$1
+  ps -o pid --no-headers --ppid $parent_pid
+}
+
+# Function to recursively get all descendant PIDs
+get_descendant_pids() {
+  if [[ -z "$1" ]]; then echo "get_descendant_pids:error: \$1 is empty " 1>&2 ; exit 1 ; fi
+  local parent_pid=$1
+  local child_pids=$(get_child_pids $parent_pid)
+  for pid in $child_pids; do
+    echo $pid
+    get_descendant_pids $pid
+  done
+}
+
+function start
+{
+  export LC_ALL=C
+  # no idea why this is required
+  # https://github.com/oetiker/SmokePing/issues/29
+  cd /var/lib/smokeping
+
+  mkdir -p /run/smokeping/
+  chown $SMOKEPING_USER /run/smokeping/
+
+  touch "$SMOKEPING_LOG_PATH"
+  chown $SMOKEPING_USER "$SMOKEPING_LOG_PATH"
+  
+  if [[ -e $SMOKEPING_PIDFILE && ( "" == "$(cat $SMOKEPING_PIDFILE)" ) ]]
+  then
+    printf "Pid file is empty: %s\n" "$SMOKEPING_PIDFILE" 1>&2
+  elif [[ -e $SMOKEPING_PIDFILE && ( "" != "$(cat $SMOKEPING_PIDFILE)" ) ]]
+  then
+    PID=$(cat "$SMOKEPING_PIDFILE")
+    printf "PID=%s\n" "$PID"
+    if ps --pid "$PID"
+    then
+      printf "Smokeping already running with pid %d.\n" "$PID" 1>&2
+      return 1
+    else
+      printf "You have bogus pid file!\n" 1>&2
+      rm "$SMOKEPING_PIDFILE"
+    fi
+  fi
+
+  /sbin/setcap 'CAP_NET_RAW+eip CAP_NET_ADMIN+eip'  /usr/sbin/fping
+  if ! su smokeping -s/bin/sh -c "$SMOKEPING_PATH --config=$SMOKEPING_CONFIG_PATH --logfile=$SMOKEPING_LOG_PATH"
+  then
+    printf "Smokeping failed to start!\n" 1>&2
+    return 2
+  fi
+
+  if [[ ! -e $SMOKEPING_PIDFILE ]]
+  then
+    printf "Smokeping pidfile missing!\n" 1>&2
+    return 3
+  elif [[ "" == $(cat $SMOKEPING_PIDFILE  | tr -d '\n' ) ]]
+  then
+    printf "Pid file %s empty.\n" $(cat $SMOKEPING_PIDFILE) 1>&2
+  else
+    PID=$(cat "$SMOKEPING_PIDFILE")
+    if ps --pid "$PID"
+    then
+      :
+    else
+      printf "Smokeping created pidfile, but is not running!\n" 1>&2
+      return 4
+    fi
+  fi
+  rm -f /run/smokeping-fcgi.sock
+  /usr/bin/spawn-fcgi -u $SMOKEPING_USER -s /run/smokeping-fcgi.sock -M 660 -U $SMOKEPING_USER -- /var/www/htdocs/smokeping/smokeping.fcgi
+  return 0
+}
+
+function stop()
+{
+  if [[ ! -e "$SMOKEPING_PIDFILE" ]];  then
+    printf "Pid file %s does not exist!\n" "$SMOKEPING_PIDFILE"
+    return 6
+  elif [[ "" == "$(cat "$SMOKEPING_PIDFILE")" ]] ;  then
+    printf "Pid file %s empty!\n" "$SMOKEPING_PIDFILE"
+    return 6
+  fi
+  child_pids=$(get_descendant_pids $(cat  "$SMOKEPING_PIDFILE"))
+  printf "Full pid list (smokeping+children):%s\n" "$(cat "$SMOKEPING_PIDFILE") $child_pids"
+  /bin/kill --timeout 3000 TERM --timeout 1000 KILL --signal QUIT $(cat "$SMOKEPING_PIDFILE") $child_pids
+
+  rm -f "$SMOKEPING_PIDFILE"
+
+  if pgrep -f 'bin/smokeping ' -la >/dev/null 2>&1 # the space is important
+  then
+    printf "Killing smokeping failed!\n" 1>&2
+    pgrep -f 'bin/smokeping' -la
+  fi
+  /bin/kill --timeout 3000 TERM --timeout 1000 KILL --signal QUIT $(/usr/sbin/ss -f unix -l -p | grep /run/smokeping-fcgi.sock | sed -E 's/.*pid=([[:digit:]]+),.*/\1/g')
+  rm /run/smokeping-fcgi.sock
+}
+
+case "$1" in
+  start)
+    printf "case up\n"
+    start
+    exit "$?"
+    ;;
+  stop)
+    printf "case down\n"
+    stop
+    exit "$?"
+    ;;
+  status)
+    if [[ -e "$SMOKEPING_PIDFILE" && "" != $(cat  "$SMOKEPING_PIDFILE") ]] ; then
+      pstree -s -p $(cat  "$SMOKEPING_PIDFILE")
+    else
+      printf "smokeping is not running or not running from this service.\n"
+    fi
+    cgi_pid=$(/usr/sbin/ss -f unix -l -p | grep /run/smokeping-fcgi.sock | sed -E 's/.*pid=([[:digit:]]+),.*/\1/g' 2>/dev/null)
+    if [[ "" == "$cgi_pid" ]] ; then
+      printf "smokeping_cgi is not running or not running from this service.\n"
+    else
+      pstree -s -p "$cgi_pid"
+    fi
+    ;;
+  restart)
+    if ! stop
+    then
+      exit "$?"
+    fi
+    if ! start
+    then
+      exit "$?"
+    fi
+    ;;
+  *) printf "usage: {up,down,restart,status}\n"
+esac

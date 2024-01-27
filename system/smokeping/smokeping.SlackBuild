@@ -1,0 +1,185 @@
+#!/bin/bash
+
+# Copyright Lockywolf, lockywolf gmail.com
+# Based on the work of Patrick J. Volkerding
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=smokeping
+VERSION=${VERSION:-2.8.2}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+ARCH=${ARCH:-}
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) export ARCH=i586 ;;
+    arm*) export ARCH=arm ;;
+       *) export ARCH=$( uname -m ) ;;
+  esac
+fi
+
+PRINT_PACKAGE_NAME=${PRINT_PACKAGE_NAME:-}
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD.txz"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O0 -fPIC -ggdb"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+SB_UID=${MUID:-383}
+SB_GID=${MGID:-383}
+SB_USER=${NTOPUSER:-smokeping}
+SB_GROUP=${NTOPGROUP:-smokeping}
+
+if ! getent group $SB_GROUP 2>&1 > /dev/null; then
+  echo "  You must have an $SB_GROUP group to run this script."
+  echo "    # groupadd -g $SB_GID $PRGNAM"
+  exit 1
+elif ! getent passwd $SB_USER 2>&1 > /dev/null; then
+  echo "  You must have a $SB_USER user to run this script."
+  echo "    # useradd -u $SB_UID -g $SB_GID -d /var/lib/$PRGNAM $SB_USER"
+  exit 1
+fi
+
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.?z* || exit 1
+cd $PRGNAM-$VERSION || exit 1
+
+
+chown -R root:root .
+find . \
+  \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+  -exec chmod 755 {} \; -o \
+  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+  -exec chmod 644 {} \;
+
+
+
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}
+
+
+patch -p1 < $CWD/smokeping-2.8.2-no-3rd-party.patch
+patch -p1 < $CWD/smokeping-2.8.2-paths.patch
+patch -p1 < $CWD/smokeping-config.patch
+
+rm -rf configure
+sed -i "s|\$(distdir)/lib|\$(distdir)/lib${LIBDIRSUFFIX}|g" Makefile.am
+sed -i "s|perllibdir = \$(prefix)/lib|perllibdir = \$(prefix)/share/perl5|g" ./lib/Makefile.am
+autoreconf -i
+
+export LC_ALL=C
+
+#PERL5LIB=/usr/share/perl5/ \
+CFLAGS="$SLKCFLAGS" \
+      ./configure \
+      --prefix=/usr \
+      --with-htdocs-dir=/var/www/htdocs/smokeping \
+      --mandir=/usr/man \
+      --libdir=/usr/lib${LIBDIRSUFFIX} \
+      --sysconfdir=/etc/$PRGNAM \
+      --localstatedir=/var/ \
+      --docdir=/usr/doc/$PRGNAM-$VERSION
+#mkdir -p thirdparty/lib/perl5/removeme
+rm -rf thirdparty/CPAN
+mkdir thirdparty/CPAN
+touch cpanfile "thirdparty/cpanfile-$(perl -MConfig -e 'my $v =$Config{version}; $v =~ s/.\d+$//;print $v;').snapshot"
+touch thirdparty/touch thirdparty/CPAN/touch
+
+DESTDIR=$PKG gmake || exit 1
+gmake DESTDIR=$PKG install  || exit 1
+
+#rmdir $PKG/usr/lib${LIBDIRSUFFIX}/removeme/
+
+mkdir -p $PKG/etc/rc.d/
+
+cat $CWD/rc.smokeping > $PKG/etc/rc.d/rc.smokeping.template
+sed -i "s/@SMOKEPING_USER@/$SB_USER/g" $PKG/etc/rc.d/rc.smokeping.template
+sed -i "s|@SMOKEPING_PATH@|/usr/bin/smokeping|g" $PKG/etc/rc.d/rc.smokeping.template
+sed -i "s|@SMOKEPING_GROUP@|$SB_GROUP|g" $PKG/etc/rc.d/rc.smokeping.template
+sed -i "s|@SMOKEPING_CONFIG_PATH@|/etc/smokeping/config|g" $PKG/etc/rc.d/rc.smokeping.template
+#mv $CWD/rc.smokeping.template > $PKG/etc/rc.d/rc.smokeping.new
+mv $PKG/etc/rc.d/rc.smokeping.template $PKG/etc/rc.d/rc.smokeping
+chmod +x $PKG/etc/rc.d/rc.smokeping
+cat $CWD/rc.smokeping-slave > $PKG/etc/rc.d/rc.smokeping-slave
+chmod +x $PKG/etc/rc.d/rc.smokeping-slave
+
+install -d -m 755 -o smokeping -g smokeping $PKG/var/lib/$PRGNAM
+install -d -m 755 -o smokeping -g smokeping $PKG/var/lib/$PRGNAM/data
+install -d -m 755 -o smokeping -g smokeping $PKG/var/lib/$PRGNAM/imgcache
+ln -sf /var/lib/$PRGNAM/imgcache ${PKG}/var/www/htdocs/${PRGNAM}/images
+
+
+#mkdir -p $PKG/opt/${PRGNAM}-${VERSION}/data
+#mkdir -p $PKG/opt/${PRGNAM}-${VERSION}/var
+#mkdir -p $PKG/opt/${PRGNAM}-${VERSION}/imgcache
+
+#chown -R apache:apache $PKG/opt/${PRGNAM}-${VERSION}/{data,var,imgcache}
+
+#ln -s smokeping.fcgi.dist ${PKG}/var/www/htdocs/${PRGNAM}/smokeping.fcgi
+#ln -s /opt/${PRGNAM}-${VERSION}/imgcache ${PKG}/var/www/htdocs/${PRGNAM}/imgcache
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/usr/doc/${PRGNAM}-$VERSION
+cp -a \
+    CHANGES       COPYRIGHT README.md  VERSION    \
+   CONTRIBUTORS  LICENSE  TODO       \
+  $PKG/usr/doc/${PRGNAM}-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat "$CWD"/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.sbo
+
+cat > $PKG/usr/doc/${PRGNAM}-$VERSION/dothtaccess <<"END"
+Options +ExecCGI
+Options +FollowSymlinks
+AddHandler cgi-script .fcgi
+AddHandler cgi-script .dist
+DirectoryIndex smokeping.fcgi
+END
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
