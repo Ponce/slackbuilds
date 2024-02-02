@@ -9,6 +9,7 @@
 # Copyright (c) 2014-2022  Christoph Willing, Brisbane, Australia
 # Copyright (c) 2022  Bill Kirkpatrick, Bay City, Texas, USA
 # Copyright (c) 2023  Tim Dickson, Scotland
+# Copyright (c) 2024  Steven Voges <Oregon, USA>
 # All rights reserved.
 #
 #   Redistribution and use of this script, with or without modification is
@@ -44,7 +45,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=vlc
-VERSION=${VERSION:-3.0.18}
+VERSION=${VERSION:-3.0.20}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -57,9 +58,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -81,8 +79,6 @@ else
 fi
 SLKLDFLAGS="-lrt"
 
-DOCS="AUTHORS COPYING NEWS README THANKS"
-
 set -e
 
 rm -rf $PKG
@@ -94,10 +90,10 @@ cd $PRGNAM-$VERSION
 
 sed -i '/DEPRECATED/s:^://:' modules/text_renderer/freetype/text_layout.c
 
-patch -p0 < $CWD/patch-dvdread-503.diff
-patch -p0 < $CWD/patch-dvdnav-503.diff
-patch -p0 < $CWD/patch-projectM-fontpath.diff
-patch -p0 < $CWD/patch_vlc_cache_gen.diff
+patch -p1 < $CWD/dvdread.patch
+patch -p1 < $CWD/dvdnav.patch
+patch -p1 < $CWD/projectM.patch
+patch -p1 < $CWD/cache.patch
 
 # Don't enable wayland by default
 wayland="--disable-wayland" ; [ "${WAYLAND:-no}" != "no" ] && wayland="--enable-wayland"
@@ -107,6 +103,9 @@ runasroot=""; [ "${RUNASROOT:-no}" != "no" ] && runasroot="--enable-run-as-root"
 
 # Give the possibility to explicitly disable aom support
 aom=""; [ "${AOM:-yes}" = "no" ] && aom="--disable-aom"
+
+# Allow to build without lua
+lua=""; [ "${LUA:-yes}" = "no" ] && lua="--disable-lua"
 
 autoreconf -fiv
 
@@ -130,33 +129,34 @@ LDFLAGS="$SLKLDFLAGS" \
   --build=$ARCH-slackware-linux \
   --enable-qt=5 \
   --enable-merge-ffmpeg \
-  --disable-upnp \
   --disable-libplacebo \
+  --disable-upnp \
   $wayland \
   $runasroot \
   $aom \
-
+  $lua
 make
 make DESTDIR=$PKG install
 
-mkdir -p $PKG/usr/man/man1
-gzip -9c doc/vlc.1 > $PKG/usr/man/man1/vlc.1.gz
-
 install -D -m0644 extras/analyser/vlc.vim $PKG/usr/share/vim/vimfiles/syntax/vlc.vim
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-find $PKG/usr/doc -type f -exec chmod 644 {} \;
-chown -R root:root $PKG/usr/doc/$PRGNAM-$VERSION/*
-
-find $PKG/usr/man -type f -name "*.?" -exec gzip -9f {} \;
-for i in $(find $PKG/usr/man -type l -name "*.?") ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+rm -f $PKG/usr/lib*/*.la
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" \
   | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
 
-rm -f $PKG/usr/lib*/*.la
+mkdir -p $PKG/usr/man/man1
+gzip -9c doc/vlc.1 > $PKG/usr/man/man1/vlc.1.gz
+find $PKG/usr/man -type f -name "*.?" -exec gzip -9f {} \;
+for i in $(find $PKG/usr/man -type l -name "*.?") ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  AUTHORS COPYING NEWS README THANKS \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+find $PKG/usr/doc -type f -exec chmod 644 {} \;
+chown -R root:root $PKG/usr/doc/$PRGNAM-$VERSION/*
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
