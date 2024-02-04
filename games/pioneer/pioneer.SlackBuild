@@ -3,7 +3,7 @@
 # Slackware build script for pioneer
 
 # Copyright 2015-2019 Hunter Sezen California, USA
-# Copyright 2023 K. Eugene Carlson Tsukuba, JP
+# Copyright 2023-2024 K. Eugene Carlson Tsukuba, JP
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -26,7 +26,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=pioneer
-VERSION=${VERSION:-20230203}
+VERSION=${VERSION:-20240203}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -94,16 +94,18 @@ pkg-config --exists glew && GLEW=ON
 # as cmake seems to search for them in order.
 pkg-config --exists lua5.2 && ! pkg-config --exists lua && LUA=ON
 
-# Fix 32-bit build (PR 5538) and system lua build (PR 5526).
-patch -p0 < $CWD/fix-build.patch
-# Post-release autopilot fixes (PR 5481, 5551).
-patch -p1 < $CWD/ship-ai.patch
-
 # 20210214 bkw: prevent the build from writing to /root/, without
 # breaking ccache if it's in use.
-mkdir -p tmphome
+mkdir -p tmphome/.local/share/pioneer
 export CCACHE_DIR=${CCACHE_DIR:-$HOME/.ccache}
 export HOME=$( pwd )/tmphome
+
+OSNAME="$(awk -F= '/^ID=/{print $2}' /etc/os-release)"
+OSVER="$(awk -F= '/^VERSION_ID=/{print $2}' /etc/os-release)"
+OSCODENAME="$(awk -F= '/^VERSION_CODENAME=/{print $2}' /etc/os-release)"
+# This version information string can be included when reporting issues
+# upstream.
+INFOSTRING="$OSNAME-$OSVER-$OSCODENAME-$PRGNAM-$VERSION-$ARCH-$BUILD$TAG"
 
 mkdir -p build
 cd build
@@ -112,9 +114,10 @@ cd build
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_INSTALL_BINDIR=games \
-    -DPIONEER_DATA_DIR=/usr/share/games/$PRGNAM \
+    -DCMAKE_INSTALL_DATADIR=/usr/share/games \
     -DUSE_SYSTEM_LIBGLEW=$GLEW \
     -DUSE_SYSTEM_LIBLUA=$LUA \
+    -DPROJECT_VERSION_INFO="$INFOSTRING" \
     -DCMAKE_BUILD_TYPE=$RELEASE ..
   make
   make install DESTDIR=$PKG
@@ -125,6 +128,14 @@ if [ "$DEBUG" = 0 ]; then
   find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" |
     grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 fi
+
+# Clean up the data directory, put icons and files where they are
+# supposed to be and install an SVG icon.
+rm -rf $PKG/usr/share/games/$PRGNAM/{licenses,*txt,*md}
+mv $PKG/usr/share/games/{icons,applications,metainfo} $PKG/usr/share
+mkdir -p $PKG/usr/share/icons/hicolor/scalable/apps
+install -m 0644 application-icon/badge-full.svg \
+  $PKG/usr/share/icons/hicolor/scalable/apps/net.pioneerspacesim.Pioneer.svg
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a licenses *.txt README.md $PKG/usr/doc/$PRGNAM-$VERSION
