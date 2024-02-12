@@ -15,5 +15,5 @@ if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
 fi
 
-cmp etc/xdg/autostart/${file} etc/xdg/autostart/${file}.sample 2> /dev/null && \
-      rm etc/xdg/autostart/${file}.sample
+cmp etc/xdg/autostart/sun_daemon.desktop etc/xdg/autostart/sun_daemon.desktop.sample 2> /dev/null && \
+	  rm etc/xdg/autostart/sun_daemon.desktop.sample
