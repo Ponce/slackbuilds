@@ -1,9 +1,5 @@
 function _khal_completion;
-    set -l response;
-
-    for value in (env _KHAL_COMPLETE=fish_complete COMP_WORDS=(commandline -cp) COMP_CWORD=(commandline -t) khal);
-        set response $response $value;
-    end;
+    set -l response (env _KHAL_COMPLETE=fish_complete COMP_WORDS=(commandline -cp) COMP_CWORD=(commandline -t) khal);
 
     for completion in $response;
         set -l metadata (string split "," $completion);

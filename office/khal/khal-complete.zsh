@@ -31,5 +31,11 @@ _khal_completion() {
     fi
 }
 
-compdef _khal_completion khal;
+if [[ $zsh_eval_context[-1] == loadautofunc ]]; then
+    # autoload from fpath, call function directly
+    _khal_completion "$@"
+else
+    # eval/source/. command, register function for later
+    compdef _khal_completion khal
+fi
 
