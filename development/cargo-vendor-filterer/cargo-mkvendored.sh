@@ -11,6 +11,12 @@
 # Variables to use in your SlackBuild:
 # VSBUILD         # same use as BUILD but for vendored sources
 # VSDIR=/sub/dir/ # (optional) alternate location in src for vendor dir
+#
+# Vendors sources for the following targets
+# i686-unknown-linux-gnu
+# x86_64-unknown-linux-gnu
+# arm-unknown-linux-gnueabihf
+# aarch64-unknown-linux-gnu
 
 INFO="$( echo *.info )"
 if [ ! -e "$INFO" ]; then
@@ -97,7 +103,7 @@ fi
 # Configure cargo-vendor-filterer
   cat << EOF >> Cargo.toml
 [package.metadata.vendor-filter]
-platforms = ["x86_64-unknown-linux-gnu", "i686-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+platforms = ["x86_64-unknown-linux-gnu", "i686-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "arm-unknown-linux-gnueabihf"]
 all-features = true
 exclude-crate-paths = [
   { name = "openssl-src", exclude = "openssl" },
