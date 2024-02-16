@@ -1,0 +1,151 @@
+#!/bin/bash
+
+# Slackware build script for MuseScore-Legacy
+
+# Copyright 2024 Antonio Leal, Porto Salvo, Oeiras, Portugal
+# Copyright 2022-2023 Klaatu <klaatu@member.fsf.org> | Lawrence NZ
+# Thanks to Tim Dickson
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=MuseScore-Legacy
+VERSION=${VERSION:-3.6.2}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf ${PRGNAM::-7}-$VERSION
+
+tar xvf $CWD/${PRGNAM::-7}-$VERSION.tar.gz
+
+cd ${PRGNAM::-7}-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Copy over sound files for installation.
+cp $CWD/MuseScore_General_License.md share/sound
+cp $CWD/MuseScore_General.sf3 share/sound
+
+# Turn off Qt crash reporter.  Option isn't available in Makefile,
+# so turn it off in CMakeLists.txt
+sed -i '/(BUILD_CRASH_REPORTER/s|ON)|OFF)|' CMakeLists.txt
+sed -i 's|share/man|man|' CMakeLists.txt
+
+mkdir b
+cd b
+cmake \
+  -DCMAKE_INSTALL_PREFIX=/opt/MuseScore-Legacy \
+  -DCMAKE_C_FLAGS_RELEASE="$SLKCFLAGS" \
+  -DCMAKE_CXX_FLAGS_RELEASE="$SLKCFLAGS" \
+  -DCMAKE_MODULE_LINKER_FLAGS_RELEASE="-pthread" \
+  -DMUSESCORE_BUILD_CONFIG=release \
+  -DDOWNLOAD_SOUNDFONT=OFF \
+  -DUSE_SYSTEM_FREETYPE=ON \
+  -DBUILD_WEBENGINE=OFF \
+  -DBUILD_TELEMETRY_MODULE=OFF \
+  -DBUILD_PORTAUDIO=ON \
+  -DBUILD_PORTMIDI=ON \
+  -DQMAKE=/usr/lib"${LIBDIRSUFFIX}"/qt5/bin/qmake \
+  -DQT_QMAKE_EXECUTABLE=/usr/lib"${LIBDIRSUFFIX}"/qt5/bin/qmake \
+  ..
+
+make -j5 install \
+  DESTDIR=$PKG \
+  UPDATE_CACHE=FALSE
+
+cd ..
+
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG -name perllocal.pod -o -name ".packlist" -o -name "*.bs" | xargs rm -f || true
+
+mkdir -p $PKG/usr/share/pixmaps
+mv $PKG/opt/MuseScore-Legacy/share/icons/hicolor/128x128/apps/mscore.png $PKG/usr/share/pixmaps/mscore-legacy.png
+rm -rf $PKG/opt/MuseScore-Legacy/share/icons
+
+mkdir -p $PKG/usr/share/applications
+mv $PKG/opt/MuseScore-Legacy/share/applications/mscore.desktop $PKG/usr/share/applications/mscore-legacy.desktop
+rm -rf $PKG/opt/MuseScore-Legacy/share/applications
+sed -i 's|Exec=mscore %F|Exec=mscore-legacy %F|' $PKG/usr/share/applications/mscore-legacy.desktop
+sed -i 's|Icon=mscore|Icon=mscore-legacy|' $PKG/usr/share/applications/mscore-legacy.desktop
+
+mkdir -p $PKG/usr/man/man1
+mv $PKG/opt/MuseScore-Legacy/man/man1/mscore.1.gz $PKG/usr/man/man1/mscore-legacy.1.gz
+rm -rf $PKG/opt/MuseScore-Legacy/man
+
+mkdir -p $PKG/usr/bin
+( cd $PKG/usr/bin ; rm -rf mscore-legacy )
+( cd $PKG/usr/bin ; ln -sf ../../opt/MuseScore-Legacy/bin/mscore mscore-legacy )
+( cd $PKG/usr/bin ; rm -rf MuseScore-Legacy )
+( cd $PKG/usr/bin ; ln -sf ../../opt/MuseScore-Legacy/bin/mscore MuseScore-Legacy )
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a  LICENSE.* README.md $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
