@@ -2,31 +2,23 @@
 
 # Slackware build script for spectmorph
 
-# Copyright 2022 Juan M. Lasca <juanmlasca@gmail.com> 
-# All rights reserved.
-#
-# Redistribution and use of this script, with or without modification, is
-# permitted provided that the following conditions are met:
-#
-# 1. Redistributions of this script must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-#
-#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
-#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
-#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Original author, 2022 Juan M. Lasca <email removed> 
+# Modified and now maintained by B. Watson <urchlay@slackware.uk>
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20240225 bkw: BUILD=2
+# - Take over maintenance.
+# - Relicense as WTFPL.
+# - Include PDF manual in package.
+# - Tweak .desktop file.
+# - Tweak README and slack-desc.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=spectmorph
 VERSION=${VERSION:-0.6.1}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -38,9 +30,6 @@ case "$( uname -m )" in
 esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}"  ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -73,11 +62,8 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -94,27 +80,31 @@ CXXFLAGS="$SLKCFLAGS" \
   --with-jack \
   --with-lv2
 
+# 20240225 bkw: do not run ldconfig during the build. it's useless
+# and slows things down.
+sed -i 's,|| */sbin/ldconfig,|| /bin/true,' */Makefile
+
 make
-make install DESTDIR=$PKG
+make install-strip DESTDIR=$PKG
+rm -f $PKG/usr/lib*/*.la
+gzip -9 $PKG/usr/man/man*/*
 
-rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+# 20240225 bkw: install-strip misses these.
+strip $PKG/usr/lib*/{lv2/*/*.so,clap/*.clap,vst/*.so} \
+      2>/dev/null || true
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a COPYING AUTHORS DESIGN README.md TODO $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a COPYING AUTHORS DESIGN README.md TODO $PKGDOC
+cat $CWD/manual.pdf > $PKGDOC/manual.pdf
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
-# fix desktop file
-sed -i 's/smjack\.png/smjack/' $PKG/usr/share/applications/smjack.desktop
+# 20240225 bkw: full path for icon, since it's not in /usr/share/icons.
+sed -i '/^Icon/s,=,=/usr/share/pixmaps/,' $PKG/usr/share/applications/*desktop
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
