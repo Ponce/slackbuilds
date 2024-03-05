@@ -1,55 +1,92 @@
 #!/bin/bash
+
 # Start/stop/restart sickchill.
 
-# rc.sickrage created by Jeremy Hansen for Slackware in 2016
-# rc.sickchill was updated by Jeremy Hansen for Slackware in 2023
+# Originally created for sickrage in 2016
+# Updated to sickchill in 2023
+
+# Copyright 2016-2024  Jeremy Hansen <jebrhansen+SBo@gmail.com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 # Set program name in case you want to run sick{beard|rage|gear|etc}
 PROG=${PROG:-sickchill}
 
+# If you want to have multiple instances of sickchill running, set
+# the suffix here.
+SUFFIX=
+
+# Set the full program name for folders
+if [ -n "$SUFFIX" ]; then
+  FULLPROG="$PROG-$SUFFIX"
+# Just use $PROG if there isn't a suffix set
+else
+  FULLPROG="$PROG"
+fi
+
 # Source SickRage configuration
-if [ -f /etc/"$PROG".conf ]; then
-        . /etc/"$PROG".conf
+if [ -f /etc/"$FULLPROG".conf ]; then
+        . /etc/"$FULLPROG".conf
 fi
 
 # Ensure all required variables are set in conf file
-# Edit conf file in /etc/sickchill.conf for any changes
+# Edit conf file in /etc/$PROG-$SUFFIX.conf for any changes
+MISSING=0
 for var in USERNAME HOMEDIR DATADIR PIDFILE PORT; do
   if [ -z "${!var}" ]; then
-    echo "/etc/$PROG.conf is missing some or all required variables ($var)."
-    echo "Please check the file and try again."
-    exit 1
+    ((MISSING++))
+    VAR="$var $VAR"
   fi
 done
+if [ $MISSING -gt 0 ]; then
+  echo "/etc/$FULLPROG.conf is missing some or all required variables ($VAR)."
+  echo "Please check the file and try again."
+fi
 
 # Check if the program is running and pid file exists
-check() {
+check()
+{
   if pgrep "$PROG" > /dev/null; then
-    if [ -e "$PIDFILE" ] && ! pgrep -F "$PIDFILE" > /dev/null; then
-        STATUS=broken
-        echo "WARNING: $PROG is running, but its PID does not match the one in $PIDFILE."
-    elif [ ! -e "$PIDFILE" ]; then
-        STATUS=broken
-        echo "WARNING: $PROG is running, but $PIDFILE does not exist."
-        echo "Maybe you ran $PROG from the commandline rather than rc.sickchill?"
-    else
+    # Check if the pidfile matches the running pid
+    if [ -e "$PIDFILE" ] && pgrep -f "$PIDFILE" > /dev/null; then
       STATUS=running
+    else
+      # Check if the program is running without the pid file matching
+      if pgrep -f "$FULLPROG.*$PORT" > /dev/null; then
+        STATUS=broken
+        echo "WARNING: $FULLPROG is running without the correct pid file."
+        echo "Did you start it without using the rc.$FULLPROG?"
+      else
+        STATUS=stopped
+      fi
     fi
   else
-    if [ -e "$PIDFILE" ]; then
-      STATUS=broken
-      echo "WARNING: $PROG is not running but $PIDFILE exists."
-    else
-      STATUS=stopped
-    fi
+    STATUS=stopped
   fi
 }
 
-status() {
+status()
+{
   if [ $STATUS == "running" ]; then
-    echo "$PROG currently running."
+    echo "$FULLPROG currently running."
   elif [ $STATUS == "stopped" ]; then
-    echo "$PROG not running."
+    echo "$FULLPROG not running."
   elif [ $STATUS == "broken" ]; then
     echo "Please fix the issue before attempting to run $(basename "$0") again."
   else
@@ -57,21 +94,23 @@ status() {
   fi
 }
 
-start() {
-  if [ $STATUS == "running" ]; then
-    echo "$PROG already running or not shut down properly."
-  else
-    echo -n "Starting $PROG: "
-    if su "$USERNAME" -s /bin/sh -c "/usr/bin/sickchill --daemon --pidfile=${PIDFILE} --datadir=${DATADIR} --port=${PORT} &> /dev/null"; then
+start()
+{
+  if [ $STATUS == "stopped" ]; then
+    if su "$USERNAME" -s /bin/sh -c "/usr/bin/${PROG} --daemon --pidfile=${PIDFILE} --datadir=${DATADIR} --port=${PORT} &> /dev/null"; then
       echo "Startup Successful"
     else
-      echo "Startup Failed. Please try running the following to see the errors."
-      echo "su $USERNAME -s /bin/sh -c \"/usr/bin/sickchill --daemon --pidfile=${PIDFILE} --datadir=${DATADIR} --port=${PORT}\""
+      su "$USERNAME" -s /bin/sh -c "/usr/bin/${PROG} --daemon --pidfile=${PIDFILE} --datadir=${DATADIR} --port=${PORT}"
+      echo "Startup Failed. The following command is what produced the failure:"
+      echo "su $USERNAME -s /bin/sh -c \"/usr/bin/${PROG} --daemon --pidfile=${PIDFILE} --datadir=${DATADIR} --port=${PORT}\""
     fi
+  else
+    status
   fi
 }
 
-stop() {
+stop()
+{
   if [ $STATUS == "stopped" ]; then
     echo "$PROG doesn't seem to be running. Please try running"
     echo "$0 start"
@@ -82,14 +121,24 @@ stop() {
       echo "Please run as root"
       exit 1
     fi
-    PID=$(cat "$PIDFILE")
     echo -n $"Shutting down $PROG: "
-    if ! curl -s http://localhost:"$PORT"/home/shutdown/?pid="$PID" | grep -q "shutting down"; then
+    curl -s http://localhost:"$PORT"/home/shutdown/?pid="$(cat "$PIDFILE")" | grep -q "shutting down"
+    # sickchill can take some time to properly shut down.
+    #Give it 10 seconds before forcing it to close.
+    TIMEOUT=10
+    for (( COUNT=0; COUNT <= TIMEOUT; COUNT++ )); do
+      if pgrep -f "$FULLPROG.*$PORT" > /dev/null; then
+        SHUTDOWN=success
+        break
+      fi
+      sleep 1
+    done
+    if [ "$SHUTDOWN" == "success" ]; then
+      echo "Shutdown successful."
+    else
       echo "Normal Shutdown Failed - Attempting to kill the process."
       sleep 7
-      kill -9 "$PID"
-    else
-      echo "Shutdown Successful"
+      pkill -9 -F "$PIDFILE"
     fi
   fi
 }
