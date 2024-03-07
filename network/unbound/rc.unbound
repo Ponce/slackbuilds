@@ -7,6 +7,7 @@ UNBOUND=/usr/sbin/unbound
 CONFIG=/etc/unbound/unbound.conf
 PIDFILE=/run/unbound/unbound.pid
 LOGDIR=/var/log/unbound
+KEYFILE=/var/lib/unbound/root.key
 
 # Unbound-control is useful but I'm not going to cram it
 # down your throat. Set this to "yes" to disable unbound-control
@@ -22,15 +23,29 @@ DISABLE_UNBOUND_CONTROL="no"
 DISABLE_LOGDIR_CHECKS="no"
 
 initchecks() {
-    # Look out for a stale pidfile. If there's one, remove it.
-    # This shouldn't be necessary unless the system was shutdown uncleanly
-    # or if Unbound crashes.
-    if [ -e $PIDFILE ] && [ ! $(pidof unbound) ]; then
-       echo "Looks like Unbound isn't running but there's a stale pid file."
-       echo "Removing $PIDFILE"
-       rm -vf $PIDFILE
-    fi
-    # Check that /run/unbound exists. If not, create and chown it.
+   # If auto-trust-anchor-file is enabled and the keyfile doesn't exists in
+   # /var/lib/unbound, we won't start the daemon. Most(?) errors can be caught
+   # by /usr/sbin/unbound executable but this one actually allows Unbound to start -
+   # - only for it to crash a moment later. Running unbound-checkconf on every start up
+   # would be useful, but it would make noise every time the daemon starts up.
+   if [ ! -z "$(unbound-checkconf -o auto-trust-anchor-file)" ] && [ ! -e "$KEYFILE" ]; then
+     echo "ERROR: $KEYFILE not found, yet auto-trust-anchor-file is enabled in $CONFIG"
+     echo "ERROR: Refusing to start because Unbound would crash."
+     echo "ERROR: Please generate Unbound Anchor file with the following command:"
+     echo "       # sh /etc/rc.d/rc.unbound generate-key"
+     echo
+     echo "...or comment out auto-trust-anchor-file in $CONFIG."
+     exit 1
+   fi
+   # Look out for a stale pidfile. If there's one, remove it.
+   # This shouldn't be necessary unless the system was shutdown uncleanly
+   # or if Unbound crashes.
+   if [ -e $PIDFILE ] && [ ! $(pidof unbound) ]; then
+      echo "Looks like Unbound isn't running but there's a stale pid file."
+      echo "Removing $PIDFILE"
+      rm -vf $PIDFILE
+   fi
+   # Check that /run/unbound exists. If not, create and chown it.
     if [ ! -e $(dirname $PIDFILE) ]; then
         mkdir -p $(dirname $PIDFILE)
         chown unbound:unbound $(dirname $PIDFILE)
@@ -42,6 +57,7 @@ initchecks() {
         echo "This is normal for the first run."
         echo "Running initial setup to generate certificates: /usr/sbin/unbound-control-setup"
         /usr/sbin/unbound-control-setup || exit 1
+        echo "Actually... no need to do anything. It's enabled by default on Slackware :-)"
     fi
     # Deleted the entire log directory by accident? Oh well, bound to happen.
     # Let's fix that right away.
@@ -56,6 +72,20 @@ initchecks() {
         chown -R unbound:unbound $LOGDIR && echo "Success!"
         fi
     fi
+}
+
+anchorkeygen() {
+     echo "Generating Unbound Anchor keyfile..."
+     sudo -u unbound unbound-anchor -f /etc/resolv.conf -R -a /var/lib/unbound/root.key
+     echo "Done"
+}
+
+checkconfig() {
+    echo "Checking Unbound configuration file: $CONFIG"
+    echo "This will run the command: /usr/sbin/unbound-checkconf"
+    echo "-----START unbound-checkconf output-----"
+    /usr/sbin/unbound-checkconf
+    echo "-----END unbound-checkconf output-----"
 
 }
 
@@ -65,7 +95,7 @@ start() {
         echo 'Unbound is already running!'
         return
     else
-	echo "Starting Unbound DNS validating resolver..."
+	echo "Starting Unbound..."
         $UNBOUND -c $CONFIG || echo "Failed to start! The error messages above might help."
     fi
 }
@@ -75,7 +105,7 @@ stop() {
         echo 'Unbound is not running.'
         return
     fi
-    echo "Stopping Unbound DNS validating resolver..."
+    echo "Stopping Unbound..."
     kill `cat $PIDFILE`
     rm -f $PIDFILE
 }
@@ -101,11 +131,17 @@ case "$1" in
 	sleep 1
         start
         ;;
+    'generate-key')
+        anchorkeygen
+        ;;
+    'check-config')
+        checkconfig
+        ;;
     'reload')
         reload
         ;;
     *)
-        echo "Usage: $0 {start|stop|reload|restart}"
+        echo "Usage: $0 {start|stop|reload|restart|generate-key|check-config}"
         exit 1
         ;;
 esac
