@@ -1,0 +1,201 @@
+#!/bin/bash
+
+# SlackBuild script for OTB-legacy
+
+# Copyright 2023-2024 Giancarlo Dessi, Cagliari, IT
+# Copyright 2014-2021 Benjamin Trigona-Harany <slackbuilds@jaxartes.net>
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are
+# met:
+#
+# * Redistributions of source code must retain the above copyright
+# notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=OTB-legacy
+SRCNAM=OTB
+VERSION=${VERSION:-8.1.2}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+#Look for other installed versions of Orfeo ToolBox version 8
+#Versions earlier than OTB 8 are not detected
+if [ -d /usr/doc/OTB-8* ]; then
+  echo "*****************************************************************"
+  echo "WARNING: another installation of OTB is found in your system!"
+  echo "If you are trying to update or rebuild your OTB with this script"
+  echo "you must remove previous OTB package installed because OTB-legacy"
+  echo "will conflict with the current installed:"
+  echo "# removepkg OTB"
+  echo "This script will be stopped"
+  echo "*****************************************************************"
+  exit 1
+fi 
+#Look for other installed versions of Orfeo ToolBox later than 8.1.2
+if [ -d /usr/doc/OTB-9* ]; then
+  echo "*****************************************************************"
+  echo "WARNING: a later version of OTB is found in your system!"
+  echo "If you are trying to downgrade your OTB with this script"
+  echo "you must remove previous OTB package installed because OTB-legacy"
+  echo "will conflict with the current installed:"
+  echo "# removepkg OTB"
+  echo "This script will be stopped"
+  echo "*****************************************************************"
+  exit 1
+fi 
+
+if [ -d /usr/share/cmake-3.28 ]; then
+   # This prevents some cmake warnings in current 
+   CMAKE_POLICY="-DCMAKE_POLICY_DEFAULT_CMP0106=OLD "
+else
+   CMAKE_POLICY=""
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+# Search for optional dependencies
+if pkg-config --exists ompi; then
+  BUILD_MPI="" ; [ "${MPI:-ON}" = "ON" ] && BUILD_MPI="-DOTB_USE_MPI=ON "
+else
+  BUILD_MPI=""
+fi
+
+if pkg-config --exists glfw3; then
+  WITH_GLFW="" ; [ "${GLFW:-ON}" = "ON" ] && WITH_GLFW="-DOTB_USE_GLFW=ON "
+else
+  WITH_GLFW=""
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+patch -p1 < $CWD/otbSpatialReference.cxx.patch
+
+sed -i CMakeLists.txt -e "s/message(WARNING/message(STATUS/g"
+
+sed -i "s/lib\b/lib${LIBDIRSUFFIX}/" \
+  CMakeLists.txt \
+  CMake/OTBModuleExternal.cmake \
+  CMake/OTBStandaloneModuleMacros.cmake \
+  CMake/OTBApplicationMacros.cmake
+
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_C_FLAGS="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DBUILD_EXAMPLES=OFF \
+    -DBUILD_TESTING=OFF \
+    -DOTB_USE_CURL=ON \
+    -DOTB_USE_QWT=ON \
+    -DOTB_USE_GLEW=ON \
+    -DOTB_USE_OPENGL=ON \
+    -DOTB_USE_QT=ON \
+    -DOTB_USE_GLUT=ON \
+    -DOTB_USE_GSL=ON \
+    -DOTB_USE_LIBKML=ON \
+    -DOTB_USE_MUPARSER=ON \
+    -DOTB_USE_OPENCV=ON \
+    -DOTB_USE_OPENMP=ON \
+    -DOTB_USE_SHARK=ON \
+    -DOTB_INSTALL_PYTHON_DIR=$(python3 -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())") \
+    -DOTB_WRAP_PYTHON=ON \
+    -DOTB_INSTALL_DOC_DIR=doc/$PRGNAM-$VERSION \
+    -DGDAL_CONFIG_CHECKING=ON \
+    $BUILD_MPI \
+    $WITH_GLFW \
+    $CMAKE_POLICY \
+    ..
+  make -j 10
+  make install DESTDIR=$PKG
+cd ..
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/etc/profile.d
+cat > $PKG/etc/profile.d/otb.csh << EOF
+#!/bin/csh
+# Orfeo ToolBox applications path
+setenv OTB_APPLICATION_PATH /usr/lib${LIBDIRSUFFIX}/otb/applications
+EOF
+cat > $PKG/etc/profile.d/otb.sh << EOF
+#!/bin/sh
+# Orfeo ToolBox applications path
+export OTB_APPLICATION_PATH=/usr/lib${LIBDIRSUFFIX}/otb/applications
+EOF
+
+chmod 0755 $PKG/etc/profile.d/otb.csh
+chmod 0755 $PKG/etc/profile.d/otb.sh
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  README.md RELEASE_NOTES.txt \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
