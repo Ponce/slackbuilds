@@ -2,7 +2,7 @@
 
 # SlackBuild script for OTB
 
-# Copyright 2023 Giancarlo Dessi, Cagliari, IT
+# Copyright 2023-2024 Giancarlo Dessi, Cagliari, IT
 # Copyright 2014-2021 Benjamin Trigona-Harany <slackbuilds@jaxartes.net>
 # All rights reserved.
 #
@@ -28,7 +28,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=OTB
-VERSION=${VERSION:-8.1.2}
+VERSION=${VERSION:-9.0.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -45,6 +45,19 @@ if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
 fi
+
+#Look for installed package OTB-legacy
+if [ -d /usr/doc/OTB-legacy* ]; then
+  echo "*****************************************************************"
+  echo "WARNING: package OTB-legacy is found installed in your system!"
+  echo "OTB and OTB-legacy cannot exist in the same system, please remove"
+  echo "OTB-legacy before running this script if you want to upgrade to a"
+  echo "later version of OTB:"
+  echo "# removepkg OTB-legacy"
+  echo "This script will be stopped"
+  echo "*****************************************************************"
+  exit 1
+fi 
 
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
@@ -66,20 +79,6 @@ fi
 
 set -e
 
-# Search for optional dependencies
-if pkg-config --exists ompi; then
-  BUILD_MPI="" ; [ "${MPI:-ON}" = "ON" ] && BUILD_MPI="-DOTB_USE_MPI=ON "
-else
-  BUILD_MPI=""
-fi
-
-# glfw3 will be enabled only if environment variable MONTEVERDI is set to ON
-if pkg-config --exists glfw3; then
-  WITH_GLFW="" ; [ "${GLFW:-ON}" = "ON" ] && WITH_GLFW="-DOTB_USE_GLFW=ON "
-else
-  WITH_GLFW=""
-fi
-
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
@@ -93,18 +92,15 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
+patch -p1 < $CWD/otbSpatialReference.cxx.patch
+
+sed -i CMakeLists.txt -e "s/message(WARNING/message(STATUS/g"
+
 sed -i "s/lib\b/lib${LIBDIRSUFFIX}/" \
   CMakeLists.txt \
   CMake/OTBModuleExternal.cmake \
   CMake/OTBStandaloneModuleMacros.cmake \
   CMake/OTBApplicationMacros.cmake
-
-MONTEVERDI=${MONTEVERDI:-OFF}
-BUILD_MONTEVERDI="-DOTB_USE_QWT=$MONTEVERDI \
-     -DOTB_USE_GLEW=$MONTEVERDI \
-     -DOTB_USE_OPENGL=$MONTEVERDI \
-     $WITH_GLFW"
-BUILD_QT="-DOTB_USE_QT=${QTGUI:-ON}"
 
 mkdir -p build
 cd build
@@ -112,63 +108,55 @@ cd build
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_FLAGS="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS="$SLKCFLAGS" \
+    -DCMAKE_POLICY_DEFAULT_CMP0106=OLD \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DBUILD_EXAMPLES=OFF \
-    -DBUILD_TESTING=OFF \
     -DOTB_USE_CURL=ON \
-    -DOTB_USE_GLUT=ON \
     -DOTB_USE_GSL=ON \
     -DOTB_USE_LIBKML=ON \
-    -DOTB_USE_MUPARSER=ON \
-    -DOTB_USE_OPENCV=ON \
+    -DOTBGroup_Learning=ON \
+    -DOTBGroup_FeaturesExtraction=ON \
+    -DOTB_USE_MUPARSERX=OFF \
     -DOTB_USE_OPENMP=ON \
     -DOTB_USE_SHARK=ON \
     -DOTB_INSTALL_PYTHON_DIR=$(python3 -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())") \
     -DOTB_WRAP_PYTHON=ON \
-    -DOTB_INSTALL_DOC_DIR=doc/$PRGNAM-$VERSION \
-    -DGDAL_CONFIG_CHECKING=ON \
-    $BUILD_MPI \
-    $BUILD_MONTEVERDI \
-    $BUILD_QT \
+    -DGDAL_CONFIG_CHECKING=OFF \
+    -DBUILD_DOCUMENTATION=OFF \
     ..
-  make
+  make -j 10
   make install DESTDIR=$PKG
 cd ..
 
-if [ "$QTGUI" = "OFF" ] ; then
-  # otbgui scripts are added but are unusable
-  rm $PKG/usr/bin/otbgui_*
-fi
-
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+  
+# Experimental: remove post-install scripts from a no-standard path
+# These scripts should be used to reconfigure the environment if various versions of OTB
+# are installed and/or set the correct Python path in some Linux distributions 
+# They do not seem essential and their launch might cause unexpected issues with 
+# pkgtool. I think we do not need this
+cp -a $PKG/usr/LICENSE .
+rm -f $PKG/usr/README \
+      $PKG/usr/otbenv.profile \
+      $PKG/usr/recompile_bindings.sh \
+      $PKG/usr/LICENSE
 
-mkdir -p $PKG/etc/profile.d
-cat > $PKG/etc/profile.d/otb.csh << EOF
-#!/bin/csh
-# Orfeo ToolBox applications path
-setenv OTB_APPLICATION_PATH /usr/lib${LIBDIRSUFFIX}/otb/applications
-EOF
-cat > $PKG/etc/profile.d/otb.sh << EOF
-#!/bin/sh
-# Orfeo ToolBox applications path
-export OTB_APPLICATION_PATH=/usr/lib${LIBDIRSUFFIX}/otb/applications
-EOF
-
-chmod 0755 $PKG/etc/profile.d/otb.csh
-chmod 0755 $PKG/etc/profile.d/otb.sh
+# This no standard directory includes three post-install scripts. We do need them?
+# At the moment we move this directory in /usr/share/otb: users would require these
+# tools for singular contexts
+mv $PKG/usr/tools $PKG/usr/share/otb
+      
+# Remove no standard directory /usr/share/doc with superfluous content
+rm -rf $PKG/usr/share/doc
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  README.md RELEASE_NOTES.txt \
+  README.md RELEASE_NOTES.txt LICENSE \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-if [ "$MONTEVERDI" = "ON" ] ; then
-  cat $CWD/doinst.sh > $PKG/install/doinst.sh
-fi
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
