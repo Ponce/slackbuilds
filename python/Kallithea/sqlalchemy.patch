@@ -1,0 +1,472 @@
+diff -r 7324ff1929d5 kallithea/lib/auth.py
+--- a/kallithea/lib/auth.py	Thu May 27 21:28:32 2021 +0200
++++ b/kallithea/lib/auth.py	Thu Mar 14 14:26:11 2024 +0100
+@@ -29,7 +29,7 @@
+ 
+ import ipaddr
+ from decorator import decorator
+-from sqlalchemy.orm import joinedload
++from sqlalchemy.orm import joinedload, aliased
+ from sqlalchemy.orm.exc import ObjectDeletedError
+ from tg import request
+ from tg.i18n import ugettext as _
+@@ -164,11 +164,11 @@
+         # user group global permissions
+         user_perms_from_users_groups = meta.Session().query(db.UserGroupToPerm) \
+             .options(joinedload(db.UserGroupToPerm.permission)) \
+-            .join((db.UserGroupMember, db.UserGroupToPerm.users_group_id ==
+-                   db.UserGroupMember.users_group_id)) \
++            .join(db.UserGroupMember, db.UserGroupToPerm.users_group_id ==
++                   db.UserGroupMember.users_group_id) \
+             .filter(db.UserGroupMember.user_id == self.user_id) \
+-            .join((db.UserGroup, db.UserGroupMember.users_group_id ==
+-                   db.UserGroup.users_group_id)) \
++            .join(db.UserGroup, db.UserGroupMember.users_group_id ==
++                   db.UserGroup.users_group_id) \
+             .filter(db.UserGroup.users_group_active == True) \
+             .order_by(db.UserGroupToPerm.users_group_id) \
+             .all()
+@@ -222,11 +222,11 @@
+             # user group repository permissions
+             user_repo_perms_from_users_groups = \
+              meta.Session().query(db.UserGroupRepoToPerm) \
+-                .join((db.UserGroup, db.UserGroupRepoToPerm.users_group_id ==
+-                       db.UserGroup.users_group_id)) \
++                .join(db.UserGroup, db.UserGroupRepoToPerm.users_group_id ==
++                       db.UserGroup.users_group_id) \
+                 .filter(db.UserGroup.users_group_active == True) \
+-                .join((db.UserGroupMember, db.UserGroupRepoToPerm.users_group_id ==
+-                       db.UserGroupMember.users_group_id)) \
++                .join(db.UserGroupMember, db.UserGroupRepoToPerm.users_group_id ==
++                       db.UserGroupMember.users_group_id) \
+                 .filter(db.UserGroupMember.user_id == self.user_id) \
+                 .options(joinedload(db.UserGroupRepoToPerm.repository)) \
+                 .options(joinedload(db.UserGroupRepoToPerm.permission)) \
+@@ -268,11 +268,11 @@
+             # user group for repo groups permissions
+             user_repo_group_perms_from_users_groups = \
+                 meta.Session().query(db.UserGroupRepoGroupToPerm) \
+-                .join((db.UserGroup, db.UserGroupRepoGroupToPerm.users_group_id ==
+-                       db.UserGroup.users_group_id)) \
++                .join(db.UserGroup, db.UserGroupRepoGroupToPerm.users_group_id ==
++                       db.UserGroup.users_group_id) \
+                 .filter(db.UserGroup.users_group_active == True) \
+-                .join((db.UserGroupMember, db.UserGroupRepoGroupToPerm.users_group_id
+-                       == db.UserGroupMember.users_group_id)) \
++                .join(db.UserGroupMember, db.UserGroupRepoGroupToPerm.users_group_id
++                       == db.UserGroupMember.users_group_id) \
+                 .filter(db.UserGroupMember.user_id == self.user_id) \
+                 .options(joinedload(db.UserGroupRepoGroupToPerm.permission)) \
+                 .all()
+@@ -311,16 +311,17 @@
+                 user_group_permissions[u_k] = p
+ 
+             # user group for user group permissions
++            ug1 = aliased(db.UserGroup)
+             user_group_user_groups_perms = \
+                 meta.Session().query(db.UserGroupUserGroupToPerm) \
+-                .join((db.UserGroup, db.UserGroupUserGroupToPerm.target_user_group_id
+-                       == db.UserGroup.users_group_id)) \
+-                .join((db.UserGroupMember, db.UserGroupUserGroupToPerm.user_group_id
+-                       == db.UserGroupMember.users_group_id)) \
++                .join(db.UserGroup, db.UserGroupUserGroupToPerm.target_user_group_id
++                       == db.UserGroup.users_group_id) \
++                .join(db.UserGroupMember, db.UserGroupUserGroupToPerm.user_group_id
++                       == db.UserGroupMember.users_group_id) \
+                 .filter(db.UserGroupMember.user_id == self.user_id) \
+-                .join((db.UserGroup, db.UserGroupMember.users_group_id ==
+-                       db.UserGroup.users_group_id), aliased=True, from_joinpoint=True) \
+-                .filter(db.UserGroup.users_group_active == True) \
++                .join(ug1, db.UserGroupMember.users_group_id ==
++                       db.UserGroup.users_group_id) \
++                .filter(ug1 == True) \
+                 .options(joinedload(db.UserGroupUserGroupToPerm.permission)) \
+                 .all()
+             for perm in user_group_user_groups_perms:
+diff -r 7324ff1929d5 kallithea/lib/db_manage.py
+--- a/kallithea/lib/db_manage.py	Thu May 27 21:28:32 2021 +0200
++++ b/kallithea/lib/db_manage.py	Thu Mar 14 14:26:11 2024 +0100
+@@ -90,7 +90,8 @@
+             sys.exit(0)
+ 
+         if reuse_database:
+-            meta.Base.metadata.drop_all()
++            engine = sqlalchemy.create_engine(url)
++            meta.Base.metadata.drop_all(engine)
+         else:
+             if url.drivername == 'mysql':
+                 url.database = None  # don't connect to the database (it might not exist)
+@@ -109,9 +110,10 @@
+             else:
+                 # Some databases enforce foreign key constraints and Base.metadata.drop_all() doesn't work, but this is
+                 # known to work on SQLite - possibly not on other databases with strong referential integrity
+-                meta.Base.metadata.drop_all()
++                engine = sqlalchemy.create_engine(url)
++                meta.Base.metadata.drop_all(engine)
+ 
+-        meta.Base.metadata.create_all(checkfirst=False)
++        meta.Base.metadata.create_all(engine, checkfirst=False)
+ 
+         # Create an Alembic configuration and generate the version table,
+         # "stamping" it with the most recent Alembic migration revision, to
+diff -r 7324ff1929d5 kallithea/model/base.py
+--- a/kallithea/model/base.py	Thu May 27 21:28:32 2021 +0200
++++ b/kallithea/model/base.py	Thu Mar 14 14:26:11 2024 +0100
+@@ -46,3 +46,4 @@
+     engine_str = obfuscate_url_pw(str(engine.url))
+     log.info("initializing db for %s", engine_str)
+     meta.Base.metadata.bind = engine
++    meta.Session.configure(bind=engine)
+diff -r 7324ff1929d5 kallithea/model/changeset_status.py
+--- a/kallithea/model/changeset_status.py	Thu May 27 21:28:32 2021 +0200
++++ b/kallithea/model/changeset_status.py	Thu Mar 14 14:26:11 2024 +0100
+@@ -110,7 +110,7 @@
+                      with_revisions=False):
+         q = self._get_status_query(repo, revision, pull_request,
+                                    with_revisions)
+-        q = q.options(joinedload('author'))
++        q = q.options(joinedload(db.ChangesetStatus.author))
+         return q.all()
+ 
+     def get_status(self, repo, revision=None, pull_request=None, as_str=True):
+diff -r 7324ff1929d5 kallithea/model/db.py
+--- a/kallithea/model/db.py	Thu May 27 21:28:32 2021 +0200
++++ b/kallithea/model/db.py	Thu Mar 14 14:26:11 2024 +0100
+@@ -406,27 +406,27 @@
+     created_on = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+     _user_data = Column("user_data", LargeBinary(), nullable=True)  # JSON data # FIXME: not nullable?
+ 
+-    user_log = relationship('UserLog')
+-    user_perms = relationship('UserToPerm', primaryjoin="User.user_id==UserToPerm.user_id", cascade='all')
++    user_log = relationship('UserLog', back_populates="user")
++    user_perms = relationship('UserToPerm', primaryjoin="User.user_id==UserToPerm.user_id", cascade='all', back_populates="user")
+ 
+-    repositories = relationship('Repository')
+-    repo_groups = relationship('RepoGroup')
+-    user_groups = relationship('UserGroup')
+-    user_followers = relationship('UserFollowing', primaryjoin='UserFollowing.follows_user_id==User.user_id', cascade='all')
+-    followings = relationship('UserFollowing', primaryjoin='UserFollowing.user_id==User.user_id', cascade='all')
++    repositories = relationship('Repository', back_populates="owner")
++    repo_groups = relationship('RepoGroup', back_populates="owner")
++    user_groups = relationship('UserGroup', back_populates="owner")
++    user_followers = relationship('UserFollowing', primaryjoin='UserFollowing.follows_user_id==User.user_id', cascade='all', back_populates="follows_user")
++    followings = relationship('UserFollowing', primaryjoin='UserFollowing.user_id==User.user_id', cascade='all', back_populates="user")
+ 
+-    repo_to_perm = relationship('UserRepoToPerm', primaryjoin='UserRepoToPerm.user_id==User.user_id', cascade='all')
+-    repo_group_to_perm = relationship('UserRepoGroupToPerm', primaryjoin='UserRepoGroupToPerm.user_id==User.user_id', cascade='all')
++    repo_to_perm = relationship('UserRepoToPerm', primaryjoin='UserRepoToPerm.user_id==User.user_id', cascade='all', back_populates="user")
++    repo_group_to_perm = relationship('UserRepoGroupToPerm', primaryjoin='UserRepoGroupToPerm.user_id==User.user_id', cascade='all', back_populates="user")
+ 
+-    group_member = relationship('UserGroupMember', cascade='all')
++    group_member = relationship('UserGroupMember', cascade='all', back_populates="user")
+ 
+     # comments created by this user
+-    user_comments = relationship('ChangesetComment', cascade='all')
++    user_comments = relationship('ChangesetComment', cascade='all', back_populates="author")
+     # extra emails for this user
+-    user_emails = relationship('UserEmailMap', cascade='all')
++    user_emails = relationship('UserEmailMap', cascade='all', back_populates="user")
+     # extra API keys
+-    user_api_keys = relationship('UserApiKeys', cascade='all')
+-    ssh_keys = relationship('UserSshKeys', cascade='all')
++    user_api_keys = relationship('UserApiKeys', cascade='all', back_populates="user")
++    ssh_keys = relationship('UserSshKeys', cascade='all', back_populates="user")
+ 
+     @hybrid_property
+     def email(self):
+@@ -669,7 +669,7 @@
+     expires = Column(Float(53), nullable=False)
+     created_on = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+ 
+-    user = relationship('User')
++    user = relationship('User', back_populates="user_api_keys")
+ 
+     @hybrid_property
+     def is_expired(self):
+@@ -686,7 +686,7 @@
+     email_id = Column(Integer(), primary_key=True)
+     user_id = Column(Integer(), ForeignKey('users.user_id'), nullable=False)
+     _email = Column("email", String(255), nullable=False, unique=True)
+-    user = relationship('User')
++    user = relationship('User', back_populates="user_emails")
+ 
+     @validates('_email')
+     def validate_email(self, key, email):
+@@ -757,8 +757,8 @@
+     def action_as_day(self):
+         return datetime.date(*self.action_date.timetuple()[:3])
+ 
+-    user = relationship('User')
+-    repository = relationship('Repository', cascade='')
++    user = relationship('User', back_populates="user_log")
++    repository = relationship('Repository', cascade='', back_populates="logs")
+ 
+ 
+ class UserGroup(meta.Base, BaseDbModel):
+@@ -775,14 +775,14 @@
+     created_on = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+     _group_data = Column("group_data", LargeBinary(), nullable=True)  # JSON data # FIXME: not nullable?
+ 
+-    members = relationship('UserGroupMember', cascade="all, delete-orphan")
+-    users_group_to_perm = relationship('UserGroupToPerm', cascade='all')
+-    users_group_repo_to_perm = relationship('UserGroupRepoToPerm', cascade='all')
+-    users_group_repo_group_to_perm = relationship('UserGroupRepoGroupToPerm', cascade='all')
+-    user_user_group_to_perm = relationship('UserUserGroupToPerm', cascade='all')
+-    user_group_user_group_to_perm = relationship('UserGroupUserGroupToPerm', primaryjoin="UserGroupUserGroupToPerm.target_user_group_id==UserGroup.users_group_id", cascade='all')
++    members = relationship('UserGroupMember', cascade="all, delete-orphan", back_populates="users_group")
++    users_group_to_perm = relationship('UserGroupToPerm', cascade='all', back_populates="users_group")
++    users_group_repo_to_perm = relationship('UserGroupRepoToPerm', cascade='all', back_populates="users_group")
++    users_group_repo_group_to_perm = relationship('UserGroupRepoGroupToPerm', cascade='all', back_populates="users_group")
++    user_user_group_to_perm = relationship('UserUserGroupToPerm', cascade='all', back_populates="user_group")
++    user_group_user_group_to_perm = relationship('UserGroupUserGroupToPerm', primaryjoin="UserGroupUserGroupToPerm.target_user_group_id==UserGroup.users_group_id", cascade='all', back_populates="target_user_group")
+ 
+-    owner = relationship('User')
++    owner = relationship('User', back_populates="user_groups")
+ 
+     @hybrid_property
+     def group_data(self):
+@@ -852,8 +852,8 @@
+     users_group_id = Column(Integer(), ForeignKey('users_groups.users_group_id'), nullable=False)
+     user_id = Column(Integer(), ForeignKey('users.user_id'), nullable=False)
+ 
+-    user = relationship('User')
+-    users_group = relationship('UserGroup')
++    user = relationship('User', back_populates="group_member")
++    users_group = relationship('UserGroup', back_populates="members")
+ 
+     def __init__(self, gr_id='', u_id=''):
+         self.users_group_id = gr_id
+@@ -878,7 +878,7 @@
+     field_type = Column(String(255), nullable=False)
+     created_on = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+ 
+-    repository = relationship('Repository')
++    repository = relationship('Repository', back_populates="extra_fields")
+ 
+     @property
+     def field_key_prefixed(self):
+@@ -931,29 +931,29 @@
+     fork_id = Column(Integer(), ForeignKey('repositories.repo_id'), nullable=True)
+     group_id = Column(Integer(), ForeignKey('groups.group_id'), nullable=True)
+ 
+-    owner = relationship('User')
++    owner = relationship('User', back_populates="repositories")
+     fork = relationship('Repository', remote_side=repo_id)
+     group = relationship('RepoGroup')
+-    repo_to_perm = relationship('UserRepoToPerm', cascade='all', order_by='UserRepoToPerm.repo_to_perm_id')
+-    users_group_to_perm = relationship('UserGroupRepoToPerm', cascade='all')
+-    stats = relationship('Statistics', cascade='all', uselist=False)
++    repo_to_perm = relationship('UserRepoToPerm', cascade='all', order_by='UserRepoToPerm.repo_to_perm_id', back_populates="repository")
++    users_group_to_perm = relationship('UserGroupRepoToPerm', cascade='all', back_populates="repository")
++    stats = relationship('Statistics', cascade='all', uselist=False, back_populates="repository")
+ 
+     followers = relationship('UserFollowing',
+                              primaryjoin='UserFollowing.follows_repository_id==Repository.repo_id',
+-                             cascade='all')
++                             cascade='all', back_populates="follows_repository")
+     extra_fields = relationship('RepositoryField',
+-                                cascade="all, delete-orphan")
++                                cascade="all, delete-orphan", back_populates="repository")
+ 
+-    logs = relationship('UserLog')
+-    comments = relationship('ChangesetComment', cascade="all, delete-orphan")
++    logs = relationship('UserLog', back_populates="repository")
++    comments = relationship('ChangesetComment', cascade="all, delete-orphan", back_populates="repo")
+ 
+     pull_requests_org = relationship('PullRequest',
+                     primaryjoin='PullRequest.org_repo_id==Repository.repo_id',
+-                    cascade="all, delete-orphan")
++                    cascade="all, delete-orphan", back_populates="org_repo")
+ 
+     pull_requests_other = relationship('PullRequest',
+                     primaryjoin='PullRequest.other_repo_id==Repository.repo_id',
+-                    cascade="all, delete-orphan")
++                    cascade="all, delete-orphan", back_populates="other_repo")
+ 
+     def __repr__(self):
+         return "<%s %s: %r>" % (self.__class__.__name__,
+@@ -1343,10 +1343,10 @@
+     owner_id = Column('user_id', Integer(), ForeignKey('users.user_id'), nullable=False)
+     created_on = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+ 
+-    repo_group_to_perm = relationship('UserRepoGroupToPerm', cascade='all', order_by='UserRepoGroupToPerm.group_to_perm_id')
+-    users_group_to_perm = relationship('UserGroupRepoGroupToPerm', cascade='all')
++    repo_group_to_perm = relationship('UserRepoGroupToPerm', cascade='all', order_by='UserRepoGroupToPerm.group_to_perm_id', back_populates="group")
++    users_group_to_perm = relationship('UserGroupRepoGroupToPerm', cascade='all', back_populates="group")
+     parent_group = relationship('RepoGroup', remote_side=group_id)
+-    owner = relationship('User')
++    owner = relationship('User', back_populates="repo_groups")
+ 
+     @classmethod
+     def query(cls, sorted=False):
+@@ -1641,8 +1641,8 @@
+     permission_id = Column(Integer(), ForeignKey('permissions.permission_id'), nullable=False)
+     repository_id = Column(Integer(), ForeignKey('repositories.repo_id'), nullable=False)
+ 
+-    user = relationship('User')
+-    repository = relationship('Repository')
++    user = relationship('User', back_populates="repo_to_perm")
++    repository = relationship('Repository', back_populates="repo_to_perm")
+     permission = relationship('Permission')
+ 
+     @classmethod
+@@ -1672,7 +1672,7 @@
+     user_group_id = Column(Integer(), ForeignKey('users_groups.users_group_id'), nullable=False)
+ 
+     user = relationship('User')
+-    user_group = relationship('UserGroup')
++    user_group = relationship('UserGroup', back_populates="user_user_group_to_perm")
+     permission = relationship('Permission')
+ 
+     @classmethod
+@@ -1700,7 +1700,7 @@
+     user_id = Column(Integer(), ForeignKey('users.user_id'), nullable=False)
+     permission_id = Column(Integer(), ForeignKey('permissions.permission_id'), nullable=False)
+ 
+-    user = relationship('User')
++    user = relationship('User', back_populates="user_perms")
+     permission = relationship('Permission')
+ 
+     def __repr__(self):
+@@ -1720,9 +1720,9 @@
+     permission_id = Column(Integer(), ForeignKey('permissions.permission_id'), nullable=False)
+     repository_id = Column(Integer(), ForeignKey('repositories.repo_id'), nullable=False)
+ 
+-    users_group = relationship('UserGroup')
++    users_group = relationship('UserGroup', back_populates="users_group_repo_to_perm")
+     permission = relationship('Permission')
+-    repository = relationship('Repository')
++    repository = relationship('Repository', back_populates="users_group_to_perm")
+ 
+     @classmethod
+     def create(cls, users_group, repository, permission):
+@@ -1750,7 +1750,7 @@
+     permission_id = Column(Integer(), ForeignKey('permissions.permission_id'), nullable=False)
+     user_group_id = Column(Integer(), ForeignKey('users_groups.users_group_id'), nullable=False)
+ 
+-    target_user_group = relationship('UserGroup', primaryjoin='UserGroupUserGroupToPerm.target_user_group_id==UserGroup.users_group_id')
++    target_user_group = relationship('UserGroup', primaryjoin='UserGroupUserGroupToPerm.target_user_group_id==UserGroup.users_group_id', back_populates="user_group_user_group_to_perm")
+     user_group = relationship('UserGroup', primaryjoin='UserGroupUserGroupToPerm.user_group_id==UserGroup.users_group_id')
+     permission = relationship('Permission')
+ 
+@@ -1779,7 +1779,7 @@
+     users_group_id = Column(Integer(), ForeignKey('users_groups.users_group_id'), nullable=False)
+     permission_id = Column(Integer(), ForeignKey('permissions.permission_id'), nullable=False)
+ 
+-    users_group = relationship('UserGroup')
++    users_group = relationship('UserGroup', back_populates="users_group_to_perm")
+     permission = relationship('Permission')
+ 
+ 
+@@ -1795,8 +1795,8 @@
+     group_id = Column(Integer(), ForeignKey('groups.group_id'), nullable=False)
+     permission_id = Column(Integer(), ForeignKey('permissions.permission_id'), nullable=False)
+ 
+-    user = relationship('User')
+-    group = relationship('RepoGroup')
++    user = relationship('User', back_populates="repo_group_to_perm")
++    group = relationship('RepoGroup', back_populates="repo_group_to_perm")
+     permission = relationship('Permission')
+ 
+     @classmethod
+@@ -1821,9 +1821,9 @@
+     group_id = Column(Integer(), ForeignKey('groups.group_id'), nullable=False)
+     permission_id = Column(Integer(), ForeignKey('permissions.permission_id'), nullable=False)
+ 
+-    users_group = relationship('UserGroup')
++    users_group = relationship('UserGroup', back_populates="users_group_repo_group_to_perm")
+     permission = relationship('Permission')
+-    group = relationship('RepoGroup')
++    group = relationship('RepoGroup', back_populates="users_group_to_perm")
+ 
+     @classmethod
+     def create(cls, user_group, repository_group, permission):
+@@ -1848,7 +1848,7 @@
+     commit_activity_combined = Column(LargeBinary(), nullable=False) # JSON data
+     languages = Column(LargeBinary(1000000), nullable=False) # JSON data
+ 
+-    repository = relationship('Repository', single_parent=True)
++    repository = relationship('Repository', single_parent=True, back_populates="stats")
+ 
+ 
+ class UserFollowing(meta.Base, BaseDbModel):
+@@ -1865,10 +1865,10 @@
+     follows_user_id = Column(Integer(), ForeignKey('users.user_id'), nullable=True)
+     follows_from = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+ 
+-    user = relationship('User', primaryjoin='User.user_id==UserFollowing.user_id')
++    user = relationship('User', primaryjoin='User.user_id==UserFollowing.user_id', back_populates="followings")
+ 
+-    follows_user = relationship('User', primaryjoin='User.user_id==UserFollowing.follows_user_id')
+-    follows_repository = relationship('Repository', order_by=lambda: sqlalchemy.func.lower(Repository.repo_name))
++    follows_user = relationship('User', primaryjoin='User.user_id==UserFollowing.follows_user_id', back_populates="user_followers")
++    follows_repository = relationship('Repository', order_by=lambda: sqlalchemy.func.lower(Repository.repo_name), back_populates="followers")
+ 
+     @classmethod
+     def get_repo_followers(cls, repo_id):
+@@ -1894,14 +1894,14 @@
+     created_on = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+     modified_at = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+ 
+-    author = relationship('User')
+-    repo = relationship('Repository')
++    author = relationship('User', back_populates="user_comments")
++    repo = relationship('Repository', back_populates="comments")
+     # status_change is frequently used directly in templates - make it a lazy
+     # join to avoid fetching each related ChangesetStatus on demand.
+     # There will only be one ChangesetStatus referencing each comment so the join will not explode.
+     status_change = relationship('ChangesetStatus',
+-                                 cascade="all, delete-orphan", lazy='joined')
+-    pull_request = relationship('PullRequest')
++                                 cascade="all, delete-orphan", lazy='joined', back_populates="comment")
++    pull_request = relationship('PullRequest', back_populates="comments")
+ 
+     def url(self):
+         anchor = "comment-%s" % self.comment_id
+@@ -1959,8 +1959,8 @@
+ 
+     author = relationship('User')
+     repo = relationship('Repository')
+-    comment = relationship('ChangesetComment')
+-    pull_request = relationship('PullRequest')
++    comment = relationship('ChangesetComment', back_populates="status_change")
++    pull_request = relationship('PullRequest', back_populates="statuses")
+ 
+     def __repr__(self):
+         return "<%s %r by %r>" % (
+@@ -2027,12 +2027,12 @@
+ 
+     owner = relationship('User')
+     reviewers = relationship('PullRequestReviewer',
+-                             cascade="all, delete-orphan")
+-    org_repo = relationship('Repository', primaryjoin='PullRequest.org_repo_id==Repository.repo_id')
+-    other_repo = relationship('Repository', primaryjoin='PullRequest.other_repo_id==Repository.repo_id')
+-    statuses = relationship('ChangesetStatus', order_by='ChangesetStatus.changeset_status_id')
++                             cascade="all, delete-orphan", back_populates="pull_request")
++    org_repo = relationship('Repository', primaryjoin='PullRequest.org_repo_id==Repository.repo_id', back_populates="pull_requests_org")
++    other_repo = relationship('Repository', primaryjoin='PullRequest.other_repo_id==Repository.repo_id', back_populates="pull_requests_other")
++    statuses = relationship('ChangesetStatus', order_by='ChangesetStatus.changeset_status_id', back_populates="pull_request")
+     comments = relationship('ChangesetComment', order_by='ChangesetComment.comment_id',
+-                             cascade="all, delete-orphan")
++                             cascade="all, delete-orphan", back_populates="pull_request")
+ 
+     @classmethod
+     def query(cls, reviewer_id=None, include_closed=True, sorted=False):
+@@ -2142,7 +2142,7 @@
+     user_id = Column(Integer(), ForeignKey('users.user_id'), nullable=False)
+ 
+     user = relationship('User')
+-    pull_request = relationship('PullRequest')
++    pull_request = relationship('PullRequest', back_populates="reviewers")
+ 
+     def __json__(self):
+         return dict(
+@@ -2262,7 +2262,7 @@
+     created_on = Column(DateTime(timezone=False), nullable=False, default=datetime.datetime.now)
+     last_seen = Column(DateTime(timezone=False), nullable=True)
+ 
+-    user = relationship('User')
++    user = relationship('User', back_populates="ssh_keys")
+ 
+     @property
+     def public_key(self):
