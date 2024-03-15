@@ -1,0 +1,168 @@
+#!/bin/bash
+
+# Slackware build script for zabbix_agent2
+
+# Copyright 2013-2014 Michal Bialozor, Gdansk, Pomorskie, POLAND
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=zabbix_agent2
+VERSION=${VERSION:-6.4.11}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+PRGSHORT=zabbix
+
+# ZABBIXUSER is owner of log directory, this is required for running the agent on the same host as server
+ZABBIXUSER=${ZABBIXUSER:-zabbix}
+ZABBIXGROUP=${ZABBIXGROUP:-zabbix}
+ZABBIXUID=${ZABBIXUID:-228}
+ZABBIXGID=${ZABBIXGID:-228}
+
+ZABBIXAGENTUSER=${ZABBIXAGENTUSER:-zabbixagent}
+ZABBIXAGENTGROUP=${ZABBIXAGENTGROUP:-zabbixagent}
+ZABBIXAGENTUID=${ZABBIXAGENTUID:-266}
+ZABBIXAGENTGID=${ZABBIXAGENTGID:-266}
+
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+# Bail out if user or group isn't valid on your system
+# For slackbuilds.org, assigned zabbixagent uid/gid are 266/266 and assigned zabbix uid/gid are 228/228
+# See http://slackbuilds.org/uid_gid.txt
+if [ "$(grep ^$ZABBIXAGENTUSER: /etc/passwd)" = "" -o "$(grep ^$ZABBIXAGENTUSER: /etc/passwd)" = "" -o \
+     "$(grep ^$ZABBIXGROUP: /etc/group)" = "" ] ; then
+    echo "  You must have a \"$ZABBIXGROUP\" group as well as \"$ZABBIXUSER\" and \"$ZABBIXAGENTUSER\" users to run this script."
+    echo "    # groupadd -g $ZABBIXGID $ZABBIXGROUP"
+    echo "    # useradd -u $ZABBIXUID -g $ZABBIXGROUP -d /dev/null -s /bin/false $ZABBIXUSER"
+    echo "    # useradd -u $ZABBIXAGENTUID -g $ZABBIXGROUP -d /dev/null -s /bin/false $ZABBIXAGENTUSER"
+    exit 1
+fi
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGSHORT-$VERSION
+tar xvf $CWD/$PRGSHORT-$VERSION.tar.gz
+cd $PRGSHORT-$VERSION
+chown -R root:root .
+
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --sysconfdir=/etc/zabbix \
+  --localstatedir=/var/lib \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --with-libpcre2 \
+  --enable-agent2 \
+  --with-openssl \
+  --enable-ipv6 \
+  --build=$ARCH-slackware-linux
+
+make
+make install DESTDIR=$PKG
+
+find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+# Initial log file
+mkdir -p $PKG/var/log/$PRGSHORT
+chown $ZABBIXUSER:$ZABBIXGROUP $PKG/var/log/$PRGSHORT
+chmod g+w $PKG/var/log/$PRGSHORT
+#touch $PKG/var/log/$PRGSHORT/$PRGNAM.log.new
+#chown $ZABBIXAGENTUSER:$ZABBIXUSER $PKG/var/log/$PRGSHORT/$PRGNAM.log.new
+
+# Dir for pid-file
+mkdir -p $PKG/var/run/$PRGNAM
+chown -R $ZABBIXAGENTUSER:$ZABBIXGROUP $PKG/var/run/$PRGNAM
+chmod g+w $PKG/var/run/$PRGNAM
+
+# Configuration file
+sed -e "s,# PidFile=/tmp/zabbix_agent2.pid,PidFile=/var/run/$PRGNAM/zabbix_agent2.pid," \
+    -e "s,# LogFile=/tmp/zabbix_agent2.log,LogFile=/var/log/$PRGSHORT/$PRGNAM.log," \
+    -e "s,Include=./zabbix_agent2.d/plugins.d/\*.conf,Include=/etc/$PRGSHORT/zabbix_agent2.d/plugins.d/*.conf," \
+    $PKG/etc/$PRGSHORT/$PRGNAM.conf > $PKG/etc/$PRGSHORT/$PRGNAM.conf.new
+# remove uneeded old agent conf
+rm -rf $PKG/etc/$PRGSHORT/zabbix_agentd.* $PKG/etc/$PRGSHORT/$PRGNAM.d/ $PKG/etc/$PRGSHORT/$PRGNAM.conf
+
+# Init script
+mkdir -p $PKG/etc/rc.d
+sed "s|@ZABBIXAGENTUSER@|$ZABBIXAGENTUSER|" $CWD/rc.$PRGNAM > $PKG/etc/rc.d/rc.$PRGNAM.new
+
+# Documentation
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS COPYING ChangeLog NEWS README $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
+
+# Installation scripts
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

@@ -1,0 +1,78 @@
+#!/bin/sh
+
+# Usage: ./rc.zabbix_agent2 {start|stop|restart}
+
+PRGNAM=zabbix_agent2
+PRGDIR=/usr/sbin/
+PIDDIR=/var/run/zabbixagent/
+LOGDIR=/var/log/zabbix/
+DATE=$(date +%a\ %b\ %d\ %T\ %Y)
+RETVAL=0
+
+prg_start() {
+    echo -n "Starting $PRGNAM ... "
+    if [ -r ${PIDDIR}${PRGNAM}.pid ]; then
+        if $(! /sbin/pidof $PRGNAM > /dev/null 2>&1 ) ; then
+            echo "Removing an old ${PIDDIR}${PRGNAM}.pid"
+            rm -f ${PIDDIR}${PRGNAM}.pid
+        fi
+    fi
+    mkdir -p ${PIDDIR}
+    su -s /bin/sh -c "${PRGDIR}${PRGNAM} >> ${LOGDIR}${PRGNAM}.log 2>&1 &" @ZABBIXAGENTUSER@
+    RETVAL=$?
+
+    if [ $RETVAL -eq 0 ]; then
+        touch /var/lock/$PRGNAM
+        sleep 2
+        echo "done"
+    else
+        echo "failed"
+    fi
+    return $RETVAL
+}
+
+prg_stop() {
+    echo -n "Stopping $PRGNAM ... "
+    if [ -r ${PIDDIR}${PRGNAM}.pid ]; then
+        killall $PRGNAM
+        # Give it some time to die gracefully
+        for second in 0 1 2 3 4 5 6 7 8 9 10 ; do
+            if $(! /sbin/pidof $PRGNAM > /dev/null 2>&1 ) ; then
+                rm -f ${PIDDIR}${PRGNAM}.pid
+                break;
+            fi
+            sleep 1
+        done
+
+        if [ "$second" = "10" ]; then
+            echo "\nWARNING: $PRGNAM did not exit!"
+            sleep 10
+        else
+            echo "$DATE EXIT: $PRGNAM stopped by user: $USER (UID: $EUID)" >> ${LOGDIR}${PRGNAM}.log
+            echo "done"
+        fi
+    fi
+    rm -f /var/lock/$PRGNAM
+    return $RETVAL
+}
+
+# How were we called:
+case "$1" in
+    start)
+        prg_start
+        ;;
+    stop)
+        prg_stop
+        ;;
+    restart|reload)
+        prg_stop
+        # Wait a few seconds before restarting
+        sleep 10
+        prg_start
+        ;;
+    *)
+        echo "Usage: $(basename $0) {start|stop|restart}"
+        RETVAL=1
+esac
+
+#EOF
