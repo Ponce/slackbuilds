@@ -29,8 +29,9 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=google-go-lang
-VERSION=${VERSION:-1.21.8}
+VERSION=${VERSION:-1.22.1}
 BOOTSTRAP_VERSION=${BOOTSTRAP_VERSION:-1.19.13}
+BOOTSTRAP_VERSION2=${BOOTSTRAP_VERSION2:-1.21.8}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -139,6 +140,75 @@ if [[ $CGO_MINOR_VERSION -lt 18 ]] ; then
   mkdir -p $PKG$GOROOT_FINAL
 fi
 
+if [[ $CGO_MINOR_VERSION -lt 20 ]] ; then
+  mkdir -p $TMP $PKG/usr/lib${LIBDIRSUFFIX}/go${BOOTSTRAP_VERSION2} $OUTPUT
+  cd $PKG/usr/lib${LIBDIRSUFFIX}/go${BOOTSTRAP_VERSION2}
+  tar xvf $CWD/go${BOOTSTRAP_VERSION2}.src.tar.gz
+  cd go
+  chown -R root:root .
+  find -L . \
+   \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+   -o -perm 511 \) -exec chmod 755 {} \; -o \
+   \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+  # as of >= go1.5, the cross-compiler does not need to be bootstrap, so the
+  # compiler need only be compiled for the host OS, which it detects
+  unset GOBIN GOPATH GOOS GOARCH
+
+  # Not sure why, but this causes run.bash to fail --rworkman
+  unset BASH_ENV
+
+  # gcc 5+ is go1.4 API, so we'll bootstrap with it
+  if [[ $CGO_MINOR_VERSION -lt 18 ]] ; then
+    export GOROOT_BOOTSTRAP="$PKG/usr/lib${LIBDIRSUFFIX}/go${BOOTSTRAP_VERSION}/go"
+  else
+    export GOROOT_BOOTSTRAP="/usr"
+  fi
+
+  # Default GOROOT is the parent directory of all.bash,
+  # which is the current directory we're in.
+  # Defining it here means we can use it below when building
+  # shared libraries
+  GOROOT="$(pwd)"
+  export GOROOT
+
+  # The value of GOROOT once the package is installed
+  export GOROOT_FINAL="/usr/lib${LIBDIRSUFFIX}/go${BOOTSTRAP_VERSION2}/go"
+
+  case "$ARCH" in
+    arm|i?86) export GOMAXPROCS=1 ;;
+  esac
+
+  cd src
+
+  if [[ "${RUN_TEST}" = "true" ]] ; then
+    LC_ALL=C \
+      ./all.bash
+  else
+    LC_ALL=C \
+      ./make.bash
+  fi
+
+  # As of go1.5, golang supports shared libraries, so generate them for use.
+  $GOROOT/bin/go install -buildmode=shared std
+
+  cd ..
+
+  # remove Go build cache
+  rm -rf pkg/obj/go-build/*
+
+  # remove the doc Makefile
+  rm -f doc/Makefile
+
+  mkdir -p $PKG$GOROOT_FINAL
+fi
+
+# remove bootstrap
+if [[ $CGO_MINOR_VERSION -lt 18 ]] ; then
+  rm -rf $PKG/usr/lib$LIBDIRSUFFIX/go$BOOTSTRAP_VERSION
+fi
+
 mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/go${VERSION} $OUTPUT
 cd $PKG/usr/lib${LIBDIRSUFFIX}/go${VERSION}
 tar xvf $CWD/go${VERSION}.src.tar.gz
@@ -158,8 +228,8 @@ unset GOBIN GOPATH GOOS GOARCH
 unset BASH_ENV
 
 # gcc 5+ is go1.4 API, so we'll bootstrap with it
-if [[ $CGO_MINOR_VERSION -lt 18 ]] ; then
-  export GOROOT_BOOTSTRAP="$PKG/usr/lib${LIBDIRSUFFIX}/go${BOOTSTRAP_VERSION}/go"
+if [[ $CGO_MINOR_VERSION -lt 20 ]] ; then
+  export GOROOT_BOOTSTRAP="$PKG/usr/lib${LIBDIRSUFFIX}/go${BOOTSTRAP_VERSION2}/go"
 else
   export GOROOT_BOOTSTRAP="/usr"
 fi
@@ -210,8 +280,8 @@ find $PKG/$GOROOT_FINAL/src -type f -name "*_test.go" -exec rm -rf {} +
 mkdir -p $PKG$GOROOT_FINAL
 
 # remove bootstrap
-if [[ $CGO_MINOR_VERSION -lt 18 ]] ; then
-  rm -rf $PKG/usr/lib$LIBDIRSUFFIX/go$BOOTSTRAP_VERSION
+if [[ $CGO_MINOR_VERSION -lt 20 ]] ; then
+  rm -rf $PKG/usr/lib$LIBDIRSUFFIX/go$BOOTSTRAP_VERSION2
 fi
 
 # Put the profile scripts for setting PATH and env variables
