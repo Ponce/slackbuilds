@@ -1,7 +1,7 @@
 .. RST source for asap-sdl(1) man page. Convert with:
 ..   rst2man.py asap-sdl.rst > asap-sdl.1
 
-.. |version| replace:: 5.3.0
+.. |version| replace:: 6.0.3
 .. |date| date::
 
 ========
@@ -47,7 +47,7 @@ OPTIONS
 **-v**, **--version**
   Show version number.
 
-**-s** *song*
+**-s** *song*, **--song**\=song
   Select subsong number (zero-based). The default is 0, which will be
   the only subsong in a file that contains only one song. Use
   **chksap.pl -s filename** to see how many subsongs exist in a file.
