@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Slackware build script for jack1-legacy, adapted from
+# Slackware build script for jack1, adapted from
 # jack-audio-connection-kit.SlackBuild.
 
 # Copyright 2007-2014 Heinz Wiesinger, Amsterdam, The Netherlands
@@ -32,15 +32,20 @@
 # If you need to see the commit log for the old name, use a command like:
 # git log -- audio/jack-audio-connection-kit
 
+# 20240319 bkw: updated for v0.126.0. since upstream moved the tools
+# to a separate git repo, modified this build to include that as well,
+# for compatibility with older releases.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=jack1
-VERSION=${VERSION:-0.125.0}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-0.126.0}
+TOOLSVER=${TOOLSVER:-4}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
-SRCNAM=jack-audio-connection-kit
+SRCNAM=$PRGNAM
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -81,9 +86,11 @@ cd $TMP
 rm -rf $SRCNAM-$VERSION
 tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
 cd $SRCNAM-$VERSION
+TOPDIR="$(pwd)"
+tar xvf $CWD/jack-example-tools-$TOOLSVER.tar.gz
 chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
 # respect march and mtune flags: fixes building on x86_64
 sed -i 's|-march=native \-mtune=native||' configure.ac
@@ -106,11 +113,39 @@ CXXFLAGS="$SLKCFLAGS" \
 make
 make install-strip DESTDIR=$PKG
 
+# 20240319 bkw: now build the tools against the installed libs in $PKG.
+cd $TOPDIR
+sed "s,/usr,$PKG/usr,g" $PKG/usr/lib$LIBDIRSUFFIX/pkgconfig/jack.pc > jack.pc
+export PKG_CONFIG_PATH=$TOPDIR:$PKG_CONFIG_PATH
+cd jack-example-tools-$TOOLSVER
+mkdir build
+MFLAGS="$SLKCFLAGS -I$PKG/usr/include"
+cd build
+  CFLAGS="$MFLAGS" \
+  CXXFLAGS="$MFLAGS" \
+  LDFLAGS="-L$PKG/usr/lib$LIBDIRSUFFIX" \
+  meson .. \
+    --buildtype=release \
+    --infodir=/usr/info \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    -Dstrip=true
+  "${NINJA:=ninja}"
+  DESTDIR=$PKG $NINJA install
+cd ..
+
 gzip -9 $PKG/usr/man/man?/*.?
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS COPYING* README TODO $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+PKGDOC2=$PKGDOC/jack-example-tools-$TOOLSVER
+mkdir -p $PKGDOC $PKGDOC2
+cp -a LICENSE *.md $PKGDOC2
+cd $TOPDIR
+cp -a AUTHORS COPYING* README.md TODO $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 rm -f $PKG/usr/lib*/*.la
 
