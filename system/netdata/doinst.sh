@@ -23,33 +23,29 @@ preserve_perms() {
 }
 
 config etc/netdata/netdata.conf.new
+config etc/netdata/netdata-updater.conf.new
 
-for L in `ls usr/lib%LIBDIRSUFFIX%/netdata/conf.d/*.new`
+for L in `ls usr/lib/netdata/conf.d/*.new`
 do
 config $L
 done
 
-for L in `ls usr/lib%LIBDIRSUFFIX%/netdata/conf.d/python.d/*.new`
+for L in `ls usr/lib/netdata/conf.d/python.d/*.new`
 do
 config $L
 done
 
-for L in `ls usr/lib%LIBDIRSUFFIX%/netdata/conf.d/charts.d/*.new`
+for L in `ls usr/lib/netdata/conf.d/charts.d/*.new`
 do
 config $L
 done
 
-for L in `ls usr/lib%LIBDIRSUFFIX%/netdata/conf.d/health.d/*.new`
+for L in `ls usr/lib/netdata/conf.d/health.d/*.new`
 do
 config $L
 done
 
-#for L in `ls usr/lib%LIBDIRSUFFIX%/netdata/conf.d/node.d/*.new`
-#do
-#config $L
-#done
-
-for L in `ls usr/lib%LIBDIRSUFFIX%/netdata/conf.d/statsd.d/*.new`
+for L in `ls usr/lib/netdata/conf.d/statsd.d/*.new`
 do
 config $L
 done

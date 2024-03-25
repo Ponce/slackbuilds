@@ -2,7 +2,7 @@
 
 # Slackware build script for netdata
 
-# Copyright 2017-2022 Willy Sudiarto Raharjo <willysr@slackbuilds.org>
+# Copyright 2017-2024 Willy Sudiarto Raharjo <willysr@slackbuilds.org>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,7 +25,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=netdata
-VERSION=${VERSION:-1.44.3}
+VERSION=${VERSION:-1.45.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -95,23 +95,22 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-autoreconf -fiv
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --with-user=$NETDATA_USER \
-  --with-zlib \
-  --with-math \
-  --build=$ARCH-slackware-linux
-
-make
-make install DESTDIR=$PKG
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/ \
+    -DENABLE_ACLK=FALSE \
+    -DENABLE_EXPORTER_PROMETHEUS_REMOTE_WRITE=FALSE \
+    -DENABLE_PLUGIN_XENSTAT=FALSE \
+    -DENABLE_PLUGIN_EBPF=FALSE \
+    -DENABLE_PLUGIN_SYSTEMD_JOURNAL=FALSE \
+    -DENABLE_LOGS_MANAGEMENT_TESTS=FALSE \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install/strip DESTDIR=$PKG
+cd ..
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -122,7 +121,6 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/var/lock/subsys/ $PKG/var/cache/netdata $PKG/var/lib/netdata $PKG/var/log/netdata
 
-sed -i "s|usr/lib|usr/lib${LIBDIRSUFFIX}|g" $PKG/etc/netdata/edit-config
 # set permission
 chown -R $NETDATA_USER:$NETDATA_GROUP $PKG/var/lib/netdata
 chown -R $NETDATA_USER:$NETDATA_GROUP $PKG/var/log/netdata
@@ -134,41 +132,39 @@ mkdir -p $PKG/etc/rc.d/
 install -m 0644 $CWD/rc.netdata $PKG/etc/rc.d/
 
 # handle all conf files
-touch $PKG/etc/netdata/netdata.conf.new
+rm $PKG/etc/netdata/netdata-updater.conf
+cp system/netdata.conf $PKG/etc/netdata/netdata.conf.new
+cp system/netdata-updater.conf $PKG/etc/netdata/netdata-updater.conf.new
 
-for L in `ls $PKG/usr/lib${LIBDIRSUFFIX}/netdata/conf.d/*.conf`
+# since 1.45.0, all files will be kept in /usr/lib
+for L in `ls $PKG/usr/lib/netdata/conf.d/*.conf`
 do
 mv $L $L.new
 done
 
-for L in `ls $PKG/usr/lib${LIBDIRSUFFIX}/netdata/conf.d/python.d/*.conf`
+for L in `ls $PKG/usr/lib/netdata/conf.d/python.d/*.conf`
 do
 mv $L $L.new
 done
 
-for L in `ls $PKG/usr/lib${LIBDIRSUFFIX}/netdata/conf.d/charts.d/*.conf`
+for L in `ls $PKG/usr/lib/netdata/conf.d/charts.d/*.conf`
 do
 mv $L $L.new
 done
 
-for L in `ls $PKG/usr/lib${LIBDIRSUFFIX}/netdata/conf.d/health.d/*.conf`
+for L in `ls $PKG/usr/lib/netdata/conf.d/health.d/*.conf`
 do
 mv $L $L.new
 done
 
-#for L in `ls $PKG/usr/lib${LIBDIRSUFFIX}/netdata/conf.d/node.d/*.conf`
-#do
-#mv $L $L.new
-#done
-
-for L in `ls $PKG/usr/lib${LIBDIRSUFFIX}/netdata/conf.d/statsd.d/*.conf`
+for L in `ls $PKG/usr/lib/netdata/conf.d/statsd.d/*.conf`
 do
 mv $L $L.new
 done
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-sed -e s/%LIBDIRSUFFIX%/$LIBDIRSUFFIX/g $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
