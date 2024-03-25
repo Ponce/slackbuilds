@@ -33,8 +33,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=wine-staging
-VERSION=${VERSION:-9.0}
-WINEVERSION=${WINEVERSION:-9.0}
+VERSION=${VERSION:-9.5}
+WINEVERSION=${WINEVERSION:-9.5}
 STAGINGVERSION=$WINEVERSION
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
@@ -64,37 +64,27 @@ else
   do_opengl="without"
 fi
 
-WINE32=${WINE32@L}
-WINE64=${WINE64@L}
-WINETMP="$( mktemp -d $TMP/wine-test-XXXXXX )"
-echo "int main(void) {; return(0); }" > "$WINETMP/test.c"
-gcc -m32 "$WINETMP/test.c" -o /dev/null >/dev/null 2>&1 && WINE32=${WINE32:-yes}
-gcc -m64 "$WINETMP/test.c" -o /dev/null >/dev/null 2>&1 && WINE64=${WINE64:-yes}
-rm -rf "$WINETMP"
-
-if [ "${WINE32:-no}${WINE64:-no}" = "nono" ]; then
- echo "Both 64 and 32 bit builds disabled. Nothing to do."
- exit 1
-fi
-
 BUILD_ARCH="$ARCH-slackware-linux"
 SLKCFLAGS="-O2"
+
 case "$ARCH" in
-  arm)
-    BUILD_ARCH="$ARCH-slackware-linux-gnueabi"
-    SLKCFLAGS="-O2"
-    ;;
-  i?86)
-   # -Os was -O2, fix for:
-   # https://bugs.winehq.org/show_bug.cgi?id=42406
-   # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=78911
-   # https://bugs.gentoo.org/613128
-   SLKCFLAGS="-Os -march=$ARCH -mtune=i686"
-   ;;
-  x86_64)
-   SLKCFLAGS="-O2 -fPIC"
-   LIBDIRSUFFIX="64"
-   ;;
+ arm)
+  BUILD_ARCH="$ARCH-slackware-linux-gnueabi"
+  SLKCFLAGS="-O2"
+  ;;
+ i?86)
+  # -Os was -O2, fix for:
+  # https://bugs.winehq.org/show_bug.cgi?id=42406
+  # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=78911
+  # https://bugs.gentoo.org/613128
+  SLKCFLAGS="-Os -march=$ARCH -mtune=i686"
+  WINE32="yes"
+  ;;
+ x86_64)
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+  WINE64="yes"
+  ;;
 esac
 
 set -e
@@ -124,7 +114,9 @@ find -L . \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
 # Fix for flex.
-patch -p1 --verbose < $CWD/0001-winhlp32-Workaround-a-bug-in-Flex.patch
+patch -p1 < $CWD/flex.patch
+# WriteCopy Fix.
+patch -p1 < $CWD/writecopy.patch
 # Fix path of opencl headers.
 sed 's|OpenCL/opencl.h|CL/opencl.h|g' -i configure*
 
@@ -137,12 +129,13 @@ if [ "$WINE64" = "yes" ]; then
   CFLAGS="$SLKCFLAGS" \
   CXXFLAGS="$SLKCFLAGS" \
   ../configure \
-    --enable-win64 \
     --prefix=/usr \
     --libdir=/usr/lib64 \
     --localstatedir=/var \
     --sysconfdir=/etc \
     --mandir=/usr/man \
+    --enable-win64 \
+    --enable-archs="i386,x86_64" \
     --with-x \
     --with-gnutls \
     --${do_opengl}-opengl \
@@ -159,7 +152,6 @@ fi
 if [ "$WINE32" = "yes" ]; then
   mkdir wine32
   cd wine32
-
   export PKG_CONFIG_PATH="/usr/lib/pkgconfig:$PKG_CONFIG_PATH"
 
   LDFLAGS="-L/usr/lib -ldl" \
@@ -195,7 +187,7 @@ for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; r
 install -d $PKG/etc/fonts/conf.{avail,d}
 install -m644 $CWD/30-win32-aliases.conf $PKG/etc/fonts/conf.avail
 ln -sf /etc/fonts/conf.avail/30-win32-aliases.conf $PKG/etc/fonts/conf.d/30-win32-aliases.conf
-install -Dm 644 $CWD/wine-binfmt.conf $PKG/usr/lib/binfmt.d/wine.conf
+install -Dm 644 $CWD/wine-binfmt.conf $PKG/usr/lib$LIBDIRSUFFIX/binfmt.d/wine.conf
 
 # Create Wine menu structure:
 mkdir -p $PKG/etc/xdg/menus/applications-merged
@@ -214,11 +206,9 @@ convert $CWD/winecfg.png -scale 64 $PKG/usr/share/pixmaps/wine-uninstaller.png
 cp programs/winecfg/winecfg.svg $PKG/usr/share/icons/hicolor/scalable/apps/
 cp $CWD/*.desktop $PKG/usr/share/applications/
 
-DOCS="ANNOUNCE.md AUTHORS COPYING.LIB LICENSE* MAINTAINERS README.md VERSION"
-FONTS_LICENSE="COPYING.arial COPYING.cour COPYING.msyh COPYING.times"
-
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp $DOCS $FONTS_LICENSE $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a ANNOUNCE.md AUTHORS COPYING.* LICENSE* MAINTAINERS README.md VERSION \
+  $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
