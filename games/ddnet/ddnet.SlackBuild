@@ -1,0 +1,223 @@
+#!/bin/bash
+
+# Slackware build script for ddnet
+
+# Copyright 2024  i3slkiller <i3sl.1.3.3.0@gmail.com> (PGP fingerprint: 7B69 A55C 4533 F5E2 44C2  4889 095A 0992 0ECC A5AF)
+# All rights reserved.
+#
+#   Permission to use, copy, modify, and distribute this software for
+#   any purpose with or without fee is hereby granted, provided that
+#   the above copyright notice and this permission notice appear in all
+#   copies.
+#
+#   THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESSED OR IMPLIED
+#   WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#   MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+#   IN NO EVENT SHALL THE AUTHORS AND COPYRIGHT HOLDERS AND THEIR
+#   CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+#   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+#   USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+#   ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+#   OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+#   OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+#   SUCH DAMAGE.
+# -----------------------------------------------------------------------------
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=ddnet
+SRCNAM=DDNet
+VERSION=${VERSION:-18.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+# These variables are for proper matching version of source and package.
+# Regardless whether eg. 18.1-rc1 or 18.1_rc1 was passed into VERSION,
+# this script will unpack DDNet-18.1-rc1.tar.xz source tarball (SRCVER=18.1-rc1)
+# and produce ddnet-18.1_rc1-ARCH-1_SBo.tgz package (PKGVER=18.1_rc1).
+# For stable versions SRCVER and PKGVER will have the same value (SRCVER=PKGVER=18.1).
+SRCVER=${VERSION/_/-}
+PKGVER=${VERSION/-/_}
+
+# Whether to enable WebSocket support for server
+# Requires libwebsockets from SBo
+[ ${WEBSOCKETS:-no} == yes ] && USE_WEBSOCKETS=ON || USE_WEBSOCKETS=OFF
+
+# Whether to enable MySQL/MariaDB support for server
+[ ${MYSQL:-no} == yes ] && USE_MYSQL=ON || USE_MYSQL=OFF
+
+# Whether to add video recording support using FFmpeg to the client
+# Requires x264 from SBo
+[ ${VIDEORECORDER:-yes} == yes ] && USE_VIDEORECORDER=ON || USE_VIDEORECORDER=OFF
+
+# Whether to enable UPnP support for the server
+# Requires miniupnpc from SBo
+[ ${UPNP:-no} == yes ] && USE_UPNP=ON || USE_UPNP=OFF
+
+# Whether to enable the vulkan backend
+[ ${VULKAN:-yes} == yes ] && USE_VULKAN=ON || USE_VULKAN=OFF
+
+# Enable interprocedural optimizations, also known as Link Time Optimization (LTO)
+[ ${IPO:-no} == yes ] && USE_IPO=ON || USE_IPO=OFF
+
+# Whether to set security-relevant compiler flags like -D_FORTIFY_SOURCE=2 and -fstack-protector-all
+[ ${SECURITY_COMPILER_FLAGS:-yes} == yes ] && USE_SECURITY_COMPILER_FLAGS=ON || USE_SECURITY_COMPILER_FLAGS=OFF
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$PKGVER-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+elif [ "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+else
+  SLKCFLAGS="-O2"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$SRCVER
+tar xvf $CWD/$SRCNAM-$SRCVER.tar.?z
+cd $SRCNAM-$SRCVER
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# build offline
+# configuration tells cargo to use the configured directory
+# for dependencies instead of downloading from crates.io
+cat << EOF >> .cargo/config.toml
+[source]
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "vendor"
+EOF
+
+# deps and versions come from Cargo.lock
+mkdir vendor
+(
+  cd vendor
+
+  grep -h -A 4 "\[\[package\]\]" \
+      $(find "../" -maxdepth 1 -mindepth 1 -name Cargo.lock | tr '\n' ' ') | \
+      sed 's/[[:space:]]*=[[:space:]]*/=/g;s/^--//;s/^\[\[/--\n[[/' | \
+      awk 'BEGIN { RS = "--\n" ; FS="\n" } { print $2, $3, $4, $5 }' | \
+      sed 's/"//g;s/name=//;s/ version=/=/' | \
+      grep " source=" | \
+      sed 's/ dependencies=.*$//' | \
+      sed 's/ source=[^ ]*//' | \
+      sed 's/ checksum=/=/' | \
+      sort -u | \
+      while read -r dep ; do
+
+    cksum="$(printf "%s\n" "$dep" | cut -d= -f3)"
+    ver="$(printf "%s\n" "$dep" | cut -d= -f2)"
+    dep="$(printf "%s\n" "$dep" | cut -d= -f1)"
+
+    CRATE_FILE="$CWD/$dep-$ver.crate"
+
+    if [ -z "$cksum" ] ; then
+      mkdir $dep-$ver
+      tar xvf $CRATE_FILE -C $dep-$ver --strip-components=1
+      cksum="null"
+    else
+      tar xvf $CRATE_FILE
+    fi
+
+    touch $dep-$ver/.cargo-ok
+
+    # generate checksum
+    {
+      printf "{\n"
+      printf '    "files": {\n'
+
+      (
+        cd $dep-$ver
+        find . -type f -print0 | xargs -0 sha256sum | sed -n '/\.cargo-checksum\.json/!p' | sed 's/\.\///;s/^\([^ ]*\)[[:space:]][[:space:]]*\(.*\)$/"\2":"\1",/'
+      ) | sed '$ s/,$//'
+
+      printf "    },\n"
+      printf '    "package": "%s"'  "$cksum"
+
+      printf "}\n"
+    } | python3 -c "import sys, json; data = sys.stdin.read(); print(json.dumps(json.loads(data), sort_keys=True, indent=4, separators=(',', ' : ')))" > $dep-$ver/.cargo-checksum.json
+  done
+)
+
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+export CARGO_HOME=.cargo
+
+mkdir -p build
+cd build
+  cmake .. \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DPREFER_BUNDLED_LIBS=OFF \
+    -DWEBSOCKETS=$USE_WEBSOCKETS \
+    -DMYSQL=$USE_MYSQL \
+    -DAUTOUPDATE=OFF \
+    -DCLIENT=ON \
+    -DVIDEORECORDER=$USE_VIDEORECORDER \
+    -DUPNP=$USE_UPNP \
+    -DVULKAN=$USE_VULKAN \
+    -DIPO=$USE_IPO \
+    -DSECURITY_COMPILER_FLAGS=$USE_SECURITY_COMPILER_FLAGS \
+    -DCMAKE_BUILD_TYPE=Release \
+    -GNinja
+  ninja
+  DESTDIR=$PKG ninja install/strip
+cd ..
+
+install -D -m0644 man/DDNet.6 -t $PKG/usr/man/man6
+install -D -m0644 man/DDNet-Server.6 -t $PKG/usr/man/man6
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p "$PKG/usr/doc/$PRGNAM-$PKGVER"
+cp -a \
+  README.md license.txt \
+  $PKG/usr/doc/$PRGNAM-$PKGVER
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$PKGVER/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$PKGVER-$ARCH-$BUILD$TAG.$PKGTYPE
