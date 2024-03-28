@@ -8,7 +8,7 @@ config() {
   fi
 }
 
-FILES="slpkg repositories blacklist rules"
+FILES="slpkg repositories blacklist"
 for file in $FILES; do
   config etc/slpkg/$file.toml.new
 done
