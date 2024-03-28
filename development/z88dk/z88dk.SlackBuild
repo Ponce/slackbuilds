@@ -6,18 +6,8 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-# TODO: someday include the zsdcc stuff. Probably sometime after z88dk's
-# 2.0 release. If no 2.0 release exists by, say, the start of 2019, I'll
-# probably change this build so it works with a git snapshot instead
-# of a release. I'll admit, my motivation for that will be that I want
-# to have a C compiler that targets Pac-Man arcade hardware (the 1.99B
-# release doesn't, current git does).
-# 20210907 bkw: the above TODO still stands, but I don't have time to do
-# it right now (gearing up for 15.0 release).
-# 20230114 bkw: I don't have time to deal with it right now, but
-# z88dk-2.2 looks promising. Unfortunately I'll have to spend a week
-# writing SlackBuilds for the 50 or so perl modules it requires, and I
-# don't have a week right now.
+# 20240322 bkw: *Finally* updated, v2.3. Many thanks to fuzzix, who did
+# most of the work for this upgrade.
 
 # 20230114 bkw: BUILD=2
 # - do not ship pre-compiled binaries in the doc dir
@@ -26,8 +16,9 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=z88dk
-VERSION=${VERSION:-1.99B}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-2.3}
+ZSDCC_REV=14210
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -68,14 +59,15 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM
-unzip $CWD/$PRGNAM-src-$VERSION.zip
+tar xf $CWD/$PRGNAM-src-$VERSION.tgz
 cd $PRGNAM
+cp $CWD/zsdcc_r${ZSDCC_REV}_src.tar.gz .
 
 # Upstream permissions are bad. Please don't replace with "find . -L
 # ..." boilerplate.
-find . -name CVS -print0 | xargs -0 rm -rf
-find . -type f   -print0 | xargs -0 chmod 0644
-find . -type d   -print0 | xargs -0 chmod 0755
+find -L . -name CVS -a -exec rm -rf {}     + -o \
+          -type f   -a -exec chmod 0644 {} + -o \
+          -type d   -a -exec chmod 0755 {} +
 chmod +x *.sh
 
 # Sneaky ways to inject CFLAGS.
@@ -84,34 +76,21 @@ sed -i "s/CC=gcc/CC='gcc $SLKCFLAGS'/" build.sh
 export CXX="g++ $SLKCFLAGS"
 
 # Default prefix.
-sed -i "s,/usr/local,/usr," Makefile
-
-# Upstream seems to be in the middle of migrating from /usr/lib to
-# /usr/share or vice versa. The compiler looks for stuff in lib that's
-# actually installed to share, if I don't do this:
-sed -i '/^prefix_share/s,/share,/lib,' Makefile
-
-# Note to well-intentioned maintainers: please don't try to move
-# this stuff to /usr/lib64 on 64-bit systems. There's no native code
-# (no ELF executables, no shared or static libraries full of x86_64
-# code). Everthing in /usr/lib/z88dk is either headers, source, or
-# z88dk's own .lib format for z80 object code. From Linux's point
-# of view, it's just data. It's no different from Pat keeping udev
-# rules in /lib/udev on 64-bit.
+# We could delete config.h and have make rebuild it with the PREFIX,
+# but Z88DK_VERSION gets wiped.
+sed -i "s,/usr/local,/usr," src/config.h
+export PREFIX=/usr
 
 # Parallel make of the compiler itself works OK, but not of the
 # z80 native libraries.
 sed -i '/^\$MAKE *-e/aexport MAKEFLAGS="-j1"' build.sh
 
-./build.sh
-
-# install-libs doesn't seem to support DESTDIR.
-make install prefix=$PKG/usr
-make install-libs prefix=$PKG/usr
-
-# 'make install' doesn't install everything the compiler needs...
-# Trying to build the examples I got "sh: zpragma: command not found".
-cp -a bin/* $PKG/usr/bin/
+export BUILD_SDCC=1
+# The following should skip attempting the SVN fetch of zsdcc,
+# and also skip the HTTP fetch as the appropriate tarball is present
+export BUILD_SDCC_HTTP=1
+./build.sh -i $PREFIX
+make install DESTDIR=$PKG/
 
 # strip strips everything but chokes on the perl script.
 strip $PKG/usr/bin/* 2>/dev/null || true
@@ -126,14 +105,20 @@ for i in $CWD/man/*.1; do
 done
 
 # 20230114 bkw: do not ship executables in the doc dir.
-rm -f support/bin2var/{bin2var,*.exe}
-rm -f support/graphics/{z80svg,*.o}
-rm -rf support/winstall
+# 20240322 bkw: make this smarter (but uglier).
+find support -type f | \
+  xargs file -m/etc/file/magic/elf | \
+  grep ELF | \
+  cut -d: -f1 | \
+  xargs rm -f
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a README* LICENSE EXTENSIONS doc examples support \
-      $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a README* LICENSE doc examples support $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+# 20240322 bkw: stuff's getting installed to the doc dir with wrong owner.
+find $PKGDOC -exec chown root:root {} +
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
