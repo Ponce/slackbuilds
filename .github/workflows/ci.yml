@@ -105,3 +105,52 @@ jobs:
         with:
           issue-number: ${{ github.event.number }}
           body-path: comment-output
+
+  dependencies:
+    name: Compute reverse dependencies
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      pull-requests: write
+    needs: [changes]
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          show-progress: false
+          ref: ${{ github.head_ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+
+      - name: Get short package name
+        run: printf '%s\n' "${{ matrix.dir }}" | cut -d/ -f2 | sed 's/^/PACKAGE_NAME=/' >> "$GITHUB_ENV"
+
+      - name: Look up dependencies
+        id: get_deps
+        uses: fjogeleit/http-request-action@8af28031091191b8e41afb287e0e56fce753c7b4 # v1.15.4
+        with:
+          url: 'https://slackbuilds.org/revdeps.php?q=${{ env.PACKAGE_NAME }}'
+          method: 'GET'
+          preventFailureOnNoResponse: "true"
+
+      - name: Build comment
+        run: |
+          {
+            printf '#### reverse dependencies - %s\n\n' "${{ matrix.dir }}"
+            if [[ ${{ steps.get_deps.outputs.response }} == "" ]] ; then
+              printf 'None\n'
+            else
+              printf '```\n'
+              printf '%s' ${{ steps.get_deps.outputs.response }} | sed 's/\\n/\n/g' | sort
+              printf '```\n'
+            fi
+          } > comment-output
+        shell:
+          bash
+
+      - name: Comment with dependeny results
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
+        with:
+          issue-number: ${{ github.event.number }}
+          body-path: comment-output
