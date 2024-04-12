@@ -1,0 +1,124 @@
+#!/bin/bash
+
+# Slackware build script for ejabberd-bin
+
+# Copyright 2024, Alexander Verbovetsky, Moscow, Russia
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=ejabberd-bin
+VERSION=${VERSION:-24.02}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ "$ARCH" != "x86_64" -a "$ARCH" != "aarch64" ]; then
+  echo "Only x86_64 and aarch64 are supported."
+  exit 1
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+if ! grep ^ejabberd: /etc/group 2>&1 > /dev/null; then
+  echo "  A group "ejabberd" must exist prior to running this script."
+  echo "    # groupadd -g 370 ejabberd"
+  exit 1
+elif ! grep ^ejabberd: /etc/passwd 2>&1 > /dev/null; then
+  echo "  A user "ejabberd" must exist prior to running this script."
+  echo "    # useradd -u 370 -g 370 -s /sbin/nologin -d /var/lib/ejabberd ejabberd"
+  exit 1
+elif ! grep ^ejabberd:.*:/var/lib/ejabberd: /etc/passwd 2>&1 > /dev/null; then
+  echo "  Please change the user "ejabberd" home directory to /var/lib/ejabberd."
+  echo "    # usermod -d /var/lib/ejabberd ejabberd"
+  exit 1
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $PKG
+ar p $CWD/${PRGNAM%-bin}_${VERSION}-*.deb data.tar.gz | tar xvz
+
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+rm -r usr/share lib etc
+mkdir -p etc var/{lib,log}/ejabberd
+chown -R ejabberd:ejabberd var/{lib,log}/ejabberd
+chmod 700 var/{lib,log}/ejabberd
+rm -f opt/ejabberd/conf/*.pem
+mv opt/ejabberd/conf etc/ejabberd
+rmdir opt/ejabberd/{database,logs,}
+chown root:ejabberd etc/ejabberd/* opt/ejabberd-*/lib/epam-*/priv/bin/epam
+chmod 640 etc/ejabberd/*
+chmod 4750 opt/ejabberd-*/lib/epam-*/priv/bin/epam
+
+sed -i -e '/^ca_file:/,/^[^ ]/{//!d}' -e '/^certfiles:/,/^[^ ]/{//!d}' \
+  -e '/\(^ca_file:\|^certfiles:\)/d' etc/ejabberd/ejabberd.yml
+
+find -L etc/ejabberd -type f -print0 | xargs -0 -I {} mv {} {}.new
+
+sed -i -e 's|/opt/ejabberd/conf|/etc/ejabberd|' \
+  -e 's|/opt/ejabberd/logs|/var/log/ejabberd|' \
+  -e 's|/opt/ejabberd/database/\$ERLANG_NODE|/var/lib/ejabberd|' \
+  opt/ejabberd-$VERSION/bin/ejabberdctl
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p etc/rc.d
+cat $CWD/rc.ejabberd > etc/rc.d/rc.ejabberd.new
+
+mkdir -p usr/share/bash-completion/completions
+cat $CWD/ejabberdctl.bc > usr/share/bash-completion/completions/ejabberdctl
+
+mkdir -p usr/man/man5
+cat $CWD/ejabberd.yml.5 | gzip -9c > usr/man/man5/ejabberd.yml.5.gz
+
+mkdir -p usr/doc/$PRGNAM-$VERSION
+cat $CWD/CHANGELOG.md > usr/doc/$PRGNAM-$VERSION/CHANGELOG.md
+cat $CWD/$PRGNAM.SlackBuild > usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p install
+cat $CWD/slack-desc > install/slack-desc
+cat $CWD/doinst.sh > install/doinst.sh
+
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
