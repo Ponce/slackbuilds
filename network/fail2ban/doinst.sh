@@ -24,15 +24,4 @@ preserve_perms() {
 
 preserve_perms etc/rc.d/rc.fail2ban.new
 config etc/logrotate.d/fail2ban.new
-config etc/fail2ban/fail2ban.conf.new
-config etc/fail2ban/jail.conf.new
-config etc/fail2ban/paths-common.conf.new
-config etc/fail2ban/paths-slackware.conf.new
 config etc/bash_completion.d/fail2ban.new
-
-for conf_file in etc/fail2ban/action.d/*.new; do
-  config $conf_file
-done
-for conf_file in etc/fail2ban/filter.d/*.new; do
-  config $conf_file
-done
