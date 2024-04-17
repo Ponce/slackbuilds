@@ -1,0 +1,157 @@
+--- linksys-tftp-1.2.1/tftp.c	2024-04-16 08:27:50.328449885 -0700
++++ linksys-tftp-1.2.1/tftp.c	2024-04-15 21:26:36.259371211 -0700
+@@ -47,6 +47,13 @@ extern  int     rexmtval;
+ extern  int     maxtimeout;
+ extern	int	segsize;
+ 
++/* functions from tftpsubs */
++extern int readit(FILE *file,  struct tftphdr **dpp, int convert);
++extern int read_ahead(FILE *file, int convert);
++extern int writeit(FILE *file, struct tftphdr **dpp, int ct, int convert);
++extern int write_behind( FILE *file, int convert);
++extern int synchnet(int f);
++
+ #define PKTSIZE    (1432+4) /* SEGSIZE+4 */
+ char    ackbuf[PKTSIZE];
+ int	timeout;
+@@ -57,6 +64,19 @@ jmp_buf	timeoutbuf;
+ #define OACK	6
+ #endif
+ 
++/* functions declared herein */
++void timer(int sig);
++void parseoack(char *cp, int sz);
++void sendfile(int fd, char *name, char *mode, char *linkpass);
++void recvfile(int fd, char *name, char *mode, char *linkpass);
++int makerequest(int request, char *name, struct tftphdr *tp, char *mode, char *linkpass);
++void nak(int error);
++void topts(char *cp, int sz);
++void tpacket(char *s, struct tftphdr *tp, int n);
++void startclock();
++void stopclock();
++void printstats(char *direction, unsigned long amount);
++
+ void timer(int sig)
+ {
+ 
+@@ -72,9 +92,7 @@ void timer(int sig)
+ /*
+  * Parse an OACK package and set blocksize accordingly
+  */
+-parseoack(cp, sz)
+-	char *cp;
+-	int sz;
++void parseoack(char *cp, int sz)
+ {
+ 	int n;
+ 	
+@@ -106,11 +124,7 @@ parseoack(cp, sz)
+ /*
+  * Send the requested file.
+  */
+-sendfile(fd, name, mode, linkpass)
+-	int fd;
+-	char *name;
+-	char *mode;
+-	char *linkpass;
++void sendfile(int fd, char *name, char *mode, char *linkpass)
+ {
+ 	register struct tftphdr *ap;       /* data and ack packets */
+ 	struct tftphdr *r_init(), *dp;
+@@ -211,7 +225,7 @@ send_data:
+ 					printf("protocol violation\n");
+ 					longjmp(toplevel, -1);
+ 				}
+-				parseoack(&ap->th_stuff, n - 2);
++                                parseoack(ap->th_stuff, n - 2);
+ 				break;
+ 			}
+ 		}
+@@ -231,11 +245,7 @@ abort:
+ /*
+  * Receive a file.
+  */
+-recvfile(fd, name, mode, linkpass)
+-	int fd;
+-	char *name;
+-	char *mode;
+-	char *linkpass;
++void recvfile(int fd, char *name, char *mode, char *linkpass)
+ {
+ 	register struct tftphdr *ap;
+ 	struct tftphdr *dp, *w_init();
+@@ -336,7 +346,7 @@ send_ack:
+ 					longjmp(toplevel, -1);
+ 				}
+ 				waitforoack = 0;
+-				parseoack(&dp->th_stuff, n - 2);
++                                parseoack(dp->th_stuff, n - 2);
+ 				ap->th_opcode = htons((u_short)ACK);
+ 				ap->th_block = htons(0);
+ 				size = 4;
+@@ -362,10 +372,7 @@ abort:
+ 		printstats("Received", amount);
+ }
+ 
+-makerequest(request, name, tp, mode, linkpass)
+-	int request;
+-	char *name, *mode, *linkpass;
+-	struct tftphdr *tp;
++int makerequest(int request, char *name, struct tftphdr *tp, char *mode, char *linkpass)
+ {
+ 	register char *cp;
+ 
+@@ -404,8 +411,7 @@ struct errmsg {
+  * standard TFTP codes, or a UNIX errno
+  * offset by 100.
+  */
+-nak(error)
+-	int error;
++void nak(int error)
+ {
+ 	register struct tftphdr *tp;
+ 	int length;
+@@ -431,9 +437,7 @@ nak(error)
+ 		perror("nak");
+ }
+ 
+-topts(cp, sz)
+-	char *cp;
+-	int sz;
++void topts(char *cp, int sz)
+ {
+ 	int n, i = 0;
+ 	
+@@ -454,10 +458,7 @@ topts(cp, sz)
+ 	}
+ }
+ 
+-tpacket(s, tp, n)
+-	char *s;
+-	struct tftphdr *tp;
+-	int n;
++void tpacket(char *s, struct tftphdr *tp, int n)
+ {
+ 	static char *opcodes[] =
+ 	   { "#0", "RRQ", "WRQ", "DATA", "ACK", "ERROR", "OACK" };
+@@ -505,17 +506,15 @@ struct timeval tstart;
+ struct timeval tstop;
+ struct timezone zone;
+ 
+-startclock() {
++void startclock() {
+ 	gettimeofday(&tstart, &zone);
+ }
+ 
+-stopclock() {
++void stopclock() {
+ 	gettimeofday(&tstop, &zone);
+ }
+ 
+-printstats(direction, amount)
+-char *direction;
+-unsigned long amount;
++void printstats(char *direction, unsigned long amount)
+ {
+ 	double delta;
+ 			/* compute delta in 1/10's second units */
