@@ -24,4 +24,3 @@ preserve_perms() {
 
 preserve_perms etc/rc.d/rc.fail2ban.new
 config etc/logrotate.d/fail2ban.new
-config etc/bash_completion.d/fail2ban.new
