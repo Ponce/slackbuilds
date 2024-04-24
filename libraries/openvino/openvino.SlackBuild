@@ -26,8 +26,11 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=openvino
 VERSION=${VERSION:-2024.0.0}
-VERSION_PROTOBUF=3.21.12
 VERSION_FLATBUFFERS=24.3.25
+VERSION_ONNX=1.16.0
+VERSION_ONEDNN_GPU=3.4.1
+COMMIT_ONEDNN=26633ae49edd4353a29b7170d9fcef6b2d79f4b3
+COMMIT_MLAS=d1bc25ec4660cddd87804fcf03b2411b5dfb2e94
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -85,40 +88,74 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} +
 
-# The protobuf3 version from SBo makes the build fail
-(
-cd thirdparty/protobuf/
-rmdir protobuf
-tar vxf $CWD/protobuf-$VERSION_PROTOBUF.tar.gz
-ln -s protobuf-$VERSION_PROTOBUF protobuf
-)
-# Flatbuffers from SBo comes without static lib
+# Flatbuffers from SBo provide broken cmake files(static-lib removed but static-lib-cmake-files not removed)
 (
 cd thirdparty/flatbuffers/
 rmdir flatbuffers
 tar vxf $CWD/flatbuffers-$VERSION_FLATBUFFERS.tar.gz
 ln -s flatbuffers-$VERSION_FLATBUFFERS flatbuffers
 )
+# onnx frontend
+(
+cd thirdparty/onnx/
+rmdir onnx
+tar vxf $CWD/onnx-$VERSION_ONNX.tar.gz
+ln -s onnx-$VERSION_ONNX onnx
+)
+# mlas for cpu inference device
+(
+cd src/plugins/intel_cpu/thirdparty
+rmdir mlas
+tar vxf $CWD/mlas-$COMMIT_MLAS.tar.gz
+ln -s mlas-$COMMIT_MLAS mlas
+)
+# oneDNN for cpu inference device, fork from openvinotoolkit needed
+# oneDNN supports 64 bit platforms only
+if [ "$LIBDIRSUFFIX" == 64 ]; then
+  CPU=ON
+  GPU=ON
+  (
+  cd src/plugins/intel_cpu/thirdparty
+  rmdir onednn
+  tar vxf $CWD/oneDNN-$COMMIT_ONEDNN.tar.gz
+  ln -s oneDNN-$COMMIT_ONEDNN onednn
+  )
+  # oneDNN for gpu inference device, original project
+  (
+  cd src/plugins/intel_gpu/thirdparty
+  rmdir onednn_gpu
+  tar vxf $CWD/oneDNN-$VERSION_ONEDNN_GPU.tar.gz
+  ln -s oneDNN-$VERSION_ONEDNN_GPU onednn_gpu
+  )
+else
+  CPU=OFF
+  GPU=OFF
+fi
 
+#-DENABLE_TBBBIND_2_5=OFF prevents using static prebuild libtbbbind
+# https://github.com/openvinotoolkit/openvino/blob/master/docs/dev/cmake_options_for_custom_compilation.md
 mkdir -p build
 cd build
   unshare -n cmake \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_STANDARD=17 \
     -DLIB_SUFFIX=${LIBDIRSUFFIX} \
     -DCMAKE_INSTALL_PREFIX=/usr/share/openvino \
     -DENABLE_SYSTEM_PUGIXML=ON \
     -DENABLE_SYSTEM_SNAPPY=ON \
     -DENABLE_SYSTEM_OPENCL=ON \
     -DENABLE_SYSTEM_TBB=ON \
-    -DENABLE_SYSTEM_PROTOBUF=OFF \
+    -DENABLE_TBBBIND_2_5=OFF \
+    -DENABLE_SYSTEM_PROTOBUF=ON \
+    -DProtobuf_LIBRARY=/usr/lib$LIBDIRSUFFIX/libprotobuf.so \
     -DENABLE_SYSTEM_OPENCL=ON \
+    -DOpenCV_DIR=/usr/lib64/cmake/opencv4 \
     -DENABLE_JS=OFF \
-    -DENABLE_SSE42=OFF \
     -DENABLE_SAMPLES=OFF \
-    -DENABLE_INTEL_CPU=OFF \
-    -DENABLE_INTEL_GPU=OFF \
-    -DENABLE_OV_ONNX_FRONTEND=OFF \
+    -DENABLE_INTEL_CPU=$CPU \
+    -DENABLE_INTEL_GPU=$GPU \
+    -DENABLE_OV_ONNX_FRONTEND=ON \
     -Wno-dev \
     -DCMAKE_BUILD_TYPE=Release ..
   cmake --build .
@@ -127,7 +164,6 @@ cd ..
 
 rmdir $PKG/usr/share/openvino/samples/cpp/thirdparty/gflags/gflags
 rmdir $PKG/usr/share/openvino/samples/cpp/thirdparty/nlohmann_json
-
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a LICENSE README.md $PKG/usr/doc/$PRGNAM-$VERSION
