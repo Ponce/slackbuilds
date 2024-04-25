@@ -1,5 +1,5 @@
---- vboxdrv.sh.orig	2023-01-11 18:59:15.000000000 +0100
-+++ vboxdrv.sh	2023-03-11 16:35:46.673798632 +0100
+--- vboxdrv.sh.orig	2024-02-28 15:40:56.680861821 +0100
++++ vboxdrv.sh	2024-02-28 15:47:52.417842405 +0100
 @@ -45,39 +45,13 @@
    MODPROBE="$MODPROBE --allow-unsupported-modules"
  fi
@@ -40,7 +40,7 @@
  if test -u "${VIRTUALBOX}"; then
      GROUP=root
      DEVICE_MODE=0600
-@@ -173,299 +147,12 @@
+@@ -173,333 +147,12 @@
      lsmod | grep -q "$1[^_-]"
  }
  
@@ -215,7 +215,7 @@
 -            --state "$opt_name" 2>/dev/null
 -    elif test -f /lib/modules/"$KERN_VER"/build/.config; then
 -        # Extract config option manually.
--        grep "$opt_name" /lib/modules/"$KERN_VER"/build/.config | sed -e "s/^$opt_name=//" -e "s/\"//g"
+-        grep "$opt_name=" /lib/modules/"$KERN_VER"/build/.config | sed -e "s/^$opt_name=//" -e "s/\"//g"
 -    fi
 -}
 -
@@ -240,6 +240,40 @@
 -      -o "$sig_hashalgo" = "sha512" ] || return
 -
 -    echo "1"
+-}
+-
+-# Check if kernel configuration requires modules signature.
+-kernel_requires_module_signature()
+-{
+-    vbox_sys_lockdown_path="/sys/kernel/security/lockdown"
+-
+-    requires=""
+-    # We consider that if kernel is running in the following configurations,
+-    # it will require modules to be signed.
+-    if [ "$(kernel_get_config_opt "CONFIG_MODULE_SIG")" = "y" ]; then
+-
+-        # Modules signature verification is hardcoded in kernel config.
+-        [ "$(kernel_get_config_opt "CONFIG_MODULE_SIG_FORCE")" = "y" ] && requires="1"
+-
+-        # Unsigned modules loading is restricted by "lockdown" feature in runtime.
+-        if [   "$(kernel_get_config_opt "CONFIG_LOCK_DOWN_KERNEL")" = "y" \
+-            -o "$(kernel_get_config_opt "CONFIG_SECURITY_LOCKDOWN_LSM")" = "y" \
+-            -o "$(kernel_get_config_opt "CONFIG_SECURITY_LOCKDOWN_LSM_EARLY")" = "y" ]; then
+-
+-            # Once lockdown level is set to something different than "none" (e.g., "integrity"
+-            # or "confidentiality"), kernel will reject unsigned modules loading.
+-            if [ -r "$vbox_sys_lockdown_path" ]; then
+-                [ -n "$(cat "$vbox_sys_lockdown_path" | grep "\[integrity\]")" ] && requires="1"
+-                [ -n "$(cat "$vbox_sys_lockdown_path" | grep "\[confidentiality\]")" ] && requires="1"
+-            fi
+-
+-            # This configuration is used by a number of modern Linux distributions and restricts
+-            # unsigned modules loading when Secure Boot mode is enabled.
+-            [ "$(kernel_get_config_opt "CONFIG_LOCK_DOWN_IN_EFI_SECURE_BOOT")" = "y" -a -n "$HAVE_SEC_BOOT" ] && requires="1"
+-        fi
+-    fi
+-
+-    [ -n "$requires" ] && echo "1"
 -}
 -
 -# Returns "1" if module is signed and signature can be verified
@@ -318,8 +352,8 @@
 -    mod_dir="$(dirname "$mod_path" | sed 's;^.*/;;')"
 -    [ "$mod_dir" = "misc" ] || return
 -
--    # In case if system is running in Secure Boot mode, check if module is signed.
--    if test -n "$HAVE_SEC_BOOT"; then
+-    # In case if kernel configuration requires module signature, check if module is signed.
+-    if test "$(kernel_requires_module_signature)" = "1"; then
 -        [ "$(module_signed "$mod")" = "1" ] || return
 -    fi
 -
@@ -340,18 +374,17 @@
  start()
  {
      begin_msg "Starting VirtualBox services" console
-@@ -483,10 +170,6 @@
-     fi
+@@ -518,9 +171,6 @@
  
      if ! running vboxdrv; then
--
+ 
 -        # Check if system already has matching modules installed.
 -        [ "$(setup_complete)" = "1" ] || setup
 -
          if ! rm -f $DEVICE; then
              failure "Cannot remove $DEVICE"
          fi
-@@ -538,8 +221,6 @@
+@@ -572,8 +222,6 @@
          mkdir -p -m 0750 /dev/vboxusb 2>/dev/null
          chown root:vboxusers /dev/vboxusb 2>/dev/null
      fi
@@ -360,7 +393,7 @@
      succ_msg "VirtualBox services started"
  }
  
-@@ -620,153 +301,10 @@
+@@ -654,153 +302,10 @@
      fi
  }
  
@@ -425,7 +458,7 @@
 -        module_build_log "$myerr"
 -        failure "Look at $LOG to find out what went wrong"
 -    fi
--    log "Building the net adaptor module."
+-    log "Building the net adapter module."
 -    if ! myerr=`$BUILDINTMP \
 -        --use-module-symvers /tmp/vboxdrv-Module.symvers \
 -        --module-source "$MODULE_SRC/vboxnetadp" \
@@ -450,8 +483,8 @@
 -    sync
 -    succ_msg "VirtualBox kernel modules built"
 -
--    # Secure boot on Ubuntu, Debian and Oracle Linux.
--    if test -n "$HAVE_SEC_BOOT"; then
+-    # Sign kernel modules if kernel configuration requires it.
+-    if test "$(kernel_requires_module_signature)" = "1"; then
 -        begin_msg "Signing VirtualBox kernel modules" console
 -
 -        # Generate new signing key if needed.
@@ -515,7 +548,7 @@
  }
  
  dmnstatus()
-@@ -816,20 +354,7 @@
+@@ -850,20 +355,7 @@
      stop && start
      ;;
  setup)
@@ -537,7 +570,7 @@
      ;;
  force-reload)
      stop
-@@ -839,7 +364,7 @@
+@@ -873,7 +365,7 @@
      dmnstatus
      ;;
  *)
