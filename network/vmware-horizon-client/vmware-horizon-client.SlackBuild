@@ -3,6 +3,7 @@
 # Slackware build script for vmware-horizon-client
 
 # Copyright 2015 Beni Keller, Schwyz, Switzerland
+# Copyright 2024 Erich Ritz, Jenks, Oklahoma, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,76 +26,44 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=vmware-horizon-client
-VERSION=${VERSION:-3.4.0}
+SRCNAM=VMware-Horizon-Client
+VERSION=${VERSION:-2312.1_8.12.1_23543969}
+DEBVERSION=${VERSION//_/-}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-ARCH=i586
-_BUILD=2769709
-
-# Install PCOIP component
-PCOIP=${PCOIP:-YES}
-# Install USB-redirection component
-# This is deactivated by default because
-# It's not working with the current version of libcrypto.
-USB=${USB:-NO}
-# Install Smartcard component
-SMARTCRD=${SMARTCRD:-YES}
-# Install Real Time Audio and Video component
-RTAV=${RTAV:-YES}
-
-echo $PCOIP
-break
-
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
-if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
-  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
-  exit 0
-fi
 
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-BUNDLE=$CWD/VMware-Horizon-Client-$VERSION-$_BUILD.x86.bundle
-# All the components we support with this SlackBuild. The
-# 'virtual-printing' support is excluded because I have no
-# way to test whether it's working.
-COMPONENTS="client pcoip usb smartcard rtav"
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
 
-set -e 
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+# Upstream only has binary support for x86_64 at present.
+if [ "$ARCH" = "x86_64" ]; then
+    DEBARCH="x64"
+else
+    echo "Sorry, the VMware Horizon Client binary is currently available for x86_64 only."
+    exit 1
+fi
+
+set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
-cd $TMP
-rm -rf $PRGNAM-$VERSION
-
-# We use the Gentoo eclass to extract components from the bundle.
-# These are the settings needed for these functions.
-
-
-
-
-export T="$CWD"
-
-ebegin() {
-    echo -n "Begin ${1}: "
-}
-eend() {
-    echo 'done'
-}
-
-source "$CWD/vmware-bundle.eclass"
-
-# Extracting the components from the bundle
-for COMPONENT in $COMPONENTS; do
-    extract_bundle_component $BUNDLE "vmware-horizon-$COMPONENT" "$CWD/extract/vmware-horizon-$COMPONENT"
-done
-
-cd $CWD/extract
-
+cd $PKG
+ar p $CWD/${SRCNAM}-${DEBVERSION}.$DEBARCH.deb data.tar.gz | tar xzv
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -102,69 +71,52 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
+# Move lib to lib64
+mv $PKG/usr/lib $PKG/usr/lib64
+sed -i 's-/usr/lib-/usr/lib64-g' $PKG/usr/bin/vmware-appstub
+sed -i 's-/usr/lib-/usr/lib64-g' $PKG/usr/bin/vmware-url-filter
+sed -i 's-/usr/lib-/usr/lib64-g' $PKG/usr/bin/vmware-view
+sed -i 's-/usr/lib-/usr/lib64-g' $PKG/usr/bin/vmware-view-lib-scan
+sed -i 's-/usr/lib-/usr/lib64-g' $PKG/usr/bin/vmware-view-log-collector
+sed -i 's-/usr/lib-/usr/lib64-g' $PKG/usr/lib64/vmware/view/integratedPrinting/integrated-printing-setup.sh
 
-# Dirty hack copied from Arch PKGBUILD
-# https://aur.archlinux.org/packages/vm/vmware-horizon-client
-# Helps linking to the correct version of the OpenSSL libs
-for FILE in $(find "$CWD/extract/" -type f); do
-	# executables and libraries only
-	file --mime "${FILE}" | egrep -q "(application/x-(executable|sharedlib)|text/x-shellscript)" || continue
+#find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+#  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+#find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+#  | cut -f 1 -d : | xargs chmod 755 2> /dev/null || true
 
-	# make executable
-	chmod +x "${FILE}"
+# Handle Debian's postinst:
+ln -s /lib64/libudev.so.1 $PKG/usr/lib64/vmware/libudev.so.0
+ln -s /usr/lib64/libsecret-1.so $PKG/usr/lib64/vmware/libsecret.so
+mkdir -p $PKG/etc/rc0.d
+mkdir -p $PKG/etc/rc3.d
+mkdir -p $PKG/etc/rc4.d
+mkdir -p $PKG/etc/rc6.d
+ln -s /etc/init.d/ftsprhv $PKG/etc/rc0.d/K08ftsprhv
+ln -s /etc/init.d/ftsprhv $PKG/etc/rc6.d/K08ftsprhv
+ln -s /etc/init.d/ftsprhv $PKG/etc/rc3.d/S50ftsprhv
+ln -s /etc/init.d/ftsprhv $PKG/etc/rc4.d/S50ftsprhv
+ln -s /etc/init.d/ftscanhv $PKG/etc/rc0.d/K08ftscanhv
+ln -s /etc/init.d/ftscanhv $PKG/etc/rc6.d/K08ftscanhv
+ln -s /etc/init.d/ftscanhv $PKG/etc/rc3.d/S50ftscanhv
+ln -s /etc/init.d/ftscanhv $PKG/etc/rc4.d/S50ftscanhv
+ln -s /etc/init.d/vmware-USBArbitrator $PKG/etc/rc0.d/K01vmware-USBArbitrator
+ln -s /etc/init.d/vmware-USBArbitrator $PKG/etc/rc6.d/K01vmware-USBArbitrator
+ln -s /etc/init.d/vmware-USBArbitrator $PKG/etc/rc3.d/S01vmware-USBArbitrator
+ln -s /etc/init.d/vmware-USBArbitrator $PKG/etc/rc4.d/S01vmware-USBArbitrator
+ln -sf /usr/lib64/vmware/view/usb/vmware-usbarbitrator $PKG/usr/bin/vmware-usbarbitrator
+chmod +755 $PKG/usr/lib64/vmware/view/html5mmr/*.so*
+chmod +755 $PKG/usr/lib64/vmware/view/vdpService/webrtcRedir/libwebrtc_sharedlib.so
 
-	# link against libudev.so.1
-	#sed -i -e 's/libudev.so.0/libudev.so.1/' "${FILE}"
-
-	# even openssl 1.0.1.x has library file names ending in .so.1.0.0
-	sed -i -e 's/libssl.so.1.0.1/libssl.so.1.0.0/' \
-		-e 's/libcrypto.so.1.0.1/libcrypto.so.1.0.0/' \
-		"${FILE}"
-done
-# Delete these libraries. We'll recreate these files later as links
-rm "$CWD"/extract/vmware-horizon-pcoip/pcoip/lib/vmware/lib{crypto,ssl}.so.1.0.1
-
-# We install the client without the other components
-# Since it's a binary distribution we just copy the files
-cd $CWD/extract/vmware-horizon-client
-
-mkdir -p "$PKG/usr/"
-mkdir -p "$PKG/usr/doc/"
-
-cp -a bin/ "$PKG/usr/"
-cp -a lib/ "$PKG/usr/"
-cp -a share/ "$PKG/usr/"
-cp -a doc/ "$PKG/usr/doc/$PRGNAM-$VERSION/"
-cp -a debug/ "$PKG/usr/doc/$PRGNAM-$VERSION/"
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+mv $PKG/usr/share/doc/vmware-horizon-client/* $PKG/usr/doc/$PRGNAM-$VERSION/
+rm -rf $PKG/usr/share/doc
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-
-# We install the components
-if [ "$PCOIP" == "YES" ]; then
-    cd ../vmware-horizon-pcoip
-    cp -a pcoip/lib/* "$PKG/usr/lib/"
-    cp -a pcoip/bin/* "$PKG/usr/bin/"
-    # We create the symbolic links for the libraries
-    ln -sf ../../lib/libcrypto.so.1.0.0 "$PKG/usr/lib/vmware/libcrypto.so.1.0.0"
-    ln -sf ../../lib/libssl.so.1.0.0 "$PKG/usr/lib/vmware/libssl.so.1.0.0"
-fi
-
-if [ "$USB" == "YES" ]; then
-    cd ../vmware-horizon-usb
-    cp -a bin/* "$PKG/usr/bin/"
-fi
-
-if [ "$SMARTCRD" == "YES" ]; then
-    cd ../vmware-horizon-smartcard
-    cp -a lib/* "$PKG/usr/lib/"
-fi
-
-if [ "$RTAV" == "YES" ]; then
-    cd ../vmware-horizon-rtav
-    cp -a lib/* "$PKG/usr/lib/"
-fi
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/douninst.sh > $PKG/install/douninst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
