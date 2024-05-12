@@ -9,11 +9,9 @@ config() {
 }
 
 config etc/fwupd/fwupd.conf.new
-config etc/fwupd/remotes.d/fwupd-tests.conf.new
 config etc/fwupd/remotes.d/lvfs-testing.conf.new
 config etc/fwupd/remotes.d/lvfs.conf.new
 config etc/fwupd/remotes.d/vendor-directory.conf.new
-config etc/fwupd/remotes.d/vendor.conf.new
 config etc/grub.d/35_fwupd.new
 
 if [ -e usr/share/icons/hicolor/icon-theme.cache ]; then
