@@ -23,6 +23,6 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.mongodb.new
-config etc/mongodb.conf.new
+config etc/mongod.conf.new
 config etc/mongos.conf.new
 config etc/logrotate.d/mongodb.new

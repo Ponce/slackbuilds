@@ -52,9 +52,6 @@ OUTPUT=${OUTPUT:-/tmp}
 MONGO_USER=${MONGO_USER:-285}
 MONGO_GROUP=${MONGO_GROUP:-285}
 
-SRC_FILE=$PRGNAM-src-r$VERSION.tar.gz
-SRC_FLDR=$PRGNAM-src-r$VERSION
-
 if [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
@@ -81,15 +78,11 @@ EOF
 getent passwd mongo &>/dev/null || bailout
 getent group  mongo &>/dev/null || bailout
 
-rm -fr $TMP/$SRC_FLDR $PKG
+rm -fr $PKG
 mkdir -p $TMP $PKG $OUTPUT
-cd $TMP
-tar xvf $CWD/$SRC_FILE
-cd $SRC_FLDR
-# remove bundled libs
-rm -fR src/third_party/{boost,pcre-*,snappy-*,yaml-cpp,zlib-*}
-# remove compass
-rm -fR src/mongo/installer/compass
+cd $PKG
+ar p $CWD/mongodb-org-server_${VERSION}_amd64.deb data.tar.zst | zstd --decompress | tar xv
+ar p $CWD/mongodb-org-mongos_${VERSION}_amd64.deb data.tar.zst | zstd --decompress | tar xv
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -97,63 +90,24 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# thanks gentoo, also for these patches
-for i in $CWD/patches/* ; do patch -p1 < $i ; done
-
-sed -i "s|GCC 11.3|GCC 11.2|g" SConstruct
-sed -i "s|__GNUC_MINOR__ < 3|__GNUC_MINOR__ < 2|g" SConstruct
-
-scons_opts=(
-  --disable-warnings-as-errors
-  --use-system-boost
-  --use-system-pcre2
-  --use-system-snappy
-  --use-system-yaml
-  --use-system-zlib
-  --use-system-zstd
-  --use-sasl-client
-  --use-system-libbson
-  --use-system-mongo-c
-  --ssl
-)
-
-# Thanks to Lockywolf
-# scons can use multiple jobs. For convenience, read MAKEFLAGS from the environment, if set
-JOBS="$( echo $MAKEFLAGS | sed 's,.*-j *\([0-9][0-9]*\)*.*,\1,' )"
-# or if no MAKEFLAGS, use the number of cores minus 1
-JOBS="${JOBS:-$(( $( nproc ) - 1 ))}"
-# or 1, if we really have one core
-[ "$JOBS" = "0" ] && JOBS=1
-
-if [ "$ARCH" = "x86_64" ]; then
-  PREFIX=${PKG}/usr CFLAGS="$SLKCFLAGS" CXXFLAGS="$SLKCFLAGS" LDFLAGS="-L /lib$LIBDIRSUFFIX -L/usr/lib$LIBDIRSUFFIX" \
-    ./buildscripts/scons.py "${scons_opts[@]}" --force-jobs --jobs="$JOBS" install-core
-else
-  PREFIX=${PKG}/usr CFLAGS="$SLKCFLAGS" CXXFLAGS="$SLKCFLAGS" LDFLAGS="-L /lib$LIBDIRSUFFIX -L/usr/lib$LIBDIRSUFFIX" \
-    ./buildscripts/scons.py "${scons_opts[@]}" --force-jobs --jobs="$JOBS" --wiredtiger=off install-core
-fi
-
-# manual install
-( cd build/install/bin
-  for i in * ; do install -D -m 0755 $i $PKG/usr/bin/$i ; done )
-( cd debian
-  for i in *.1 ; do install -D -m 0644 $i $PKG/usr/man/man1/$i ; done )
+# We don't need systemd files
+rm -rf lib
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+mv usr/share/man usr/
 
 mkdir -p ${PKG}/usr/doc/${PRGNAM}-${VERSION}
-cp distsrc/* ${PKG}/usr/doc/${PRGNAM}-${VERSION}
+mv usr/share/doc/mongodb-org-* ${PKG}/usr/doc/${PRGNAM}-${VERSION}
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+rm -rf usr/share/doc
 
 mkdir -p $PKG/etc/{logrotate,rc}.d
-cat $CWD/files/mongodb.conf > $PKG/etc/mongodb.conf.new
 cat $CWD/files/mongos.conf > $PKG/etc/mongos.conf.new
 cat $CWD/files/mongodb.logrotate > $PKG/etc/logrotate.d/mongodb.new
 cat $CWD/files/rc.mongodb > $PKG/etc/rc.d/rc.mongodb.new
+mv etc/mongod.conf etc/mongod.conf.new
 
 mkdir -p $PKG/var/{lib,log}/mongodb
 chmod 750 $PKG/var/{lib,log}/mongodb
