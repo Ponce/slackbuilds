@@ -1,0 +1,157 @@
+From 6d0381f98ce0a5624901b0042d624ea972a10c2b Mon Sep 17 00:00:00 2001
+From: Stephen Seo <seo.disparate@gmail.com>
+Date: Wed, 29 Nov 2023 20:09:08 +0900
+Subject: [PATCH] obs-ffmpeg: Use new side-data FFmpeg 6.1 API
+
+Fixes for using FFmpeg 6.1 due to deprecations. Uses `#if` macros to
+allow builds for using older versions of FFmpeg.
+
+This commit replaces usage of `av_stream_add_side_data(...)` with
+`av_packet_side_data_add(...)`, as the former was deprecated in favor of
+the latter.
+
+The FFmpeg commit that deprecated `av_stream_add_side_data(...)` is [1].
+
+The FFmpeg commit that introduced `av_packet_side_data_add(...)` is [2].
+
+Note that the deprecation commit is after the new API function. The
+commit in between [3] appears to be changes that migrates to the usage
+of the new API function.
+
+[1]: avformat/avformat: use the side data from AVStream.codecpar
+https://github.com/FFmpeg/FFmpeg/commit/5432d2aacad5fa7420fe2d9369ed061d521e92d6
+
+[2]: avcodec/packet: add generic side data helpers
+https://github.com/FFmpeg/FFmpeg/commit/74279227dd28d01b447edb8e617a545982171c2c
+
+[3]: avcodec/codec_par: add side data to AVCodecParameters
+https://github.com/FFmpeg/FFmpeg/commit/21d7cc6fa9a26e94965fa71b25655d07568450fe
+---
+ plugins/obs-ffmpeg/ffmpeg-mux/ffmpeg-mux.c | 16 ++++++++++++++++
+ plugins/obs-ffmpeg/obs-ffmpeg-mpegts.c     | 16 ++++++++++++++++
+ plugins/obs-ffmpeg/obs-ffmpeg-output.c     | 16 ++++++++++++++++
+ 3 files changed, 48 insertions(+)
+
+diff --git a/plugins/obs-ffmpeg/ffmpeg-mux/ffmpeg-mux.c b/plugins/obs-ffmpeg/ffmpeg-mux/ffmpeg-mux.c
+index 740b60e5bf46e..8fb84aa7c4e0b 100644
+--- a/plugins/obs-ffmpeg/ffmpeg-mux/ffmpeg-mux.c
++++ b/plugins/obs-ffmpeg/ffmpeg-mux/ffmpeg-mux.c
+@@ -498,9 +498,17 @@ static void create_video_stream(struct ffmpeg_mux *ffm)
+ 			av_content_light_metadata_alloc(&content_size);
+ 		content->MaxCLL = max_luminance;
+ 		content->MaxFALL = max_luminance;
++#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(60, 31, 102)
+ 		av_stream_add_side_data(ffm->video_stream,
+ 					AV_PKT_DATA_CONTENT_LIGHT_LEVEL,
+ 					(uint8_t *)content, content_size);
++#else
++		av_packet_side_data_add(
++			&ffm->video_stream->codecpar->coded_side_data,
++			&ffm->video_stream->codecpar->nb_coded_side_data,
++			AV_PKT_DATA_CONTENT_LIGHT_LEVEL, (uint8_t *)content,
++			content_size, 0);
++#endif
+ 
+ 		AVMasteringDisplayMetadata *const mastering =
+ 			av_mastering_display_metadata_alloc();
+@@ -516,10 +524,18 @@ static void create_video_stream(struct ffmpeg_mux *ffm)
+ 		mastering->max_luminance = av_make_q(max_luminance, 1);
+ 		mastering->has_primaries = 1;
+ 		mastering->has_luminance = 1;
++#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(60, 31, 102)
+ 		av_stream_add_side_data(ffm->video_stream,
+ 					AV_PKT_DATA_MASTERING_DISPLAY_METADATA,
+ 					(uint8_t *)mastering,
+ 					sizeof(*mastering));
++#else
++		av_packet_side_data_add(
++			&ffm->video_stream->codecpar->coded_side_data,
++			&ffm->video_stream->codecpar->nb_coded_side_data,
++			AV_PKT_DATA_MASTERING_DISPLAY_METADATA,
++			(uint8_t *)mastering, sizeof(*mastering), 0);
++#endif
+ 	}
+ 
+ 	if (ffm->output->oformat->flags & AVFMT_GLOBALHEADER)
+diff --git a/plugins/obs-ffmpeg/obs-ffmpeg-mpegts.c b/plugins/obs-ffmpeg/obs-ffmpeg-mpegts.c
+index f33ee77365274..a56dd91bcc38e 100644
+--- a/plugins/obs-ffmpeg/obs-ffmpeg-mpegts.c
++++ b/plugins/obs-ffmpeg/obs-ffmpeg-mpegts.c
+@@ -168,9 +168,17 @@ static bool create_video_stream(struct ffmpeg_output *stream,
+ 			av_content_light_metadata_alloc(&content_size);
+ 		content->MaxCLL = hdr_nominal_peak_level;
+ 		content->MaxFALL = hdr_nominal_peak_level;
++#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(60, 31, 102)
+ 		av_stream_add_side_data(data->video,
+ 					AV_PKT_DATA_CONTENT_LIGHT_LEVEL,
+ 					(uint8_t *)content, content_size);
++#else
++		av_packet_side_data_add(
++			&data->video->codecpar->coded_side_data,
++			&data->video->codecpar->nb_coded_side_data,
++			AV_PKT_DATA_CONTENT_LIGHT_LEVEL, (uint8_t *)content,
++			content_size, 0);
++#endif
+ 
+ 		AVMasteringDisplayMetadata *const mastering =
+ 			av_mastering_display_metadata_alloc();
+@@ -186,10 +194,18 @@ static bool create_video_stream(struct ffmpeg_output *stream,
+ 		mastering->max_luminance = av_make_q(hdr_nominal_peak_level, 1);
+ 		mastering->has_primaries = 1;
+ 		mastering->has_luminance = 1;
++#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(60, 31, 102)
+ 		av_stream_add_side_data(data->video,
+ 					AV_PKT_DATA_MASTERING_DISPLAY_METADATA,
+ 					(uint8_t *)mastering,
+ 					sizeof(*mastering));
++#else
++		av_packet_side_data_add(
++			&data->video->codecpar->coded_side_data,
++			&data->video->codecpar->nb_coded_side_data,
++			AV_PKT_DATA_MASTERING_DISPLAY_METADATA,
++			(uint8_t *)mastering, sizeof(*mastering), 0);
++#endif
+ 	}
+ 	context = avcodec_alloc_context3(NULL);
+ 	context->codec_type = codec->type;
+diff --git a/plugins/obs-ffmpeg/obs-ffmpeg-output.c b/plugins/obs-ffmpeg/obs-ffmpeg-output.c
+index ec02b59cda9d8..c7786153392e5 100644
+--- a/plugins/obs-ffmpeg/obs-ffmpeg-output.c
++++ b/plugins/obs-ffmpeg/obs-ffmpeg-output.c
+@@ -213,9 +213,17 @@ static bool create_video_stream(struct ffmpeg_data *data)
+ 			av_content_light_metadata_alloc(&content_size);
+ 		content->MaxCLL = hdr_nominal_peak_level;
+ 		content->MaxFALL = hdr_nominal_peak_level;
++#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(60, 31, 102)
+ 		av_stream_add_side_data(data->video,
+ 					AV_PKT_DATA_CONTENT_LIGHT_LEVEL,
+ 					(uint8_t *)content, content_size);
++#else
++		av_packet_side_data_add(
++			&data->video->codecpar->coded_side_data,
++			&data->video->codecpar->nb_coded_side_data,
++			AV_PKT_DATA_CONTENT_LIGHT_LEVEL, (uint8_t *)content,
++			content_size, 0);
++#endif
+ 
+ 		AVMasteringDisplayMetadata *const mastering =
+ 			av_mastering_display_metadata_alloc();
+@@ -231,10 +239,18 @@ static bool create_video_stream(struct ffmpeg_data *data)
+ 		mastering->max_luminance = av_make_q(hdr_nominal_peak_level, 1);
+ 		mastering->has_primaries = 1;
+ 		mastering->has_luminance = 1;
++#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(60, 31, 102)
+ 		av_stream_add_side_data(data->video,
+ 					AV_PKT_DATA_MASTERING_DISPLAY_METADATA,
+ 					(uint8_t *)mastering,
+ 					sizeof(*mastering));
++#else
++		av_packet_side_data_add(
++			&data->video->codecpar->coded_side_data,
++			&data->video->codecpar->nb_coded_side_data,
++			AV_PKT_DATA_MASTERING_DISPLAY_METADATA,
++			(uint8_t *)mastering, sizeof(*mastering), 0);
++#endif
+ 	}
+ 
+ 	closest_format = data->config.format;
