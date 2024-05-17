@@ -1,0 +1,253 @@
+#!/bin/bash
+
+# Slackware build script for OpenJDK21 LTS
+
+# Copyright 2024 Lenard Spencer, Orlando, Florida, USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=OpenJDK21
+VERSION=${VERSION:-21.0.3}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm; echo "$ARCH is not supported, aborting."; exit 1 ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf jdk21u-jdk-$VERSION-ga
+tar xvf $CWD/jdk21u-jdk-$VERSION-ga.tar.gz
+
+# Building openjdk from source requires bootstrapping from either a
+# current or previous version of the (open)jdk binary installation.
+# Extract the OpenJDK20 binary to bootstrap
+if [ "$ARCH" = "x86_64" ]; then
+  export BSDIR="OpenJDK-20.0.2-ga-linux-x86_64-bin"
+  rm -rf $BSDIR
+  tar xvf $CWD/OpenJDK-20.0.2-ga-linux-x86_64-bin.tar.xz
+else
+  export BSDIR="OpenJDK-20.0.2-ga-linux-i586-bin"
+  rm -rf $BSDIR
+  tar xvf $CWD/OpenJDK-20.0.2-ga-linux-i586-bin.tar.xz
+fi
+
+export BOOT_JAVA=$TMP/$BSDIR
+
+# Unpack the jtreg package to run the tests:
+if [ "${TESTS:-no}" = "yes" ]; then
+  rm -rf $TMP/jtreg{,-reports}
+  tar xvf $CWD/jtreg-7.3.1+1.tar.gz
+  JTREG="--with-jtreg=$TMP/jtreg"
+else
+  JTREG=""
+fi
+
+cd jdk21u-jdk-${VERSION}-ga
+echo "Setting permissions (this may take a while so be patient)"
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+unset JAVA_HOME # recommended by upstream
+
+if [ "${USE_CCACHE:-no}" = "yes" ]; then
+  USECCACHE="--enable-ccache"
+else
+  USECCACHE=""
+fi
+
+# By default, the OpenJDK21 build uses all available cpu cores.
+# We can override that here with the CORES= switch.
+if [ "${CORES:-""}" ]; then
+  JVAL="$(echo $CORES | grep -o "[0-9]")" || true
+  [ -n "$JVAL" ] && SJOBS="--with-jobs=$JVAL"
+  TJOBS=$JVAL
+else
+  SJOBS=""
+  TJOBS="$(expr $(nproc) + 1)"
+fi
+
+sh configure \
+  --with-boot-jdk=${BOOT_JAVA} \
+  --with-extra-cflags="$SLKCFLAGS" \
+  --with-extra-cxxflags="$SLKCFLAGS" \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --with-giflib=system \
+  --with-harfbuzz=system \
+  --with-lcms=system \
+  --with-libjpeg=system \
+  --with-libpng=system \
+  --with-zlib=system \
+  --disable-precompiled-headers \
+  --enable-libffi-bundling \
+  --enable-unlimited-crypto \
+  --disable-warnings-as-errors \
+  --with-native-debug-symbols=none \
+  $SJOBS \
+  $USECCACHE \
+  $JTREG \
+  --build=$ARCH-slackware-linux
+
+unset MAKEFLAGS  # causes the build to fail if set
+make bootcycle-images
+
+# Test the build using jtreg (thanks BLFS):
+if [ "$TESTS" = "yes" ]; then
+  export JT_JAVA=$(echo $TMP/jdk21u-jdk-${VERSION}-ga/build/*/jdk)
+  mkdir -p $TMP/jtreg-reports
+  $TMP/jtreg/bin/jtreg -jdk:$JT_JAVA -automatic -ignore:quiet -v1 \
+   -r:$TMP/jtreg-reports -avm -conc:$TJOBS test/jdk:tier1 test/langtools:tier1 \
+   || true
+  unset JT_JAVA
+fi
+
+# make install does not respect DESTDIR, so we must move the image:
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/java
+cp -a build/*/images/jdk/* $PKG/usr/lib$LIBDIRSUFFIX/java
+
+for s in 16 24 32 48; do
+  install -vDm644 src/java.desktop/unix/classes/sun/awt/X11/java-icon${s}.png \
+   $PKG/usr/share/icons/hicolor/${s}x${s}/apps/java.png
+done
+# the 24x24 icon is missized, so we fix it here:
+cp $CWD/java.png $PKG/usr/share/icons/hicolor/24x24/apps
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Create some necessary symlinks:
+( cd $PKG/usr/lib$LIBDIRSUFFIX
+ln -sf java $PRGNAM-$VERSION
+ln -sf java/lib/libjawt.so
+ln -sf java/lib/server/libjvm.so
+ln -sf java/lib/libjava.so
+ln -sf java/lib/libawt.so
+ln -sf java/lib/libawt_xawt.so
+ln -sf java/lib/libverify.so
+)
+
+# Move man pages and compress:
+mv $PKG/usr/lib$LIBDIRSUFFIX/java/man $PKG/usr
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+#Thanks AlienBOB for this part!
+# Generate a cacerts file from the certificates installed by ca-certificates
+# in Slackware - the "cacerts" in the OpenJDK sources may be outdated.
+# This requires 'trust' program from p11-kit:
+rm -f $PKG/usr/lib${LIBDIRSUFFIX}/java/lib/security/cacerts 
+trust extract --format=java-cacerts --filter=ca-anchors --purpose=server-auth \
+  $PKG/usr/lib${LIBDIRSUFFIX}/java/lib/security/cacerts
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  LICENSE ADDITIONAL_LICENSE_INFO ASSEMBLY_EXCEPTION README.md \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+( cd $PKG/usr/doc/$PRGNAM-$VERSION
+ln -s ../../lib${LIBDIRSUFFIX}/$PRGNAM-$VERSION/legal
+ln -s ../../lib${LIBDIRSUFFIX}/$PRGNAM-$VERSION/release
+)
+
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Create desktop entries (Thanks BLFS):
+mkdir -p $PKG/usr/share/applications
+cat > $PKG/usr/share/applications/openjdk-java.desktop << EOF
+[Desktop Entry]
+Name=OpenJDK ${VERSION} Runtime
+Comment=OpenJDK Java ${VERSION} Runtime
+Exec=/usr/lib${LIBDIRSUFFIX}/java/bin/java -jar
+Terminal=false
+Type=Application
+Icon=java
+MimeType=application/x-java-archive;application/java-archive;application/x-jar;
+NoDisplay=true
+EOF
+
+cat > $PKG/usr/share/applications/openjdk-jconsole.desktop << EOF
+[Desktop Entry]
+Name=OpenJDK Java ${VERSION} Console
+Comment=OpenJDK ${VERSION} Console
+Keywords=java;console;monitoring
+Exec=/usr/lib${LIBDIRSUFFIX}/java/bin/jconsole
+Terminal=false
+Type=Application
+Icon=java
+Categories=System;
+EOF
+
+# Create /etc/profile.d scripts:
+mkdir -p $PKG/etc/profile.d
+cat > $PKG/etc/profile.d/jdk21.sh << EOF
+export JAVA_HOME=/usr/lib${LIBDIRSUFFIX}/java
+export PATH=\${PATH}:\${JAVA_HOME}/bin
+EOF
+
+cat > $PKG/etc/profile.d/jdk21.csh << EOF
+setenv JAVA_HOME /usr/lib${LIBDIRSUFFIX}/java
+setenv PATH \${PATH}:\${JAVA_HOME}/bin
+EOF
+chmod 755 $PKG/etc/profile.d/*
+
+mkdir -p $PKG/install
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
