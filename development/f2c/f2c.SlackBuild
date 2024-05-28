@@ -2,8 +2,10 @@
 
 # Slackware build script for f2c
 
-# Copyright 2017-2023, Judah Milgram, Washington DC
+# Copyright 2017-2024, Judah Milgram, Washington DC
 # All rights reserved.
+#
+# Assistance of Moritz Schaefer gratefully acknowledged.
 #
 # Redistribution and use of this script, with or without modification, is
 # permitted provided that the following conditions are met:
@@ -22,10 +24,11 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=f2c
-VERSION=${VERSION:-20240130} # f2c version, not libf2c.
+VERSION=${VERSION:-20240504}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -48,16 +51,19 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -fPIC -DNON_UNIX_STDIO -march=i586 -mtune=i686"
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -fPIC -DNON_UNIX_STDIO -march=i686 -mtune=i686"
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC -DNON_UNIX_STDIO"
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+elif [ "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
-  SLKCFLAGS="-O2 -fPIC -DNON_UNIX_STDIO"
+  SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
 
@@ -67,13 +73,10 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
 
-mkdir -p $PRGNAM-$VERSION/libf2c
-cd $PRGNAM-$VERSION/libf2c
-unzip $CWD/libf2c.zip
-
-cd $TMP/$PRGNAM-$VERSION
-tar xfvz $CWD/src.tgz
+unzip -d libf2c libf2c.zip
 
 chown -R root:root .
 find -L . \
@@ -82,49 +85,35 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# make libf2c:
-cd $TMP/$PRGNAM-$VERSION/libf2c
-make CFLAGS="${SLKCFLAGS}" -f makefile.u
+# libf2c
+make CFLAGS="${SLKCFLAGS} -DNON_UNIX_STDIO -fPIC" -C libf2c -f makefile.u \
+     signal1.h f2c.h libf2c.so
+install -D -t $PKG/usr/lib${LIBDIRSUFFIX} libf2c/libf2c.so
 
-# install libf2c:
-mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}
-make -f makefile.u LIBDIR=$PKG/usr/lib${LIBDIRSUFFIX} install
+# f2c
+make CFLAGS="${SLKCFLAGS} -DNON_UNIX_STDIO -fPIC" -C src -f makefile.u
+install -D -t $PKG/usr/bin src/f2c
+install -m 644 -D -t $PKG/usr/include src/f2c.h
 
-# make f2c:
-cd $TMP/$PRGNAM-$VERSION/src
-make CFLAGS="${SLKCFLAGS}" -f makefile.u
+# strip
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" \
+    | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-# install f2c:
-mkdir -p $PKG/usr/bin
-mkdir -p $PKG/usr/include
-install -s f2c $PKG/usr/bin
-install -m 644 f2c.h $PKG/usr/include
-
-# strip binaries:
-strip --strip-unneeded $PKG/usr/lib${LIBDIRSUFFIX}/libf2c.a
-strip --strip-unneeded $PKG/usr/bin/f2c
-
-# install f2c man page:
-cd $TMP
+# man pages
 mkdir -p $PKG/usr/man/man1
-install -m 644 $PRGNAM-$VERSION/src/f2c.1t $PKG/usr/man/man1/f2c.1
-gzip -9 $PKG/usr/man/man1/f2c.1
+gzip -9 -c src/f2c.1t > $PKG/usr/man/man1/f2c.1.gz
 
-# install docs:
-cd $TMP
+# docs:
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a $PRGNAM-$VERSION/src/Notice $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a $PRGNAM-$VERSION/src/README $PKG/usr/doc/$PRGNAM-$VERSION/README.f2c
-cp -a $PRGNAM-$VERSION/src/changes $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a $PRGNAM-$VERSION/libf2c/README $PKG/usr/doc/$PRGNAM-$VERSION/README.libf2c
-cat $CWD/fc > $PKG/usr/doc/$PRGNAM-$VERSION/fc
-cat $CWD/f2c.pdf > $PKG/usr/doc/$PRGNAM-$VERSION/f2c.pdf
+cp -a \
+   00lastchange README changes f2c.pdf fc index.html src/Notice \
+   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
-# Copy the slack-desc into ./install
+# slack-desc
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
-# Make the package
+# Make package
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
