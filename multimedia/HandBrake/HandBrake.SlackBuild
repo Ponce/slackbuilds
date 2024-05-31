@@ -2,19 +2,42 @@
 
 # Slackware build script for HandBrake
 
-# This slackbuild maintained by Klaatu at klaatu@hackerpublicradio.org
+# This slackbuild was maintained by Klaatu at klaatu@hackerpublicradio.org
 # Modified by David Somero at SlackBuilds.org.
 # Modified by Erik Hanson at SlackBuilds.org
 # Patched to fix x264 segfault by John Vogel
 
+# Permission from Klaatu was given in 2024 to add the following copyright.
+# If any previous maintainers would like to have their info added, please
+# contact the current maintainer.
+
+# Copyright 2024 Jeremy Hansen <jebrhansen+SBo@gmail.com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=HandBrake
-VERSION=${VERSION:-1.5.1}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.8.0}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-DOCDIR=${DOCDIR:-/usr/doc}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -47,10 +70,6 @@ else
   LIBDIRSUFFIX=""
 fi
 
-SLKCFLAGS="$SLKCFLAGS -fno-aggressive-loop-optimizations"
-export CFLAGS="$SLKCFLAGS"
-export CXXFLAGS="$SLKCFLAGS"
-
 set -e
 
 rm -rf $PKG
@@ -60,7 +79,7 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION-source.tar.bz2
 cd $PRGNAM-$VERSION
 mkdir -p download
-cp -r $CWD/*{gz,bz2} download
+cp -r $CWD/*.tar.{gz,bz2} download/
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -68,42 +87,56 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# 20220324 bkw: this fixes the 32-bit build, at the cost of adding
-# x265 as a required dep. It's based on Debian's
-# 0001-Remove-embedded-downloaded-copies-of-various-librari.patch
-# ...but it only affects x265.
-patch -p1 < $CWD/system_x265.diff
+# Correct dependency tarball naming inconsistency
+mv download/AMF-1.4.33-slim.tar.gz download/AMF-1.4.33.tar.gz
 
-# Autodetect onevpl support
-if pkg-config --exists vpl ; then qsv="--enable-qsv" ; else qsv="" ; fi
+# Make the GUI optional
+if [ "$GUI" == "no" ]; then
+  GTK_GUI="--disable-gtk"
+else
+  GTK_GUI="--enable-gtk"
+fi
 
+# libdovi and nvdec/nvenc currently don't compile successfully on my
+# machine. Feel free to send any suggestions/fixes.
+# libdovi fails if not forcefully disabled... disabling nvdec/nvenc
+# in case it does the same.
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
-  --disable-gtk-update-checks \
   --enable-fdk-aac \
-  --enable-nvenc \
+  --enable-numa \
+  --enable-qsv \
   --enable-vce \
   --enable-x265 \
-  $qsv \
+  --disable-libdovi \
+  --disable-nvdec \
+  --disable-nvenc \
+  $GTK_GUI \
   --arch=$ARCH
 
 cd build
   make
   make install DESTDIR=$PKG
-strip $PKG/usr/bin/*
+
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 cd $TMP/$PRGNAM-$VERSION
 
-mkdir -p $PKG/$DOCDIR/$PRGNAM-$VERSION
-cp -a AUTHORS.markdown COPYING NEWS.markdown THANKS.markdown README.markdown \
- $PKG/$DOCDIR/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/$DOCDIR/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  AUTHORS.markdown COPYING NEWS.markdown THANKS.markdown README.markdown \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-cat $CWD/doinst.sh > $PKG/install/doinst.sh
+# Don't use the doinst.sh if there is no GUI
+if [ "$GUI" != "no" ]; then cat $CWD/doinst.sh > $PKG/install/doinst.sh; fi
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
