@@ -26,6 +26,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=pytorch
 VERSION=${VERSION:-2.3.0}
+VERSION_SIX=1.11.0
 BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -74,6 +75,10 @@ cd $PRGNAM-v$VERSION
 chown -R root:root .
 chmod -R u+w,go-w,a+rX-st $PKG
 
+# Needed for NNPACK
+mkdir -p build/confu-deps/six-download/six-prefix/src/
+cp $CWD/six-$VERSION_SIX.tar.gz build/confu-deps/six-download/six-prefix/src/
+
 # Fix cmake libdir location
 sed -i c10/CMakeLists.txt \
   -e "s;DESTINATION lib;DESTINATION lib$LIBDIRSUFFIX;g"
@@ -85,16 +90,15 @@ sed -i "/Werror=return-type/d" CMakeLists.txt
 # This seems harmless as these get recompiled again locally, but it slows down the building process.
 # See https://github.com/icecc/icecream/issues/336
 
-export USE_NNPACK=0
-python3 setup.py build --cmake-only
+unshare -n python3 setup.py build --cmake-only
 
 cd build
   unshare -n cmake \
     -G Ninja \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_CXX_STANDARD=17 \
     -DCMAKE_INSTALL_PREFIX="/usr" \
+    -DCMAKE_CXX_STANDARD=17 \
     -DLIBSHM_INSTALL_LIB_SUBDIR="lib$LIBDIRSUFFIX" \
     -DTORCH_INSTALL_LIB_DIR="lib$LIBDIRSUFFIX" \
     -DPYTHON_EXECUTABLE=$(which python3) \
@@ -102,17 +106,16 @@ cd build
     -DBUILD_TEST=OFF \
     -DUSE_FFMPEG=ON \
     -DUSE_GOLD_LINKER=ON \
-    -DUSE_NNPACK=OFF \
     -DUSE_OPENCL=ON \
     -DUSE_OPENCV=ON \
     -DUSE_VULKAN=ON \
     -DCMAKE_BUILD_TYPE=Release ..
   "${NINJA:=ninja}"
   DESTDIR=tmpxxx $NINJA install/strip
-
-  mkdir -p $PKG/usr
+  
+  mkdir -p $PKG/usr/{share,lib$LIBDIRSUFFIX}
   mv tmpxxx/usr/bin $PKG/usr
-  mkdir -p $PKG/usr/lib$LIBDIRSUFFIX
+  mv tmpxxx/usr/share/cmake $PKG/usr/share
   mv tmpxxx/usr/lib$LIBDIRSUFFIX/*.so $PKG/usr/lib$LIBDIRSUFFIX
 cd ..
 python3 setup.py install --root=$PKG
