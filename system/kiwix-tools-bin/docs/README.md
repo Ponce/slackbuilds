@@ -113,7 +113,7 @@ Like for the installation, you might need to run the command as `root`
 Docker
 ------
 
-An official Docker image of the Kiwix tools can be found on 
+An official Docker image of the Kiwix tools can be found on
 [GHCR](https://ghcr.io/kiwix/kiwix-tools). A
 `kiwix-serve` dedicated Docker image [exists
 too](https://ghcr.io/kiwix/kiwix-serve).
