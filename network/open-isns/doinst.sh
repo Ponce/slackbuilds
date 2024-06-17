@@ -1,4 +1,3 @@
-# 20230620 bkw: Please stick with the config() from our template.
 
 config() {
   NEW="$1"
