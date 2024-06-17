@@ -1,6 +1,3 @@
-# 20230620 bkw: reverted this to the config() function from SBo
-# template. Please leave this as-is. It works, and it won't confuse
-# us (we have over 8000 scripts to look after...)
 
 config() {
   NEW="$1"
@@ -15,5 +12,8 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/iscsi/iscsid.conf.new
 config etc/iscsi/initiatorname.iscsi.new
+config etc/iscsi/iscsid.conf.new
+config etc/udev/rules.d/50-iscsi-firmware-login.rules.new
+config etc/logrotate.d/iscsiuiolog.new
+config etc/rc.d/rc.open-iscsi.new

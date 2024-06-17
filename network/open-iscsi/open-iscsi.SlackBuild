@@ -2,7 +2,7 @@
 
 # Slackware build script for open-iscsi
 
-# Copyright 2019 Wayne Cuddy USA
+# Copyright 2024 Wayne Cuddy USA
 # Copyright 2021  Mario Preksavec, Zagreb, Croatia
 # All rights reserved.
 #
@@ -23,19 +23,11 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# 20230620 bkw: Modified by SlackBuilds.org, BUILD=2:
-# - Fix doinst.sh (conf files were missing .new suffix).
-# - Do not install /usr/include headers with +x permission.
-
-#
-# 2019/09/08 - add patch to support building on Slackware "current"
-#
-
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=open-iscsi
-VERSION=${VERSION:-2.1.5}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-2.1.10}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -65,6 +57,9 @@ elif [ "$ARCH" = "i686" ]; then
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
+elif [ "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
@@ -79,11 +74,6 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 
-# Allow this SB to work on "current", benign on 14.2.
-patch -p1 <$CWD/include_sysmacros.patch
-
-patch -p1 <$CWD/remove_werror.patch
-
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -91,16 +81,24 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
-make OPTFLAGS="-DNO_SYSTEMD" NO_SYSTEMD=1
-make install DESTDIR=$PKG
+mkdir build
+cd build
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  meson .. \
+    --buildtype=release \
+    --infodir=/usr/info \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    -Dstrip=true \
+    -Dno_systemd=true
+  "${NINJA:=ninja}"
+  DESTDIR=$PKG $NINJA install
+cd ..
 
-chmod -x $PKG/usr/include/*.h
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-mv $PKG/usr/share/man $PKG/usr
-rmdir $PKG/usr/share
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
@@ -117,8 +115,10 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 # These may be renamed back by doinst.sh.
 for cf in \
+    etc/iscsi/initiatorname.iscsi \
     etc/iscsi/iscsid.conf \
-    etc/iscsi/initiatorname.iscsi
+    etc/udev/rules.d/50-iscsi-firmware-login.rules \
+    etc/logrotate.d/iscsiuiolog
 do
     mv $PKG/$cf $PKG/$cf.new
 done
@@ -128,7 +128,7 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 mkdir -p $PKG/etc/rc.d
-cat $CWD/rc.$PRGNAM > $PKG/etc/rc.d/rc.$PRGNAM
+cat $CWD/rc.$PRGNAM > $PKG/etc/rc.d/rc.$PRGNAM.new
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
