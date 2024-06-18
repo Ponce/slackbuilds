@@ -11,5 +11,5 @@ config() {
     # Otherwise, we leave the .new copy for the admin to consider...
 }
 
-config etc/mailfromd/mailfromd.mf.new
+config etc/mailfromd/mailfromd.mfl.new
 config etc/rc.d/rc.mailfromd.new
