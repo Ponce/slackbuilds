@@ -22,17 +22,18 @@
 #  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=realtek-bt
 VERSION=${VERSION:-20201202}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-TMP=${TMP:-/tmp/SBo}
-BUILD_DIR=$TMP/$PRGNAM
-PKG=$TMP/package-$PRGNAM
-OUTPUT=${OUTPUT:-/tmp}
+
+KERNEL=${KERNEL:-$(uname -r)}
+KERNELPATH=${KERNELPATH:-/lib/modules/$KERNEL/build}
+PKGVER=${VERSION}_$(echo $KERNEL | tr - _)
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -43,32 +44,46 @@ if [ -z "$ARCH" ]; then
 fi
 
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
-  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  echo "$PRGNAM-$PKGVER-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
 fi
 
-BASE_DIR=20201202_LINUX_BT_DRIVER/usb/
-SRC_DIR=bluetooth_usb_driver
-DRV_DIR=lib/modules/$(uname -r)/kernel/drivers/bluetooth
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
 
 set -e
 
-rm -rf $BUILD_DIR $PKG
-mkdir -p $TMP $BUILD_DIR $PKG $OUTPUT
-
-cd $BUILD_DIR
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+mkdir $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
 7z x $CWD/mpow_BH519A_driver+for+Linux.7z
-cd $BASE_DIR
-make -C $SRC_DIR
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+DRV_DIR=lib/modules/$KERNEL/kernel/drivers/bluetooth
+SRC_DIR=bluetooth_usb_driver
+
+cd "$VERSION"_LINUX_BT_DRIVER/usb/
+env -u ARCH make -C $SRC_DIR KVER=$KERNEL KDIR=$KERNELPATH
+
+mkdir -p $PKG/$DRV_DIR
+install -m 0644 $SRC_DIR/rtk_btusb.ko $PKG/$DRV_DIR/
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$PKGVER
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$PKGVER/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s%@KERNEL@%$KERNEL%" $CWD/install/doinst.sh > $PKG/install/doinst.sh
+sed "s%@KERNEL@%$KERNEL%" $CWD/install/douninst.sh > $PKG/install/douninst.sh
 
 cd $PKG
-
-mkdir -p $DRV_DIR
-cp $BUILD_DIR/$BASE_DIR/$SRC_DIR/rtk_btusb.ko $DRV_DIR
-cp -r $CWD/install .
-cat $CWD/slack-desc > $PKG/install/slack-desc
-
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$PKGVER-$ARCH-$BUILD$TAG.$PKGTYPE
