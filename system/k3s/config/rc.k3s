@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+
+### BEGIN INIT INFO
+# Provides:          k3s
+# Required-Start:    $network $remote_fs $syslog
+# Required-Stop:     $network $remote_fs $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Lightweight Kubernetes Distribution
+### END INIT INFO
+
+PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
+
+BASE=k3s
+DAEMON_DIR=/usr/bin
+DAEMON="$BASE server"
+PID=/var/run/$BASE.pid
+SOCK=/run/k3s/containerd/containerd.sock
+ENVFILE=/etc/rancher/$BASE/$BASE.service.env
+
+# Load environment variables
+[ -r $ENVFILE ] && . $ENVFILE
+
+do_start() {
+    # Load kernel modules
+    /sbin/modprobe br_netfilter || true
+    /sbin/modprobe overlay || true
+
+    $DAEMON_DIR/$DAEMON > /dev/null 2>&1 &
+    pidof "$DAEMON" > $PID
+
+    sleep 7
+    if [ -f $PID ]; then
+        echo "$BASE has started."
+    else
+        echo "$BASE failed to start. Please restart the daemon."
+    fi
+}
+
+do_stop() {
+    if [ -f $PID ]; then
+        echo "Stopping $BASE.."
+        kill $(ps aux | grep "$SOCK" | awk '{print $2}') \
+             $(cat $PID) > /dev/null 2>&1
+        sleep 2
+        ip link delete flannel.1 > /dev/null 2>&1
+        rm -f $PID
+        echo "$BASE has stopped."
+    else
+        killall "$DAEMON" > /dev/null 2>&1 || echo "$BASE is not running."
+    fi
+}
+
+do_restart() {
+    do_stop > /dev/null
+    do_start > /dev/null
+    echo "$BASE has restarted."
+}
+
+do_stat() {
+    if [ -s $PID ]; then
+        echo "$BASE is running: $(cat $PID)"
+    else
+        echo "$BASE is not running."
+    fi
+}
+
+case "$1" in
+    start)
+        echo "Starting $BASE.."
+        do_start
+        ;;
+    stop)
+        do_stop
+        ;;
+    killall)
+        # This option is merged from killall script, good idea to have it here!
+        echo "Stopping $BASE and cleaning up resources.."
+        if [ ! -f $PID ]; then
+            do_start > /dev/null
+        fi
+        sleep 5
+        pschildren() {
+            ps -e -o ppid= -o pid= | \
+            sed -e 's/^\s*//g; s/\s\s*/\t/g;' | \
+            grep -w "^$1" | \
+            cut -f2
+        }
+        pstree() {
+            for pid in $@; do
+                echo $pid
+                for child in $(pschildren $pid); do
+                    pstree $child
+                done
+            done
+        }
+        killtree() {
+            kill -9 $(
+                { set +x; } 2>/dev/null;
+                pstree $@;
+                set -x;
+            ) 2>/dev/null
+        }
+        getshims() {
+            ps -e -o pid= -o args= | sed -e 's/^ *//; s/\s\s*/\t/;' | grep -w 'k3s/data/[^/]*/bin/containerd-shim' | cut -f1
+        }
+        killtree $({ set +x; } 2>/dev/null; getshims; set -x)
+        do_unmount_and_remove() {
+            awk -v path="$1" '$2 ~ ("^" path) { print $2 }' /proc/self/mounts | sort -r | xargs -r -t -n 1 sh -c 'umount "$0" && rm -rf "$0"'
+        }
+        sleep 2
+        do_unmount_and_remove '/run/k3s'
+        do_unmount_and_remove '/var/lib/rancher/k3s'
+        do_unmount_and_remove '/var/lib/kubelet/pods'
+        do_unmount_and_remove '/run/netns/cni-'
+        ip netns show 2>/dev/null | grep cni- | xargs -r -t -n 1 ip netns delete
+        ip link show 2>/dev/null | grep 'master cni0' | while read ignore iface ignore; do
+            iface=${iface%%@*}
+            [ -z "$iface" ] || ip link delete $iface
+        done
+        ip link delete cni0
+        ip link delete flannel.1
+        rm -rf /var/lib/cni/
+        iptables-save | grep -v 'KUBE-\|CNI-' | iptables-restore
+        do_stop > /dev/null
+        echo "Done."
+        ;;
+    status)
+        do_stat
+        ;;
+    restart)
+        echo "Restarting $BASE.."
+        do_restart
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|killall|status|restart}" >&2
+        exit 1
+        ;;
+esac
