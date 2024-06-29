@@ -10,9 +10,22 @@ config() {
   fi
   # Otherwise, we leave the .new copy for the admin to consider...
 }
+preserve_perms() {
+  NEW="$1"
+  OLD="$(dirname $NEW)/$(basename $NEW .new)"
+  if [ -e $OLD ]; then
+    cp -a $OLD ${NEW}.incoming
+    cat $NEW > ${NEW}.incoming
+    mv ${NEW}.incoming $NEW
+  fi
+  config $NEW
+}
 
+preserve_perms etc/rc.d/rc.k3s.new
 config etc/rancher/k3s/k3s.service.env.new
 
-if [ -x /etc/rc.d/rc.k3s ]; then
-    /etc/rc.d/rc.k3s restart > /dev/null
+if [ ! -f /etc/rancher/k3s/k3s.yaml ]; then
+  k3s server \
+    --write-kubeconfig /etc/rancher/k3s/k3s.yaml \
+    --write-kubeconfig-mode 644 > /dev/null 2>&1 &
 fi
