@@ -23,3 +23,4 @@ preserve_perms() {
 }
 
 preserve_perms etc/rc.d/rc.nix.new
+config etc/nix/nix.conf.new
