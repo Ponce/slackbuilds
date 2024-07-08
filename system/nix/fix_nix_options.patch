@@ -1,40 +1,49 @@
 diff --git a/doc/manual/local.mk b/doc/manual/local.mk
-index f43510b..1e1e62d 100644
+index abdfd6a..f1cec77 100644
 --- a/doc/manual/local.mk
 +++ b/doc/manual/local.mk
-@@ -24,7 +24,7 @@ dummy-env = env -i \
- 	NIX_STATE_DIR=/dummy \
+@@ -25,14 +25,16 @@ clean-files += $(d)/*.1 $(d)/*.5 $(d)/*.8
+ 
+ # Provide a dummy environment for nix, so that it will not access files outside the macOS sandbox.
+ # Set cores to 0 because otherwise nix show-config resolves the cores based on the current machine
++dum_DIR := $(realpath $(nix_DIR))
++
+ dummy-env = env -i \
+-	HOME=/dummy \
+-	NIX_CONF_DIR=/dummy \
+-	NIX_SSL_CERT_FILE=/dummy/no-ca-bundle.crt \
+-	NIX_STATE_DIR=/dummy \
++	HOME=$(dum_DIR)/dummy \
++	NIX_CONF_DIR=$(dum_DIR)/dummy \
++	NIX_SSL_CERT_FILE=$(dum_DIR)/dummy/no-ca-bundle.crt \
++	NIX_STATE_DIR=$(dum_DIR)/dummy \
  	NIX_CONFIG='cores = 0'
  
 -nix-eval = $(dummy-env) $(bindir)/nix eval --experimental-features nix-command -I nix/corepkgs=corepkgs --store dummy:// --impure --raw
 +nix-eval = $(dummy-env) $(nix_DIR)/nix eval --experimental-features nix-command -I nix/corepkgs=corepkgs --store dummy:// --impure --raw
  
- $(d)/%.1: $(d)/src/command-ref/%.md
- 	@printf "Title: %s\n\n" "$$(basename $@ .1)" > $^.tmp
-@@ -48,29 +48,29 @@ $(d)/src/SUMMARY.md: $(d)/src/SUMMARY.md.in $(d)/src/command-ref/new-cli
- 	$(trace-gen) cat doc/manual/src/SUMMARY.md.in | while IFS= read line; do if [[ $$line = @manpages@ ]]; then cat doc/manual/src/command-ref/new-cli/SUMMARY.md; else echo "$$line"; fi; done > $@.tmp
+ # re-implement mdBook's include directive to make it usable for terminal output and for proper @docroot@ substitution
+ define process-includes
+@@ -96,52 +98,52 @@ $(d)/src/SUMMARY.md: $(d)/src/SUMMARY.md.in $(d)/src/command-ref/new-cli $(d)/sr
+ 	@cp $< $@
+ 	@$(call process-includes,$@,$@)
+ 
+-$(d)/src/command-ref/new-cli: $(d)/nix.json $(d)/utils.nix $(d)/generate-manpage.nix $(bindir)/nix
++$(d)/src/command-ref/new-cli: $(d)/nix.json $(d)/utils.nix $(d)/generate-manpage.nix $(nix_DIR)/nix
+ 	@rm -rf $@ $@.tmp
+ 	$(trace-gen) $(nix-eval) --write-to $@.tmp --expr 'import doc/manual/generate-manpage.nix (builtins.readFile $<)'
  	@mv $@.tmp $@
  
--$(d)/src/command-ref/new-cli: $(d)/nix.json $(d)/generate-manpage.nix $(bindir)/nix
-+$(d)/src/command-ref/new-cli: $(d)/nix.json $(d)/generate-manpage.nix $(nix_DIR)/nix
- 	@rm -rf $@
- 	$(trace-gen) $(nix-eval) --write-to $@.tmp --expr 'import doc/manual/generate-manpage.nix { toplevel = builtins.readFile $<; }'
- 	@# @docroot@: https://nixos.org/manual/nix/unstable/contributing/hacking.html#docroot-variable
- 	$(trace-gen) sed -i $@.tmp/*.md -e 's^@docroot@^../..^g'
- 	@mv $@.tmp $@
- 
--$(d)/src/command-ref/conf-file.md: $(d)/conf-file.json $(d)/generate-options.nix $(d)/src/command-ref/conf-file-prefix.md $(bindir)/nix
-+$(d)/src/command-ref/conf-file.md: $(d)/conf-file.json $(d)/generate-options.nix $(d)/src/command-ref/conf-file-prefix.md $(nix_DIR)/nix
+-$(d)/src/command-ref/conf-file.md: $(d)/conf-file.json $(d)/utils.nix $(d)/src/command-ref/conf-file-prefix.md $(d)/src/command-ref/experimental-features-shortlist.md $(bindir)/nix
++$(d)/src/command-ref/conf-file.md: $(d)/conf-file.json $(d)/utils.nix $(d)/src/command-ref/conf-file-prefix.md $(d)/src/command-ref/experimental-features-shortlist.md $(nix_DIR)/nix
  	@cat doc/manual/src/command-ref/conf-file-prefix.md > $@.tmp
- 	@# @docroot@: https://nixos.org/manual/nix/unstable/contributing/hacking.html#docroot-variable
- 	$(trace-gen) $(nix-eval) --expr 'import doc/manual/generate-options.nix (builtins.fromJSON (builtins.readFile $<))' \
- 	  | sed -e 's^@docroot@^..^g'>> $@.tmp
+ 	$(trace-gen) $(nix-eval) --expr '(import doc/manual/utils.nix).showSettings { useAnchors = true; } (builtins.fromJSON (builtins.readFile $<))' >> $@.tmp;
  	@mv $@.tmp $@
  
 -$(d)/nix.json: $(bindir)/nix
--	$(trace-gen) $(dummy-env) $(bindir)/nix __dump-args > $@.tmp
+-	$(trace-gen) $(dummy-env) $(bindir)/nix __dump-cli > $@.tmp
 +$(d)/nix.json: $(nix_DIR)/nix
-+	$(trace-gen) $(dummy-env) $(nix_DIR)/nix __dump-args > $@.tmp
++	$(trace-gen) $(dummy-env) $(nix_DIR)/nix __dump-cli > $@.tmp
  	@mv $@.tmp $@
  
 -$(d)/conf-file.json: $(bindir)/nix
@@ -43,51 +52,94 @@ index f43510b..1e1e62d 100644
 +	$(trace-gen) $(dummy-env) $(nix_DIR)/nix show-config --json --experimental-features nix-command > $@.tmp
  	@mv $@.tmp $@
  
--$(d)/src/language/builtins.md: $(d)/builtins.json $(d)/generate-builtins.nix $(d)/src/language/builtins-prefix.md $(bindir)/nix
-+$(d)/src/language/builtins.md: $(d)/builtins.json $(d)/generate-builtins.nix $(d)/src/language/builtins-prefix.md $(nix_DIR)/nix
+-$(d)/src/contributing/experimental-feature-descriptions.md: $(d)/xp-features.json $(d)/utils.nix $(d)/generate-xp-features.nix $(bindir)/nix
++$(d)/src/contributing/experimental-feature-descriptions.md: $(d)/xp-features.json $(d)/utils.nix $(d)/generate-xp-features.nix $(nix_DIR)/nix
+ 	@rm -rf $@ $@.tmp
+ 	$(trace-gen) $(nix-eval) --write-to $@.tmp --expr 'import doc/manual/generate-xp-features.nix (builtins.fromJSON (builtins.readFile $<))'
+ 	@mv $@.tmp $@
+ 
+-$(d)/src/command-ref/experimental-features-shortlist.md: $(d)/xp-features.json $(d)/utils.nix $(d)/generate-xp-features-shortlist.nix $(bindir)/nix
++$(d)/src/command-ref/experimental-features-shortlist.md: $(d)/xp-features.json $(d)/utils.nix $(d)/generate-xp-features-shortlist.nix $(nix_DIR)/nix
+ 	@rm -rf $@ $@.tmp
+ 	$(trace-gen) $(nix-eval) --write-to $@.tmp --expr 'import doc/manual/generate-xp-features-shortlist.nix (builtins.fromJSON (builtins.readFile $<))'
+ 	@mv $@.tmp $@
+ 
+-$(d)/xp-features.json: $(bindir)/nix
+-	$(trace-gen) $(dummy-env) NIX_PATH=nix/corepkgs=corepkgs $(bindir)/nix __dump-xp-features > $@.tmp
++$(d)/xp-features.json: $(nix_DIR)/nix
++	$(trace-gen) $(dummy-env) NIX_PATH=nix/corepkgs=corepkgs $(nix_DIR)/nix __dump-xp-features > $@.tmp
+ 	@mv $@.tmp $@
+ 
+-$(d)/src/language/builtins.md: $(d)/language.json $(d)/generate-builtins.nix $(d)/src/language/builtins-prefix.md $(bindir)/nix
++$(d)/src/language/builtins.md: $(d)/language.json $(d)/generate-builtins.nix $(d)/src/language/builtins-prefix.md $(nix_DIR)/nix
  	@cat doc/manual/src/language/builtins-prefix.md > $@.tmp
- 	@# @docroot@: https://nixos.org/manual/nix/unstable/contributing/hacking.html#docroot-variable
- 	$(trace-gen) $(nix-eval) --expr 'import doc/manual/generate-builtins.nix (builtins.fromJSON (builtins.readFile $<))' \
-@@ -78,8 +78,8 @@ $(d)/src/language/builtins.md: $(d)/builtins.json $(d)/generate-builtins.nix $(d
+ 	$(trace-gen) $(nix-eval) --expr 'import doc/manual/generate-builtins.nix (builtins.fromJSON (builtins.readFile $<)).builtins' >> $@.tmp;
  	@cat doc/manual/src/language/builtins-suffix.md >> $@.tmp
  	@mv $@.tmp $@
  
--$(d)/builtins.json: $(bindir)/nix
--	$(trace-gen) $(dummy-env) NIX_PATH=nix/corepkgs=corepkgs $(bindir)/nix __dump-builtins > $@.tmp
-+$(d)/builtins.json: $(nix_DIR)/nix
-+	$(trace-gen) $(dummy-env) NIX_PATH=nix/corepkgs=corepkgs $(nix_DIR)/nix __dump-builtins > $@.tmp
+-$(d)/src/language/builtin-constants.md: $(d)/language.json $(d)/generate-builtin-constants.nix $(d)/src/language/builtin-constants-prefix.md $(bindir)/nix
++$(d)/src/language/builtin-constants.md: $(d)/language.json $(d)/generate-builtin-constants.nix $(d)/src/language/builtin-constants-prefix.md $(nix_DIR)/nix
+ 	@cat doc/manual/src/language/builtin-constants-prefix.md > $@.tmp
+ 	$(trace-gen) $(nix-eval) --expr 'import doc/manual/generate-builtin-constants.nix (builtins.fromJSON (builtins.readFile $<)).constants' >> $@.tmp;
+ 	@cat doc/manual/src/language/builtin-constants-suffix.md >> $@.tmp
+ 	@mv $@.tmp $@
+ 
+-$(d)/language.json: $(bindir)/nix
+-	$(trace-gen) $(dummy-env) NIX_PATH=nix/corepkgs=corepkgs $(bindir)/nix __dump-language > $@.tmp
++$(d)/language.json: $(nix_DIR)/nix
++	$(trace-gen) $(dummy-env) NIX_PATH=nix/corepkgs=corepkgs $(nix_DIR)/nix __dump-language > $@.tmp
  	@mv $@.tmp $@
  
  # Generate the HTML manual.
 diff --git a/doc/manual/local.mk b/doc/manual/local.mk
-index 1e1e62d..3978847 100644
+index b4aba08..daed407 100644
 --- a/doc/manual/local.mk
 +++ b/doc/manual/local.mk
-@@ -109,12 +109,12 @@ doc/manual/generated/man1/nix3-manpages: $(d)/src/command-ref/new-cli
+@@ -176,22 +176,22 @@ doc/manual/generated/man1/nix3-manpages: $(d)/src/command-ref/new-cli
  	@touch $@
  
- $(docdir)/manual/index.html: $(MANUAL_SRCS) $(d)/book.toml $(d)/anchors.jq $(d)/custom.css $(d)/src/SUMMARY.md $(d)/src/command-ref/new-cli $(d)/src/command-ref/conf-file.md $(d)/src/language/builtins.md
+ $(docdir)/manual/index.html: $(MANUAL_SRCS) $(d)/book.toml $(d)/anchors.jq $(d)/custom.css $(d)/src/SUMMARY.md $(d)/src/command-ref/new-cli $(d)/src/contributing/experimental-feature-descriptions.md $(d)/src/command-ref/conf-file.md $(d)/src/language/builtins.md $(d)/src/language/builtin-constants.md
 -	$(trace-gen) \
--	  set -euo pipefail; \
--	  RUST_LOG=warn mdbook build doc/manual -d $(DESTDIR)$(docdir)/manual.tmp 2>&1 \
--		  | { grep -Fv "because fragment resolution isn't implemented" || :; }
+-		tmp="$$(mktemp -d)"; \
+-		cp -r doc/manual "$$tmp"; \
+-		find "$$tmp" -name '*.md' | while read -r file; do \
+-			$(call process-includes,$$file,$$file); \
+-		done; \
+-		find "$$tmp" -name '*.md' | while read -r file; do \
+-			docroot="$$(realpath --relative-to="$$(dirname "$$file")" $$tmp/manual/src)"; \
+-			sed -i "s,@docroot@,$$docroot,g" "$$file"; \
+-		done; \
+-		set -euo pipefail; \
+-		RUST_LOG=warn mdbook build "$$tmp/manual" -d $(DESTDIR)$(docdir)/manual.tmp 2>&1 \
+-			| { grep -Fv "because fragment resolution isn't implemented" || :; }; \
+-		rm -rf "$$tmp/manual"
 -	@rm -rf $(DESTDIR)$(docdir)/manual
 -	@mv $(DESTDIR)$(docdir)/manual.tmp/html $(DESTDIR)$(docdir)/manual
 -	@rm -rf $(DESTDIR)$(docdir)/manual.tmp
 +	# $(trace-gen) \
-+	#   set -euo pipefail; \
-+	#   RUST_LOG=warn mdbook build doc/manual -d $(DESTDIR)$(docdir)/manual.tmp 2>&1 \
-+	# 	  | { grep -Fv "because fragment resolution isn't implemented" || :; }
++	# 	tmp="$$(mktemp -d)"; \
++	# 	cp -r doc/manual "$$tmp"; \
++	# 	find "$$tmp" -name '*.md' | while read -r file; do \
++	# 		$(call process-includes,$$file,$$file); \
++	# 	done; \
++	# 	find "$$tmp" -name '*.md' | while read -r file; do \
++	# 		docroot="$$(realpath --relative-to="$$(dirname "$$file")" $$tmp/manual/src)"; \
++	# 		sed -i "s,@docroot@,$$docroot,g" "$$file"; \
++	# 	done; \
++	# 	set -euo pipefail; \
++	# 	RUST_LOG=warn mdbook build "$$tmp/manual" -d $(DESTDIR)$(docdir)/manual.tmp 2>&1 \
++	# 		| { grep -Fv "because fragment resolution isn't implemented" || :; }; \
++	# 	rm -rf "$$tmp/manual"
 +	# @rm -rf $(DESTDIR)$(docdir)/manual
 +	# @mv $(DESTDIR)$(docdir)/manual.tmp/html $(DESTDIR)$(docdir)/manual
 +	# @rm -rf $(DESTDIR)$(docdir)/manual.tmp
  
  endif
 diff --git a/Makefile b/Makefile
-index c1a1ce2..3ec1423 100644
+index 31b54b9..0be7929 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -34,6 +34,8 @@ else
+@@ -45,6 +45,8 @@ else
    GLOBAL_CXXFLAGS += -O0 -U_FORTIFY_SOURCE
  endif
  
@@ -95,12 +147,12 @@ index c1a1ce2..3ec1423 100644
 +
  include mk/lib.mk
  
- GLOBAL_CXXFLAGS += -g -Wall -include config.h -std=c++17 -I src
+ GLOBAL_CXXFLAGS += -g -Wall -include config.h -std=c++2a -I src
 diff --git a/src/libstore/sqlite.cc b/src/libstore/sqlite.cc
-index 871f2f3..21897d0 100644
+index 7c8decb..3f36374 100644
 --- a/src/libstore/sqlite.cc
 +++ b/src/libstore/sqlite.cc
-@@ -24,7 +24,7 @@ SQLiteError::SQLiteError(const char *path, const char *errMsg, int errNo, int ex
+@@ -25,7 +25,7 @@ SQLiteError::SQLiteError(const char *path, const char *errMsg, int errNo, int ex
  {
      int err = sqlite3_errcode(db);
      int exterr = sqlite3_extended_errcode(db);
@@ -109,3 +161,27 @@ index 871f2f3..21897d0 100644
  
      auto path = sqlite3_db_filename(db, nullptr);
      auto errMsg = sqlite3_errmsg(db);
+diff --git a/src/libexpr/tests/local.mk b/src/libexpr/tests/local.mk
+index 331a5ea..c56848a 100644
+--- a/src/libexpr/tests/local.mk
++++ b/src/libexpr/tests/local.mk
+@@ -16,4 +16,4 @@ libexpr-tests_CXXFLAGS += -I src/libexpr -I src/libutil -I src/libstore -I src/l
+ 
+ libexpr-tests_LIBS = libstore-tests libutils-tests libexpr libutil libstore libfetchers
+ 
+-libexpr-tests_LDFLAGS := $(GTEST_LIBS) -lgmock
++libexpr-tests_LDFLAGS := -lrapidcheck $(GTEST_LIBS) -lgmock
+diff --git a/configure.ac b/configure.ac
+index 6d78237..b1bb516 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -341,7 +341,8 @@ AC_CHECK_FUNCS([strsignal posix_fallocate sysconf])
+ AC_ARG_WITH(sandbox-shell, AS_HELP_STRING([--with-sandbox-shell=PATH],[path of a statically-linked shell to use as /bin/sh in sandboxes]),
+   sandbox_shell=$withval)
+ AC_SUBST(sandbox_shell)
+-if test ${cross_compiling:-no} = no && ! test -z ${sandbox_shell+x}; then
++if test ${cross_compiling:-no} = no && test -n "${sandbox_shell}" &&
++  test -z "${sandbox_shell%%*busybox*}"; then
+   AC_MSG_CHECKING([whether sandbox-shell has the standalone feature])
+   # busybox shell sometimes allows executing other busybox applets,
+   # even if they are not in the path, breaking our sandbox
