@@ -4,6 +4,8 @@ fi
 
 if [ -x /usr/bin/update-mime-database ]; then
   /usr/bin/update-mime-database usr/share/mime >/dev/null 2>&1
+  # This fix bad permissions in -current
+  chmod 0644 usr/share/mime/application/*.xml || true
 fi
 
 if [ -e usr/share/icons/hicolor/icon-theme.cache ]; then
