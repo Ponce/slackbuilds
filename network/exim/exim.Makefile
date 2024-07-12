@@ -1,7 +1,7 @@
 ##################################################
 #          The Exim mail transport agent         #
 ##################################################
-# Copyright (c) The Exim Maintainers 2022 - 2023
+# Copyright (c) The Exim Maintainers 2022 - 2024
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 # This is the template for Exim's main build-time configuration file. It
@@ -47,11 +47,13 @@
 # compile the Exim monitor utility. Exim itself does not use X11.
 
 # Another area of variability between systems is the type and location of the
-# DBM library package. Exim has support for ndbm, gdbm, tdb, and Berkeley DB.
+# DBM library package. Exim has support for ndbm, gdbm, tdb, Berkeley DB and
+# sqlite3.
 # By default the code assumes ndbm; this often works with gdbm or DB, provided
 # they are correctly installed, via their compatibility interfaces. However,
 # Exim can also be configured to use the native calls for Berkeley DB (obsolete
 # versions 1.85, 2.x, 3.x, or the current 4.x version) and also for gdbm.
+# See definitions for DBMLIB below.
 
 # For some operating systems, a default DBM library (other than ndbm) is
 # selected by a setting in the OS-specific Makefile. Most modern OS now have
@@ -59,8 +61,8 @@
 # for you by the OS-specific configuration. If Exim compiles without any
 # problems, you probably do not have to worry about the DBM library. If you
 # do want or need to change it, you should first read the discussion in the
-# file doc/dbm.discuss.txt, which also contains instructions for testing Exim's
-# interface to the DBM library.
+# file doc/doc-txt/dbm.discuss.txt, which also contains instructions for testing
+# Exim's interface to the DBM library.
 
 # In Local/Makefiles blank lines and lines starting with # are ignored. It is
 # also permitted to use the # character to add a comment to a setting, for
@@ -604,6 +606,9 @@ DISABLE_MAL_MKS=yes
 # using only native facilities.
 SUPPORT_SRS=yes
 
+# Uncomment the following to remove support for the ESMTP extension "WELLKNOWN"
+# DISABLE_WELLKNOWN=yes
+
 
 #------------------------------------------------------------------------------
 # Compiling Exim with experimental features. These are documented in
@@ -685,6 +690,10 @@ SUPPORT_SRS=yes
 # Berkeley DB
 # USE_DB = yes
 # DBMLIB = -ldb
+
+# sqlite
+# USE_SQLITE = yes
+# DBMLIB = -lsqlite3
 
 
 #------------------------------------------------------------------------------
