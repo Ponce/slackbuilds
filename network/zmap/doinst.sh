@@ -9,4 +9,4 @@ config() {
 }
 
 config etc/zmap/zmap.conf.new
-config etc/zmap/blacklist.conf.new
+config etc/zmap/blocklist.conf.new
