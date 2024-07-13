@@ -1,0 +1,156 @@
+diff --git a/compile-phazor.sh b/compile-phazor.sh
+index 090c318b..2313338d 100755
+--- a/compile-phazor.sh
++++ b/compile-phazor.sh
+@@ -3,7 +3,7 @@
+ set -e
+ 
+ gcc src/phazor/kissfft/kiss_fftr.c src/phazor/kissfft/kiss_fft.c src/phazor/phazor.c \
+-    `pkg-config --cflags --libs samplerate wavpack opusfile vorbisfile libmpg123 flac libopenmpt libgme` \
++    `pkg-config --cflags --libs samplerate wavpack opusfile vorbisfile libmpg123 flac libopenmpt` \
+     -shared -o libphazor.so -fPIC -Wall -O3 -g #-Wextra
+ mkdir -p lib
+ mv libphazor.so lib/libphazor.so
+diff --git a/src/phazor/phazor.c b/src/phazor/phazor.c
+index e89edaf6..ecb84259 100644
+--- a/src/phazor/phazor.c
++++ b/src/phazor/phazor.c
+@@ -55,7 +55,6 @@
+ #include <libopenmpt/libopenmpt_stream_callbacks_file.h>
+ #include "kissfft/kiss_fftr.h"
+ #include "wavpack/wavpack.h"
+-#include "gme/gme.h"
+ 
+ #define BUFF_SIZE 240000  // Decoded data buffer size
+ #define BUFF_SAFE 100000  // Ensure there is this much space free in the buffer
+@@ -209,7 +208,6 @@ enum decoder_types {
+     MPT,
+     FEED,
+     WAVPACK,
+-    GME,
+ };
+ 
+ enum result_status_enum {
+@@ -318,11 +316,6 @@ char parse_buffer[2048 * 2];
+ FILE* mod_file = 0;
+ openmpt_module* mod = 0;
+ 
+-
+-// GME related -------------------
+-
+-Music_Emu* emu;
+-
+ // FFMPEG related -----------------------------------------------------
+ 
+ FILE *ffm;
+@@ -893,9 +886,6 @@ void stop_decoder() {
+         case MPT:
+             openmpt_module_destroy(mod);
+             break;
+-        case GME:
+-            gme_delete(emu);
+-            break;
+     }
+     //src_reset(src);
+     decoder_allocated = 0;
+@@ -1132,9 +1122,6 @@ void decode_seek(int abs_ms, int sample_rate) {
+         case MPT:
+             openmpt_module_set_position_seconds(mod, abs_ms / 1000.0);
+             break;
+-        case GME:
+-            gme_seek(emu, (long) abs_ms);
+-            break;
+     }
+ }
+ 
+@@ -1281,7 +1268,6 @@ int load_next() {
+     long rate;
+     int e = 0;
+     int old_sample_rate = sample_rate_src;
+-    src_channels = 2;
+ 
+     char *ext;
+     ext = strrchr(loaded_target_file, '.');
+@@ -1424,21 +1410,6 @@ int load_next() {
+               )
+             ) codec = MPT;
+ 
+-    if (codec == UNKNOWN && ext != NULL && (
+-                strcmp(ext, ".spc") == 0 || strcmp(ext, ".SPC") == 0 ||
+-                strcmp(ext, ".ay") == 0 || strcmp(ext, ".AY") == 0 ||
+-                strcmp(ext, ".gbs") == 0 || strcmp(ext, ".GBS") == 0 ||
+-                strcmp(ext, ".gym") == 0 || strcmp(ext, ".GYM") == 0 ||
+-                strcmp(ext, ".hes") == 0 || strcmp(ext, ".HES") == 0 ||
+-                strcmp(ext, ".kss") == 0 || strcmp(ext, ".KSS") == 0 ||
+-                strcmp(ext, ".nsf") == 0 || strcmp(ext, ".NSF") == 0 ||
+-                strcmp(ext, ".nsfe") == 0 || strcmp(ext, ".NSFE") == 0 ||
+-                strcmp(ext, ".sap") == 0 || strcmp(ext, ".SAP") == 0 ||
+-                strcmp(ext, ".vgm") == 0 || strcmp(ext, ".VGM") == 0 ||
+-                strcmp(ext, ".vgz") == 0 || strcmp(ext, ".VGZ") == 0
+-                )
+-            ) codec = GME;
+-
+     if (codec == UNKNOWN && ext != NULL) {
+         if (strcmp(ext, ".flac") == 0 || strcmp(ext, ".FLAC") == 0) {
+             codec = FLAC;
+@@ -1476,25 +1447,6 @@ int load_next() {
+         return 0;
+     }
+ 
+-    if (codec == GME){
+-
+-        sample_rate_src = 48000;
+-        gme_open_file(loaded_target_file, &emu, (long) sample_rate_src);
+-        gme_start_track(emu, subtrack);
+-
+-        if (load_target_seek > 0) gme_seek(emu, (long) load_target_seek);
+-
+-        if (old_sample_rate != sample_rate_src) {
+-            src_reset(src);
+-        }
+-
+-        pthread_mutex_unlock(&buffer_mutex);
+-        decoder_allocated = 1;
+-
+-        return 0;
+-
+-    }
+-
+     if (codec == MPT){
+ 
+       mod_file = uni_fopen(loaded_target_file);
+@@ -1811,20 +1763,6 @@ void pump_decode() {
+         pthread_mutex_unlock(&buffer_mutex);
+       }
+ 
+-    } else if (codec == GME) {
+-
+-        gme_play(emu, 1024, temp16l);
+-
+-        pthread_mutex_lock(&buffer_mutex);
+-        read_to_buffer_s16int(temp16l, 1024);
+-        samples_decoded += 1024;
+-        pthread_mutex_unlock(&buffer_mutex);
+-
+-        if (gme_track_ended(emu)){
+-            decoder_eos();
+-        }
+-
+-
+     } else if (codec == FLAC) {
+         // FLAC decoding
+ 
+@@ -1853,12 +1791,7 @@ void pump_decode() {
+ 
+         unsigned int done;
+ 
+-        if(src_channels == 1){
+-          done = op_read(opus_dec, opus_buffer, 4096, NULL);
+-        }
+-        else{
+-          done = op_read_stereo(opus_dec, opus_buffer, 1024 * 2) * 2;
+-        }
++        done = op_read_stereo(opus_dec, opus_buffer, 1024 * 2) * 2;
+ 
+         pthread_mutex_lock(&buffer_mutex);
+         read_to_buffer_s16int(opus_buffer, done);
