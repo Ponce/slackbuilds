@@ -33,7 +33,7 @@ echo
 echo "************************* NOTICE *********************************"
 echo "ecbd needs to be running for the printer monitor to be usable. run"
 echo "/etc/rc.d/rc.ecbd restart"
-if [ x`grep "rc.ecbd start" /etc/rc.d/rc.local|wc -l` = "x0" ]; then
+if [ x$(grep "rc.ecbd start" /etc/rc.d/rc.local|wc -l) = "x0" ]; then
   echo "to get it to run automatically at startup, add the following"
   echo "to /etc/rc.d/rc.local"
   echo "if [ -x /etc/rc.d/rc.ecbd ]; then"
