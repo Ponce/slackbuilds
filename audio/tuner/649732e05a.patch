@@ -1,0 +1,295 @@
+From 649732e05a56f7b5c8b34875b3ed544319c45e3f Mon Sep 17 00:00:00 2001
+From: Louis Brauer <louis@openbooking.ch>
+Date: Sat, 22 Jun 2024 23:22:57 +0200
+Subject: [PATCH] Upgrade to libsoup-3.0
+
+---
+ README.md                               |  4 +-
+ meson.build                             |  3 +-
+ src/Services/RadioBrowserDirectory.vala | 79 ++++++++++++++++---------
+ src/Widgets/HeaderBar.vala              | 44 ++++++++------
+ src/Widgets/StationBox.vala             | 56 ++++++++++--------
+ 5 files changed, 110 insertions(+), 76 deletions(-)
+
+diff --git a/README.md b/README.md
+index 8a20169..5d2cb66 100644
+--- a/README.md
++++ b/README.md
+@@ -109,7 +109,7 @@ granite
+ gtk+-3.0
+ gstreamer-1.0
+ gstreamer-player-1.0
+-libsoup-2.4
++libsoup-3.0
+ json-glib-1.0
+ libgee-0.8
+ libgeoclue-2-0
+@@ -124,7 +124,7 @@ Make sure you have the dependencies installed:
+ 
+ ```bash
+ sudo apt install git valac meson
+-sudo apt install libgtk-3-dev libgee-0.8-dev libgranite-dev libgstreamer1.0-dev libgstreamer-plugins-bad1.0-dev libsoup2.4-dev libjson-glib-dev libgeoclue-2-dev libgeocode-glib-dev
++sudo apt install libgtk-3-dev libgee-0.8-dev libgranite-dev libgstreamer1.0-dev libgstreamer-plugins-bad1.0-dev libsoup3.0-dev libjson-glib-dev libgeoclue-2-dev libgeocode-glib-dev
+ ```
+ 
+ Then clone this repo and build it locally:
+diff --git a/meson.build b/meson.build
+index 63542fa..5aabe03 100644
+--- a/meson.build
++++ b/meson.build
+@@ -47,7 +47,7 @@ dependencies = [
+     dependency ('granite'),
+     dependency ('gstreamer-1.0'),
+     dependency ('gstreamer-player-1.0'),
+-    dependency ('libsoup-2.4'),
++    dependency ('libsoup-3.0'),
+     dependency ('json-glib-1.0'),
+     dependency ('libgeoclue-2.0'),
+     dependency ('geocode-glib-1.0')
+@@ -69,4 +69,3 @@ subdir ('data')
+ subdir ('po')
+ 
+ meson.add_install_script ('meson/post_install.py')
+-
+diff --git a/src/Services/RadioBrowserDirectory.vala b/src/Services/RadioBrowserDirectory.vala
+index 9def43d..a7db9bb 100644
+--- a/src/Services/RadioBrowserDirectory.vala
++++ b/src/Services/RadioBrowserDirectory.vala
+@@ -177,16 +177,26 @@ public class Client : Object {
+         debug (@"sending listening event for station $stationuuid");
+         var resource = @"json/url/$stationuuid";
+         var message = new Soup.Message ("GET", @"$current_server/$resource");
+-        var response_code = _session.send_message (message);
+-        debug (@"response: $(response_code)");
++        try {
++            var resp = _session.send (message);
++            resp.close ();
++        } catch(GLib.Error e) {
++            debug ("failed to track()");
++        }
++        debug (@"response: $(message.status_code)");
+     }
+ 
+     public void vote (string stationuuid) {
+         debug (@"sending vote event for station $stationuuid");
+         var resource = @"json/vote/$stationuuid)";
+         var message = new Soup.Message ("GET", @"$current_server/$resource");
+-        var response_code = _session.send_message (message);
+-        debug (@"response: $(response_code)");
++        try {
++            var resp = _session.send (message);
++            resp.close ();
++        } catch(GLib.Error e) {
++            debug("failed to vote()");
++        }
++        debug (@"response: $(message.status_code)");
+     }
+ 
+     public ArrayList<Station> get_stations (string resource) throws DataError {
+@@ -195,21 +205,27 @@ public class Client : Object {
+         var message = new Soup.Message ("GET", @"$current_server/$resource");
+         Json.Node rootnode;
+ 
+-        var response_code = _session.send_message (message);
+-        debug (@"response from radio-browser.info: $response_code");
+-        var body = (string) message.response_body.data;
+-        if (body == null) {
+-            throw new DataError.NO_CONNECTION (@"unable to read response");
+-        }
+         try {
+-            rootnode = Json.from_string (body);
+-        } catch (Error e) {
+-            throw new DataError.PARSE_DATA (@"unable to parse JSON response: $(e.message)");
+-        }
+-        var rootarray = rootnode.get_array ();
++            var response = _session.send (message);
++            warning (@"response from radio-browser.info: $(message.status_code)");
+ 
+-        var stations = jarray_to_stations (rootarray);
+-        return stations;
++            try {
++                var parser = new Json.Parser();
++                parser.load_from_stream (response, null);
++                rootnode = parser.get_root();
++                response.close ();
++            } catch (Error e) {
++                throw new DataError.PARSE_DATA (@"unable to parse JSON response: $(e.message)");
++            }
++            var rootarray = rootnode.get_array ();
++
++            var stations = jarray_to_stations (rootarray);
++            return stations;
++        } catch (GLib.Error e) {
++            warning (@"response from radio-browser.info: $(e.message)");
++        }
++
++        return new ArrayList<Station>();
+     }
+ 
+     public ArrayList<Station> search (SearchParams params,
+@@ -266,20 +282,27 @@ public class Client : Object {
+         var message = new Soup.Message ("GET", @"$current_server/$resource");
+         Json.Node rootnode;
+ 
+-        var response_code = _session.send_message (message);
+-        debug (@"response from radio-browser.info: $response_code");
+-        var body = (string) message.response_body.data;
+-
+         try {
+-            rootnode = Json.from_string (body);
+-        } catch (Error e) {
+-            throw new DataError.PARSE_DATA (@"unable to parse JSON response: $(e.message)");
++            var ip = _session.send (message);
++            debug (@"response from radio-browser.info: $(message.status_code)");
++
++            
++            try {
++                var parser = new Json.Parser();
++                parser.load_from_stream (ip, null);
++                rootnode = parser.get_root ();
++            } catch (Error e) {
++                throw new DataError.PARSE_DATA (@"unable to parse JSON response: $(e.message)");
++            }
++            var rootarray = rootnode.get_array ();
++
++            var tags = jarray_to_tags (rootarray);
++            return tags;
++        } catch(GLib.Error e) {
++            debug("cannot get_tags()");
+         }
+-        var rootarray = rootnode.get_array ();
+-
+-        var tags = jarray_to_tags (rootarray);
+-        return tags;
+ 
++        return new ArrayList<Tag>();
+     }
+ 
+ }
+diff --git a/src/Widgets/HeaderBar.vala b/src/Widgets/HeaderBar.vala
+index be2716b..3bd95d4 100644
+--- a/src/Widgets/HeaderBar.vala
++++ b/src/Widgets/HeaderBar.vala
+@@ -184,26 +184,32 @@ public class Tuner.HeaderBar : Gtk.HeaderBar {
+         var session = new Soup.Session ();
+         var message = new Soup.Message ("GET", url);
+ 
+-        session.queue_message (message, (sess, mess) => {
+-            if (mess.status_code != 200) {
+-                warning (@"Unexpected status code: $(mess.status_code), will not render $(url)");
+-                return;
++        session.send_async.begin (message, 0, null, (sess, res) => {
++            try {            
++                GLib.InputStream resp = session.send_async.end (res);
++                
++                if (message.status_code != 200) {
++                    warning (@"Unexpected status code: $(message.status_code), will not render $(url)");
++                    return;
++                }
++                
++                // var data_stream = new MemoryInputStream.from_data (mess.response_body.data);
++                Gdk.Pixbuf pxbuf;
++
++                try {
++                    pxbuf = new Gdk.Pixbuf.from_stream_at_scale (resp, 48, 48, true, null);
++                    favicon.set_from_pixbuf (pxbuf);
++                    favicon.set_size_request (48, 48);
++                } catch (Error e) {
++                    warning ("Couldn't render favicon: %s (%s)",
++                        url ?? "unknown url",
++                        e.message);
++                }
++
++                resp.close ();
++            } catch (GLib.Error e) {
++                warning("load_favicon failed: $(e.message)");
+             }
+-
+-            var data_stream = new MemoryInputStream.from_data (mess.response_body.data);
+-            Gdk.Pixbuf pxbuf;
+-
+-            try {
+-                pxbuf = new Gdk.Pixbuf.from_stream_at_scale (data_stream, 48, 48, true, null);
+-            } catch (Error e) {
+-                warning ("Couldn't render favicon: %s (%s)",
+-                    url ?? "unknown url",
+-                    e.message);
+-                return;
+-            }
+-
+-            favicon.set_from_pixbuf (pxbuf);
+-            favicon.set_size_request (48, 48);
+         });
+     }
+ 
+diff --git a/src/Widgets/StationBox.vala b/src/Widgets/StationBox.vala
+index b76a105..a21bed4 100644
+--- a/src/Widgets/StationBox.vala
++++ b/src/Widgets/StationBox.vala
+@@ -94,35 +94,41 @@ public class Tuner.StationBox : Tuner.WelcomeButton {
+             var session = new Soup.Session ();
+             var message = new Soup.Message ("GET", station.favicon_url);
+ 
+-            session.queue_message (message, (sess, mess) => {
+-                if (mess.status_code != 200) {
++            session.send_async.begin (message, 0, null, (sess, res) => {
++                try {
++                    GLib.InputStream data_stream = session.send_async.end (res);
++
++                    //set_favicon_from_stream (data_stream);
++
++                    var file = File.new_for_path (favicon_cache_file);
++                    try {
++                        var stream = file.create_readwrite (FileCreateFlags.PRIVATE);
++                        stream.output_stream.splice (data_stream, 0);
++                        stream.close ();
++                    } catch (Error e) {
++                        // File already created by another stationbox
++                        // TODO: possible race condition
++                        // TODO: Create stationboxes as singletons?
++                    }
++
++                    try {
++                        var favicon_stream = file.read ();
++                        if (!set_favicon_from_stream (favicon_stream)) {
++                            set_default_favicon ();
++                        };
++                    } catch (Error e) {
++                        warning (@"Error while reading icon file stream: $(e.message)");
++                    }
++                } catch (GLib.Error e) {
++                    critical (@"unable to load favicon: $(e.message)");
++                    return;
++                }
++     
++                if (message.status_code != 200) {
+                     //debug (@"Unexpected status code: $(mess.status_code), will not render $(station.favicon_url)");
+                     set_default_favicon ();
+                     return;
+                 }
+-
+-                var data_stream = new MemoryInputStream.from_data (mess.response_body.data);
+-                //set_favicon_from_stream (data_stream);
+-
+-                var file = File.new_for_path (favicon_cache_file);
+-                try {
+-                    var stream = file.create_readwrite (FileCreateFlags.PRIVATE);
+-                    stream.output_stream.splice (data_stream, 0);
+-                    stream.close ();
+-                } catch (Error e) {
+-                    // File already created by another stationbox
+-                    // TODO: possible race condition
+-                    // TODO: Create stationboxes as singletons?
+-                }
+-
+-                try {
+-                    var favicon_stream = file.read ();
+-                    if (!set_favicon_from_stream (favicon_stream)) {
+-                        set_default_favicon ();
+-                    };
+-                } catch (Error e) {
+-                    warning (@"Error while reading icon file stream: $(e.message)");
+-                }
+             });
+ 
+         } else {
