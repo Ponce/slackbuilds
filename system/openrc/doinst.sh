@@ -13,7 +13,7 @@ config() {
 }
 
 BACKUP_FILE=(openrc/rc.conf logrotate.d/openrc)
-BACKUP_CONF=(agetty bootmisc consolefont devfs dmesg fsck hostname hwclock keymaps killprocs localmount modules mtab net-online netmount network staticroute swap urandom)
+BACKUP_CONF=(agetty bootmisc consolefont devfs dmesg fsck hostname hwclock keymaps killprocs localmount modules mtab net-online netmount network seedrng staticroute swap swclock)
 
 for file in "${BACKUP_FILE[@]}"; do
   config "etc/${file}.new"
