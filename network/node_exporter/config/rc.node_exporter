@@ -1,0 +1,131 @@
+#!/bin/sh
+#
+# Node Exporter startup script for Slackware Linux
+#
+
+BASE=node_exporter
+SERVER=/usr/bin/${BASE}
+
+# Default options.
+if [ -f /etc/default/node_exporter ]; then
+  . /etc/default/node_exporter
+fi
+
+NODE_EXPORTER_USER=${NODE_EXPORTER_USER:=nobody}
+NODE_EXPORTER_ARGS=${NODE_EXPORTER_ARGS:=""}
+NODE_EXPORTER_LOG_FACILITY=${NODE_EXPORTER_LOG_FACILITY:=daemon.info}
+NODE_EXPORTER_PID=/var/run/node_exporter/node_exporter.pid
+
+# Check if server is present.
+if [ ! -x ${SERVER} ]; then
+  echo "${SERVER} not present or not executable"
+  exit 1
+fi
+
+# Check if daemon is present.
+if [ ! -x /usr/bin/daemon ]; then
+  echo "/usr/bin/daemon not present or not executable"
+  echo "> slackpkg install daemon"
+  exit 1
+fi
+
+wait_for_pid () {
+  try=0
+ 
+  while test $try -lt 5 ; do
+    case "$1" in
+      'created')
+      if [ -f "$2" ] ; then
+        try=''
+        break
+      fi
+      ;;
+ 
+      'removed')
+      if [ ! -f "$2" ] ; then
+        try=''
+        break
+      fi
+      ;;
+    esac
+ 
+    echo -n .
+    try=`expr $try + 1`
+    sleep 1
+ 
+  done
+}
+
+node_exporter_start() {
+  if [ -f $NODE_EXPORTER_PID ]; then
+    echo "$NODE_EXPORTER_PID file exists, $BASE is probably running"
+    exit 0
+  else
+    echo -n "Starting ${BASE} ..."
+    daemon --user=$NODE_EXPORTER_USER \
+	   --pidfile=$NODE_EXPORTER_PID \
+	   --output=$NODE_EXPORTER_LOG_FACILITY -- \
+	   $SERVER $NODE_EXPORTER_ARGS
+
+    wait_for_pid created $NODE_EXPORTER_PID
+
+    if [ -n "$try" ] ; then
+      echo " failed"
+      exit 1
+    else
+      echo " done"
+    fi
+
+  fi
+}
+
+node_exporter_stop() {
+  echo -n "Stopping ${BASE} ..."
+  if [ -f $NODE_EXPORTER_PID ]; then
+    kill $(cat $NODE_EXPORTER_PID)
+
+    wait_for_pid removed $NODE_EXPORTER_PID
+
+    if [ -n "$try" ] ; then
+      echo " failed"
+      exit 1
+    else
+      echo " done"
+    fi
+  else
+    echo "not running"
+  fi 
+}
+
+node_exporter_restart() {
+  node_exporter_stop
+  node_exporter_start
+}
+
+node_exporter_status() {
+  if [ -f $NODE_EXPORTER_PID ]; then
+    echo "Status of ${BASE}: running"
+  else
+    echo "Status of ${BASE}: stopped"
+  fi
+}
+
+
+case "$1" in
+  'start')
+    node_exporter_start
+    ;;
+  'stop')
+    node_exporter_stop
+    ;;
+  'restart')
+    node_exporter_restart
+    ;;
+  'status')
+    node_exporter_status
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart|status}"
+esac
+
+exit 0
