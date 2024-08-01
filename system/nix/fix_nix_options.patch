@@ -1,5 +1,32 @@
+diff --git a/Makefile b/Makefile
+index 31b54b9..0be7929 100644
+--- a/Makefile
++++ b/Makefile
+@@ -45,6 +45,8 @@ else
+   GLOBAL_CXXFLAGS += -O0 -U_FORTIFY_SOURCE
+ endif
+ 
++GLOBAL_CFLAGS += $(CPPFLAGS)
++
+ include mk/lib.mk
+ 
+ GLOBAL_CXXFLAGS += -g -Wall -include config.h -std=c++2a -I src
+diff --git a/configure.ac b/configure.ac
+index 6d78237..b1bb516 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -341,7 +341,8 @@ AC_CHECK_FUNCS([strsignal posix_fallocate sysconf])
+ AC_ARG_WITH(sandbox-shell, AS_HELP_STRING([--with-sandbox-shell=PATH],[path of a statically-linked shell to use as /bin/sh in sandboxes]),
+   sandbox_shell=$withval)
+ AC_SUBST(sandbox_shell)
+-if test ${cross_compiling:-no} = no && ! test -z ${sandbox_shell+x}; then
++if test ${cross_compiling:-no} = no && test -n "${sandbox_shell}" &&
++  test -z "${sandbox_shell%%*busybox*}"; then
+   AC_MSG_CHECKING([whether sandbox-shell has the standalone feature])
+   # busybox shell sometimes allows executing other busybox applets,
+   # even if they are not in the path, breaking our sandbox
 diff --git a/doc/manual/local.mk b/doc/manual/local.mk
-index abdfd6a..dcf9163 100644
+index abdfd6a..dc4aac2 100644
 --- a/doc/manual/local.mk
 +++ b/doc/manual/local.mk
 @@ -25,14 +25,16 @@ clean-files += $(d)/*.1 $(d)/*.5 $(d)/*.8
@@ -91,7 +118,7 @@ index abdfd6a..dcf9163 100644
  	@mv $@.tmp $@
  
  # Generate the HTML manual.
-@@ -174,22 +176,22 @@ doc/manual/generated/man1/nix3-manpages: $(d)/src/command-ref/new-cli
+@@ -174,22 +176,5 @@ doc/manual/generated/man1/nix3-manpages: $(d)/src/command-ref/new-cli
  	@touch $@
  
  $(docdir)/manual/index.html: $(MANUAL_SRCS) $(d)/book.toml $(d)/anchors.jq $(d)/custom.css $(d)/src/SUMMARY.md $(d)/src/command-ref/new-cli $(d)/src/contributing/experimental-feature-descriptions.md $(d)/src/command-ref/conf-file.md $(d)/src/language/builtins.md $(d)/src/language/builtin-constants.md
@@ -112,38 +139,8 @@ index abdfd6a..dcf9163 100644
 -	@rm -rf $(DESTDIR)$(docdir)/manual
 -	@mv $(DESTDIR)$(docdir)/manual.tmp/html $(DESTDIR)$(docdir)/manual
 -	@rm -rf $(DESTDIR)$(docdir)/manual.tmp
-+	# $(trace-gen) \
-+	# 	tmp="$$(mktemp -d)"; \
-+	# 	cp -r doc/manual "$$tmp"; \
-+	# 	find "$$tmp" -name '*.md' | while read -r file; do \
-+	# 		$(call process-includes,$$file,$$file); \
-+	# 	done; \
-+	# 	find "$$tmp" -name '*.md' | while read -r file; do \
-+	# 		docroot="$$(realpath --relative-to="$$(dirname "$$file")" $$tmp/manual/src)"; \
-+	# 		sed -i "s,@docroot@,$$docroot,g" "$$file"; \
-+	# 	done; \
-+	# 	set -euo pipefail; \
-+	# 	RUST_LOG=warn mdbook build "$$tmp/manual" -d $(DESTDIR)$(docdir)/manual.tmp 2>&1 \
-+	# 		| { grep -Fv "because fragment resolution isn't implemented" || :; }; \
-+	# 	rm -rf "$$tmp/manual"
-+	# @rm -rf $(DESTDIR)$(docdir)/manual
-+	# @mv $(DESTDIR)$(docdir)/manual.tmp/html $(DESTDIR)$(docdir)/manual
-+	# @rm -rf $(DESTDIR)$(docdir)/manual.tmp
  
  endif
-diff --git a/Makefile b/Makefile
-index 31b54b9..0be7929 100644
---- a/Makefile
-+++ b/Makefile
-@@ -45,6 +45,8 @@ else
-   GLOBAL_CXXFLAGS += -O0 -U_FORTIFY_SOURCE
- endif
- 
-+GLOBAL_CFLAGS += $(CPPFLAGS)
-+
- include mk/lib.mk
- 
- GLOBAL_CXXFLAGS += -g -Wall -include config.h -std=c++2a -I src
 diff --git a/src/libstore/sqlite.cc b/src/libstore/sqlite.cc
 index 7c8decb..3f36374 100644
 --- a/src/libstore/sqlite.cc
@@ -157,17 +154,24 @@ index 7c8decb..3f36374 100644
  
      auto path = sqlite3_db_filename(db, nullptr);
      auto errMsg = sqlite3_errmsg(db);
-diff --git a/configure.ac b/configure.ac
-index 6d78237..b1bb516 100644
---- a/configure.ac
-+++ b/configure.ac
-@@ -341,7 +341,8 @@ AC_CHECK_FUNCS([strsignal posix_fallocate sysconf])
- AC_ARG_WITH(sandbox-shell, AS_HELP_STRING([--with-sandbox-shell=PATH],[path of a statically-linked shell to use as /bin/sh in sandboxes]),
-   sandbox_shell=$withval)
- AC_SUBST(sandbox_shell)
--if test ${cross_compiling:-no} = no && ! test -z ${sandbox_shell+x}; then
-+if test ${cross_compiling:-no} = no && test -n "${sandbox_shell}" &&
-+  test -z "${sandbox_shell%%*busybox*}"; then
-   AC_MSG_CHECKING([whether sandbox-shell has the standalone feature])
-   # busybox shell sometimes allows executing other busybox applets,
-   # even if they are not in the path, breaking our sandbox
+diff --git a/src/libutil/ref.hh b/src/libutil/ref.hh
+index af5f830..b0cf17d 100644
+--- a/src/libutil/ref.hh
++++ b/src/libutil/ref.hh
+@@ -24,14 +24,14 @@ public:
+         : p(r.p)
+     { }
+ 
+-    explicit ref<T>(const std::shared_ptr<T> & p)
++    explicit ref(const std::shared_ptr<T> & p)
+         : p(p)
+     {
+         if (!p)
+             throw std::invalid_argument("null pointer cast to ref");
+     }
+ 
+-    explicit ref<T>(T * p)
++    explicit ref(T * p)
+         : p(p)
+     {
+         if (!p)
