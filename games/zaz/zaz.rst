@@ -1,6 +1,5 @@
 .. RST source for zaz(1) man page. Convert with:
 ..   rst2man.py zaz.rst > zaz.6
-.. rst2man.py comes from the SBo development/docutils package.
 
 .. |version| replace:: 1.0.0
 .. |date| date::
@@ -48,7 +47,7 @@ gameplay, **zaz** should be run without options.
 
 -e [*level*]
   Start up in level editing mode. If **level** is given, it will be loaded
-  into the editor, otherwise *default* is used. **level** shoould be the name
+  into the editor, otherwise *default* is used. **level** should be the name
   of the *.lvl* file, minus the *.lvl* extension.
   Must be run from within the data directory (or a copy of it).
 
