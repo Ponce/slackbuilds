@@ -1,38 +1,44 @@
 diff --git a/Makefile b/Makefile
-index 31b54b9..0be7929 100644
+index 6c96ef5..29b57de 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -45,6 +45,8 @@ else
-   GLOBAL_CXXFLAGS += -O0 -U_FORTIFY_SOURCE
- endif
+@@ -102,6 +102,8 @@ GLOBAL_CXXFLAGS += -g -Wall -Wdeprecated-copy -Wignored-qualifiers -Wimplicit-fa
+ 
+ # Include the main lib, causing rules to be defined
  
 +GLOBAL_CFLAGS += $(CPPFLAGS)
 +
  include mk/lib.mk
  
- GLOBAL_CXXFLAGS += -g -Wall -include config.h -std=c++2a -I src
+ # Fallback stub rules for better UX when things are disabled
 diff --git a/configure.ac b/configure.ac
-index 6d78237..b1bb516 100644
+index 90a6d45..9eb3380 100644
 --- a/configure.ac
 +++ b/configure.ac
-@@ -341,7 +341,8 @@ AC_CHECK_FUNCS([strsignal posix_fallocate sysconf])
+@@ -417,7 +417,8 @@ AC_CHECK_FUNCS([strsignal posix_fallocate sysconf])
  AC_ARG_WITH(sandbox-shell, AS_HELP_STRING([--with-sandbox-shell=PATH],[path of a statically-linked shell to use as /bin/sh in sandboxes]),
    sandbox_shell=$withval)
  AC_SUBST(sandbox_shell)
 -if test ${cross_compiling:-no} = no && ! test -z ${sandbox_shell+x}; then
 +if test ${cross_compiling:-no} = no && test -n "${sandbox_shell}" &&
-+  test -z "${sandbox_shell%%*busybox*}"; then
++   test -z "${sandbox_shell%%*busybox*}"; then
    AC_MSG_CHECKING([whether sandbox-shell has the standalone feature])
    # busybox shell sometimes allows executing other busybox applets,
    # even if they are not in the path, breaking our sandbox
 diff --git a/doc/manual/local.mk b/doc/manual/local.mk
-index abdfd6a..dc4aac2 100644
+index 71ad5c8..8e7d5a0 100644
 --- a/doc/manual/local.mk
 +++ b/doc/manual/local.mk
-@@ -25,14 +25,16 @@ clean-files += $(d)/*.1 $(d)/*.5 $(d)/*.8
+@@ -24,15 +24,18 @@ man-pages += $(foreach subcommand, \
+ 	$(filter-out %opt-common.md %env-common.md, $(wildcard $(d)/src/command-ref/nix-*/*.md)), \
+ 	$(d)/$(subst /,-,$(subst $(d)/src/command-ref/,,$(subst .md,.1,$(subcommand)))))
+ 
+-clean-files += $(d)/*.1 $(d)/*.5 $(d)/*.8
++clean-files += $(d)/*.1 $(d)/generated/man1/*.1 $(d)/*.5 $(d)/*.8
++clean-files += $(d)/*.json
  
  # Provide a dummy environment for nix, so that it will not access files outside the macOS sandbox.
- # Set cores to 0 because otherwise nix show-config resolves the cores based on the current machine
+ # Set cores to 0 because otherwise `nix config show` resolves the cores based on the current machine
 +dum_DIR := $(realpath $(nix_DIR))
 +
  dummy-env = env -i \
@@ -46,89 +52,103 @@ index abdfd6a..dc4aac2 100644
 +	NIX_STATE_DIR=$(dum_DIR)/dummy \
  	NIX_CONFIG='cores = 0'
  
--nix-eval = $(dummy-env) $(bindir)/nix eval --experimental-features nix-command -I nix/corepkgs=corepkgs --store dummy:// --impure --raw
-+nix-eval = $(dummy-env) $(nix_DIR)/nix eval --experimental-features nix-command -I nix/corepkgs=corepkgs --store dummy:// --impure --raw
- 
- # re-implement mdBook's include directive to make it usable for terminal output and for proper @docroot@ substitution
- define process-includes
-@@ -96,52 +98,52 @@ $(d)/src/SUMMARY.md: $(d)/src/SUMMARY.md.in $(d)/src/command-ref/new-cli $(d)/sr
- 	@cp $< $@
- 	@$(call process-includes,$@,$@)
- 
--$(d)/src/command-ref/new-cli: $(d)/nix.json $(d)/utils.nix $(d)/generate-manpage.nix $(bindir)/nix
-+$(d)/src/command-ref/new-cli: $(d)/nix.json $(d)/utils.nix $(d)/generate-manpage.nix $(nix_DIR)/nix
- 	@rm -rf $@ $@.tmp
- 	$(trace-gen) $(nix-eval) --write-to $@.tmp --expr 'import doc/manual/generate-manpage.nix (builtins.readFile $<)'
+ nix-eval = $(dummy-env) $(doc_nix) eval --experimental-features nix-command -I nix=doc/manual --store dummy:// --impure --raw
+@@ -111,11 +114,15 @@ $(d)/src/command-ref/new-cli: $(d)/nix.json $(d)/utils.nix $(d)/generate-manpage
+ 	$(trace-gen) $(nix-eval) --write-to $@.tmp --expr 'import doc/manual/generate-manpage.nix true (builtins.readFile $<)'
  	@mv $@.tmp $@
  
--$(d)/src/command-ref/conf-file.md: $(d)/conf-file.json $(d)/utils.nix $(d)/src/command-ref/conf-file-prefix.md $(d)/src/command-ref/experimental-features-shortlist.md $(bindir)/nix
-+$(d)/src/command-ref/conf-file.md: $(d)/conf-file.json $(d)/utils.nix $(d)/src/command-ref/conf-file-prefix.md $(d)/src/command-ref/experimental-features-shortlist.md $(nix_DIR)/nix
++clean-files += $(d)/src/command-ref/new-cli/*.md
++
+ $(d)/src/command-ref/conf-file.md: $(d)/conf-file.json $(d)/utils.nix $(d)/generate-settings.nix $(d)/src/command-ref/conf-file-prefix.md $(d)/src/command-ref/experimental-features-shortlist.md $(doc_nix)
  	@cat doc/manual/src/command-ref/conf-file-prefix.md > $@.tmp
- 	$(trace-gen) $(nix-eval) --expr '(import doc/manual/utils.nix).showSettings { useAnchors = true; } (builtins.fromJSON (builtins.readFile $<))' >> $@.tmp;
+ 	$(trace-gen) $(nix-eval) --expr 'import doc/manual/generate-settings.nix { prefix = "conf"; } (builtins.fromJSON (builtins.readFile $<))' >> $@.tmp;
  	@mv $@.tmp $@
  
--$(d)/nix.json: $(bindir)/nix
--	$(trace-gen) $(dummy-env) $(bindir)/nix __dump-cli > $@.tmp
-+$(d)/nix.json: $(nix_DIR)/nix
-+	$(trace-gen) $(dummy-env) $(nix_DIR)/nix __dump-cli > $@.tmp
++clean-files += $(d)/src/command-ref/conf-file.md
++
+ $(d)/nix.json: $(doc_nix)
+ 	$(trace-gen) $(dummy-env) $(doc_nix) __dump-cli > $@.tmp
+ 	@mv $@.tmp $@
+@@ -124,36 +131,50 @@ $(d)/conf-file.json: $(doc_nix)
+ 	$(trace-gen) $(dummy-env) $(doc_nix) config show --json --experimental-features nix-command > $@.tmp
  	@mv $@.tmp $@
  
--$(d)/conf-file.json: $(bindir)/nix
--	$(trace-gen) $(dummy-env) $(bindir)/nix show-config --json --experimental-features nix-command > $@.tmp
-+$(d)/conf-file.json: $(nix_DIR)/nix
-+	$(trace-gen) $(dummy-env) $(nix_DIR)/nix show-config --json --experimental-features nix-command > $@.tmp
- 	@mv $@.tmp $@
- 
--$(d)/src/contributing/experimental-feature-descriptions.md: $(d)/xp-features.json $(d)/utils.nix $(d)/generate-xp-features.nix $(bindir)/nix
-+$(d)/src/contributing/experimental-feature-descriptions.md: $(d)/xp-features.json $(d)/utils.nix $(d)/generate-xp-features.nix $(nix_DIR)/nix
++clean-files += $(d)/conf-file.json
++
+ $(d)/src/contributing/experimental-feature-descriptions.md: $(d)/xp-features.json $(d)/utils.nix $(d)/generate-xp-features.nix $(doc_nix)
  	@rm -rf $@ $@.tmp
  	$(trace-gen) $(nix-eval) --write-to $@.tmp --expr 'import doc/manual/generate-xp-features.nix (builtins.fromJSON (builtins.readFile $<))'
  	@mv $@.tmp $@
  
--$(d)/src/command-ref/experimental-features-shortlist.md: $(d)/xp-features.json $(d)/utils.nix $(d)/generate-xp-features-shortlist.nix $(bindir)/nix
-+$(d)/src/command-ref/experimental-features-shortlist.md: $(d)/xp-features.json $(d)/utils.nix $(d)/generate-xp-features-shortlist.nix $(nix_DIR)/nix
++clean-files += $(d)/src/contributing/experimental-feature-descriptions.md
++
+ $(d)/src/command-ref/experimental-features-shortlist.md: $(d)/xp-features.json $(d)/utils.nix $(d)/generate-xp-features-shortlist.nix $(doc_nix)
  	@rm -rf $@ $@.tmp
  	$(trace-gen) $(nix-eval) --write-to $@.tmp --expr 'import doc/manual/generate-xp-features-shortlist.nix (builtins.fromJSON (builtins.readFile $<))'
  	@mv $@.tmp $@
  
--$(d)/xp-features.json: $(bindir)/nix
--	$(trace-gen) $(dummy-env) NIX_PATH=nix/corepkgs=corepkgs $(bindir)/nix __dump-xp-features > $@.tmp
-+$(d)/xp-features.json: $(nix_DIR)/nix
-+	$(trace-gen) $(dummy-env) NIX_PATH=nix/corepkgs=corepkgs $(nix_DIR)/nix __dump-xp-features > $@.tmp
++clean-files += $(d)/src/command-ref/experimental-features-shortlist.md
++
+ $(d)/xp-features.json: $(doc_nix)
+ 	$(trace-gen) $(dummy-env) $(doc_nix) __dump-xp-features > $@.tmp
  	@mv $@.tmp $@
  
--$(d)/src/language/builtins.md: $(d)/language.json $(d)/generate-builtins.nix $(d)/src/language/builtins-prefix.md $(bindir)/nix
-+$(d)/src/language/builtins.md: $(d)/language.json $(d)/generate-builtins.nix $(d)/src/language/builtins-prefix.md $(nix_DIR)/nix
++clean-files += $(d)/xp-features.json
++
+ $(d)/src/language/builtins.md: $(d)/language.json $(d)/generate-builtins.nix $(d)/src/language/builtins-prefix.md $(doc_nix)
  	@cat doc/manual/src/language/builtins-prefix.md > $@.tmp
  	$(trace-gen) $(nix-eval) --expr 'import doc/manual/generate-builtins.nix (builtins.fromJSON (builtins.readFile $<)).builtins' >> $@.tmp;
  	@cat doc/manual/src/language/builtins-suffix.md >> $@.tmp
  	@mv $@.tmp $@
  
--$(d)/src/language/builtin-constants.md: $(d)/language.json $(d)/generate-builtin-constants.nix $(d)/src/language/builtin-constants-prefix.md $(bindir)/nix
-+$(d)/src/language/builtin-constants.md: $(d)/language.json $(d)/generate-builtin-constants.nix $(d)/src/language/builtin-constants-prefix.md $(nix_DIR)/nix
++clean-files += $(d)/src/language/builtins.md
++
+ $(d)/src/language/builtin-constants.md: $(d)/language.json $(d)/generate-builtin-constants.nix $(d)/src/language/builtin-constants-prefix.md $(doc_nix)
  	@cat doc/manual/src/language/builtin-constants-prefix.md > $@.tmp
  	$(trace-gen) $(nix-eval) --expr 'import doc/manual/generate-builtin-constants.nix (builtins.fromJSON (builtins.readFile $<)).constants' >> $@.tmp;
  	@cat doc/manual/src/language/builtin-constants-suffix.md >> $@.tmp
  	@mv $@.tmp $@
  
--$(d)/language.json: $(bindir)/nix
--	$(trace-gen) $(dummy-env) NIX_PATH=nix/corepkgs=corepkgs $(bindir)/nix __dump-language > $@.tmp
-+$(d)/language.json: $(nix_DIR)/nix
-+	$(trace-gen) $(dummy-env) NIX_PATH=nix/corepkgs=corepkgs $(nix_DIR)/nix __dump-language > $@.tmp
++clean-files += $(d)/src/language/builtin-constants.md
++
+ $(d)/language.json: $(doc_nix)
+ 	$(trace-gen) $(dummy-env) $(doc_nix) __dump-language > $@.tmp
  	@mv $@.tmp $@
  
- # Generate the HTML manual.
-@@ -174,22 +176,5 @@ doc/manual/generated/man1/nix3-manpages: $(d)/src/command-ref/new-cli
- 	@touch $@
++clean-files += $(d)/language.json
++
+ # Generate "Upcoming release" notes (or clear it and remove from menu)
+ $(d)/src/release-notes/rl-next.md: $(d)/rl-next $(d)/rl-next/*
+ 	@if type -p changelog-d > /dev/null; then \
+@@ -164,6 +185,8 @@ $(d)/src/release-notes/rl-next.md: $(d)/rl-next $(d)/rl-next/*
+ 		true > $@; \
+ 	fi
  
- $(docdir)/manual/index.html: $(MANUAL_SRCS) $(d)/book.toml $(d)/anchors.jq $(d)/custom.css $(d)/src/SUMMARY.md $(d)/src/command-ref/new-cli $(d)/src/contributing/experimental-feature-descriptions.md $(d)/src/command-ref/conf-file.md $(d)/src/language/builtins.md $(d)/src/language/builtin-constants.md
++clean-files += $(d)/src/release-notes/rl-next.md
++
+ $(d)/src/SUMMARY-rl-next.md: $(d)/src/release-notes/rl-next.md
+ 	$(trace-gen) true
+ 	@if [ -s $< ]; then \
+@@ -172,6 +195,8 @@ $(d)/src/SUMMARY-rl-next.md: $(d)/src/release-notes/rl-next.md
+ 	  true > $@; \
+ 	fi
+ 
++clean-files += $(d)/src/SUMMARY-rl-next.md
++
+ # Generate the HTML manual.
+ .PHONY: manual-html
+ manual-html: $(docdir)/manual/index.html
+@@ -218,20 +243,3 @@ doc/manual/generated/man1/nix3-manpages: $(d)/src/command-ref/new-cli
+ # FIXME: maybe contributing guides should live right next to the code
+ # instead of in the manual
+ $(docdir)/manual/index.html: $(MANUAL_SRCS) $(d)/book.toml $(d)/anchors.jq $(d)/custom.css $(d)/src/SUMMARY.md $(d)/src/store/types $(d)/src/command-ref/new-cli $(d)/src/contributing/experimental-feature-descriptions.md $(d)/src/command-ref/conf-file.md $(d)/src/language/builtins.md $(d)/src/language/builtin-constants.md $(d)/src/release-notes/rl-next.md $(d)/src/figures $(d)/src/favicon.png $(d)/src/favicon.svg
 -	$(trace-gen) \
 -		tmp="$$(mktemp -d)"; \
 -		cp -r doc/manual "$$tmp"; \
 -		find "$$tmp" -name '*.md' | while read -r file; do \
 -			$(call process-includes,$$file,$$file); \
 -		done; \
--		find "$$tmp" -name '*.md' | while read -r file; do \
+-		find "$$tmp" -name '*.md' ! -name 'documentation.md' | while read -r file; do \
 -			docroot="$$(realpath --relative-to="$$(dirname "$$file")" $$tmp/manual/src)"; \
 -			sed -i "s,@docroot@,$$docroot,g" "$$file"; \
 -		done; \
@@ -139,26 +159,30 @@ index abdfd6a..dc4aac2 100644
 -	@rm -rf $(DESTDIR)$(docdir)/manual
 -	@mv $(DESTDIR)$(docdir)/manual.tmp/html $(DESTDIR)$(docdir)/manual
 -	@rm -rf $(DESTDIR)$(docdir)/manual.tmp
+diff --git a/src/libexpr/local.mk b/src/libexpr/local.mk
+index ecadc5e..26e875e 100644
+--- a/src/libexpr/local.mk
++++ b/src/libexpr/local.mk
+@@ -37,7 +37,13 @@ $(d)/parser-tab.cc $(d)/parser-tab.hh: $(d)/parser.y
+ $(d)/lexer-tab.cc $(d)/lexer-tab.hh: $(d)/lexer.l
+ 	$(trace-gen) flex --outfile $(libexpr_DIR)/lexer-tab.cc --header-file=$(libexpr_DIR)/lexer-tab.hh $<
  
- endif
-diff --git a/src/libstore/sqlite.cc b/src/libstore/sqlite.cc
-index 7c8decb..3f36374 100644
---- a/src/libstore/sqlite.cc
-+++ b/src/libstore/sqlite.cc
-@@ -25,7 +25,7 @@ SQLiteError::SQLiteError(const char *path, const char *errMsg, int errNo, int ex
- {
-     int err = sqlite3_errcode(db);
-     int exterr = sqlite3_extended_errcode(db);
--    int offset = sqlite3_error_offset(db);
-+    int offset = -1;
+-clean-files += $(d)/parser-tab.cc $(d)/parser-tab.hh $(d)/lexer-tab.cc $(d)/lexer-tab.hh
++clean-files += \
++  $(d)/fetchurl.nix.gen.hh \
++  $(d)/flake/call-flake.nix.gen.hh \
++  $(d)/imported-drv-to-derivation.nix.gen.hh \
++  $(d)/primops/derivation.nix.gen.hh \
++  $(d)/parser-tab.cc $(d)/parser-tab.hh $(d)/parser-tab.output \
++  $(d)/lexer-tab.cc $(d)/lexer-tab.hh
  
-     auto path = sqlite3_db_filename(db, nullptr);
-     auto errMsg = sqlite3_errmsg(db);
+ $(eval $(call install-file-in, $(buildprefix)$(d)/nix-expr.pc, $(libdir)/pkgconfig, 0644))
+ 
 diff --git a/src/libutil/ref.hh b/src/libutil/ref.hh
-index af5f830..b0cf17d 100644
+index 03aa642..e2bf37a 100644
 --- a/src/libutil/ref.hh
 +++ b/src/libutil/ref.hh
-@@ -24,14 +24,14 @@ public:
+@@ -25,14 +25,14 @@ public:
          : p(r.p)
      { }
  
@@ -175,3 +199,42 @@ index af5f830..b0cf17d 100644
          : p(p)
      {
          if (!p)
+diff --git a/src/nix/local.mk b/src/nix/local.mk
+index 9883509..f439aba 100644
+--- a/src/nix/local.mk
++++ b/src/nix/local.mk
+@@ -42,22 +42,34 @@ $(eval $(call install-symlink, $(bindir)/nix, $(libexecdir)/nix/build-remote))
+ 
+ src/nix-env/user-env.cc: src/nix-env/buildenv.nix.gen.hh
+ 
++clean-files += src/nix-env/buildenv.nix.gen.hh
++
+ src/nix/develop.cc: src/nix/get-env.sh.gen.hh
+ 
++clean-files += src/nix/get-env.sh.gen.hh
++
+ src/nix-channel/nix-channel.cc: src/nix-channel/unpack-channel.nix.gen.hh
+ 
++clean-files += src/nix-channel/unpack-channel.nix.gen.hh
++
+ src/nix/main.cc: \
+   doc/manual/generate-manpage.nix.gen.hh \
+   doc/manual/utils.nix.gen.hh doc/manual/generate-settings.nix.gen.hh \
+   doc/manual/generate-store-info.nix.gen.hh \
+   src/nix/generated-doc/help-stores.md
+ 
++clean-files += doc/manual/generate-manpage.nix.gen.hh \
++  doc/manual/utils.nix.gen.hh doc/manual/generate-settings.nix.gen.hh \
++  doc/manual/generate-store-info.nix.gen.hh
++
+ src/nix/generated-doc/files/%.md: doc/manual/src/command-ref/files/%.md
+ 	@mkdir -p $$(dirname $@)
+ 	@cp $< $@
+ 
+ src/nix/profile.cc: src/nix/profile.md src/nix/generated-doc/files/profiles.md.gen.hh
+ 
++clean-files += src/nix/doc/files/profiles.md.gen.hh
++
+ src/nix/generated-doc/help-stores.md: doc/manual/src/store/types/index.md.in
+ 	@mkdir -p $$(dirname $@)
+ 	@echo 'R"(' >> $@.tmp
