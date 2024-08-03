@@ -31,62 +31,71 @@ PRGNAM=aerc
 VERSION=${VERSION:-0.18.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
-ARCH=${ARCH:-x86_64}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+set -e
 
 TMP=${TMP:-/tmp/SBo}
 PKG=${TMP}/package-${PRGNAM}
-PKGTYPE=${PKGTYPE:-tgz}
 OUTPUT=${OUTPUT:-/tmp}
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
 fi
 
-# Clean up any previous build artifacts
 rm -rf "$PKG"
 mkdir -p "$TMP" "$PKG" "$OUTPUT"
 cd "$TMP"
 
-# Download and extract the source code
-rm -rf "${PRGNAM}-${VERSION}"
-wget -O "${PRGNAM}-${VERSION}.tar.gz" "https://git.sr.ht/~rjarry/aerc/archive/${VERSION}.tar.gz"
-tar xvf "${PRGNAM}-${VERSION}.tar.gz"
-cd "${PRGNAM}-${VERSION}"
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+elif [ "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
 
-# Compile the source
+rm -rf ${PRGNAM}-${VERSION}
+tar xvf $CWD/${PRGNAM}-${VERSION}.tar.gz || tar xvf $CWD/$VERSION.tar.gz
+cd ${PRGNAM}-${VERSION}
 make PREFIX=/usr
 
-# Install the compiled binaries to the package directory
 make install PREFIX=/usr DESTDIR="$PKG"
 
-# Copy documentation
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
 mkdir -p "$PKG/usr/doc/${PRGNAM}-${VERSION}"
 cp -a CHANGELOG.md CONTRIBUTING.md README.md LICENSE MAINTAINERS \
-    "$PKG/usr/doc/${PRGNAM}-${VERSION}"
+    $PKG/usr/doc/${PRGNAM}-${VERSION}
 
-# Compress man pages and fix symlinks
-find "$PKG/usr/share/man" -type f -exec gzip -9 {} \;
-for i in $(find "$PKG/usr/man" -type l); do
-  ln -s "$(readlink "$i").gz" "$i.gz"
-  rm "$i"
-done
+mv $PKG/usr/share/man $PKG/usr/
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-# Copy the SlackBuild script into the package documentation
-cat "$CWD/${PRGNAM}.SlackBuild" > "$PKG/usr/doc/${PRGNAM}-${VERSION}/${PRGNAM}.SlackBuild"
+cat $CWD/${PRGNAM}.SlackBuild > $PKG/usr/doc/${PRGNAM}-${VERSION}/${PRGNAM}.SlackBuild
 
-# Copy the slack-desc file
-mkdir -p "$PKG/install"
-cat "$CWD/slack-desc" > "$PKG/install/slack-desc"
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
-# Create the package
-cd "$PKG"
-/sbin/makepkg -l y -c n "$OUTPUT/${PRGNAM}-${VERSION}-${ARCH}-${BUILD}${TAG}.${PKGTYPE}"
-
-# Generate MD5 checksum
-cd "$OUTPUT"
-md5sum "${PRGNAM}-${VERSION}-${ARCH}-${BUILD}${TAG}.${PKGTYPE}" > "${PRGNAM}-${VERSION}-${ARCH}-${BUILD}${TAG}.${PKGTYPE}.md5"
-
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
