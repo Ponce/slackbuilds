@@ -1,0 +1,73 @@
+diff -Naur virtualbox-kernel-6.1.50.orig/vboxdrv/r0drv/linux/memobj-r0drv-linux.c virtualbox-kernel-6.1.50/vboxdrv/r0drv/linux/memobj-r0drv-linux.c
+--- virtualbox-kernel-6.1.50.orig/vboxdrv/r0drv/linux/memobj-r0drv-linux.c	2024-02-28 16:14:23.000000000 +0100
++++ virtualbox-kernel-6.1.50/vboxdrv/r0drv/linux/memobj-r0drv-linux.c	2024-06-20 10:07:05.741540749 +0200
+@@ -1078,7 +1078,7 @@
+     u.Four  = *p4d_offset(&u.Global, ulAddr);
+     if (RT_UNLIKELY(p4d_none(u.Four)))
+         return NULL;
+-    if (p4d_large(u.Four))
++    if (p4d_leaf(u.Four))
+     {
+         pPage = p4d_page(u.Four);
+         AssertReturn(pPage, NULL);
+@@ -1094,7 +1094,7 @@
+     if (RT_UNLIKELY(pud_none(u.Upper)))
+         return NULL;
+ # if RTLNX_VER_MIN(2,6,25)
+-    if (pud_large(u.Upper))
++    if (pud_leaf(u.Upper))
+     {
+         pPage = pud_page(u.Upper);
+         AssertReturn(pPage, NULL);
+@@ -1110,7 +1110,7 @@
+     if (RT_UNLIKELY(pmd_none(u.Middle)))
+         return NULL;
+ #if RTLNX_VER_MIN(2,6,0)
+-    if (pmd_large(u.Middle))
++    if (pmd_leaf(u.Middle))
+     {
+         pPage = pmd_page(u.Middle);
+         AssertReturn(pPage, NULL);
+diff -Naur virtualbox-kernel-6.1.50.orig/vboxnetflt/linux/VBoxNetFlt-linux.c virtualbox-kernel-6.1.50/vboxnetflt/linux/VBoxNetFlt-linux.c
+--- virtualbox-kernel-6.1.50.orig/vboxnetflt/linux/VBoxNetFlt-linux.c	2024-02-28 16:14:23.000000000 +0100
++++ virtualbox-kernel-6.1.50/vboxnetflt/linux/VBoxNetFlt-linux.c	2024-06-20 10:07:53.820540749 +0200
+@@ -156,6 +156,17 @@
+ # endif
+ #endif
+ 
++#if RTLNX_VER_MIN(6,9,0)
++# define VBOX_SKB_FRAG_LEN(_pFrag)       ((_pFrag)->len)
++# define VBOX_SKB_FRAG_OFFSET(_pFrag)    ((_pFrag)->offset)
++#elif RTLNX_VER_MIN(5,4,0) || RTLNX_SUSE_MAJ_PREREQ(15, 2)
++# define VBOX_SKB_FRAG_LEN(_pFrag)       ((_pFrag)->bv_len)
++# define VBOX_SKB_FRAG_OFFSET(_pFrag)    ((_pFrag)->bv_offset)
++#else /* < KERNEL_VERSION(5, 4, 0) */
++# define VBOX_SKB_FRAG_LEN(_pFrag)       ((_pFrag)->size)
++# define VBOX_SKB_FRAG_OFFSET(_pFrag)    ((_pFrag)->page_offset)
++#endif /* > KERNEL_VERSION(6, 9, 0) */
++
+ #if RTLNX_VER_MIN(3,20,0) || RTLNX_RHEL_RANGE(7,2,  8,0) || RTLNX_RHEL_RANGE(6,8,  7,0)
+ # define VBOX_HAVE_SKB_VLAN
+ #endif
+@@ -918,8 +929,8 @@
+     {
+         skb_frag_t *pFrag = &skb_shinfo(pBuf)->frags[i];
+ # if RTLNX_VER_MIN(5,4,0) || RTLNX_SUSE_MAJ_PREREQ(15, 2)
+-        pSG->aSegs[iSeg].cb = pFrag->bv_len;
+-        pSG->aSegs[iSeg].pv = VBOX_SKB_KMAP_FRAG(pFrag) + pFrag->bv_offset;
++        pSG->aSegs[iSeg].cb = VBOX_SKB_FRAG_LEN(pFrag);
++        pSG->aSegs[iSeg].pv = VBOX_SKB_KMAP_FRAG(pFrag) + VBOX_SKB_FRAG_OFFSET(pFrag);
+ # else /* < KERNEL_VERSION(5, 4, 0) */
+         pSG->aSegs[iSeg].cb = pFrag->size;
+         pSG->aSegs[iSeg].pv = VBOX_SKB_KMAP_FRAG(pFrag) + pFrag->page_offset;
+@@ -939,8 +950,8 @@
+         {
+             skb_frag_t *pFrag = &skb_shinfo(pFragBuf)->frags[i];
+ # if RTLNX_VER_MIN(5,4,0) || RTLNX_SUSE_MAJ_PREREQ(15, 2)
+-            pSG->aSegs[iSeg].cb = pFrag->bv_len;
+-            pSG->aSegs[iSeg].pv = VBOX_SKB_KMAP_FRAG(pFrag) + pFrag->bv_offset;
++            pSG->aSegs[iSeg].cb = VBOX_SKB_FRAG_LEN(pFrag);
++            pSG->aSegs[iSeg].pv = VBOX_SKB_KMAP_FRAG(pFrag) + VBOX_SKB_FRAG_OFFSET(pFrag);
+ # else /* < KERNEL_VERSION(5, 4, 0) */
+             pSG->aSegs[iSeg].cb = pFrag->size;
+             pSG->aSegs[iSeg].pv = VBOX_SKB_KMAP_FRAG(pFrag) + pFrag->page_offset;
