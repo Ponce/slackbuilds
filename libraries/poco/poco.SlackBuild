@@ -27,9 +27,9 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=poco
-VERSION=${VERSION:-1.12.5}
+VERSION=${VERSION:-1.13.3}
 EDITION=all
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -49,12 +49,11 @@ if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   exit 0
 fi
 
-# Make optionally detected components really optional as they are in 
-# CMAKE build configuration upstream.
-if [ ${POSTGRESQL:-no} = "no" ]; then
-  NOPOSTGRESQL="--omit=Data/PostgreSQL"
+# Optionally disable bundles libs in favor of Slackware's versions 
+if [ ${BUNDLE:-no} = "no" ]; then
+  NOBUNDLE="-DPOCO_UNBUNDLED=ON"
 else
-  NOPOSTGRESQL=""
+  NOBUNDLE=""
 fi
 
 TMP=${TMP:-/tmp/SBo}
@@ -81,7 +80,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION-$EDITION
-tar xvf $CWD/$PRGNAM-$VERSION-$EDITION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION-$EDITION.tar.bz2
 cd $PRGNAM-$VERSION-$EDITION
 chown -R root:root .
 find -L . \
@@ -90,23 +89,21 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-if [ "$ARCH" = "x86_64" ]; then
-    patch -p1 < $CWD/poco_x64.patch
-fi
-
 # Slackware ships with MariaDB not MySQL, patch from Arch Linux
 patch -p1 < $CWD/poco_mariadb.patch
 
-./configure \
-  --prefix=/usr \
-  --no-tests \
-  --no-samples \
-  $NOPOSTGRESQL \
-  --sqlite-thread-safe=2 \
-  --shared
-
-make
-make install DESTDIR=$PKG
+mkdir -p cmake-build
+cd cmake-build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    $NOBUNDLE \
+    -DCMAKE_BUILD_TYPE=Release ..
+    
+  make
+  make install DESTDIR=$PKG
+cd ..
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -117,7 +114,7 @@ find $PKG -name perllocal.pod \
   | xargs rm -f
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a CHANGELOG CONTRIBUTORS NEWS LICENSE VERSION README $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CHANGELOG CONTRIBUTORS LICENSE MANIFEST VERSION README $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 rm -f $PKG/usr/lib*/*.la
