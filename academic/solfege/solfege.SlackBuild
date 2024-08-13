@@ -1,27 +1,39 @@
 #!/bin/bash
 
 # Slackware build script for solfege
-# Written by Phillip Warner <pc_warner@yahoo.com>
+# Originally written by Phillip Warner <email removed>.
+# Modified and now maintained by B. Watson <urchlay@slackware.uk>.
+
+# Original version of this script had no license. Modified version is
+# licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20240812 bkw: BUILD=2
+# - take over maintenance.
+# - don't generate broken help if lilypond is installed.
+# - ARCH=noarch (no compiled C/etc here).
+# - Add notes to README about what I had to do to get audio to
+#   work, and about freepats vs. eawpats.
+
+# Note: 3.22.2 (from 2013) is still the latest stable. I tried 3.23.4,
+# the latest development release (from 2016), but it fails to start
+# up, with some Python stack trace stuff. Stable still works (though
+# there are some spurious error dialogs), so stick with it.
+
+# Looks like it's abandoned upstream.
+
+# If you're wondering why this can't just be dropped from the repo...
+# it could be. But there's nothing else in the repo that does the same
+# job (ear training and music theory exercises).
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=solfege
 VERSION=${VERSION:-3.22.2}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+ARCH=noarch
 
-if [ -z "$ARCH" ]; then
-  case "$( uname -m )" in
-    i?86) ARCH=i586 ;;
-    arm*) ARCH=arm ;;
-       *) ARCH=$( uname -m ) ;;
-  esac
-fi
-
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -31,34 +43,17 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
-fi
-
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
 # Fix Makefile.in so it does not require txt2man
 # We will copy over our own man page
@@ -68,32 +63,30 @@ CFLAGS="$SLKCFLAGS" \
 CPPFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --disable-oss-sound \
   --mandir=/usr/man
 
+# 20240812 bkw: solfege source will rebuild all the PNG images
+# in the help/ dir if lilypond is found, otherwise use shipped versions.
+# There are 2 reasons to want to avoid this: (1) to save build time,
+# and (2) because the generated files are actually incorrect!
+# There's no --disable-lilypond config option, but this works:
+sed -i '/LILYPOND/s,:=.*,:=,' Makefile
+
 CFLAGS="$SLKCFLAGS" make
 
 # We either had to install this or txt2man
-cat $CWD/solfege.1 > $TMP/$PRGNAM-$VERSION/solfege.1
+cat $CWD/solfege.1 > solfege.1
 
 make install DESTDIR=$PKG
-
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-( cd $PKG/usr/man
-  find . -type f -exec gzip -9 {} \;
-  for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-)
-
+gzip $PKG/usr/man/man*/*
 mv $PKG/etc/solfege $PKG/etc/solfege.new
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS COPYING README ChangeLog changelog FAQ INSTALL \
-   $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a AUTHORS COPYING README ChangeLog changelog FAQ $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
