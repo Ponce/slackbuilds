@@ -6,6 +6,9 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20240812 bkw:
+# - update for v5.0.
+# - enable the GTK3 GUI.
 # 20230814 bkw:
 # - update to v4.7.
 # - switch to self-hosted download, as upstreams disappears the
@@ -16,7 +19,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=bacon
-VERSION=${VERSION:-4.7}
+VERSION=${VERSION:-5.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -54,6 +57,31 @@ fi
 
 set -e
 
+# The --enable-gui-* and --disable-gui-* don't actually work.
+# We can't run autoreconf either (fails).
+# The intent here is to build:
+# The GTK3 gui if requested by the user (but never automatically),
+# The FLTK gui if fltk is installed and not disabled with FLTK=no,
+# or the TK gui if fltk is missing or disabled via FLTK=no.
+# Either way, we don't currently support the gtk 2 gui (it depends
+# on webkitgtk 2.x, which is outdated and gone from our repo).
+if [ "${GTK3:-no}" = "yes" ]; then
+  if ! pkg-config --exists gtksourceview-4; then
+  cat <<EOF
+$0: GTK=3 is set, but gtksourceview4 is not installed. Aborting.
+EOF
+    exit 1
+  fi
+  GUI="FLTK=false TK=false GTK3=true LEGACY=false"
+  GUITYPE=GTK3
+elif [ "${FLTK:-yes}" = "yes" -a -x /usr/bin/fltk-config ]; then
+  GUI="FLTK=true TK=false GTK3=false LEGACY=false"
+  GUITYPE=FLTK
+else
+  GUI="FLTK=false TK=true GTK3=false LEGACY=false"
+  GUITYPE=TK
+fi
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
@@ -63,23 +91,6 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
-
-# The --enable-gui-* and --disable-gui-* don't actually work.
-# We can't run autoreconf either (fails).
-# The intent here is to build the fltk gui if fltk is installed and
-# not disabled with FLTK=no, or the tk gui if fltk is missing or
-# disabled.
-# Either way, we don't currently support the gtk 2 gui (it depends
-# on webkitgtk 2.x, which is outdated and gone from our repo) or the
-# gtk 3 gui (because I don't feel like dealing with webkit2gtk as a
-# dependency, not even an optional one).
-if [ "${FLTK:-yes}" = "yes" -a -x /usr/bin/fltk-config ]; then
-  GUI="FLTK=true TK=false GTK3=false GTK2=false"
-  GUITYPE=FLTK
-else
-  GUI="FLTK=false TK=true GTK3=false GTK2=false"
-  GUITYPE=TK
-fi
 
 # Keep the .xbm icon in a private directory, so nothing else accidentally
 # uses it (it's ugly).
@@ -143,6 +154,8 @@ cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 mkdir -p $PKG/usr/share/vim/vimfiles/syntax/
 mv $PKG/usr/share/BaCon/syntax/bacon.vim $PKG/usr/share/vim/vimfiles/syntax/bacon.vim
 mkdir -p $PKG/usr/share/gtksourceview-3.0/language-specs/
+mkdir -p $PKG/usr/share/gtksourceview-4/language-specs
+cp $PKG/usr/share/BaCon/syntax/bacon.lang $PKG/usr/share/gtksourceview-4/language-specs
 mv $PKG/usr/share/BaCon/syntax/bacon.lang $PKG/usr/share/gtksourceview-3.0/language-specs/bacon.lang
 
 # The vim syntax file works, but won't be used automatically without this:
