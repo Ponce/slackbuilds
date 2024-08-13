@@ -1,8 +1,7 @@
 .. RST source for mediaextract(1) man page. Convert with:
 ..   rst2man.py mediaextract.rst > mediaextract.1
-.. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 1.1.1
+.. |version| replace:: 1.2.0
 .. |date| date::
 
 ============
@@ -38,6 +37,9 @@ OPTIONS
 
 -h, --help
   Print this help message.
+
+-v, --version
+  Print program version.
 
 -q, --quiet
   Do not print status messages.
@@ -95,16 +97,16 @@ OPTIONS
       all supported formats
 
     default
-      the default set of formats (AIFF, ASF, AU, BINK, BMP, GIF, ID3v2, IT, JPEG, MPEG 1, MPEG PS, MIDI, MP4, Ogg, PNG, RIFF, S3M, SMK, XM, XMIDI)
+      the default set of formats (AIFF, ASF, AU, AVIF, BINK, BMP, GIF, HEIF, ID3v2, IT, JPEG, MPEG 1, MPEG PS, MIDI, MP4, Ogg, PNG, RIFF, S3M, SMK, XM, XMIDI)
 
     audio
       all audio files (AIFF, ASF, AU, ID3v2, IT, MIDI, MP4, Ogg, RIFF, S3M, XM, XMIDI)
 
-    text
+    text *[1]*
       all text files (ASCII, UTF-8, UTF-16LE, UTF-16BE, UTF-32LE, UTF-32BE)
 
     image
-      all image files (BMP, PNG, JPEG, GIF)
+      all image files (BMP, PNG, JPEG, GIF, AVIF, HEIF)
 
     mpeg
       all safe mpeg files (MPEG 1, MPEG PS, ID3v2)
@@ -114,6 +116,9 @@ OPTIONS
 
     video
       all video files (ASF, BINK, MP4, RIFF, SMK)
+
+    avif
+      AVIF image files
 
     aiff
       big-endian (Apple) wave files
@@ -136,6 +141,9 @@ OPTIONS
     gif
       Graphics Interchange Format files
 
+    heif
+      HEIF images files
+
     id3v2
       MPEG layer 1/2/3 files with ID3v2 tags
 
@@ -148,10 +156,10 @@ OPTIONS
     midi
       MIDI files
 
-    mod *[1]*
+    mod *[2]*
       Noisetracker/Soundtracker/Protracker Module files
 
-    mpg123 *[1]* *[2]*
+    mpg123 *[2]* *[3]*
       MPEG layer 1/2/3 files (MP1, MP2, MP3)
 
     mpeg1
@@ -160,7 +168,7 @@ OPTIONS
     mpegps
       MPEG 2 Program Streams
 
-    mpegts *[1]*
+    mpegts *[2]*
       MPEG 2 Transport Streams
 
     mp4
@@ -208,7 +216,10 @@ tracker files::
 
   mediaextract --formats=all,-tracker data.bin
 
-*[1]* WARNING: Because MP1/2/3 files do not have a nice file magic, using
+*[1]* NOTE: 'text' format might detect too much bogus text in UTF-16 or
+UTF-32 encodings. I recommend to use 'utf-8' or 'ascii' instead, if you can.
+
+*[2]* WARNING: Because MP1/2/3 files do not have a nice file magic, using
 the 'mpg123' format may cause *a lot* of false positives. Nowadays
 MP3 files usually have an ID3v2 tag at the start, so using the 'id3v2'
 format is the better option anyway.
@@ -217,7 +228,7 @@ The detection accuracy of MOD files is not much better and of MPEG TS
 it is even worse and thus the 'mpg123', 'mpegts' and 'mod' formats are
 per default disabled.
 
-*[2]* NOTE: When using only the 'mpg123' format but not 'id3v2', any ID3v2
+*[3]* NOTE: When using only the 'mpg123' format but not 'id3v2', any ID3v2
 tag will be stripped. ID3v1 tags will still be kept.
 
 EXAMPLES
