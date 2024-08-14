@@ -1,7 +1,7 @@
 .. RST source for ophis(1) man page. Convert with:
 ..   rst2man.py ophis.rst > ophis.1
 
-.. |version| replace:: 2.1
+.. |version| replace:: 2.2
 .. |date| date::
 
 =====
