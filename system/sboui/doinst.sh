@@ -22,6 +22,7 @@ config_blacklist() {
 
 config etc/sboui/sboui.conf.new
 config etc/sboui/sboui-backend.conf.new
+config etc/sboui/ignore_versions.new
 config_blacklist
 config etc/sboui/blacklist.new
 
