@@ -2,34 +2,26 @@
 
 # Slackware build script for evince-gtk2
 
-# Copyright 2023 Petar Petrov slackalaxy@gmail.com
-# Copyright 2009  Andrew Brouwers <abrouwers@gmail.com>
-# Copyright 2009, Michiel van Wessem, Manchester, United Kingdom.
-# All rights reserved.
-#
-# Redistribution and use of this script, with or without modification, is
-# permitted provided that the following conditions are met:
-#
-# 1. Redistributions of this script must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-#
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
-# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
-# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Originally written by Petar Petrov.
+# Modified and now maintained by B. Watson <urchlay@slackware.uk>
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20240819 bkw, BUILD=2:
+# - new maintainer.
+# - relicense as WTFPL.
+# - disable NLS by default, mention NLS=yes in the README.
+# - enable DVI backend, since Slackware 15.0 has texlive.
+# - remove mention of XPS from README, since this older version
+#   of evince doesn't actually support it.
+# - make comic book support (CBZ/CBR/CB7/CBT) actually *work*.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=evince-gtk2
 SRCNAM=evince
 VERSION=${VERSION:-2.32.0}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -41,7 +33,7 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-NLS=${NLS:-YES}
+NLS=${NLS:-no}
 
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
@@ -75,18 +67,26 @@ rm -rf $SRCNAM-$VERSION
 tar xvf $CWD/$SRCNAM-$VERSION.tar.bz2
 cd $SRCNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
-if [ "$NLS" != "YES" ]; then
-    # disable NLS - we're going for a small package here.
-    rm po/*.po
-    sed -i -e 's/USE_NLS=yes/USE_NLS=no/g' \
-      -e 's/ENABLE_NLS 1/ENABLE_NLS 0/g' configure
+NLSOPT="--disable-nls"
+if [ "$NLS" != "yes" ]; then
+  # disable NLS - we're going for a small package here.
+  # 20240819 bkw: --disable-nls by itself *should* be enough, but this
+  # stuff really is necessary.
+  rm po/*.po
+  sed -i -e 's/USE_NLS=yes/USE_NLS=no/g' \
+         -e 's/ENABLE_NLS 1/ENABLE_NLS 0/g' \
+         configure
+  NLSOPT="--enable-nls"
 fi
+
+# 20240819 bkw: add the correct MIME types for CBZ/CBR/CB7/CBT to actually
+# work. This patch might not be needed when Slackware 15.1/16.0 comes out,
+# if shared-mime-info and friends detect e.g. a .cbr file as application/x-cbr
+# instead of application/vnd.rar as 15.0's does.
+patch -p1 < $CWD/comicbookfix.diff
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -108,17 +108,18 @@ CXXFLAGS="$SLKCFLAGS" \
   --enable-pixbuf \
   --enable-comics \
   --enable-impress \
-  --disable-dvi \
   --disable-static \
   --disable-schemas-install \
   --disable-scrollkeeper \
   --disable-nautilus \
   --disable-introspection \
   --disable-maintainer-mode \
+  $NLSOPT \
   --build=$ARCH-slackware-linux
 
 make LDFLAGS=-lICE
-make install DESTDIR=$PKG
+make install-strip DESTDIR=$PKG
+gzip -9 $PKG/usr/man/man*/*
 
 rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
 
@@ -127,19 +128,12 @@ sed -i "/NoDisplay=true/d" $PKG/usr/share/applications/evince.desktop
 
 # Remove these
 rm -rf $PKG/*.schemas
-
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-
 rm -rf $PKG/{usr/share/gtk-doc,etc}
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
- AUTHORS COPYING NEWS README \
- $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a AUTHORS COPYING NEWS README $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
