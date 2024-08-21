@@ -2,45 +2,38 @@
 
 # Slackware build script for gnome-icon-theme
 
-# Copyright 2023 Petar Petrov slackalaxy@gmail.com
-# Using Slackware 14.1 SlackBuild as a guide...
-# All rights reserved.
-#
-# Redistribution and use of this script, with or without modification, is
-# permitted provided that the following conditions are met:
-#
-# 1. Redistributions of this script must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-#
-#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
-#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
-#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Originally written by Petar Petrov.
+# Modified and now maintained by B. Watson <urchlay@slackware.uk>.
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20240821 bkw: BUILD=2
+# - ARCH=noarch.
+# - extract tarballs to a top-level dir, for easier cleanup.
+# - factor repeated code into functions (makes the script shorter).
+# - --disable-nls, to avoid creating 103 empty LC_MESSAGES/ dirs
+#   in /usr/share/locale. There's nothing to translate here.
+#   Oddly, configure complains:
+#     configure: WARNING: unrecognized options: --disable-nls
+#   ...but it actually works anyway (no /usr/share/locale installed).
+# - funky doinst.sh creation and link removal. speed the build
+#   up 2.26x (was 2m20s, now 1m2s, on my test box).
+# - add 'install_sh=/bin/install' to make command, which further
+#   cuts the time from 1m2s to 33s (4.24x as fast as the original).
+#   No idea why configure checks for the install command, then doesn't
+#   use it instead of the shipped (and much slower) install-sh script.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=gnome-icon-theme
 VERSION=${VERSION:-3.12.0}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+ARCH=noarch
 
 EXTRAS=$PRGNAM-extras
 SYMBOL=$PRGNAM-symbolic
-
-if [ -z "$ARCH" ]; then
-  case "$( uname -m )" in
-    i?86) ARCH=i586 ;;
-    arm*) ARCH=arm ;;
-       *) ARCH=$( uname -m ) ;;
-  esac
-fi
 
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
@@ -51,119 +44,72 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
-fi
-
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 
-rm -rf $PRGNAM-$VERSION
-rm -rf $EXTRAS-$VERSION
-rm -rf $SYMBOL-$VERSION
+# 20240820 bkw: put everything in a top-level dir.
+rm -rf $PRGNAM-build
+mkdir -p $PRGNAM-build
+cd $PRGNAM-build
+TOPDIR=$( pwd )
 
-tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
-tar xvf $CWD/$EXTRAS-$VERSION.tar.xz
-tar xvf $CWD/$SYMBOL-$VERSION.tar.xz
+# 20240821 bkw: --disable-dependency-tracking doesn't speed it up at all.
+build() {
+  cd $TOPDIR
+  tar xvf $CWD/$1-$VERSION.tar.xz
+  cd $1-$VERSION
 
-cd $TMP/$PRGNAM-$VERSION
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  chown -R root:root .
+  find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
+          \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
+  [ "$2" != "" ] && patch -p1 < $2
+
   ./configure \
     --prefix=/usr \
-    --libdir=/usr/lib${LIBDIRSUFFIX} \
     --sysconfdir=/etc \
     --enable-icon-mapping \
+    --disable-nls \
     --localstatedir=/var/lib
 
-make
-make install DESTDIR=$PKG
+  make all install DESTDIR=$PKG install_sh=/bin/install
+}
 
-cd $TMP/$EXTRAS-$VERSION
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
-
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-  ./configure \
-    --prefix=/usr \
-    --libdir=/usr/lib${LIBDIRSUFFIX} \
-    --sysconfdir=/etc \
-    --enable-icon-mapping \
-    --localstatedir=/var/lib
-
-make
-make install DESTDIR=$PKG
-
-cd $TMP/$SYMBOL-$VERSION
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
-
-# Same fix as in Slackware 14.1, updated for 3.12
-patch -p1 -i $CWD/fix_gits_configure.patch
-
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-  ./configure \
-    --prefix=/usr \
-    --libdir=/usr/lib${LIBDIRSUFFIX} \
-    --sysconfdir=/etc \
-    --enable-icon-mapping \
-    --localstatedir=/var/lib
-
-make
-make install DESTDIR=$PKG
-
-rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+build $PRGNAM
+build $EXTRAS
+build $SYMBOL $CWD/fix_gits_configure.patch
 
 # As in the original SlackBuild, we don't want icon caches:
 find $PKG/usr/share/icons -type f -name "icon-theme.cache" -exec rm -f {} \+
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/{extras,symbolic}
-cp -a \
-  $TMP/$PRGNAM-$VERSION/{AUTHORS,COPYING,NEWS,README} \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  $TMP/$EXTRAS-$VERSION/{AUTHORS,COPYING,NEWS,README} \
-  $PKG/usr/doc/$PRGNAM-$VERSION/extras
-cp -a $TMP/$SYMBOL-$VERSION/{AUTHORS,COPYING,NEWS,README} \
-  $PKG/usr/doc/$PRGNAM-$VERSION/symbolic
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cd $TOPDIR
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+install_doc() {
+  mkdir -p $PKGDOC/$2
+  cp -a $1-$VERSION/{AUTHORS,COPYING,NEWS,README} $PKGDOC/$2
+}
+
+install_doc $PRGNAM
+install_doc $EXTRAS extras
+install_doc $SYMBOL symbolic
+
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
+
+# makepkg's "find symlinks and create doinst.sh" phase is painfully slow,
+# especially when there are thousands of symlinks (this package has 3846
+# of them).
+# This perl script does the same job, *many* times faster. Like, less
+# than 0.1 sec, compared to makepkg taking over a minute.
+perl $CWD/findsymlinks.pl >> $PKG/install/doinst.sh
+
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
