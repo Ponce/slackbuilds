@@ -25,8 +25,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=pytorch
-VERSION=${VERSION:-2.3.1}
-VERSION_SIX=1.11.0
+VERSION=${VERSION:-2.4.0}
+COMMIT_QNNPACK=7d2a4e9931a82adc3814275b6219a03e24e36b4c
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -75,21 +75,19 @@ cd $PRGNAM-v$VERSION
 chown -R root:root .
 chmod -R u+w,go-w,a+rX-st $PKG
 
-# Needed for NNPACK
-mkdir -p build/confu-deps/six-download/six-prefix/src/
-cp $CWD/six-$VERSION_SIX.tar.gz build/confu-deps/six-download/six-prefix/src/
+# QNNPACK not present in tar ball since version 2.4.0
+(
+cd third_party
+tar vxf $CWD/QNNPACK-$COMMIT_QNNPACK.tar.gz
+ln -s QNNPACK-$COMMIT_QNNPACK QNNPACK
+)
 
 # Fix cmake libdir location
 sed -i c10/CMakeLists.txt \
   -e "s;DESTINATION lib;DESTINATION lib$LIBDIRSUFFIX;g"
 
-# Make Vulkan Warnings not to make the build fail
-sed -i "/Werror=return-type/d" CMakeLists.txt
-
-# Fix compilation with nvidia-cuda-toolkit-12.4.0
-# https://github.com/pytorch/pytorch/issues/122169
-patch -p0 < $CWD/boxing.patch
-
+TMP_DIR=tmpxxx
+mkdir build
 cd build
   unshare -n cmake \
     -G Ninja \
@@ -102,20 +100,19 @@ cd build
     -DPYTHON_EXECUTABLE=$(which python3) \
     -DBUILD_CUSTOM_PROTOBUF=OFF \
     -DBUILD_TEST=OFF \
-    -DUSE_FFMPEG=ON \
     -DUSE_GOLD_LINKER=ON \
     -DUSE_OPENCL=ON \
-    -DUSE_OPENCV=ON \
     -DUSE_VULKAN=ON \
     -DCMAKE_BUILD_TYPE=Release ..
   "${NINJA:=ninja}"
-  DESTDIR=tmpxxx $NINJA install/strip
+  DESTDIR=$TMP_DIR $NINJA install/strip
 
   mkdir -p $PKG/usr/{share,lib$LIBDIRSUFFIX}
-  mv tmpxxx/usr/bin $PKG/usr
-  mv tmpxxx/usr/include $PKG/usr
-  mv tmpxxx/usr/share/cmake $PKG/usr/share
-  mv tmpxxx/usr/lib$LIBDIRSUFFIX/*.so $PKG/usr/lib$LIBDIRSUFFIX
+  find $TMP_DIR -empty -type d -delete
+  mv $TMP_DIR/usr/bin $PKG/usr
+  mv $TMP_DIR/usr/include $PKG/usr
+  mv $TMP_DIR/usr/share/cmake $PKG/usr/share
+  mv $TMP_DIR/usr/lib$LIBDIRSUFFIX/*.so $PKG/usr/lib$LIBDIRSUFFIX
 cd ..
 python3 setup.py install --root=$PKG
 
