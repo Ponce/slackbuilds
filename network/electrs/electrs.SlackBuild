@@ -1,0 +1,129 @@
+#!/bin/bash
+
+# Slackware build script for electrs - electrum server
+
+# Copyright 2023 thnkman <thnkman@proton.me>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=electrs
+VERSION=${VERSION:-0.10.5}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+ELECTRS_USER=${ELECTRS_USER:-electrs}
+ELECTRS_UID=${ELECTRS_UID:-386}
+ELECTRS_GROUP=${ELECTRS_GROUP:-electrs}
+ELECTRS_GID=${ELECTRS_GID:-386}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+if [ "$ARCH" = "x86_64" ]; then
+  export LIBDIRSUFFIX="64"
+elif [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
+ export LIBDIRSUFFIX="64"
+else
+  export LIBDIRSUFFIX=""
+fi
+
+export PATH="/opt/rust16/bin:$PATH"
+if [ -z "$LD_LIBRARY_PATH" ]; then
+  export LD_LIBRARY_PATH="/opt/rust16/lib$LIBDIRSUFFIX"
+else
+  export LD_LIBRARY_PATH="/opt/rust16/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+# Check if user 'electrs' excists.
+bailout() {
+  echo -e "\nYou must have a $ELECTRS_USER user and $ELECTRS_GROUP group to run this script. "
+  echo -e    "Something like this should suffice for most systems: "
+  echo -e    "# groupadd -g $ELECTRS_GID $ELECTRS_GROUP "
+  echo -e    "# useradd -u $ELECTRS_UID -g $ELECTRS_GID -c \"$PRGNAM - Electrum Server\" -M -d /var/run/$ELECTRS_USER -s /bin/false $ELECTRS_USER \n"
+  echo -e "Aborting..."
+exit 1
+}
+
+if ! grep -q "^$ELECTRS_USER:" /etc/passwd > /dev/null 2>&1 ; then
+  bailout
+elif ! grep -q "^$ELECTRS_GROUP:" /etc/group > /dev/null 2>&1 ; then
+  bailout
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+echo $LIBDIRSUFFIX
+cargo build --locked --release
+strip target/release/electrs
+
+mkdir -p $PKG/usr/bin \
+  $PKG/etc/{$PRGNAM,rc.d} \
+  $PKG/var/{log,run}/$PRGNAM
+
+install -D -m 0755 $TMP/$PRGNAM-$VERSION/target/release/$PRGNAM $PKG/usr/bin/$PRGNAM
+install -D -m 0644 $CWD/config.toml $PKG/etc/$PRGNAM/config.toml
+install -D -m 0644 $CWD/rc.$PRGNAM $PKG/etc/rc.d/rc.$PRGNAM
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  LICENSE \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+sed -i "s/ELECTRS_UID=.*$/ELECTRS_UID=$ELECTRS_UID/" $PKG/install/doinst.sh
+sed -i "s/ELECTRS_GID=.*$/ELECTRS_GID=$ELECTRS_GID/" $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -p -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
