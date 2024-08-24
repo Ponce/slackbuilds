@@ -27,7 +27,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=engrampa
-VERSION=${VERSION:-1.28.0}
+VERSION=${VERSION:-1.28.2}
+COMMIT_MATE_SUBMODULES=4074560e3642a53ace07b31baaf3f04c060dcd0b
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -77,6 +78,11 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
 cd $PRGNAM-$VERSION
+(
+  cd subprojects
+  tar vxf $CWD/mate-submodules-$COMMIT_MATE_SUBMODULES.tar.gz
+  mv mate-submodules-$COMMIT_MATE_SUBMODULES mate-submodules
+)
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -84,27 +90,34 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} +
 
+# If yelp is not present don't build Help-files, remove HelpContents
+# menuitem and move HelpAbout menuitem into file-menu
+if ! command -v yelp; then
+  sed -i "/subdir('help')/d" meson.build
+  sed -i src/ui/menus-toolbars.ui \
+    -e "/menu_icon_help/,+4d"
+fi
+
 # Autodetect caja extension
 pkg-config libcaja-extension && CAJA="enable" || CAJA="disable"
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --enable-debug=no \
-  --disable-schemas-compile \
-  --enable-magic \
-  --disable-packagekit \
-  --${CAJA}-caja-actions \
-  --build=$ARCH-slackware-linux
-
-make
-make install DESTDIR=$PKG
+mkdir build
+cd build
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  unshare -n meson .. \
+    --buildtype=release \
+    --infodir=/usr/info \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    -Db_lto=true \
+    -Dstrip=true
+  "${NINJA:=ninja}"
+  DESTDIR=$PKG $NINJA install
+cd ..
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
