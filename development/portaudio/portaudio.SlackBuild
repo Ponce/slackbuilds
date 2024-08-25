@@ -1,10 +1,11 @@
 #!/bin/bash
 
-# Slackware build script for "PortAudio".
+# Slackware build script for portaudio.
 #
-# Copyright 2009-2015 Marco Bonetti <sid77@slackware.it>
-# Copyright 2015 Marcel Saegebarth <marc@mos6581.de>
+# Copyright 2009-2015 Marco Bonetti <email removed>
+# Copyright 2015 Marcel Saegebarth <email removed>
 # Copyright 2022 Bill Kirkpatrick, Bay City, Texas, USA
+# Copyright 2024 B. Watson <urchlay@slackware.uk>
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -26,11 +27,18 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20240825 bkw: BUILD=2
+# - new maintainer.
+# - make parallel builds work (-jN, N>1).
+# - put README.md in doc dir, not useless README.configure.txt.
+# - add EXAMPLES=yes option to build examples & tests.
+# - fix parallel builds.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=portaudio
 VERSION=${VERSION:-19.7.0}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -42,9 +50,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -77,11 +82,8 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -95,16 +97,30 @@ CXXFLAGS="$SLKCFLAGS" \
   --disable-static \
   --build=$ARCH-slackware-linux
 
-make -j1
+# 20240825 bkw: Don't build the tests and examples by default.
+# README has always claimed there are example programs. And they
+# have always been built... but NOT included in the package.
+# Don't waste time building them if we don't need them.
+sed -i '/^all:/s,tests *examples *, ,' Makefile
+
+# 20240825 bkw: doing this first makes parallel builds work (-jN).
+make lib/libportaudio.la
+
+make
 make install DESTDIR=$PKG
 
-rm -rf $PKG/usr/lib${LIBDIRSUFFIX}/*.la
+strip $PKG/usr/lib*/lib*.so.*.*
+rm -rf $PKG/usr/lib*/*.la
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# 20240825 bkw: Now build/install the examples, if the user requested them.
+if [ "${EXAMPLES:-no}" = "yes" ]; then
+  make examples tests
+  mkdir -p $PKG/usr/bin
+  install -m0755 -oroot -groot -s bin/.libs/* $PKG/usr/bin
+fi
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a LICENSE.txt README.configure.txt $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE.txt README.md $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
