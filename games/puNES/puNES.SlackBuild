@@ -2,30 +2,23 @@
 
 # Slackware build script for puNES
 
-# Copyright 2018-2020 Hunter Sezen California, USA
-# All rights reserved.
-#
-# Redistribution and use of this script, with or without modification, is
-# permitted provided that the following conditions are met:
-#
-# 1. Redistributions of this script must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-#
-#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
-#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
-#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Originally written by Hunter Sezen.
+# Modified and now maintained by B. Watson <urchlay@slackware.uk>.
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20240828 bkw:
+# - new maintainer.
+# - relicense as WTFPL.
+# - update for v0.111.
+# - expand README and slack-desc.
+# - include a man page.
+# - add CG=no and QT6=yes options, document in README.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=puNES
-VERSION=${VERSION:-0.106}
+VERSION=${VERSION:-0.111}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -38,9 +31,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -52,19 +42,34 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
 fi
 
-set -eu
+set -e
+
+if [ -x /usr/bin/cgc -a "${CG:-yes}" = "yes" ]; then
+  WITHCG=WITH
+  CGOPT="-DENABLE_OPENGL_CG=ON"
+else
+  WITHCG=without
+  CGOPT=""
+fi
+
+# 20240829 bkw: Qt6 is supported, but the user has to ask for it
+# specifically. I don't see much difference in the UI either way.
+# This may break horribly any time qt6 is updated, and I don't much care.
+if [ -x /usr/bin/qmake-qt6 -a "${QT6:-no}" = "yes" ]; then
+  QTVER=6
+  QTOPT="-DENABLE_QT6_LIBS=ON"
+else
+  QTVER=5
+  QTOPT=""
+fi
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -73,38 +78,52 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
-autoreconf -fi
+# 20240828 bkw: make .desktop file validate properly.
+sed -i -e '/^Encoding/d' \
+       -e '/^Comment/d' \
+       misc/*.desktop.in
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --bindir=/usr/games \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --build=$ARCH-slackware-linux
+# 20240828 bkw: upstream switched from autocrap to cmake.
+mkdir -p build
+cd build
+  cmake \
+    $CGOPT \
+    $QTOPT \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_DOCDIR=/usr/doc/$PRGNAM-$VERSION \
+    -DCMAKE_INSTALL_BINDIR=/usr/games \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install/strip DESTDIR=$PKG
+cd ..
 
-make
-make install DESTDIR=$PKG
+# 20240828 bkw: install/strip creates this empty dir...
+rmdir $PKG/usr/bin
 
-# Don't overwrite the existing mimeinfo.cache file.
-rm -f -- $PKG/usr/share/applications/mimeinfo.cache
+# 20240829 bkw: wrote a man page. Wasn't going to, but the --help
+# option is too annoying to use (prints output in an X window instead
+# of stdout).
+mkdir -p $PKG/usr/man/man6
+gzip -9c < $CWD/punes.6 > $PKG/usr/man/man6/punes.6.gz
+ln -s punes.6.gz $PKG/usr/man/man6/$PRGNAM.6.gz
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" |
-  grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a ChangeLog COPYING README.md $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a COPYING $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s,@WITHCG@,$WITHCG," \
+    -e "s,@QTVER@,$QTVER," \
+    < $CWD/slack-desc \
+    > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/doinst.sh > $PKG/install/douninst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
