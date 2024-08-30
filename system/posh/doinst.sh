@@ -4,5 +4,5 @@ if [ ! -r etc/shells ]; then
 fi
 
 if ! grep -q /bin/posh etc/shells ; then
-  printf %s\\n /bin/posh >> etc/shells
+  echo /bin/posh >> etc/shells
 fi
