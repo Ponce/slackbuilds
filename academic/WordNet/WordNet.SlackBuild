@@ -2,14 +2,36 @@
 
 # Slackware build script for WordNet
 
-# Written by Michael Gabilondo <mgabilo{at}gmail{dot}com>
+# Written by Michael Gabilondo
 # This work is in the public domain
+
+# Modified and now maintained by B. Watson. If you live in a country
+# whose laws don't recognize "public domain", then for you this is
+# licensed under the WTFPL.
+
+# 20240831 bkw: BUILD=3
+# - new maintainer.
+# - add .desktop and icon from debian, and doinst.sh.
+# - add missing docs to doc dir, *especially* COPYING.
+# - move data files to /usr/share/wordnet. putting them
+#   in /usr/dict/ and /usr/lib/wnres is terrible.
+# - remove the profile.d/ scripts, they weren't needed.
+# - do not include tk.h and tkDecls.h in the package.
+
+# Note to self:
+# Upstream has released a version 3.1 of just the data files:
+# https://wordnetcode.princeton.edu/wn3.1.dict.tar.gz
+# ...which just contains the dict/ dir of the source. However,
+# replacing 3.0's dict/ with this doesn't work (missing frames.vrb
+# file, among others). Since I don't know anything about this,
+# didn't upgrade to the 3.1 database. If you do know, please let
+# me know.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=WordNet
 VERSION=${VERSION:-3.0}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -21,9 +43,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -56,11 +75,10 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
+
+patch -p1 < $CWD/usr_share.diff
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -71,31 +89,36 @@ CXXFLAGS="$SLKCFLAGS" \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --mandir=/usr/man \
+  --datadir=/usr/share/wordnet \
   --build=$ARCH-slackware-linux
 
 make CFLAGS="$CFLAGS -DUSE_INTERP_RESULT"
-make install DESTDIR=$PKG
+make install-strip DESTDIR=$PKG
+gzip -9 $PKG/usr/man/man*/*
 
-# Make sure WNHOME is set in the users' environments
-mkdir -p $PKG/etc/profile.d
-cat $CWD/profile.d/WordNet.sh > $PKG/etc/profile.d/WordNet.sh
-cat $CWD/profile.d/WordNet.csh > $PKG/etc/profile.d/WordNet.csh
-chmod 0755 $PKG/etc/profile.d/*
+# 20240901 bkw: this stuff doesn't belong in the package, it's already
+# in Slackware's own tk package (in /usr/include rather than /usr/include/tk).
+rm -rf $PKG/usr/include/tk
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# 20240831 bkw: .desktop taken from https://packages.debian.org/sid/wordnet
+# icon from same source, but resized to 128x128.
+mkdir -p $PKG/usr/share/{applications,icons/hicolor/{48x48,128x128}/apps}
+cat $CWD/wordnet.desktop > $PKG/usr/share/applications/wordnet.desktop
+cat $CWD/wn.png > $PKG/usr/share/icons/hicolor/128x128/apps/wn.png
+convert -resize 48x48 $CWD/wn.png $PKG/usr/share/icons/hicolor/48x48/apps/wn.png
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/wn.png $PKG/usr/share/pixmaps/wn.png
 
-( cd $PKG/usr/man
-  find . -type f -exec gzip -9 {} \;
-  for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-)
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-( cd $PKG/usr/doc ; mv html pdf ps $PRGNAM-$VERSION )
+# 20240831 bkw: LICENSE is identical to COPYING, NEWS is 0 bytes.
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+mv $PKG/usr/doc/{html,pdf,ps} $PKGDOC
+cp -a AUTHORS COPYING ChangeLog README $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
