@@ -1,10 +1,10 @@
 #!/bin/sh
 export JAVA_HOME=/usr/lib%LIBDIRSUFFIX%/zulu-openjdk17
-export MANPATH="${MANPATH}:${JAVA_HOME}/man"
-export PATH="${PATH}:${JAVA_HOME}/bin"
+export MANPATH="${JAVA_HOME}/man:${MANPATH}"
+export PATH="${JAVA_HOME}/bin:${PATH}"
 
 if [ -z "$LD_LIBRARY_PATH" ]; then
   export LD_LIBRARY_PATH="${JAVA_HOME}/lib/server"
 else
-  export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${JAVA_HOME}/lib/server"
+  export LD_LIBRARY_PATH="${JAVA_HOME}/lib/server:${LD_LIBRARY_PATH}"
 fi
