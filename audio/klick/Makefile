@@ -8,7 +8,7 @@
 # or install targets, and there's no dependency info for headers.
 
 PROJ=klick
-VERSION=0.12.2
+VERSION=0.14.2
 
 TERMINAL=yes
 OSC=no
@@ -17,7 +17,7 @@ SLKCFLAGS=
 PREFIX=/usr
 SHARE=$(PREFIX)/share/$(PROJ)
 
-SRCS=src/main.cc src/klick.cc src/options.cc src/audio_interface.cc src/audio_interface_jack.cc src/audio_interface_sndfile.cc src/audio_chunk.cc src/tempomap.cc src/metronome.cc src/metronome_simple.cc src/metronome_map.cc src/metronome_jack.cc src/position.cc src/util/util.cc
+SRCS=src/audio_chunk.cc src/audio_interface.cc src/audio_interface_jack.cc src/audio_interface_sndfile.cc src/klick.cc src/main.cc src/metronome.cc src/metronome_jack.cc src/metronome_map.cc src/metronome_simple.cc src/options.cc src/position.cc src/tempomap.cc
 
 LIBS:=$(shell pkg-config --libs jack samplerate sndfile)
 FLAGS:=$(shell pkg-config --cflags jack samplerate sndfile)
