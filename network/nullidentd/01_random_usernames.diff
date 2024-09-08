@@ -1,0 +1,106 @@
+From: Jason Thomas <jason@topic.com.au>
+Subject: Add support for returning random usernames
+Bug-Debian: http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=115204
+--- nullidentd-1.0.orig/nullidentd.c
++++ nullidentd-1.0/nullidentd.c
+@@ -7,9 +7,11 @@
+ */
+ 
+ #include <stdio.h>
++#include <stdlib.h>
+ #include <sys/types.h>
+ #include <unistd.h>
+ #include <signal.h>
++#include <time.h>
+ 
+ #include "version.h"
+ 
+@@ -18,6 +20,7 @@
+ #define MAX_RESPONSE 200
+ #define MAX_REQUEST 100
+ #define MAX_USERID 50
++#define MAX_RANDOMID 8
+ 
+ void usage()
+ {
+@@ -46,7 +49,6 @@ int write_response( int fd, char *respon
+ 
+ int read_request( int fd, char *request, int maxlen )
+ {
+-    int		retval;
+     char	c;
+     int		bytesread = 0;
+ 
+@@ -76,6 +78,22 @@ int read_request( int fd, char *request,
+     return 1;
+ }
+ 
++char *random_userid( void )
++{
++    static char buf[MAX_RANDOMID+1];
++    size_t i;
++    static const char valid[] =
++        "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
++
++    for (i = 0 ; i < MAX_RANDOMID ; i++)
++        buf[i] = valid[rand() % (sizeof(valid) - 1)];
++
++    buf[i] = '\0';
++
++    return buf;
++}
++
++
+ void session_timeout( int foo )
+ {
+     exit( 0 );
+@@ -84,12 +102,12 @@ void session_timeout( int foo )
+ int main( int argc, const char *argv[] )
+ {
+     const char *	userid = "foobar";
+-    char		c;
+     int			infd;
+     int			outfd;
+     int			response_len;
+     char		response[MAX_RESPONSE];
+     char		request[MAX_REQUEST];
++    int			gen_random = 0;
+ 
+     if( getgid() == 0 ) {
+ 	fprintf( stderr, "Group id is root, exitting.\n" );
+@@ -114,6 +132,10 @@ int main( int argc, const char *argv[] )
+ 	}
+     }
+ 
++    if (strcmp(userid, "RANDOM") == 0) {
++	    gen_random = 1;
++    }
++
+     infd = fileno( stdin );
+     outfd = fileno( stdout );
+ 
+@@ -121,6 +143,8 @@ int main( int argc, const char *argv[] )
+     signal( SIGALRM, session_timeout );
+     alarm( SESSION_TIMEOUT );
+ 
++    srand(getpid() ^ time(NULL));
++
+     for( ;; ) {
+ 	/* read the request */
+ 	if( !read_request( infd, request, MAX_REQUEST ) ) {
+@@ -128,6 +152,10 @@ int main( int argc, const char *argv[] )
+ 	    goto done;
+ 	}
+ 
++	if (gen_random) {
++		userid = random_userid();
++	}
++
+ 	/* format the response */
+ 	response_len = snprintf( response, sizeof( response ), "%.20s : USERID : UNIX : %.20s\r\n", request, userid );
+ 
+@@ -140,4 +168,3 @@ int main( int argc, const char *argv[] )
+ done:
+     return 0;
+ }
+-
