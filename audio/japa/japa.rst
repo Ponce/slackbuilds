@@ -1,8 +1,7 @@
 .. RST source for japa(1) man page. Convert with:
 ..   rst2man.py japa.rst > japa.1
-.. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 0.9.2
+.. |version| replace:: 0.9.4
 .. |date| date::
 
 ====
