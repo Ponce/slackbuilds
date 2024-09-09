@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# rc.electrs - Initscript for the electrs electrum server
+# rc.electrs - Initscript for electrs - Electrum Server in Rust
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -12,42 +12,77 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 
-PRGNAM=/usr/bin/electrs
+PRGNAM=electrs
 USER=electrs
-CONFDIR=/etc/electrs
-DBDIR=/var/run/electrs/db
-LOGDIR=/var/log/electrs
+CONFDIR=/etc/$PRGNAM
+LOGDIR=/var/log/$PRGNAM
+PIDFILE=/var/run/$PRGNAM/$PRGNAM.pid
 
+# Start electrs
 electrs_start() {
-  echo -e "Starting electrs Electrum server..."
-  # Logrotate
-  runuser -u electrs -- sh -c "savelog -n -c 7 $LOGDIR/electrs.log"
-  # Starting server
-  cd /etc/electrs
-  runuser -u electrs -- sh -c  "$PRGNAM --conf $CONFDIR/config.toml >$LOGDIR/electrs.log 2>&1 &"
+  echo -e "\nStarting $PRGNAM..."
+  if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE" 2>/dev/null) 2>/dev/null; then
+    echo -e "$PRGNAM already up\n"
+    exit 1
+  fi
+  runuser -u "$USER" -- sh -c "savelog -n -c 7 $LOGDIR/$PRGNAM.log"
+  runuser -u "$USER" -- sh -c "$PRGNAM --skip-default-conf-files \
+  --conf $CONFDIR/config.toml >$LOGDIR/$PRGNAM.log 2>&1 & echo \$! >$PIDFILE"
+  if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
+    echo -e "$PRGNAM started\n"
+  else
+    echo -e "$PRGNAM failed to start\n"
+    exit 1
+  fi
 }
 
+# Stop electrs
 electrs_stop() {
-  pkill -f $PRGNAM
-    while pgrep -f $PRGNAM > /dev/null; do
-    echo "$PRGNAM is shutting down..."
-    sleep 1
-done
+  if [ -f "$PIDFILE" ]; then
+    if kill -0 $(cat "$PIDFILE") 2>/dev/null; then
+      echo -e "\nShutting down $PRGNAM...\n"
+      kill $(cat "$PIDFILE")
+        while kill -0 $(cat "$PIDFILE") 2>/dev/null; do
+          sleep 1
+        done
+      rm -f "$PIDFILE" 2>/dev/null
+    else
+      echo -e "\n$PIDFILE exists, but $PRGNAM appears down\nMaking Sure..."
+      pkill -u "$USER" "$PRGNAM"
+        if [ $? -eq 0 ]; then
+          echo -e "$PRGNAM was killed\n"
+        else
+          echo -e "$PRGNAM was not running\n"
+        fi
+      echo -e "Removing $PIDFILE\n"
+      rm -f "$PIDFILE"
+    fi
+  else
+    echo -e "\n$PIDFILE not found. Trying 'pkill'"
+    pkill -u "$USER" "$PRGNAM"
+      if [ $? -eq 0 ]; then
+        echo -e "$PRGNAM was killed\n"
+      else
+        echo -e "$PRGNAM was not running\n"
+     fi
+  fi
 }
 
+# Restart electrs
 electrs_restart() {
-  electrs_stop
-  electrs_start
+  electrs_stop && electrs_start
 }
 
+# Check status of electrs
 electrs_status() {
-  if pidof $PRGNAM > /dev/null; then
-    echo -e "Server is up."
-else
-  echo -e "Server is down."
-fi
+  if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
+    echo -e "\n$PRGNAM is up (PID: $(cat $PIDFILE))\n"
+  else
+    echo -e "\n$PRGNAM is down\n"
+  fi
 }
 
+# Define options available
 case "$1" in
   start)
   electrs_start
@@ -65,3 +100,5 @@ case "$1" in
   echo "Usage: $0 {start|stop|restart|status}"
   exit 1
 esac
+
+exit 0
