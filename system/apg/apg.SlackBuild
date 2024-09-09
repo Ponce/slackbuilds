@@ -6,21 +6,23 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-# 20230816 bkw: note to self: repology thinks this build is outdated,
-# because someone has packaged up 2.3.0b, a beta version. The forked
-# github repo I'm using does not include 2.3.0.b, and I don't want to
-# package up a 20-year-old beta of a dead project.
+# 20240908 bkw:
+# - update for v2.3.0b+20240821_dcddc65. this is the latest commit
+#   in a fork that's actually maintained (as of Aug 2024), so I'll
+#   go with it.
+# - apgd actually works in this version, for whatever that's
+#   worth. worse than useless IMO, but include it in the package.
+# - build with cracklib (so the -k option works).
 
-# TODO: figure out what's wrong with apgd. It works fine when called
-# from the command line, but when starting it from inetd it seems
-# to get stuck in a loop, never prints any output, logs hundreds
-# of requests, and never generates any output. This is low-priority
-# because nobody actually *uses* a password-generation TCP service...
+# I packaged up a post-2.3.0b commit because there are a couple of
+# bugfixes and optimizations that came after the release. See commits
+# 5135162, 3a0ac14, c23635f.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=apg
-VERSION=${VERSION:-2.2.3}
+VERSION=${VERSION:-2.3.0b+20240821_dcddc65}
+COMMIT=${COMMIT:-dcddc65648f8b71ba8b9a9c1946034badb4ae7f3}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -61,29 +63,62 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+rm -rf $PRGNAM-$COMMIT
+tar xvf $CWD/$PRGNAM-$COMMIT.tar.gz
+cd $PRGNAM-$COMMIT
 chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
 [ "${URANDOM:-yes}" = "no" ] || sed -i 's,/dev/random,/dev/urandom,' rnd.h
 
-# If we were going to build the daemon, we'd use "make all".
+# autoconf stuff doesn't know how to enable cracklib (no autodetect,
+# no --with-cracklib, no mention of "crack" in configure.ac at
+# all). However, we can do it with flags here and LIBS, below.
+SLKCFLAGS+=" -DAPG_USE_CRACKLIB"
+SLKCFLAGS+=" -DCRACKLIB_DICTPATH=\\\"/usr/share/cracklib/pw_dict\\\""
 
-make FLAGS="$SLKCFLAGS -Wl,-s"
-make install INSTALL_PREFIX=$PKG/usr
-gzip -9 $PKG/usr/man/man?/*.?
+LIBS="-lcrack" \
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --disable-static \
+  --build=$ARCH-slackware-linux
+
+make
+make install-strip DESTDIR=$PKG
+
+# 20240908 bkw: apgd has a section 8 man page, so it goes here:
+mkdir -p $PKG/usr/sbin
+mv $PKG/usr/bin/apgd $PKG/usr/sbin
+
+# 20240908 bkw: 2.3.0b and up, man pages no longer get installed.
+# install them, and create a doinst.sh to add the man pages to the man db.
+for sec in 1 8; do
+  dir=$PKG/usr/man/man$sec
+  mkdir -p $dir
+  for page in doc/man/*.$sec; do
+    bpage=$( basename $page )
+    gzip -9 < $page > $dir/$bpage.gz
+    echo "chroot . /usr/bin/mandb -f /usr/man/man$sec/$bpage.gz &> /dev/null" >> doinst.tmp
+  done
+done
 
 rm -rf doc/man
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a CHANGES COPYING LICENSE README README.md THANKS TODO doc/* \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a CHANGES COPYING README THANKS TODO doc/* $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat doinst.tmp > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
