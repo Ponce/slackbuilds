@@ -3,6 +3,7 @@
 # Slackware build script for zziplib
 
 # Copyright 2012-2020 Larry Hajali <email removed>
+# Copyright 2024 B. Watson <urchlay@slackware.uk>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,6 +23,7 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20240909 bkw: BUILD=2, generate doinst.sh for mandb.
 # 20240823 bkw: update for v0.13.78.
 # 20240808 bkw: update for v0.13.77.
 # 20240314 bkw: update for v0.13.74.
@@ -42,7 +44,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=zziplib
 VERSION=${VERSION:-0.13.78}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -121,4 +123,41 @@ mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
+
+# 20240909 bkw: This bit may get added to the SBo templates, so I'll
+# comment it in excruciating detail.
+#
+# The idea is that, immediately after installing the package, the
+# "man -k", "whatis", "apropos" commands should be able to find the
+# newly-installed man pages. This means that, at package install time,
+# they have to be added to the man database with the mandb command.
+#
+# We *could* run "mandb -c" in the doinst.sh, which would rebuild the
+# whole cache, but it takes a long time to do in Slackware 15.0 (several
+# minutes). Running "mandb" without the -c is much quicker, but
+# doesn't always pick up the new man pages (see next paragraph). So
+# instead, we have to add them one-by-one with "mandb -f" commands.
+#
+# In theory, we could run mandb with arguments in doinst.sh, or just
+# rely /etc/cron.daily/man-db to pick up the new man pages every
+# day... but in practice, it fails to pick up new ones, if the
+# timestamp on /usr/man/man1 (man3, etc) is older than the mandb
+# database file. This happens if we install or reinstall a package
+# that was built yesterday or earlier, if it contains any man pages.
+#
+# Note that I'm *not* proposing removing the man pages from the
+# database on package removal. It could be done with a simple "mandb"
+# command in doinst.sh (takes ~10 seconds to run with an SSD, longer
+# with a platter drive), but the daily cron job already handles this
+# correctly, regardless of the timestamps on the man page dirs. So
+# when you remove a package, you'll have to live with its man pages
+# being in the database for up to 24 more hours. This is no worse
+# than its files still being listed in the locate database, and nobody
+# complains about that.
+
+find usr/man -type f -a -name '*.gz' | \
+  sed -e 's,^,chroot . /usr/bin/mandb -f "/,' \
+      -e 's,$," \&>/dev/null,' \
+  >> install/doinst.sh
+
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
