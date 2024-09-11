@@ -11,8 +11,6 @@ PRGNAM=dnscrypt-proxy
 DNSCRYPT_UID=293
 DNSCRYPT_GID=293
 
-chown $DNSCRYPT_UID:$DNSCRYPT_GID etc/$PRGNAM/*
-
-setfacl -m u:$DNSCRYPT_UID:rwx etc/$PRGNAM
-setfacl -m u:$DNSCRYPT_UID:rwx var/run/$PRGNAM
-setfacl -m u:$DNSCRYPT_UID:rwx var/log/$PRGNAM
+setfacl -R -m u:$DNSCRYPT_UID:rwx etc/$PRGNAM
+setfacl -R -m u:$DNSCRYPT_UID:rwx var/run/$PRGNAM
+setfacl -R -m u:$DNSCRYPT_UID:rwx var/log/$PRGNAM

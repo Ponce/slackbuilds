@@ -1,76 +1,105 @@
 #!/bin/sh
+#
+# rc.dnscrypt-proxy - Initscript for dnscrypt-proxy
+# A flexible DNS proxy, with support for encrypted DNS protocols.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
 
-# Init file for dnscrypt-proxy
+PRGNAM=dnscrypt-proxy
+USER=dnscrypt
+CONFDIR=/etc/dnscrypt-proxy
+LOGDIR=/var/log/dnscrypt-proxy
+PIDFILE=/var/run/dnscrypt-proxy/dnscrypt-proxy.pid
+OPTS="-config $CONFDIR/dnscrypt-proxy.toml"
 
-CONFDIR="/etc/dnscrypt-proxy"
-LOGDIR="/var/log/dnscrypt-proxy"
-RUNDIR="/var/run/dnscrypt-proxy"
-
-OPTS="-config $CONFDIR/dnscrypt-proxy.toml -pidfile $RUNDIR/dnscrypt-proxy.pid -logfile $LOGDIR/dnscrypt-proxy.log"
-
-PID=$(cat /var/run/dnscrypt-proxy/dnscrypt-proxy.pid 2>/dev/null)
-
+# Start dnscrypt-proxy
 start() {
-    echo "Starting DNSCrypt-proxy"
-    /usr/bin/dnscrypt-proxy $OPTS &
-}
-
-stop() {
-    echo "Stopping DNSCrypt-proxy"
-
-if [ -z $PID ]; then
-    echo "Not running"
-    exit 0
-fi
-
-if kill -15 $PID 2>/dev/null; then
-    echo "Stopped"
-    rm $RUNDIR/dnscrypt-proxy.pid 2>/dev/null
-else
-    sleep 1
-if kill -9 $PID 2>/dev/null; then
-    echo "Killed"
-    rm $RUNDIR/dnscrypt-proxy.pid 2>/dev/null
-else
-    echo "Error"
+  echo -e "\nStarting $PRGNAM..."
+  if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE" 2>/dev/null) 2>/dev/null; then
+    echo -e "$PRGNAM already up\n"
     exit 1
-fi
-fi
-
+  fi
+  "savelog -n -c 7 $LOGDIR/$PRGNAM.log" 2>/dev/null
+  $PRGNAM $OPTS 2>&1 & echo $! >"$PIDFILE"
+  if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
+    echo -e "$PRGNAM started\n"
+  else
+    echo -e "$PRGNAM failed to start\n"
+    exit 1
+  fi
 }
 
+# Stop dnscrypt-proxy
+stop() {
+  if [ -f "$PIDFILE" ]; then
+    if kill -0 $(cat "$PIDFILE") 2>/dev/null; then
+      echo -e "\nShutting down $PRGNAM...\n"
+      kill $(cat "$PIDFILE")
+        while kill -0 $(cat "$PIDFILE") 2>/dev/null; do
+          sleep 1
+        done
+      rm -f "$PIDFILE" 2>/dev/null
+    else
+      echo -e "\n$PIDFILE exists, but $PRGNAM appears down\nMaking Sure..."
+      pkill -u "$USER" "$PRGNAM"
+        if [ $? -eq 0 ]; then
+          echo -e "$PRGNAM was killed\n"
+        else
+          echo -e "$PRGNAM was not running\n"
+        fi
+      echo -e "Removing $PIDFILE\n"
+      rm -f "$PIDFILE"
+    fi
+  else
+    echo -e "\n$PIDFILE not found. Trying 'pkill'"
+    pkill -u "$USER" "$PRGNAM"
+      if [ $? -eq 0 ]; then
+        echo -e "$PRGNAM was killed\n"
+      else
+        echo -e "$PRGNAM was not running\n"
+     fi
+  fi
+}
+
+# Restart dnscrypt-proxy
+restart() {
+  stop && start
+}
+
+# Check status of dnscrypt-proxy
 status() {
-
-if [ -z $PID ]; then
-    echo "Not running"
-    exit 0
-else
-    echo "Running"
-    exit 0
-fi
-
+  if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
+    echo -e "\n$PRGNAM is up (PID: $(cat $PIDFILE))\n"
+  else
+    echo -e "\n$PRGNAM is down\n"
+  fi
 }
 
+# Define options available
 case "$1" in
-
-start)
-	start
-    ;;
-
-stop)
-    stop
-;;
-
-restart)
-    stop
-    sleep 3
-    start
-;;
-
-status)
-    status
-;;
-
-*)
-	echo "Usage: $0 (start|stop|restart|status)"
+  start)
+  start
+  ;;
+  stop)
+  stop
+  ;;
+  restart)
+  restart
+  ;;
+  status)
+  status
+  ;;
+  *)
+  echo "Usage: $0 {start|stop|restart|status}"
+  exit 1
 esac
+
+exit 0
