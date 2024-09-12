@@ -11,7 +11,7 @@ USERDIR="$HOME/.$PRGNAM"
 SHAREDIR="/usr/share/games/$PRGNAM"
 
 # program expects to read this stuff from the current directory.
-LINKS="Domination.jar help lib maps resources"
+LINKS="Domination.jar help lib maps resources sound"
 
 [ ! -e "$USERDIR" ] && mkdir -p "$USERDIR"
 if ! cd "$USERDIR"; then
