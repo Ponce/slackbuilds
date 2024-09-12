@@ -1,0 +1,104 @@
+#!/bin/bash
+
+# Slackware build script for ieee-pilot
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=ieee-pilot
+VERSION=${VERSION:-1.11}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
+
+# Fix man pages so they refer to ieee-pilot and ieee-pilotconv.
+# Also, fix a couple of typos in the docs.
+patch -p1 < $CWD/docs.diff
+
+# Fix error in generated C code: a comment (R) followed by label
+# results in the label being emitted twice (which fails to compile
+# in modern gcc or clang). This affects the speaknum.p example.
+# The fix is a "band-aid", but effective.
+# Also, fix warnings in generated C code (-c option).
+patch -p1 < $CWD/gencode.diff
+
+LIBDIR=/usr/lib$LIBDIRSUFFIX/$PRGNAM
+PKGLIB=$PKG$LIBDIR
+PKGBIN=$PKG/usr/bin
+PKGMAN1=$PKG/usr/man/man1
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+CONV=${PRGNAM}conv
+
+sed -i "/PILOTDIR/s,/usr/lib/pilot/,$LIBDIR," pilot.h
+
+# The -j1 is needed. Parallel makes don't speed this up much
+# anyway, because it's a tiny project.
+make -j1 all man html OPTFLAGS="$SLKCFLAGS" PILOTDIR=$LIBDIR
+
+mkdir -p $PKGLIB $PKGBIN $PKGMAN1 $PKGDOC/examples
+install -m0644 libpilot.a pilot.h $PKGLIB
+install -m0755 -s pilot $PKGBIN/$PRGNAM
+install -m0755 -s pilotconv $PKGBIN/$CONV
+gzip -9 < $PRGNAM.1 > $PKGMAN1/$PRGNAM.1.gz
+gzip -9 < $CONV.1 > $PKGMAN1/$CONV.1.gz
+
+cp -a COPYING NEWS README TODO *.html *.jpg $PKGDOC
+cp -a *.p $PKGDOC/examples
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+
+find usr/man -type f -a -name '*.gz' \
+  -printf "chroot . /usr/bin/mandb -f '/%p' &> /dev/null\n" \
+  >> install/doinst.sh
+
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
