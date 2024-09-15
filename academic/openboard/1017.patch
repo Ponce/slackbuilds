@@ -1,0 +1,83 @@
+From 4f45b6c4016972cf5835f9188bda6197b1b4ed2f Mon Sep 17 00:00:00 2001
+From: Vekhir <Vekhir@yahoo.com>
+Date: Tue, 18 Jun 2024 06:18:32 +0200
+Subject: [PATCH 1/2] fix: Support FFmpeg 7.0
+
+The `channels` attribute was deprecated for a long time and has finally
+been removed with 7.0.
+Use `ch_layout.nb_channels` which is the recommended alternative.
+---
+ src/podcast/ffmpeg/UBFFmpegVideoEncoder.cpp | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/src/podcast/ffmpeg/UBFFmpegVideoEncoder.cpp b/src/podcast/ffmpeg/UBFFmpegVideoEncoder.cpp
+index b7c3f944c..bd25946d8 100644
+--- a/src/podcast/ffmpeg/UBFFmpegVideoEncoder.cpp
++++ b/src/podcast/ffmpeg/UBFFmpegVideoEncoder.cpp
+@@ -520,7 +520,12 @@ bool UBFFmpegVideoEncoder::init()
+         }
+ 
+         // Buffer for resampled/converted audio
+-        mAudioOutBuffer = av_audio_fifo_alloc(c->sample_fmt, c->channels, c->frame_size);
++#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(61, 3, 100)
++        int nb_channels = c->channels;
++#else
++        int nb_channels = c->ch_layout.nb_channels;
++#endif
++        mAudioOutBuffer = av_audio_fifo_alloc(c->sample_fmt, nb_channels, c->frame_size);
+     }
+ 
+ 
+@@ -639,8 +644,13 @@ void UBFFmpegVideoEncoder::processAudio(QByteArray &data)
+     uint8_t ** outSamples = nullptr;
+     int outSamplesLineSize;
+ 
++#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(61, 3, 100)
++    int nb_channels = codecContext->channels;
++#else
++    int nb_channels = codecContext->ch_layout.nb_channels;
++#endif
+     ret = av_samples_alloc_array_and_samples(&outSamples, &outSamplesLineSize,
+-                                             codecContext->channels, outSamplesCount,
++                                             nb_channels, outSamplesCount,
+                                              codecContext->sample_fmt, 0);
+     if (ret < 0) {
+         qWarning() << "Could not allocate audio samples" << avErrorToQString(ret);
+
+From 315bcac782e10cc6ceef1fc8b78fff40541ea38f Mon Sep 17 00:00:00 2001
+From: Vekhir <Vekhir@yahoo.com>
+Date: Tue, 18 Jun 2024 06:20:15 +0200
+Subject: [PATCH 2/2] fix: Resolve FFmpeg 7.0 warnings
+
+`avcodec_close` has been discouraged from use since 2.3 and is
+formally deprecated with 7.0. Use `avcodec_free_context` instead.
+
+`avcodec_free_context` takes a double pointer as argument.
+---
+ src/podcast/ffmpeg/UBFFmpegVideoEncoder.cpp | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/podcast/ffmpeg/UBFFmpegVideoEncoder.cpp b/src/podcast/ffmpeg/UBFFmpegVideoEncoder.cpp
+index bd25946d8..24451f27a 100644
+--- a/src/podcast/ffmpeg/UBFFmpegVideoEncoder.cpp
++++ b/src/podcast/ffmpeg/UBFFmpegVideoEncoder.cpp
+@@ -746,11 +746,19 @@ void UBFFmpegVideoEncoder::finishEncoding()
+     av_write_trailer(mOutputFormatContext);
+     avio_close(mOutputFormatContext->pb);
+ 
++#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(61, 3, 100)
+     avcodec_close(mVideoCodecContext);
++#else
++    avcodec_free_context(&mVideoCodecContext);
++#endif
+     sws_freeContext(mSwsContext);
+ 
+     if (mShouldRecordAudio) {
++#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(61, 3, 100)
+         avcodec_close(mAudioCodecContext);
++#else
++        avcodec_free_context(&mAudioCodecContext);
++#endif
+         swr_free(&mSwrContext);
+     }
+ 
