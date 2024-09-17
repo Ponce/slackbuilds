@@ -3,6 +3,7 @@
 # Slackware build script for alienarena
 
 # Copyright 2010-2013 Larry Hajali <larryhaja[at]gmail[dot]com>
+# Copyright 2024      Jeremy Hansen <jebrhansen+SBo@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,16 +23,11 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# 20220408 bkw: Modified by SlackBuilds.org, BUILD=2:
-# - remove empty dirs and INSTALL from doc dir.
-
-# 20220222 bkw: Modified by SlackBuilds.org: fix build on 15.0.
-
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=alienarena
-VERSION=${VERSION:-7.66}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-7.71.6}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -72,8 +68,8 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION-svn4307
-tar -xvf $CWD/$PRGNAM-$VERSION-svn4307.tar.xz
-cd $PRGNAM-$VERSION-svn4307
+tar -xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -81,47 +77,40 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
-# 20220222 bkw: this patch wouldn't apply. WTF? reworked it by hand.
-# Not really sure it's necessary, but someone thought it was, so...
-patch -p1 < $CWD/alienarena-7.66-no-qglBlitFramebufferEXT.patch
+# Change Makefile.ni to not include INSTALL as docs to keep sbolint happy
+sed -i '/unix_dist\/INSTALL \\/d' Makefile.in
 
-rm -rf source/unix/ode
-
-sed -i -e "s|crx|$PRGNAM|g" -e "s|\.codred|\.${PRGNAM}|g" Tools/LinuxScripts/*
-
-SLKCFLAGS+=" -fcommon"
-
-ALIENARENA_HOMEDIR=".${PRGNAM}" \
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
-  --bindir=/usr/games \
-  --disable-silent-rules \
-  --disable-dependency-tracking \
-  --with-x \
-  --with-zlib \
-  --enable-ansi-color \
-  --with-system-libode \
-  --without-xf86dga \
-  --with-icondir=/usr/share/pixmaps \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --mandir=/usr/man \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --disable-static \
   --build=$ARCH-slackware-linux
 
 make
-make install-strip DESTDIR=$PKG
+make install DESTDIR=$PKG
 
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Move .desktop from docs to correct folder
 mkdir -p $PKG/usr/share/applications
-install -m 0644 $CWD/$PRGNAM.desktop $PKG/usr/share/applications
+mv $PKG/usr/doc/$PRGNAM-$VERSION/alien-arena.desktop $PKG/usr/share/applications/
 
-PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
-cp -a Tools/* $PKGDOC
-rm -rf $PKGDOC/INSTALL
-cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+# Fix .desktop compliance issue to remove extension from icon entry
+sed -i 's|.png||' $PKG/usr/share/applications/alien-arena.desktop
 
-# doc permissions are bad, plus empty directories.
-find $PKGDOC -type f -exec chmod 0644 '{}' \+
-find $PKGDOC -depth -empty -exec rm -rf {} \+
+cp -a \
+  docs/README.txt docs/license.txt docs/sha2_license.txt \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
