@@ -2,7 +2,7 @@
 
 # Create $PRGNAM-vendored-sources-$VERSION-$VSBUILD.tar.xz
 # Requires network access, but does not require root privilege.
-# Requires that $PRGNAM's REQUIRES need to be installed first (rust16)
+# Requires that $PRGNAM's REQUIRES need to be installed first (rust-opt)
 # and cargo-vendor-filterer installed to include just the linux deps
 #
 # Expects to be run within a slackbuild dir with the source archive
@@ -87,16 +87,16 @@ else
   LIBDIRSUFFIX=""
 fi
 
-# check if rust16 is installed
-if [ ! -d /opt/rust16/bin ]; then
-  echo "ERROR: The rust16 slackbuild is required to be installed"
+# check if rust-opt is installed
+if [ ! -d /opt/rust/bin ]; then
+  echo "ERROR: The rust-opt slackbuild is required to be installed"
   exit 1
 else
-  export PATH="/opt/rust16/bin:$PATH"
+  export PATH="/opt/rust/bin:$PATH"
   if [ -z "$LD_LIBRARY_PATH" ]; then
-    export LD_LIBRARY_PATH="/opt/rust16/lib$LIBDIRSUFFIX"
+    export LD_LIBRARY_PATH="/opt/rust/lib$LIBDIRSUFFIX"
   else
-    export LD_LIBRARY_PATH="/opt/rust16/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
+    export LD_LIBRARY_PATH="/opt/rust/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
   fi
 fi
 
