@@ -6,6 +6,13 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20240919 bkw:
+# - update for v20200712.
+# - add DEFRES to control default window size.
+# - include 4-tris ROM.
+# - new download URL for intv.zip, some residential ISPs block
+#   the previous one. lame.
+
 # 20230107 bkw: BUILD=3
 # - fix permissions in doc dir.
 # - go ahead and include the ROMs in the package.
@@ -13,15 +20,15 @@
 # 20211023 bkw: BUILD=2
 # - fix -current build.
 # - binaries in /usr/games.
-# - /usr/share/jzintv/ => /usr/share/game/jzintv
+# - /usr/share/jzintv/ => /usr/share/games/jzintv
 # - add patch to make the default window size 1024x768.
 # - include ROM images in package, if they exist in the SlackBuild dir.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=jzintv
-VERSION=${VERSION:-r1025}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-20200712}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -44,46 +51,52 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
 fi
 
 set -e
 
+ZIPNAME=$PRGNAM-$VERSION-src
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.?z*
-cd $PRGNAM-$VERSION
+rm -rf $ZIPNAME
+unzip $CWD/$ZIPNAME.zip
+cd $ZIPNAME
 chown -R root:root .
-find . -type f -a -exec chmod 644 {} \+ -o \
-       -type d -a -exec chmod 755 {} \+
 
-# 20211024 bkw: these patches are gzipped because they contain \r\n
-# line endings, and we can't trust git to preserve them.
+# 20240919 bkw: Upstream left .exrc turds in the tarball, this find
+# gets rid of them in addition to fixing the permissions.
+find . -name .exrc -delete -o \
+       -type f -a -exec chmod 644 {} + -o \
+       -type d -a -exec chmod 755 {} +
 
 # Don't see a way to redefine the ROM path on the make command
 # line (it's hard-coded to /usr/local/share/jzintv/rom).
-zcat $CWD/rompath.diff.gz | patch -p1
+# 20240924 bkw: Used to be a patch; use sed now. Leave "." in the
+# path, just in case.
+sed -i '/DEFAULT_ROM_PATH/s,".*,".:/usr/share/games/jzintv/rom",' src/config.h
 
 # It's 2021, make the default window size bigger than 320x240.
-# This sets it to 1024x768, and also fixes the --help output to show
-# all the available modes.
-zcat $CWD/resolution.diff.gz | patch -p1
+# 20240919 bkw: Used to do with a patch, now we use sed and can
+# have an environment variable to control the default res.
+DEFRES="${DEFRES:-1360x1024}"
+sed -i '/#define *STR_REPLACE(/aSTR_REPLACE(disp_res, "'"$DEFRES"'");' src/cfg/cfg.c
 
 # Fix for gcc-4.7.x and up.
 sed -i '/^LFLAGS/s,$, -lm,' src/Makefile
 
-make -C src OPT_FLAGS="$SLKCFLAGS -fcommon"
+# 20240919 bkw: No, we do not want a statically-linked binary. Can't
+# anyway, we lack static versions of some of the libs it needs.
+sed -i 's,-static,,' src/Makefile.common
+
+make -C src OPT_FLAGS="$SLKCFLAGS"
 
 # There's no 'make install'
 rm -f bin/README* bin/*.dll
@@ -108,21 +121,33 @@ for romfile in exec.bin grom.bin ecs.bin; do
   fi
 done
 
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+
+if [ -e $CWD/4-tris.zip ]; then
+  mkdir -p $ROMDIR/4-tris $PKGDOC/4-tris
+  unzip $CWD/4-tris.zip 4-tris.rom -d $ROMDIR/4-tris
+  unzip $CWD/4-tris.zip README.txt COPYING.txt -d $PKGDOC/4-tris
+  chmod 644 $ROMDIR/4-tris/* $PKGDOC/4-tris/*
+  chown root:root $ROMDIR/4-tris/* $PKGDOC/4-tris/*
+  ROMS+="4-tris.rom"
+fi
+
 if [ "$ROMS" = "" ]; then
   ROMS="This package does NOT include ROM images."
 else
-  ROMS="This package includes ROM images: $ROMS"
+  ROMS="Package includes ROM images: $ROMS"
 fi
 
-PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
-mkdir -p $PKGDOC
 echo "This directory is empty on purpose" > examples/spacepat/genasm/.dontdelete
 cp -r *.txt doc examples rom misc $PKGDOC
 cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 cat $CWD/README > $PKGDOC/README_SBo.txt
 
 mkdir -p $PKG/install
-sed "14s/:/: $ROMS/" $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s/@ROMS@/$ROMS/" \
+    -e "s/@DEFRES@/$DEFRES/" \
+    $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
