@@ -1,0 +1,221 @@
+#!/bin/bash
+
+# Slackware build script for CUDA Toolkit
+
+# Copyright 2020 Giorgio Peron <giorgio.peron@gmail.com>, Belluno, Italy
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=cudatoolkit_12.6
+FILENAME=cuda
+VERSION=${VERSION:-12.6.1}
+DRIVER=${DRIVER:-560.35.03}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  ARCH=$( uname -m )
+fi
+
+if [ "$ARCH" != "x86_64" ]; then
+  printf '%s' "$ARCH architecture is unsupported." 1>&2
+  exit 1
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+CPREFIX=cuda-12.6
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+mkdir -p $PRGNAM-$VERSION
+
+sh $CWD/"${FILENAME}"_"${VERSION}"_"${DRIVER}"_linux.run --extract=$(readlink -f $PRGNAM-$VERSION)
+
+cd $PRGNAM-$VERSION
+# cleanup useless
+rm -r NVIDIA*.run bin
+
+# legal stuff
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+mv EULA.txt version.json $PKG/usr/doc/$PRGNAM-$VERSION
+
+# extras
+mkdir -p ${PKG}/opt/${CPREFIX}/extras
+mv cuda_demo_suite/extras/demo_suite "${PKG}/opt/${CPREFIX}/extras/demo_suite"
+mv cuda_sanitizer_api/compute-sanitizer "${PKG}/opt/${CPREFIX}/extras/compute-sanitizer"
+rmdir cuda_sanitizer_api
+
+# cuda 12.6 includes almost no documentation
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+mv cuda_documentation/{CUDA_Toolkit_Release_Notes.txt,DOCS,README} $PKG/usr/doc/$PRGNAM-$VERSION/
+mv cuda_documentation/EULA.txt $PKG/usr/doc/$PRGNAM-$VERSION/EULA-doc.txt
+mv cuda_documentation/tools/* $PKG/usr/doc/$PRGNAM-$VERSION/
+rm -rf cuda_documentation
+
+# main cuda
+mkdir -p $PKG/opt/${CPREFIX}/
+mv integration nsight_compute nsight_systems $PKG/opt/${CPREFIX}/
+for component in *; do
+  # this will create /opt/cuda-12.6/{bin,include,lib64}, which is what the installer
+  # does anyway.
+  cp -a "$component"/* "${PKG}/opt/${CPREFIX}/"
+done
+
+# debug: not sure if it is needed
+# rm -r "${PKG}/opt/${CPREFIX}"/bin/cuda-uninstaller
+
+# lwf: arch does this, not sure if this is required
+# Define compilers for CUDA to use.
+# This allows us to use older versions of GCC if we have to.
+ln -s /usr/bin/gcc-11.2.0 "${PKG}/opt/${CPREFIX}"/bin/gcc
+ln -s /usr/bin/g++-gcc-11.2.0 "${PKG}/opt/${CPREFIX}"/bin/g++
+
+# lwf: arch does this, not sure if this is needed.
+# Add a symlink lib->lib64 as some libraries might expect that (FS#76951)
+( cd "${PKG}/opt/${CPREFIX}" ;
+   ln -sr lib64 lib
+)
+
+rm "${PKG}/opt/${CPREFIX}"/targets/x86_64-linux/include/include
+rm "${PKG}/opt/${CPREFIX}"/targets/x86_64-linux/lib/lib64
+#rm "${PKG}/opt/${CPREFIX}"/include/include
+#rm "${PKG}/opt/${CPREFIX}"/lib64/lib64
+#rm "${PKG}/opt/${CPREFIX}"/lib/lib64
+
+rmdir "${PKG}/opt/${CPREFIX}"/gds-tools/usr/local
+rmdir "${PKG}/opt/${CPREFIX}"/gds-tools/usr/share
+rmdir "${PKG}/opt/${CPREFIX}"/gds/usr/local
+rmdir "${PKG}/opt/${CPREFIX}"/gds/usr/share
+
+
+# placate sbopkglint
+
+chmod +x ${PKG}/opt/${CPREFIX}/libnvvp/plugins/org.eclipse.equinox.launcher.gtk.linux.x86_64_1.1.200.v20140603-1326/eclipse_1605.so
+chmod +x ${PKG}/opt/${CPREFIX}/nsight_compute/host/target-linux-x64/*.so.*
+chmod +x ${PKG}/opt/${CPREFIX}/nsight_compute/host/target-linux-x64/libnvperf_grfx_host.so
+chmod +x ${PKG}/opt/${CPREFIX}/nsight_compute/host/target-linux-x64/python/packages/nsys_recipe/third_party/_sqlite3.cpython-310-x86_64-linux-gnu.so
+
+chmod +x ${PKG}/opt/${CPREFIX}/nsight_systems/host-linux-x64/libjpeg.so.8
+chmod +x ${PKG}/opt/${CPREFIX}/nsight_systems/target-linux-x64/*.so.*
+chmod +x ${PKG}/opt/${CPREFIX}/nsight_systems/target-linux-x64/libnvperf_grfx_host.so
+chmod +x ${PKG}/opt/${CPREFIX}/nsight_systems/target-linux-x64/python/packages/nsys_recipe/third_party/_sqlite3.cpython-310-x86_64-linux-gnu.so
+
+# arch also does this.
+# not sure if this is a must, and Slackware's g++ is even 11.2
+# Allow newer compilers to work. This is not officially supported in the Arch package but
+# if users want to try, let them try.
+# See https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html#system-requirements
+# for official requirements
+sed -i "/.*unsupported GNU version.*/d" "${PKG}/opt/${CPREFIX}"/targets/x86_64-linux/include/crt/host_config.h
+sed -i "/.*unsupported clang version.*/d" "${PKG}/opt/${CPREFIX}"/targets/x86_64-linux/include/crt/host_config.h
+
+  # Fix Makefile paths to CUDA
+for f in $(find "${PKG}/opt/${CPREFIX}" -name Makefile); do
+  sed -i "s|/usr/local/cuda|/opt/${CPREFIX}|g" "$f"
+done
+
+# lwf: this remains from the cudatoolkit (10) slackbuild, I am not sure this is a must
+# Create soname links.
+# find cuda-toolkit/targets -type f -name '*.so*' ! -path '*stubs/*' -print0 | while read -rd $'\0' _lib; do
+#   _base=${_lib%.so.*}
+#   _current_soname=$(basename ${_lib%.*})
+#   while [[ $_current_soname != $(basename $_base) ]]; do
+#     ln -sf ${_lib##*/} ${PKG}/usr/share/cuda/lib64/$_current_soname
+#     _current_soname=${_current_soname%.*}
+#   done
+# done
+
+# This seems to be not needed for 12.6.1, Nvidia somehow builds everything in
+# Remove included copy of java and link to system java 8
+# rm -fr  "${PKG}/usr/share/cuda/jre"
+# sed 's|../jre/bin/java|/usr/bin/java|g' \
+#   -i "${PKG}/usr/share/cuda/libnsight/nsight.ini" \
+#   -i "${PKG}/usr/share/cuda/libnvvp/nvvp.ini"
+
+# lwf: the script for version 10 has this, but I am hesitant
+# Put libraries in the standard place
+# mkdir -p $PKG/usr/lib64
+# mv -fn $PKG/usr/share/cuda/targets/x86_64-linux/lib/* $PKG/usr/lib64/
+# rm -rf $PKG/usr/share/cuda/targets/x86_64-linux/lib
+# cd $PKG/usr/share/cuda
+# ln -sf ../../lib64 lib64
+
+# lwf: not sure this is needed. cuda is peculiar and in /opt, so it can have
+# its own weird symlinks
+# Put include in the standard place
+# mkdir -p $PKG/usr/include
+# mv -fn $PKG/usr/share/cuda/targets/x86_64-linux/include/* $PKG/usr/include/
+# rm -rf $PKG/usr/share/cuda/targets/x86_64-linux/include
+# ( cd $PKG/usr/share/cuda/ ; ln -sf ../../include include )
+# find $PKG/usr/include -type f | xargs chmod -c 0644
+#rm -rf $PKG/usr/share/cuda/targets
+
+# lwf: the driver includes libnvidia-opencl.so.560.35.03
+# but I am not sure it is the same thing.
+# These are already in the nvidia-driver package
+#rm -f $PKG/usr/lib64/libOpenCL.s*
+
+# # Put man in the standard place
+# mv $PKG/usr/share/cuda/doc/man $PKG/usr/
+# find $PKG/usr/man -type f -exec gzip -9 {} \;
+# for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+# Put doc in the standard place
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+#mv $PKG/usr/share/cuda/doc/* $PKG/usr/doc/$PRGNAM-$VERSION/
+#rm -rf $PKG/usr/share/cuda/doc
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# Install profile and ld.so.config files
+install -Dm755 "${CWD}/profile/cuda.sh" "${PKG}/etc/profile.d/cuda-12.6.sh"
+install -Dm755 "${CWD}/profile/cuda.csh" "${PKG}/etc/profile.d/cuda-12.6.csh"
+sed -i "s|@VERSION@|12.6|g" "${PKG}/etc/profile.d/cuda-12.6.sh" "${PKG}/etc/profile.d/cuda-12.6.csh"
+
+# Install pkgconfig
+mkdir -p "$PKG"/opt/"${CPREFIX}"/lib64/pkgconfig/
+cp "$CWD"/pkgconfig/*.pc "$PKG"/opt/"${CPREFIX}"/lib64/pkgconfig/
+sed -i 's|Version: 11.0|Version: 12.6|g' "$PKG"/opt/"${CPREFIX}"/lib64/pkgconfig/*
+sed -i 's|cudaroot=/opt/cuda|cudaroot=/opt/cuda-12.6|g' "$PKG"/opt/"${CPREFIX}"/lib64/pkgconfig/*
+
+# Register application  NVVP and NSIGHT
+mkdir -p $PKG/usr/share/applications
+cp $CWD/dotdesktop/*.desktop $PKG/usr/share/applications
+sed -i 's|/usr/share/cuda|/opt/cuda-12.6|g' $PKG/usr/share/applications/*.desktop
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n --compress -1 $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
