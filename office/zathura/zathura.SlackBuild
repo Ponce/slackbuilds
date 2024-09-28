@@ -3,7 +3,7 @@
 # Slackware build script for zathura
 
 # Copyright 2010 Binh Nguyen <email removed>
-# Copyright 2018 B. Watson <urchlay@slackware.uk>
+# Copyright 2024 B. Watson <urchlay@slackware.uk>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,6 +22,13 @@
 #  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Note to self: run with BUILD_MAN=yes *once* per version update to
+# regenerate the man pages (requires sphinx).
+
+# 20240927 bkw: update for v0.5.8. turns out, upstream claims to
+# require newer versions of pango, glib2, etc than the code actually
+# needs. also, update for zathura-pdf-poppler 0.3.3.
 
 # 20240319 bkw: update for v0.5.4 and zathura-pdf-poppler 0.3.2.
 # These are the last versions that will build on Slackware 15.0
@@ -46,7 +53,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=zathura
-VERSION=${VERSION:-0.5.4}
+VERSION=${VERSION:-0.5.8}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -55,7 +62,7 @@ PKGTYPE=${PKGTYPE:-tgz}
 # plugins. This build includes the default PDF plugin, without which zathura
 # is completely useless.
 PLUGIN=$PRGNAM-pdf-poppler
-PLUGINVER=${PLUGINVER:-0.3.2}
+PLUGINVER=${PLUGINVER:-0.3.3}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -92,8 +99,8 @@ set -e
 
 fixperms() {
   chown -R root:root .
-  find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-          \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+  find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+          \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 }
 
 rm -rf $PKG
@@ -104,9 +111,28 @@ tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 fixperms
 
-# 20240319 bkw: upstream decided we needed a newer meson, but this
-# builds just fine with our older one.
-sed -i '/meson_version/s,>=0\.61,>=0.59,' meson.build
+# 20240928 bkw: Fix things up to work with 15.0's old meson
+# and glib2 libraries. Upstream never bothers testing on versions
+# older than they happen to have installed, for the libs. For
+# meson, we're shipping prebuilt man pages anyway, and only
+# doc/meson.build uses new meson syntax (install_symlink), so
+# just don't use it.
+sed -i -e '/meson_version/s,>=0\.61,>=0.59,' \
+       -e '/glib-2.0/s,>=2.72,>=2.70,' \
+       -e '/gthread-2.0/s,>=2.72,>=2.70,' \
+       -e '/gmodule-no-export-2.0/s,>=2.72,>=2.70,' \
+       -e '/^subdir(.doc.)/d' \
+    meson.build
+
+# 20240928 bkw: "Secret" maintainer-only mode. You shouldn't need this.
+if [ "${BUILD_MAN:-no}" = "yes" ]; then
+  echo "===> generating man pages in $CWD/man"
+  mkdir -p $PKG/man
+  sphinx-build -b man -D version=$VERSION -D release=$VERSION doc/man $CWD/man
+  rm -rf $CWD/man/.doctrees
+else
+  echo "===> using prebuilt man pages in $CWD/man"
+fi
 
 # 20221114 bkw: Maik Wagner and Alexander Verbovetsky reported that
 # fish and bash completion weren't working, due to the symlink I use
@@ -131,7 +157,7 @@ cd build
 cd ..
 
 # man pages prebuilt on a Slackware box with Sphinx installed. I did
-# this to avoid a dependency on Sphinx (and its tree of 13 deps).
+# this to avoid a dependency on Sphinx (and its tree of 21 deps).
 rm -rf $PKG/usr/man # in case we had Sphinx already...
 for i in $CWD/man/*.*; do
   dest="$PKG/usr/man/man$( echo $i | sed 's,.*\.,,' )"
@@ -139,14 +165,15 @@ for i in $CWD/man/*.*; do
   gzip -9c < $i > "$dest/$( basename "$i" )".gz
 done
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS LICENSE README.md $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a AUTHORS LICENSE README.md $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 # Include the API docs. Sphinx would be needed to build HTML or PDF docs, but
 # the doc sources are RST, which are perfectly human-readable already (though
 # less easy to navigate).
-cp -a doc/api $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a doc/api $PKGDOC
 
 # Now build the plugin, unless the user disabled it.
 if [ "${POPPLER:-yes}" != "no" ]; then
