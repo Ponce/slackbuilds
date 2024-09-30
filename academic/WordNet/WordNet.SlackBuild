@@ -9,6 +9,11 @@
 # whose laws don't recognize "public domain", then for you this is
 # licensed under the WTFPL.
 
+# 20240930 bkw:
+# - update for v3.1.
+# - add some security patches, fix CVE-2008-2149 and CVE-2008-3908.
+# - remove HTML/PDF/PS versions of the man pages from the package.
+
 # 20240831 bkw: BUILD=3
 # - new maintainer.
 # - add .desktop and icon from debian, and doinst.sh.
@@ -18,20 +23,19 @@
 # - remove the profile.d/ scripts, they weren't needed.
 # - do not include tk.h and tkDecls.h in the package.
 
-# Note to self:
-# Upstream has released a version 3.1 of just the data files:
-# https://wordnetcode.princeton.edu/wn3.1.dict.tar.gz
-# ...which just contains the dict/ dir of the source. However,
-# replacing 3.0's dict/ with this doesn't work (missing frames.vrb
-# file, among others). Since I don't know anything about this,
-# didn't upgrade to the 3.1 database. If you do know, please let
-# me know.
+# Upgrade note for 3.1:
+# wordnet-3.1 is just a release of the data files, intended to
+# replace the ones from 3.0. The rest of the package (the tools,
+# library/header, and docs) is still 3.0, which we'll call BASEVER
+# here. Thanks are due to Reverie and Steven Allen, devs of the AUR
+# PKGBUILD for wordnet 3.1 (wordnet-common, in AUR-land).
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=WordNet
-VERSION=${VERSION:-3.0}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-3.1}
+BASEVER=${BASEVER:-3.0}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -71,12 +75,20 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
-cd $PRGNAM-$VERSION
+rm -rf $PRGNAM-$BASEVER
+tar xvf $CWD/$PRGNAM-$BASEVER.tar.bz2
+cd $PRGNAM-$BASEVER
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
+
+# 20240930 bkw: These are security patches, from Debian:
+# https://packages.debian.org/sid/wordnet
+# The gcc-4.6 patch looks like it actually fixes format string
+# vulnerabilties, and in any case, does no harm.
+for i in $CWD/patches/*; do
+  patch -p1 < $i
+done
 
 patch -p1 < $CWD/usr_share.diff
 
@@ -96,6 +108,14 @@ make CFLAGS="$CFLAGS -DUSE_INTERP_RESULT"
 make install-strip DESTDIR=$PKG
 gzip -9 $PKG/usr/man/man*/*
 
+# 20240930 bkw: replace the BASEVER data files with the VERSION ones.
+cd $PKG/usr/share/wordnet
+  rm -rf dict
+  tar xvf $CWD/wn$VERSION.dict.tar.gz
+  chown -R root:root .
+  find . -type f -exec chmod 644 {} + -o -type d -exec chmod 755 {} +
+cd -
+
 # 20240901 bkw: this stuff doesn't belong in the package, it's already
 # in Slackware's own tk package (in /usr/include rather than /usr/include/tk).
 rm -rf $PKG/usr/include/tk
@@ -112,9 +132,15 @@ ln -s ../icons/hicolor/48x48/apps/wn.png $PKG/usr/share/pixmaps/wn.png
 # 20240831 bkw: LICENSE is identical to COPYING, NEWS is 0 bytes.
 PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
 mkdir -p $PKGDOC
-mv $PKG/usr/doc/{html,pdf,ps} $PKGDOC
 cp -a AUTHORS COPYING ChangeLog README $PKGDOC
 cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+# 20240930 bkw: do not include this stuff, it's just the man pages
+# in 3 other formats. Debian's package doesn't include this; AUR's
+# does. I personally think it's a waste of space, too: users could
+# generate HTML/PDF/PS versions of the man pages, if they'e *really*
+# needed (but why would you need them?)
+rm -rf $PKG/usr/doc/{html,pdf,ps}
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
