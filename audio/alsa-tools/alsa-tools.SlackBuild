@@ -13,6 +13,14 @@
 # the firmware is being included in the package as well.
 # *** I agree.  --rworkman   :-)
 
+# Note to self: there are lots of duplicate files in both lib/firmware
+# and usr/share/alsa/firmware (though, not all of them are dups). Find
+# out whether it's OK for the usr/share ones to be symlinks to the
+# lib/firmware ones. Looked at Arch's alsa-firmware package, it's
+# the same way: dup files, not symlinks. For now, leave it alone;
+# it works.
+
+# 20241004 bkw: update for 1.2.11 (firmware still 1.2.4)
 # 20230706 bkw: fix build (heisenbug)
 # 20220402 bkw: BUILD=2, remove broken symlinks, empty /etc dir
 # 20210804 bkw: update for 1.2.5 (firmware 1.2.4)
@@ -39,8 +47,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=alsa-tools
-VERSION=${VERSION:-1.2.5}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.2.11}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -91,16 +99,31 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
 
 # allow disabling all the GUI apps
 if [ "${GUI:-yes}" != "yes" ]; then
   QT3=no
   FLTK=no
   rm -rf echomixer envy24control hdajackretask rmedigicontrol
+else
+  # 20241004 bkw: hdajackretask uses a couple of constants that
+  # aren't present in Slack 15's glib2-2.70.
+  # In -current's glib2, they are enum members that are both equal to 0.
+  # How many ways do you need to say "zero" in the C language?
+  # In case someone's running -current, only fix this if it's needed.
+  if ! pkg-config glib-2.0 --atleast-version=2.74; then
+    echo "===> glib2 version < 2.74, hdajackretask needs fix, applying"
+    sed -i -e '1i#define G_REGEX_DEFAULT 0' \
+           -e '1i#define G_REGEX_MATCH_DEFAULT 0' \
+           hdajackretask/apply-changes.c
+  else
+    echo "===> glib2 version >= 2.74, hdajackretask does not need fix"
+  fi
 fi
 
 # qlo10k1 depends on Qt3, which no longer ships with Slackware.
@@ -161,7 +184,7 @@ for subdir in $( find . -name configure | sed -e 's,^\./,,' -e 's,/configure,,' 
   make install-strip DESTDIR=$PKG
 
   for doc in README AUTHORS COPYING ChangeLog NEWS TODO COPYING.LIB; do
-    [ -s "$doc" ] && cat "$doc" > $PKG/usr/doc/$PRGNAM-$VERSION/$doc.$( basename $subdir ).txt
+    [ -s "$doc" ] && cat "$doc" > $PKGDOC/$doc.$( basename $subdir ).txt
   done
   cd -
 done
@@ -214,14 +237,14 @@ rm -rf $PKG/etc/hotplug
 mkdir -p $PKG/lib/udev/rules.d
 cat $CWD/99-tascam.rules > $PKG/lib/udev/rules.d/99-tascam.rules
 
-cat COPYING > $PKG/usr/doc/$PRGNAM-$VERSION/COPYING.firmware.txt
-cat README > $PKG/usr/doc/$PRGNAM-$VERSION/README.firmware.txt
+cat COPYING > $PKGDOC/COPYING.firmware.txt
+cat README > $PKGDOC/README.firmware.txt
 
 # I wrote this doc when I got my US-122, might as well include it in
 # case it helps anyone.
-cat $CWD/tascam-us122-HOWTO > $PKG/usr/doc/$PRGNAM-$VERSION/tascam-us122-HOWTO
+cat $CWD/tascam-us122-HOWTO > $PKGDOC/tascam-us122-HOWTO
 
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
