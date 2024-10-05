@@ -1,8 +1,7 @@
 .. RST source for ciso(1) man page. Convert with:
 ..   rst2man.py ciso.rst > ciso.1
-.. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 1.0.0
+.. |version| replace:: 1.0.2
 .. |date| date::
 
 ====
