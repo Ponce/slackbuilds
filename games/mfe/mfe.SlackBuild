@@ -2,13 +2,31 @@
 
 # Slackware build script for mfe
 
-# Written by Luis Henrique <lmello.009@gmail.com>
+# Originally written by Luis Henrique.
+# Modified and now maintained by B. Watson <urchlay@slackware.uk>.
+# Original version had no license. Modified version is
+# licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20241005 bkw: BUILD=2.
+# - take over maintenance.
+# - fix it so it can actually launch mednafen (vblur => tblur).
+# - get useless INSTALL out of doc dir.
+# - update deps (configobj => python2-configobj).
+# - new-style icons.
+# - tweak .desktop file.
+# - move binary to /usr/games.
+
+# Note: mfe has been abandoned upstream, no new releases since 2013.
+# This has been broken on SBo (incapable of starting mednafen) for
+# 11 years, and nobody's complained about it. I've taken it over and
+# fixed it, for now, but I won't be spending any more time on it. If
+# you like and use mfe, *please* take over maintenanance from me!
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=mfe
 VERSION=${VERSION:-0.1.7}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -20,9 +38,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -32,13 +47,7 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-fi
+# 20241006 bkw: no need for SLKCFLAGS or LIBDIRSUFFIX.
 
 set -e
 
@@ -49,18 +58,37 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-python setup.py install --root=$PKG
+# 20241005 bkw: mednafen renamed their -<system>.vblur option to
+# -<system>.tblur *ages* ago, which broke mfe. Fix. This doesn't
+# change the UI; doesn't need to (it's just called Blur, there).
+sed -i '/-%s\.vblur/s,vblur,tblur,' mfe/mfe.py
+
+python2 setup.py install --root=$PKG
+
+# 20241006 bkw: it's a game, put it in the games dir.
+mv $PKG/usr/bin $PKG/usr/games
+
+# 20241006 bkw: tweak the .desktop file a bit: change the name
+# from Mednafen to MFE, use abs path /usr/games/mfe, get rid
+# of deprecated Encoding.
+cat $CWD/mfe.desktop > $PKG/usr/share/applications/mfe.desktop
+
+# 20241006 bkw: new-style pre-resized icons.
+ICON=$PKG/usr/share/pixmaps/mfe.png
+for px in 32 48 64 128; do
+  sz=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$sz/apps
+  mkdir -p $dir
+  convert -resize $sz $ICON $dir/mfe.png
+done
+rm -f $ICON
+ln -s ../icons/hicolor/48x48/apps/mfe.png $ICON
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a INSTALL LICENSE README TODO $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE README TODO $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
