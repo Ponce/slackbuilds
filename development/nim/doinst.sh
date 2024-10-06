@@ -25,3 +25,5 @@ preserve_perms() {
 preserve_perms etc/nim/nim.cfg.new
 preserve_perms etc/nim/nimdoc.cfg.new
 preserve_perms etc/nim/nimdoc.tex.cfg.new
+preserve_perms etc/nim/config.nims.new
+preserve_perms etc/nim/rename.rules.cfg.new

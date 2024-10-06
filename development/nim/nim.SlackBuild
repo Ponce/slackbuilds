@@ -2,6 +2,7 @@
 
 # Slackware build script for nim
 
+# Copyright 2024 by Nick Smallbone <nick@smallbone.se>
 # Copyright 2022 by Ruben Schuller <sb@rbn.im>
 # Maintained 2020-2021 by Benjamin Trigona-Harany <slackbuilds@jaxartes.net>
 # All rights reserved.
@@ -26,7 +27,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=nim
-VERSION=${VERSION:-1.6.8}
+VERSION=${VERSION:-2.2.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -50,8 +51,6 @@ fi
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
-GUI=${GUI:-yes}
-PGADMIN=${PGADMIN:-no}
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
@@ -60,6 +59,9 @@ elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+elif [ "$ARCH" = "aarch64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
@@ -82,38 +84,64 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-COMP_FLAGS="$SLKCFLAGS" \
-./build.sh
-
+patch -p1 < $CWD/remove-missing-documentation.patch
+patch -p1 < $CWD/fix-lib-path.patch
+patch -p1 < $CWD/fix-nim-gdb-path.patch
+./build.sh --extraBuildArgs "$SLKCFLAGS"
 bin/nim c -d:release koch
-./koch tools -d:release
+./koch boot -d:release
 
-./install.sh pkg
+# Build extra tools, and documentation
+./koch toolsNoExternal -d:release
+./koch nimble -d:release
+bin/nim c -d:release tools/niminst/niminst
+# use --docCmd:skip to skip runnable examples because some require network access
+./koch --localdocs doc -d:release --docCmd:skip
 
-mkdir -p $PKG/usr
-mv pkg/nim/bin $PKG/usr/
-for fn in nimble nimsuggest nimgrep; do cp bin/$fn $PKG/usr/bin/; done
+DESTDIR=$PKG ./install.sh /usr/bin
 
-mkdir -p $PKG/usr/lib
-mv pkg/nim/lib $PKG/usr/lib/nim
-mv pkg/nim/compiler $PKG/usr/lib/nim/
-mv pkg/nim/compiler.nimble $PKG/usr/lib/nim/compiler/
+# Install extra binaries
+for fn in nim-gdb nimble nimgrep nimpretty nimsuggest testament; do cp bin/$fn $PKG/usr/bin/; done
+cp tools/niminst/niminst $PKG/usr/bin/
 
-mkdir -p $PKG/usr/include
-mv $PKG/usr/lib/nim/*.h $PKG/usr/include/
+# Install miscellaneous stuff according to doc/packaging.md
+mkdir -p $PKG/usr/lib/nim/tools/dochack $PKG/usr/lib/nim/doc
+cp doc/nimdoc.css doc/nimdoc.cls $PKG/usr/lib/nim/doc/
+cp tools/dochack/dochack.js $PKG/usr/lib/nim/tools/dochack/
+cp tools/debug/nim-gdb.py $PKG/usr/lib/nim/tools/
 
-mkdir -p $PKG/etc/nim
-mv pkg/nim/config/nim.cfg $PKG/etc/nim/nim.cfg.new
-mv pkg/nim/config/nimdoc.cfg $PKG/etc/nim/nimdoc.cfg.new
-mv pkg/nim/config/nimdoc.tex.cfg $PKG/etc/nim/nimdoc.tex.cfg.new
+# Install the compiler and dependencies
+cp -r compiler $PKG/usr/lib/nim/lib
+cp nim.nimble $PKG/usr/lib/nim/lib/compiler
+mkdir -p $PKG/usr/lib/nim/lib/dist
+cp -r dist/checksums $PKG/usr/lib/nim/lib/dist
+
+# Install completions
+mkdir -p $PKG/usr/share/bash-completion/completions \
+    $PKG/usr/share/zsh/site-functions
+for i in tools/nim dist/nimble/nimble; do
+    cp $i.bash-completion $PKG/usr/share/bash-completion/completions/$(basename $i)
+    cp $i.zsh-completion $PKG/usr/share/zsh/site-functions/_$(basename $i)
+done
+
+# Use .new for configuration files
+for i in config.nims nim.cfg nimdoc.cfg nimdoc.tex.cfg rename.rules.cfg; do
+    mv $PKG/etc/nim/$i $PKG/etc/nim/$i.new
+done
+find $PKG -depth -type d -empty -delete # remove needless empty dirs
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | \
   grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  copying.txt \
+  copying.txt doc/html changelogs \
   $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  dist/nimble/nimble-guide/docs \
+  $PKG/usr/doc/$PRGNAM-$VERSION/nimble
+rm $PKG/usr/doc/$PRGNAM-$VERSION/changelogs/readme.md
+rm $PKG/usr/doc/$PRGNAM-$VERSION/changelogs/changelog_X_XX_X.md
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
