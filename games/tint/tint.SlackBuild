@@ -2,31 +2,28 @@
 
 # Slackware build script for tint
 
-# Copyright 2022 Alexander Verbovetsky Moscow Russia
-# All rights reserved.
-#
-# Redistribution and use of this script, with or without modification, is
-# permitted provided that the following conditions are met:
-#
-# 1. Redistributions of this script must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-#
-#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
-#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
-#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Original author: Alexander Verbovetsky, Moscow, Russia.
+# Modified and now maintained by B. Watson <urchlay@slackware.uk>.
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20241008 bkw: v0.07, BUILD=2:
+# - take over maintenance.
+# - relicense as WTFPL.
+# - fix .desktop file.
+# - binary in /usr/games.
+# - use a modified man page (include keystrokes, for one thing).
+# - new-style icons.
+# - fix score file handling in doinst.sh (relative path, not abs).
+# - add CREDITS and copyright to doc dir.
+# - patch the game to make the controls not suck. yes, this breaks
+#   the Slackware philosophy; no, you're not going to change my mind.
+#   build with PRISTINE=yes if it bothers you.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=tint
 VERSION=${VERSION:-0.07}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -49,16 +46,12 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
 fi
 
 set -e
@@ -70,26 +63,46 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/${PRGNAM}_$VERSION.tar.xz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
+
+# 20241008 bkw: I find this game utterly unplayable without this patch.
+# I keep hitting the up-arrow, expecting it to rotate the piece like
+# in all the other tetris clones I've played. Instead, it speeds up
+# the game... and there's no "slow down" option, in case I hit it by
+# accident.
+# With the patch, up is rotate, and speed-up is still available
+# with the A key. The patch also allows uppercase keystrokes, in case
+# the user's dumb enough to have caps lock enabled.
+[ "${PRISTINE:-no}" = "yes" ] || patch -p1 < $CWD/key_up_rotate.diff
 
 CFLAGS="$SLKCFLAGS" \
 make
 
-install -D -o root -g games -m 2755 -s tint $PKG/usr/bin/tint
-sed -i 's|/usr/share/doc/tint|/usr/doc/tint-*|' tint.6
-install -D -m 644 tint.6 $PKG/usr/man/man6/tint.6
-gzip -9 $PKG/usr/man/man6/tint.6
-install -D -m 644 debian/tint.png $PKG/usr/share/pixmaps/tint.png
-install -D -m 644 debian/tint.desktop $PKG/usr/share/applications/tint.desktop
+mkdir -p $PKG/usr/games $PKG/usr/man/man6 $PKG/usr/share/applications
+
+install -o root -g games -m 2755 -s tint $PKG/usr/games/tint
+
+# 20241008 bkw: man page based on upstream's, but expanded.
+sed "s,@VERSION@,$VERSION," < $CWD/tint.6 | gzip -9c > $PKG/usr/man/man6/tint.6.gz
+
+sed '/^Exec=/s,=\(.*\),="\1",' \
+    < debian/tint.desktop \
+    > $PKG/usr/share/applications/tint.desktop
+
+for px in 22 32 48 64 128; do
+  sz=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$sz/apps
+  mkdir -p $dir
+  convert -resize $sz debian/tint.png $dir/tint.png
+done
+mkdir -p $PKG/usr/share/pixmaps/
+ln -s ../icons/hicolor/48x48/apps/tint.png $PKG/usr/share/pixmaps/tint.png
 
 mkdir -p $PKG/var/games
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a NOTES debian/changelog $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CREDITS NOTES debian/{changelog,copyright} $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
