@@ -12,4 +12,3 @@ config() {
 }
 
 config etc/php-fpm.d/nextcloud.conf.new
-touch etc/php-fpm.d/test
