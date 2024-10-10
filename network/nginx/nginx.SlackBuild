@@ -32,7 +32,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=nginx
 VERSION=${VERSION:-1.26.2}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -85,19 +85,15 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Remove -Werror from CFLAGS.
-# https://trac.nginx.org/nginx/ticket/1259
-sed -i '/-Werror/d' auto/cc/gcc
-
 # Fix the nginx.conf file for html and virtual server directory.
 sed -i \
   -e '/root[ ]*html/s|html;|/var/www/&|' \
   -e '$s|.*|    include /etc/nginx/conf.d/\*.conf;\n&|' conf/$PRGNAM.conf
 
 # Add if dynamic modules are used.
-if [ "${DYNAMIC:-no}" == "yes" ]; then
+if [ "${NGINX_DYNAMIC:-no}" == "yes" ]; then
   DYNAMIC_MODULE=${DYNAMIC_MODULE:-=dynamic}
-  sed -i 's|^events.*|include /etc/nginx/modules/\*.conf;\n\n&|' conf/$PRGNAM.conf
+  sed -i 's|^events.*|include /etc/nginx/modules.conf;\n\n&|' conf/$PRGNAM.conf
 else
   DYNAMIC_MODULE=""
 fi
@@ -112,7 +108,7 @@ fi
 
 # Add extra modules not included in nginx.
 ADDMODULE=${ADDMODULE:-}
-if [ "$DYNAMIC" == "yes" ]; then
+if [ "$NGINX_DYNAMIC" == "yes" ]; then
   ADD_MODULE="--add-dynamic-module=$ADDMODULE
               --modules-path=/usr/lib${LIBDIRSUFFIX}/$PRGNAM/modules"
 else
@@ -240,15 +236,12 @@ cat $CWD/doinst.sh > $PKG/install/doinst.sh
 # nginx: [emerg] dlopen() "/usr/modules/ngx_stream_module.so" failed (/usr/modules/ngx_stream_module.so: cannot open shared object file: No such file or directory) in /etc/nginx/modules/mod-stream.conf:1
 # nginx: configuration file /etc/nginx/nginx.conf test failed
 # Source: https://trac.nginx.org/nginx/ticket/961
-if [ "$DYNAMIC" == "yes" ]; then
-  mkdir $PKG/etc/$PRGNAM/modules
+if [ "$NGINX_DYNAMIC" == "yes" ]; then
   for module in $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/modules/*; do
-    MODULE_NAME=$(basename $module | sed 's|\.so||' | tr _ -)
-    MODULE_DIR=$(dirname $module | sed "s|$PKG||")
-    echo "load_module \"${MODULE_DIR}/$(basename $module)\";" > \
-      $PKG/etc/$PRGNAM/modules/${MODULE_NAME}.conf
-    echo "config etc/$PRGNAM/modules/${MODULE_NAME}.conf.new" >> $PKG/install/doinst.sh
+    MODULE_PATH=$(realpath --relative-to=$PKG $module)
+    echo "# load_module /${MODULE_PATH};" >> $PKG/etc/$PRGNAM/modules.conf
   done
+  echo "config etc/$PRGNAM/modules.conf.new" >> $PKG/install/doinst.sh
 fi
 
 # Don't clobber config files
