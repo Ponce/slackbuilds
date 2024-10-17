@@ -1,0 +1,161 @@
+#!/bin/bash
+# Slackware build script for gprbuild
+# Copyright 2012-2024, Zhu Qun-Ying
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+PRGNAM=gprbuild
+VERSION=${VERSION:-24.0.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+KB_VERSION=${KB_VERSION:-24.0.0}
+GPRCONFIG_KB=gprconfig_kb-$KB_VERSION
+GPRCONFIG_KB_SRC_DIR=$GPRCONFIG_KB
+
+if [ -z "$ARCH" ]; then
+  case "$(uname -m)" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+    *) ARCH=$(uname -m) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-"/tmp/SBo"} 
+PKG=${TMP}/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+BOOTSTRAP_DSTDIR=${BOOTSTRAP_DSTDIR:-$TMP/$PRGNAM-$VERSION/bootstrap}
+BOOTSTRAP=$BOOTSTRAP_DSTDIR/bin
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+elif [ "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+else
+  SLKCFLAGS="-O2"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+mkdir $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz -C $PRGNAM-$VERSION --strip-components=1
+
+cd $PRGNAM-$VERSION
+
+mkdir $GPRCONFIG_KB_SRC_DIR
+tar xvf $CWD/$GPRCONFIG_KB.tar.gz -C $GPRCONFIG_KB_SRC_DIR --strip-components=1
+
+sed -i -e 's/share\/doc/doc/g' \
+    -e 's/doc\/gprbuild\/info/info/g' gprbuild.gpr
+
+if [ "$ARCH" = "x86_64" ]; then
+    sed -i 's/\/lib\//\/lib64\//g' $GPRCONFIG_KB_SRC_DIR/db/compilers.xml
+    sed -i 's/\/lib\//\/lib64\//g' ./gpr/src/gpr-util.adb
+    sed -i 's/"lib"/"lib64"/g' ./gpr/src/gpr-util.adb
+    sed -i 's/lib\//lib64\//g' Makefile
+    # set the default lib directory to lib64
+    sed -i 's/\"lib\"/\"lib64\"/g' src/gprinstall.ads
+fi
+
+sed -i -e 's/"19940713"/"20231113"/' \
+       -e 's/"2016"/"2023"/' \
+       -e 's/"18.0w"/"24.0.0"/' \
+       -e 's/:= Gnatpro/:= FSF/' gpr/src/gpr-version.ads
+
+(cd share; ln -sfT ../$GPRCONFIG_KB_SRC_DIR/db gprconfig)
+export OS=UNIX
+
+XMLADA_VERSION=${XML_VERSION:-$VERSION}
+XMLADA_SRC_NAME=xmlada-$XMLADA_VERSION
+XMLADA=xmlada-$XMLADA_VERSION
+
+mkdir $XMLADA
+tar xvf $CWD/$XMLADA_SRC_NAME.tar.gz -C $XMLADA --strip-components=1
+
+export CC=gcc
+export CFLAGS=$SLKCFLAGS
+mkdir -p $BOOTSTRAP_DSTDIR
+./bootstrap.sh --with-xmlada=./$XMLADA \
+	       --with-kb=./$GPRCONFIG_KB_SRC_DIR \
+	       --prefix=$BOOTSTRAP_DSTDIR
+
+find -name "*.o" | xargs rm
+find -name "*.ali" | xargs rm
+rm gprbuild gprclean gprconfig gprinstall gprls gprname
+# now we have the bootstrap gprbuild, using it to build a static xmlada
+# lib for BOOTSTAR_DSTDIR
+(export PATH=$BOOTSTRAP_DSTDIR/bin:$PATH
+ cd $XMLADA
+ sed -i 's/18.0w/24.0.0/g' configure configure.in
+ ./configure --prefix=$BOOTSTRAP_DSTDIR --disable-shared
+ make prefix=$BOOTSTRAP_DSTDIR static
+ make prefix=$BOOTSTRAP_DSTDIR install-static
+)
+
+# now build full gprbuild
+find -name "*.a" -name "*.ali"
+(export PATH=$BOOTSTRAP_DSTDIR/bin:$PATH
+export GPR_PROJECT_PATH=$BOOTSTRAP_DSTDIR/share/gpr
+make BUILD=production prefix=/usr setup
+make LIBRARY_TYPE=static all
+make build
+make prefix=$PKG/usr install
+cd $PKG/usr/bin
+patchelf --set-rpath "" *
+patchelf --remove-rpath *
+) 
+
+rm $PKG/usr/doinstall
+make -C doc html info
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKG/usr/info
+cp -a doc/html $PKG/usr/doc/$PRGNAM-$VERSION/
+rm -rf $PKG/usr/doc/$PRGNAM-$VERSION/html/_sources
+cp doc/info/*.info $PKG/usr/info
+gzip $PKG/usr/info/*
+
+cp README.md COPYING* $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+strip $PKG/usr/bin/*
+strip $PKG/usr/libexec/gprbuild/*
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/douninst.sh > $PKG/install/douninst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-${VERSION}-$ARCH-$BUILD$TAG.$PKGTYPE
