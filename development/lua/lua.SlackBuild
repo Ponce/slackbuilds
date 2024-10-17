@@ -6,6 +6,8 @@
 # Modified by the SlackBuilds.org project
 # Modified by Aaron W. Hsu
 # Updated by Matteo Bernardini
+# Updated (for lua-5.4) by B. Watson, based on Patrick Volkerding's
+# lua.SlackBuild for Slackware-current.
 
 # This program is free software. It comes without any warranty.
 # Granted WTFPL, Version 2, as published by Sam Hocevar. See
@@ -14,7 +16,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=lua
-VERSION=${VERSION:-5.1.5}
+VERSION=${VERSION:-5.4.7}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -27,9 +29,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -52,6 +51,13 @@ fi
 
 set -e
 
+# 20241017 bkw: this stuff makes the code slightly less eye-hurting.
+SHORTVER="$( echo $VERSION | cut -d. -f1,2 )"   # e.g. 5.4
+VERMAJOR="$( echo $VERSION | cut -d. -f1   )"   # e.g. 5
+LIB=lib$LIBDIRSUFFIX
+ULIB=/usr/$LIB
+PKGLIB=$PKG$ULIB
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
@@ -59,54 +65,59 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-${VERSION}.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
-# Fix up a to-be-installed header and the pkgconfig file
-sed -i "s|/usr/local|/usr|" src/luaconf.h
-sed -i "s|lib/lua|lib$LIBDIRSUFFIX/lua|" src/luaconf.h
-sed -i "s|/usr/local|/usr|" etc/lua.pc
-sed -i "s|prefix}/lib|prefix}/lib${LIBDIRSUFFIX}|g" etc/lua.pc
+# Also search paths under /usr/local:
+patch -p1 < $CWD/lua.usr.local.patch
+
+# Fix luaconf.h header to use lib$LIBDIRSUFFIX:
+sed -i "s|lib/lua|$LIB/lua|" src/luaconf.h
 
 make linux \
-  CFLAGS="$SLKCFLAGS \$(MYCFLAGS)" \
+  MYCFLAGS="$SLKCFLAGS" \
   INSTALL_TOP=/usr \
-  INSTALL_LIB=/usr/lib${LIBDIRSUFFIX} \
-  INSTALL_LMOD=/usr/share/lua/5.1 \
-  INSTALL_CMOD=/usr/lib${LIBDIRSUFFIX}/lua/5.1
+  INSTALL_LIB=$ULIB \
+  INSTALL_LMOD=/usr/share/lua/$SHORTVER \
+  INSTALL_CMOD=$ULIB/lua/$SHORTVER
 
 make linux install \
-  CFLAGS="$SLKCFLAGS \$(MYCFLAGS)" \
+  MYCFLAGS="$SLKCFLAGS" \
   INSTALL_TOP=$PKG/usr \
-  INSTALL_LIB=$PKG/usr/lib${LIBDIRSUFFIX} \
-  INSTALL_LMOD=$PKG/usr/share/lua/5.1 \
-  INSTALL_CMOD=$PKG/usr/lib${LIBDIRSUFFIX}/lua/5.1
+  INSTALL_LIB=$PKGLIB \
+  INSTALL_LMOD=$PKG/usr/share/lua/$SHORTVER \
+  INSTALL_CMOD=$PKGLIB/lua/$SHORTVER
+
+strip $PKG/usr/bin/*
 
 # Now let's build the shared library
 mkdir -p shared
 cd shared
-  ar -x $PKG/usr/lib${LIBDIRSUFFIX}/liblua.a
+  ar -x $PKGLIB/liblua.a
   gcc -ldl -lreadline -lhistory -lncurses -lm -shared *.o -o liblua.so.$VERSION
-  cp -a liblua.so.$VERSION $PKG/usr/lib${LIBDIRSUFFIX}
-  ( cd $PKG/usr/lib${LIBDIRSUFFIX}
-    ln -s liblua.so.$VERSION liblua.so.5.1
-    ln -s liblua.so.$VERSION liblua.so.5
+  install -s -m0755 liblua.so.$VERSION $PKGLIB
+  ( cd $PKGLIB
+    ln -s liblua.so.$VERSION liblua.so.$SHORTVER
+    ln -s liblua.so.$VERSION liblua.so.$VERMAJOR
     ln -s liblua.so.$VERSION liblua.so
   )
 cd ..
 
 # and install the pkgconfig file
-mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig
-cat etc/lua.pc > $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig/lua.pc
+mkdir -p $PKGLIB/pkgconfig
+sed -e "s/%V%/$SHORTVER/" \
+    -e "s/%R%/$VERSION/" \
+    -e "s/%LIBDIRSUFFIX%/$LIBDIRSUFFIX/g" \
+    < $CWD/lua.pc \
+    > $PKGLIB/pkgconfig/lua.pc
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+gzip -9 $PKG/usr/man/man*/*
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/{extras,html}
-cp -a COPYRIGHT HISTORY INSTALL README $PKG/usr/doc/$PRGNAM-$VERSION
+# 20241017 bkw: here is the only real difference between this and PV's:
+# we don't create an empty extras/ under the doc dir.
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/html
+cp -a README* $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a doc/*.html doc/logo.gif doc/lua.css $PKG/usr/doc/$PRGNAM-$VERSION/html
-cp -a etc test $PKG/usr/doc/$PRGNAM-$VERSION/extras
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
