@@ -1,0 +1,99 @@
+From 08e66b9d432e9598c1ee9a78b2355728036ae1a1 Mon Sep 17 00:00:00 2001
+From: Michal Sojka <michal.sojka@cvut.cz>
+Date: Wed, 17 Apr 2024 20:42:20 +0200
+Subject: [PATCH] Allow compiling with markdown3
+
+Currently compilation fails with:
+
+    /build/src/classes/renderer/markdown.c:191:20: error: variable or field 'flags' declared void
+
+According to comment [1], markdown3 introduces backward
+incompatibility with respect to document flags.
+
+This commit adds conditionally compiled code that allows building
+pdfpc with both markdown versions 2 and 3.
+
+The used cmake operator VERSION_GREATER_EQUAL requires cmake 3.7 so we
+bump minimal cmake version requirement.
+
+Fixes #682
+
+[1]: https://github.com/pdfpc/pdfpc/issues/682#issuecomment-1931300154
+---
+ CMakeLists.txt                     |  2 +-
+ src/CMakeLists.txt                 |  4 ++++
+ src/classes/renderer/markdown.vala |  5 +++++
+ src/libmarkdown.vapi               | 14 ++++++++++++++
+ 4 files changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 605128ab..01062146 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,5 +1,5 @@
+ project("pdfpc" C)
+-cmake_minimum_required(VERSION 3.0)
++cmake_minimum_required(VERSION 3.7)
+ 
+ list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake/vala)
+ 
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index c2b15491..43f1b1eb 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -32,6 +32,10 @@ if (MDVIEW OR REST)
+     pkg_check_modules(MARKDOWN REQUIRED libmarkdown)
+ endif ()
+ 
++if ("${MARKDOWN_VERSION}" VERSION_GREATER_EQUAL 3)
++    set(EXTRA_VALA_OPTIONS ${EXTRA_VALA_OPTIONS} -D MARKDOWN3)
++endif ()
++
+ if (MDVIEW)
+     pkg_check_modules(WEBKIT REQUIRED webkit2gtk-4.0)
+     set(MDVIEW_PACKAGES webkit2gtk-4.0)
+diff --git a/src/classes/renderer/markdown.vala b/src/classes/renderer/markdown.vala
+index 3964af82..ac1e3eea 100644
+--- a/src/classes/renderer/markdown.vala
++++ b/src/classes/renderer/markdown.vala
+@@ -23,7 +23,12 @@
+ namespace pdfpc.Renderer {
+     public class MD {
+         public static string render(string? text = "", bool plain_text = false) {
++#if MARKDOWN3
++            var flags = new Markdown.DocumentFlags();
++            flags.set(Markdown.DocumentFlag.NO_EXT);
++#else
+             Markdown.DocumentFlags flags = Markdown.DocumentFlags.NO_EXT;
++#endif
+ 
+             string html;
+             if (text != "" && plain_text) {
+diff --git a/src/libmarkdown.vapi b/src/libmarkdown.vapi
+index f762f173..e90c8660 100644
+--- a/src/libmarkdown.vapi
++++ b/src/libmarkdown.vapi
+@@ -95,9 +95,23 @@ namespace Markdown
+ 		public void ref_prefix (string prefix);
+ 	}
+ 
++#if MARKDOWN3
++	[Compact]
++	[CCode (cname = "mkd_flag_t", free_function = "mkd_free_flags")]
++	public class DocumentFlags {
++		[CCode (cname = "mkd_flags")]
++        public DocumentFlags();
++		[CCode (cname = "mkd_set_flag_num")]
++		public void set (DocumentFlag flag);
++    }
++
++	[CCode (cprefix = "MKD_")]
++	public enum DocumentFlag
++#else
+ 	[Flags]
+ 	[CCode (cname = "mkd_flag_t", cprefix = "MKD_")]
+ 	public enum DocumentFlags
++#endif
+ 	{
+ 		NOLINKS,
+ 		NOIMAGE,
