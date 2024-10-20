@@ -87,8 +87,8 @@ else
   LIBDIRSUFFIX=""
 fi
 
-# check if rust-opt is installed
-if [ ! -d /opt/rust/bin ]; then
+# check if rust-opt is installed or in current, default cargo from rust is enough
+if [[ ! -d /opt/rust/bin && ! -f /usr/bin/cargo ]]; then
   echo "ERROR: The rust-opt slackbuild is required to be installed"
   exit 1
 else
