@@ -22,6 +22,9 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20241022 bkw: Modified by SlackBuilds.org, BUILD=3:
+# - support both lua (5.4) and lua51.
+
 # 20220424 bkw: Modified by SlackBuilds.org, BUILD=2:
 # - fix doc permissions.
 
@@ -30,7 +33,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 PRGNAM=lua-md5
 SRCNAM=md5
 VERSION=${VERSION:-1.2}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -53,16 +56,12 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
 fi
 
 DOCS="doc/us/* README"
@@ -76,11 +75,7 @@ rm -rf $SRCNAM-$VERSION
 tar xvf $CWD/$SRCNAM-$VERSION.tar.?z* || tar xvf $CWD/v$VERSION.tar.?z*
 cd $SRCNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
- -o -perm 511 \) -exec chmod 755 {} \+ -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
+find . -type f -exec chmod 644 {} + -o -type d -exec chmod 755 {} +
 
 # Added upstream patches to make it buildable
 # https://github.com/keplerproject/md5/commit/d6719be4d52ca06e29bc5dd92c98fd03538ecec9
@@ -89,19 +84,22 @@ patch -p1 < $CWD/d6719be.patch
 # https://github.com/keplerproject/md5/commit/3ee141422f30f45d841bb21be90474dd1fb68a67
 patch -p1 < $CWD/3ee1414.patch
 
-# Configure with sed
-sed -i \
-  -e "s|/usr/local|/usr|" \
-  -e "s|lib/lua|lib$LIBDIRSUFFIX/lua|" \
-  -e "s|-O2 -Wall -fPIC|$SLKCFLAGS|" \
-  config
+runmake() {
+  make clean
 
-make
+  # can't use --cflags below, the -I is hardcoded in the Makefile
+  make \
+    WARN="$SLKCFLAGS" \
+    LUA_INC=$( pkg-config $1 --variable INSTALL_INC )
 
-# Manual install
-install -s -m 0755 -D src/core.so $PKG/usr/lib$LIBDIRSUFFIX/lua/5.1/md5/core.so
-install -s -m 0755 -D src/des56.so $PKG/usr/lib$LIBDIRSUFFIX/lua/5.1/des56.so
-install    -m 0644 -D src/md5.lua $PKG/usr/share/lua/5.1/md5.lua
+  strip src/*.so
+  make install \
+    LUA_LIBDIR=$PKG/$( pkg-config $1 --variable INSTALL_CMOD ) \
+    LUA_DIR=$PKG/$( pkg-config $1 --variable INSTALL_LMOD )
+}
+
+runmake lua
+[ -x /usr/bin/lua5.1 ] && runmake lua51
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 install -m0644 $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
