@@ -22,11 +22,14 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20241021 bkw: Modified by SlackBuilds.org, BUILD=2:
+# - support both lua (5.4) and lua51.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=luacrypto
 VERSION=${VERSION:-0.5.1}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -38,9 +41,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -64,46 +64,56 @@ else
   LIBDIRSUFFIX=""
 fi
 
-DOCS="COPYING ChangeLog README"
-
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.?z*
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
- -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --build=$ARCH-slackware-linux
+LIB=lib$LIBDIRSUFFIX
+LIBDIR=/usr/$LIB
+PKGLIB=$PKG/$LIBDIR
 
-make
-make install DESTDIR=$PKG
+runmake() {
+  make clean &>/dev/null || true
 
-# Libraries should go here
-mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/lua/5.1
-mv $PKG/usr/lib$LIBDIRSUFFIX/crypto.so $PKG/usr/lib$LIBDIRSUFFIX/lua/5.1/
-rm -f $PKG/usr/lib$LIBDIRSUFFIX/crypto.la
-sed -i "s|/crypto|/lua/5.1/crypto|" $PKG/usr/lib$LIBDIRSUFFIX/pkgconfig/$PRGNAM.pc
+  LUA_CFLAGS="-DLUA_COMPAT_APIINTCASTS $( pkg-config --cflags $1 )" \
+  LUA_LIBS="$( pkg-config --libs $1 )" \
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  ./configure \
+    --prefix=/usr \
+    --libdir=$LIBDIR \
+    --docdir=/usr/doc/$PRGNAM-$VERSION \
+    --build=$ARCH-slackware-linux
+  make
+  make install-strip DESTDIR=$PKG
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+  V=$( pkg-config $1 --variable V )
+  dir=$PKGLIB/lua/$V
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+  mkdir -p $dir
+  mv $PKGLIB/*.so $dir
+  rm -f $PKGLIB/*.la
+}
+
+[ -e /usr/bin/lua5.1 ] && runmake lua5.1
+runmake lua
+
+# 20241021 bkw: note: no .pc file for the lua 5.1 module.
+sed -i "s|/crypto|/lua/5.4/crypto|" $PKG/usr/lib$LIBDIRSUFFIX/pkgconfig/$PRGNAM.pc
+
+DOCS="COPYING ChangeLog README"
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a $DOCS $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
