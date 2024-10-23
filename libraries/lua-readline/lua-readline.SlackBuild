@@ -1,0 +1,122 @@
+#!/bin/bash
+
+# Slackware build script for lua-readline
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Based on the Arch PKGBUILD:
+# https://aur.archlinux.org/packages/lua-readline
+
+# There used to be a lua-readline on SBo, maintained by abooksigun,
+# based on a different (older, v2.9) source. It was removed in April
+# 2024 because "upstream no longer exists". This isn't quite true:
+# upstream moved the lua-readline site & repo to gitlab. abooksigun
+# says (via email) that he doesn't have the time to maintain this new
+# build, so I will, since I'm up to my eyebrows in lua stuff already.
+
+# This could serve as somewhat of a template for building lua modules
+# from ".rock" files (which are just zip files), though the actual
+# compile command(s) will be different. There's no Makefile or similar
+# inside a .rock. The .rockspec file does give you a hint, but doesn't
+# contain actual compile commands.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=lua-readline
+VERSION=${VERSION:-3.3_0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# Nonstandard flags: -fPIC is requires on all arches, not just x86_64.
+SLKCFLAGS="-O2 -fPIC"
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS+=" -march=i586 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS+=" -march=i686 -mtune=i686"
+fi
+
+set -e
+
+# You're in a maze of twisty version numbers, all alike...
+SRCNAM=readline
+ROCKVER=${VERSION/_/-}
+ZIPFILE=$SRCNAM-$ROCKVER.src.rock
+TARVER=${VERSION/_*/}
+TARDIR=$SRCNAM-$TARVER
+TARBALL=$TARDIR.tar.gz
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $TARDIR
+unzip -p $CWD/$ZIPFILE $TARBALL | tar xvfz -
+cd $TARDIR
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
+
+# This patch is from Arch, it looks wrong to me: it sets the version
+# to 3.2 in the lua source. But we're on version 3.3 of lua-readline.
+# Debian doesn't include this patch at all.
+patch -p1 < $CWD/fix-version.diff
+
+# There's no Makefile, I based the compile command on the PKGBUILD.
+# The -Wl,-s makes it build a stripped library.
+# Compiled library gets written straight to $PKG, no copying.
+# The set -x makes the shell show the commands (like make does).
+runmake() {
+  set -x
+
+  local cmod=$PKG/$( pkg-config $1 --variable INSTALL_CMOD )
+  local lmod=$PKG/$( pkg-config $1 --variable INSTALL_LMOD )
+  local lflags=$( pkg-config $1 --cflags )
+
+  mkdir -p $cmod $lmod
+
+  ${CC:-gcc} \
+    $SLKCFLAGS \
+    $lflags \
+    -shared \
+    -Wl,-s \
+    -o $cmod/C-readline.so \
+    C-readline.c \
+    -lreadline -lhistory
+
+  install -m0644 readline.lua $lmod
+  set +x
+}
+
+runmake lua
+[ -x /usr/bin/lua51 ] && runmake lua51
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+head -n8 readline.lua > $PKGDOC/LICENSE
+cp -a doc/*.html $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
