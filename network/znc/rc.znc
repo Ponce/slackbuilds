@@ -2,62 +2,54 @@
 
 # Start/stop/restart znc
 
-# User account under which ZNC should run; only change this if you 
-# know what you are doing :-)
-ZNC_USER="@ZNC_USER@"
+[ -f /etc/default/znc ] && source /etc/default/znc
 
-# First, a sanity check
-if [[ ! -e /etc/znc/configs/znc.conf ]]; then
-   echo "Warning: /etc/znc/configs/znc.conf does not exist."
-   echo "You should create a config file by running the following command:"
-   echo "  su - $ZNC_USER -c '/usr/bin/znc --makeconf --datadir=/etc/znc'"
-   exit 1
+ZNC_USER=${ZNC_USER:-@ZNC_USER@}
+ZNC_HOME=${ZNC_HOME:-/etc/znc}
+ZNC_PIDFILE=${ZNC_PIDFILE:-/run/znc.pid}
+
+if [ ! -e $ZNC_HOME/configs/znc.conf ]; then
+  echo "Warning: $ZNC_HOME/configs/znc.conf does not exist."
+  echo "You should create a config file by running the following command:"
+  echo "  su - $ZNC_USER -c '/usr/bin/znc --makeconf --datadir=$ZNC_HOME'"
+  exit 1
 fi
 
 znc_start() {
-   if [[ -e /var/lock/znc ]]; then
-      echo "ZNC is already running, or there is a stale lock file at "
-      echo "/var/lock/znc - if you are sure that znc is not already "
-      echo "running, then remove the lock and try again."
-      return 1
-   else
-      su - $ZNC_USER -c '/usr/bin/znc --datadir /etc/znc'
-      touch /var/lock/znc
-      return 0
-   fi
+  if [ -e $ZNC_PIDFILE ]; then
+    echo "ZNC is already running, or there is a stale pid file at"
+    echo "$ZNC_PIDFILE - if you are sure that znc is not already"
+    echo "running, then remove the file and try again."
+    return 1
+  else
+    su - $ZNC_USER -c "/usr/bin/znc --datadir $ZNC_HOME"
+    echo $$ > $ZNC_PIDFILE
+    return 0
+  fi
 }
 
 znc_stop() {
-   killall -SIGINT znc 2>/dev/null
-   RETVAL=$?
-   if (( "$RETVAL" != 0 )); then
-      echo "ZNC does not appear to be running..."
-   else
-      rm -f /var/lock/znc
-   fi
-   return $RETVAL
-}  
-
-znc_restart() {
-   znc_stop
-   sleep 1
-   znc_start
+  killall -SIGINT znc 2>/dev/null
+  RETVAL=$?
+  if [ $RETVAL -ne 0 ]; then
+    echo "ZNC does not appear to be running..."
+  else
+    rm -f $ZNC_PIDFILE
+  fi
+  return $RETVAL
 }
 
-case "$1" in
-   'start')
-   znc_start
-   ;;
-   'stop')
-   znc_stop
-   ;;
-   'restart')
-   znc_restart
-   ;;
-   *)
-   echo "Usage: $0 start|stop|restart"
-   exit 1
+znc_restart() {
+  znc_stop
+  sleep 1
+  znc_start
+}
+
+case $1 in
+    start) znc_start ;;
+     stop) znc_stop ;;
+  restart) znc_restart ;;
+        *) echo "Usage: $0 start|stop|restart" ;;
 esac
 
 exit $?
-
