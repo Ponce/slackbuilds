@@ -3,19 +3,18 @@
 -- prefix in filters. It takes some part from the kernel.org's one.
 --
 -- Requirements:
---      luacrypto >= 0.3
---      <http://mkottman.github.io/luacrypto/>
+--      lua-md5 (from SBo)
 --
 
-local crypto = require("crypto")
+local md5 = require("md5")
 
 function filter_open(email, page)
         buffer = ""
-        md5 = crypto.digest("md5", email:sub(2, -2):lower())
+        hexdigest = md5.sumhexa(email:sub(2, -2):lower())
 end
 
 function filter_close()
-        html("<span class='gravatar'><img class='inline' src='//www.gravatar.com/avatar/" .. md5 .. "?s=13&amp;d=retro' /><img class='onhover' src='//www.gravatar.com/avatar/" .. md5 .. "?s=128&d=retro' /></span> " .. buffer)
+        html("<span class='gravatar'><img class='inline' src='//www.gravatar.com/avatar/" .. hexdigest .. "?s=13&amp;d=retro' /><img class='onhover' src='//www.gravatar.com/avatar/" .. hexdigest .. "?s=128&d=retro' /></span> " .. buffer)
         return 0
 end
 
