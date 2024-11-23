@@ -6,6 +6,7 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20241122 bkw: update for 1.7.1, remove gtkglext/sdl1/gtk2 support.
 # 20240926 bkw: update for 1.6.5
 # 20240808 bkw: update for 1.5.5
 # 20240314 bkw: update for 1.5.4
@@ -34,7 +35,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=xroar
-VERSION=${VERSION:-1.6.5}
+VERSION=${VERSION:-1.7.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -76,33 +77,22 @@ set -e
 # Lots of these. Check them immediately (don't bother to extract the
 # source if there's a problem).
 
+PKGS="sdl2 gtk+-3.0"
+
 # Most users will want to leave OSS and PULSE alone.
 [ "${OSS:-no}"    = "yes" ] ||   OSSOPT="--without-oss"
 [ "${PULSE:-yes}" = "yes" ] || PULSEOPT="--without-pulse"
 
 # Not sure why anyone would need this, but it's easy to support.
 JACKOPT="--without-jack"
-[ "${JACK:-no}" = "yes" ] && JACKOPT="--with-jack"
-
-SDL2=${SDL2:-yes}
-GTKGLEXT=${GTKGLEXT:-yes}
-
-if [ "$SDL2" = "yes" ]; then
-  pkg-config --exists sdl2 || SDL2=no
+if [ "${JACK:-no}" = "yes" ]; then
+  JACKOPT="--with-jack"
+  PKGS+=" jack"
 fi
 
-if [ "$GTKGLEXT" = "yes" ]; then
-  pkg-config --exists gtkglext-1.0 || GTKGLEXT=no
-fi
+# 20241123 bkw: this gives a useful error message, if a dep is missing.
+pkg-config --short-errors --print-errors --exists $PKGS
 
-echo "=== SDL2=$SDL2, GTKGLEXT=$GTKGLEXT"
-if [ "$SDL2" != "yes" ] && [ "$GTKGLEXT" != "yes" ]; then
-  echo "*** Fatal error: cannot build without at least one of SDL2 or gtkglext" 1>&2
-  exit 1
-fi
-
-[ "${SDL2:-yes}"     != "yes" ] && SDL2OPT="--without-sdl2"
-[ "${GTKGLEXT:-yes}" != "yes" ] && GTKGLOPT="--without-gtkgl"
 ### End of build options.
 
 rm -rf $PKG
@@ -112,15 +102,25 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
+
+# 20241123 bkw: the old gtk2 + sdl1 + gtkglext UI can still be built,
+# but gtk3 and sdl2 have been part of core Slackware for years. From
+# now on, only the gtk3/sdl2 build is supported here. Therefore, added
+# --without-gtk2 and --without-gtkgl.
+# --without-tre is unrelated (tre is a regex library we have on SBo),
+# and so far redundant, as it's disabled by default. Force-disable it,
+# to avoid surprises if it ever gets enabled by default. We don't need
+# tre because our OS has POSIX regex support, which xroar will use instead
+# of tre.
 
 # fix underlinking via LDFLAGS instead of a .diff
 LDFLAGS="-lm" \
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
-  $OSSOPT $PULSEOPT $JACKOPT $SDL2OPT $GTKGLOPT \
+  $OSSOPT $PULSEOPT $JACKOPT \
   --bindir=/usr/games \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
@@ -129,24 +129,29 @@ CXXFLAGS="$SLKCFLAGS" \
   --mandir=/usr/man \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
   --infodir=/usr/info \
+  --without-gtk2 \
+  --without-gtkgl \
+  --without-tre \
   --build=$ARCH-slackware-linux
 
-make
+make V=1
 make install DESTDIR=$PKG
 strip $PKG/usr/games/$PRGNAM
 
 # reset these for use in the slack-desc
-SDL2=no; JACK=no; GTKGLEXT=no; PULSE=no; OSS=no
+JACK=no; PULSE=no; OSS=no; ALSA=no
 
 # actually examine the binary to figure out build options. this may
 # seem like overkill, but it's very handy when updating to new xroar
 # versions (if the slack-desc doesn't match the environment, something
 # has changed in xroar and this script needs fixing).
-ldd $PKG/usr/games/$PRGNAM > ldd.tmp
-grep -q libSDL2 ldd.tmp     && SDL2=yes
-grep -q libjack ldd.tmp     && JACK=yes
-grep -q libgtkglext ldd.tmp && GTKGLEXT=yes
-grep -q libpulse.so ldd.tmp && PULSE=yes
+# 20241123 bkw: go ahead and include ALSA: yes|no in the slack-desc. This
+# will always be yes for a regular Slackware install, but it might be
+# no if someone's e.g. using OSSv4.
+objdump -p $PKG/usr/games/$PRGNAM | grep NEEDED | awk '{ print $2 }' > ldd.tmp
+grep -q libjack   ldd.tmp && JACK=yes
+grep -q libpulse  ldd.tmp && PULSE=yes
+grep -q libasound ldd.tmp && ALSA=yes
 strings $PKG/usr/games/$PRGNAM | grep -q /dev/dsp && OSS=yes
 
 # man page needs to be in section 6, since this is in games/
@@ -195,10 +200,9 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 sed -e "s,@JACK@,$JACK," \
-    -e "s,@SDL2@,$SDL2," \
-    -e "s,@GTKGLEXT@,$GTKGLEXT," \
     -e "s,@PULSE@,$PULSE," \
     -e "s,@OSS@,$OSS," \
+    -e "s,@ALSA@,$ALSA," \
     -e "s,: no,& ,g" \
     $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
