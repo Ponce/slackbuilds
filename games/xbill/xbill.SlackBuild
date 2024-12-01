@@ -1,0 +1,130 @@
+#!/bin/bash
+
+# Slackware build script for XBill
+
+# Originally written by Menno Duursma <email removed>.
+# Modified and now maintained by B. Watson <urchlay@slackware.uk>.
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20241201 bkw: BUILD=3.
+# - Resurrected; this was removed from the 13.0 repo ages ago.
+# - New maintainer.
+# - Update script for 15.0 template.
+# - Remove option to build without capabilities. It's 2024, who
+#   uses a filesystem without them? And if someone does, the
+#   result is that the game plays but high scores won't save.
+# - Remove INSTALL from doc dir.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=xbill
+VERSION=${VERSION:-2.1}
+BUILD=${BUILD:-3}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# On capability enabled filesystems this may be enabled,
+# i'd guess if this box runs x-apps, it probably has...
+FCAPS=${FCAPS:-true}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod -h 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod -h 644 {} +
+
+SLKCFLAGS+=" -Wl,-s"
+
+LIBS="-lXpm" \
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --bindir=/usr/libexec/xbill \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --localstatedir=/var/games \
+  --mandir=/usr/man \
+  --with-x \
+  --enable-motif \
+  --enable-athena \
+  --enable-gtk \
+  --build=$ARCH-slackware-linux
+
+make
+make install DESTDIR=$PKG
+gzip -9 $PKG/usr/man/man*/*
+
+# Don't overwrite hi-scores, if any
+mv $PKG/var/games/xbill/scores $PKG/var/games/xbill/scores.new
+
+# Do a little trick to disallow cheating, hopefully
+# Note: we do the privs stuff in doinst.sh
+mkdir -p $PKG/usr/games
+gcc -Wall $SLKCFLAGS $CWD/xbill-wrapper.c -o $PKG/usr/games/xbill
+chmod 0751 $PKG/usr/games/xbill
+
+# Add desktop entry nicked from the spec file
+# 20241201 bkw: ...and a 2nd .desktop file for "large size".
+mkdir -p $PKG/usr/share/applications \
+         $PKG/usr/share/icons/hicolor/48x48/apps \
+         $PKG/usr/share/pixmaps
+install -D -m 0644 $CWD/xbill.desktop $PKG/usr/share/applications/xbill.desktop
+install -D -m 0644 $CWD/xbill-large.desktop $PKG/usr/share/applications/xbill-large.desktop
+install -D -m 0644 $CWD/xbill.png $PKG/usr/share/icons/hicolor/48x48/apps/xbill.png
+ln -s ../icons/hicolor/48x48/apps/xbill.png $PKG/usr/share/pixmaps/xbill.png
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a README README.Ports ChangeLog $PKGDOC
+cat $CWD/xbill-wrapper.c > $PKGDOC/xbill-wrapper.c
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+chown root:games $PKG/var/games/xbill \
+                 $PKG/var/games/xbill/scores.new
+chmod 775 $PKG/var/games/xbill
+chmod 664 $PKG/var/games/xbill/scores.new
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
