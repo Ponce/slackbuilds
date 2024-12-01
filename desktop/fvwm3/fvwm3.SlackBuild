@@ -26,8 +26,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=fvwm3
-VERSION=${VERSION:-1.1.0}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-1.1.1}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -74,9 +74,24 @@ cd $PRGNAM-$VERSION
 # rename perl libraries to avoid collisions with the stock fvwm
 # borrowed from ALT Linux
 # https://git.altlinux.org/gears/f/fvwm3.git?a=blob_plain;f=0001-rename-perl-fvwm.patch
-zcat $CWD/0001-rename-perl-fvwm.patch.gz | patch -p2
+#
+# KEC: Replaced previous to accommodate meson (2024-12-01)
+zcat $CWD/renames.patch.gz | patch -p0
 # fix references to renamed man pages and binaries
-zcat $CWD/renamed-items.patch.gz | patch -p0
+zcat $CWD/config-renames.patch.gz | patch -p0
+
+mv perllib/FVWM perllib/FVWM3
+mv perllib/General perllib/FVWM3General
+
+(
+cd doc
+for adoc in $(find . -type f -name "*Fvwm*") ; do
+  mv $adoc $(echo $adoc | sed -e 's|Fvwm|Fvwm3|')
+done
+for adoc in $(find . -type f -name "*fvwm-*") ; do
+  mv $adoc $(echo $adoc | sed -e 's|fvwm|fvwm3|')
+done
+)
 
 chown -R root:root .
 find -L . \
@@ -85,27 +100,28 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-OSNAME="$(awk -F= '/^ID=/{print $2}' /etc/os-release)"
+PYVER=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+export PYTHONPATH=/opt/python$PYVER/site-packages
 
-./autogen.sh
+mkdir build
+(
+cd build
+
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
-./configure \
+meson setup \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --mandir=/usr/man \
-  --enable-mandoc \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --enable-golang \
-  --program-prefix= \
-  --program-suffix= \
-  --program-transform-name='/vwm[^3]/ s/vwm/vwm3/' \
-  --build=$ARCH-$OSNAME-linux
+  --buildtype=release \
+  -Ddocdir=/usr/doc/$PRGNAM-$VERSION \
+  -Dmandoc=true
 
-make
-make install DESTDIR=$PKG
+"${NINJA:=ninja}"
+DESTDIR=$PKG $NINJA install
+)
 
 rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
 
@@ -123,7 +139,7 @@ find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a CHANGELOG.md COPYING NEWS README.md $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CHANGELOG.md COPYING README.md $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
