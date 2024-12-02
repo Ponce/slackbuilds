@@ -1,0 +1,181 @@
+#!/bin/bash
+
+# Slackware build script for xtetris
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# This is an ancient game. It used to be in Slackware, but got
+# removed between 3.2 and 3.3, due to legal threats. These days,
+# Slackware includes at least one tetris game (kblocks) and SBo has
+# dozens of them, and nobody's threatening to sue... really this is
+# of historical interest only. It does have one interesting feature
+# I've never seen in another tetris game, which is the 'guide' at the
+# bottom of the playing field. IMO, it makes the game a bit too easy.
+# Also, the -bw mode might tickle someone's Mac Classic fancy (the Mac
+# isn't a nostalgia platform for me, but it is for a lot of folks).
+
+# The Slackware 3.2 source dir for this includes xtetris-quayle.patch,
+# but the source tarball already has the patch applied, so it's not
+# needed here.
+
+# This SlackBuild is new code based on SBo template. I might have
+# tried to use Pat V's ancient build script for Slackware 3.2 as a
+# basis, but I couldn't find it.
+
+# I had to patch the game a bit to get it to work properly on modern
+# Slackware... but surprisingly, not all that much.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=xtetris
+VERSION=${VERSION:-2.6}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+else
+  SLKCFLAGS="-O2"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod -h 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod -h 644 {} +
+
+# Fix paths in man page FILES section.
+patch -p1 < $CWD/patches/manpage.diff
+
+# High score file is fixed-width columns. If the local hostname is longer
+# than 12 characters, the layout gets messed up, and next time you run
+# the game, the high scores won't display.
+# Patch truncates the hostname to 12 chars or the first . (so, use the
+# short hostname, not the FQDN).
+# Sorta silly to keep the hostname in the score file anyway. It
+# probably originated on a network full of diskless workstations,
+# where the highscore file was shared via NFS.
+patch -p1 < $CWD/patches/score_hostname.diff
+
+# This patch makes everything in the left pane a bit wider, otherwise
+# the text (score, button labels, etc) gets cut off. Probably this is
+# due to changes in how X renders fonts, over the last 30+ years.
+patch -p1 < $CWD/patches/layout.diff
+
+# This one does two things:
+# 1. Enable the window manager close button. It'll do the same thing the
+#    Quit button in the UI does.
+# 2. Prevent the user from resizing the window. The game looks weird
+#    when resized, and even restoring the original size causes the pieces
+#    that were already placed in the "well" to disappear.
+patch -p1 < $CWD/patches/close_button_no_resize.diff
+
+# Don't run xrdb to generate the *.ad files. It fails if there's no
+# X server running, or if it's running but root can't connect to it.
+# To generate the *.ad files, run this script with MAKE_AD=yes in
+# the env, and you probably have to run "xhost +localhost" and
+# make sure DISPLAY=:0 is in the script's env, too. Then copy
+# the files from $PKG/etc/X11/app-defaults to the script dir and
+# commit them. Nobody but me should ever have to do that.
+if [ "${MAKE_AD:-no}" != "yes" ]; then
+  cat $CWD/app-defaults/Xtetris.bw > Xtetris.bw.ad
+  cat $CWD/app-defaults/Xtetris.c  | tee Xtetris.c.ad Xtetris.ad >/dev/null
+fi
+
+# LIBDIR=/var/games/$PRGNAM seems weird, but the only thing xtetris
+# uses LIBDIR for is the high score file.
+# INCDIR is where the bitmaps/ dir lives, for the stripe4 bitmap that
+# it loads at runtime.
+xmkmf -a
+make all install install.man \
+  CCOPTIONS="$SLKCFLAGS -fcommon" \
+  BINDIR=/usr/games \
+  LIBDIR=/var/games/$PRGNAM \
+  INCDIR=/usr/include/X11 \
+  INSTPGMFLAGS="-s" \
+  DESTDIR=$PKG
+
+gzip -9 $PKG/usr/man/man*/*
+
+# Don't need in package:
+rm -f $PKG/var/games/$PRGNAM/app-defaults
+
+# Make -color the default. No need to patch the code!
+cd $PKG/etc/X11/app-defaults
+rm -f Xtetris
+ln -s Xtetris.c Xtetris
+cd -
+
+# Run setgid games, so we can write to the global high score file.
+chown root:games $PKG/usr/games/$PRGNAM
+chmod 2755 $PKG/usr/games/$PRGNAM
+
+# Set permissions on high score file and its dir.
+# I made this a .new config file, but sbopkg won't prompt for it
+# because it's not in /etc. No harm done, it's a tiny file.
+cd $PKG/var/games/$PRGNAM
+mv xtetris-scores xtetris-scores.new
+chown games:games . *
+chmod 775 .
+chmod 664 xtetris-scores.new
+cd -
+
+# Icons made from a screenshot of the game. If you're a better graphic
+# designer than me (and you almost certainly *are*), please make a
+# better icon and send it to me!
+for i in $CWD/icons/*.png; do
+  px="$( basename $i .png )"
+  sz=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$sz/apps
+  mkdir -p $dir
+  cat $i > $dir/$PRGNAM.png
+done
+
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+# .desktop file written from scratch.
+mkdir -p $PKG/usr/share/applications
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a COPYRIGHT README TODO $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
