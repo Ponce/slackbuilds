@@ -1,0 +1,125 @@
+#!/bin/bash
+
+# Slackware build script for acidwarp
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=acidwarp
+VERSION=${VERSION:-4.10+20221127_cf5e52f}
+COMMIT=${COMMIT:-cf5e52ff7793df1cb2dffaf693b672b66cca3049}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+else
+  SLKCFLAGS="-O2"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$COMMIT
+tar xvf $CWD/$PRGNAM-$COMMIT.tar.gz
+cd $PRGNAM-$COMMIT
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod -h 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod -h 644 {} +
+
+# Build with SDL2 and OpenGL by default. OpenGL builds are only possible
+# with SDL2.
+if [ "${SDL2:-yes}" = "no" ]; then
+  SDLOPT="-DSDL2=OFF"
+  GL="${GL:-no}"
+else
+  SDLOPT="-DSDL2=ON"
+fi
+
+if [ "${GL:-yes}" = "no" ]; then
+  GLOPT="-DGL=OFF"
+else
+  GLOPT="-DGL=ON -DCMAKE_EXE_LINKER_FLAGS=-lGL"
+fi
+
+echo "===> SDLOPT: $SDLOPT"
+echo "===> GLOPT:  $GLOPT"
+
+mkdir -p build
+cd build
+  cmake \
+    $SDLOPT $GLOPT \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make VERBOSE=1
+cd ..
+
+# no make install target, do it the hard way.
+install -D -m755 -s bin/$PRGNAM $PKG/usr/games/$PRGNAM
+
+mkdir -p $PKG/usr/share/{applications,pixmaps}
+
+# acidwarp.desktop is slightly modified from upstream.
+# acidwarp-fs.desktop makes it run fullscreen, since the window size
+# comes out smaller than a pack of smokes on a modern-ish display (or
+# postage-stamp-sized, on 4k).
+for i in acidwarp acidwarp-fs; do
+  cat $CWD/$i.desktop > $PKG/usr/share/applications/$i.desktop
+done
+
+for px in 32 48 64 256; do
+  sz=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$sz/apps
+  mkdir -p $dir
+  convert -resize $sz $PRGNAM.png $dir/$PRGNAM.png
+done
+
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png \
+      $PKG/usr/share/pixmaps/$PRGNAM.png
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a README* TODO $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+objdump -p bin/$PRGNAM | grep NEEDED > tmp
+SDLVER=1.2; RENDER=software
+grep -q libSDL2 tmp && SDLVER=2.0
+grep -q libGL   tmp && RENDER=OpenGL
+
+mkdir -p $PKG/install
+sed -e "s,@SDLVER@,$SDLVER," -e "s,@RENDER@,$RENDER," \
+    < $CWD/slack-desc \
+    > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
