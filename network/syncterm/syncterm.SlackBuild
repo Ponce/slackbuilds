@@ -9,16 +9,15 @@
 # Issues:
 # 1. Figure out why shell: doesn't work on the command line (though
 #    it does, with the ^D "quick connect" option, or by adding it to
-#    the dialing list).
-# 2. How do we use /etc/syncterm.lst? strace shows that syncterm reads it,
-#    but entries there don't show up in the dialing list (not even if there's
-#    no user list). If I could get the system list to work, I'd include an
-#    entry there for a local shell (to work around issue #1). But probably
-#    nobody much cares about using this as an xterm or konsole replacement...
-# Neither of these issues are going to prevent me from submitting this.
+#    the dialing list). Though, if I add it to the dialing list, I
+#    still can't make it work directly from the command line, even
+#    though it works from the menu. *Shrug*.
 
-# Note: phigan on #atari tells me they're "almost ready" to release 1.2,
-# so this may get updated soon.
+# 20241203 bkw: update for v1.3.
+# - patch for -current no longer needed (and no longer works anyway), removed.
+# - 'make install' now installs the icons, stopping shipping our own.
+# - manpage.diff reworked for 1.3.
+# - remove -j1 from make: parallel builds work fine now.
 
 # 20240218 bkw: BUILD=2
 # - add compile fix for -current.
@@ -26,8 +25,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=syncterm
-VERSION=${VERSION:-1.1}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.3}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -72,15 +71,9 @@ find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
 
 # Man page: Fix path to dialing list and a couple typos. The path
 # baked into the binary really is /etc/syncterm.lst (not /usr/etc)...
-# although I don't see a way to make syncterm actually use the
-# system-wide dialing list.
+# In 1.3, the system dialing list actually works. If both the system
+# and user lists both exist, both are read, which is nice.
 patch -p1 < $CWD/manpage.diff
-
-# 20240218 bkw: fix compilation on -current (or so I am assured). Doesn't
-# hurt anything on 15.0. Patch originally from:
-# https://raw.github.com/nullman/config/master/common/.nixos/pkgs/syncterm/0002-use-sched-yield-53264f2b.diff
-# ...brought to my attention by Joshua E. Roybal via email.
-patch -p1 < $CWD/0002-use-sched-yield-53264f2b.diff
 
 # This is a big hassle: -O3 is hardcoded in a makefile... which is
 # inside a zip file. To force our flags, we have to extract the zip
@@ -94,7 +87,7 @@ zip -0r cryptlib.zip *
 cd -
 
 # Rest of the flags:
-sed -i "s,-O2,$SLKCFLAGS," src/build/Common.gmake
+sed -i "s,-O[23],$SLKCFLAGS," src/build/Common.gmake
 sed -i "s,-O3,\"$SLKCFLAGS\"," 3rdp/build/GNUmakefile
 
 # Top-level source directory:
@@ -106,8 +99,7 @@ cd src/$PRGNAM
 #   see no advantage to using portaudio anyway (SDL audio works fine).
 # - INSTALL_DATA: install man page with usual Slackware permissions.
 # - SRC_ROOT has to be set because the makefile is dumb...
-# - Use -j1 as the compile always fails if -jN where N>1.
-make -j1 \
+make \
   PREFIX=/usr \
   MANPREFIX=/usr \
   SYSTEM_LIST_DIR=/etc \
@@ -125,23 +117,6 @@ make -j1 \
 # let's not do it as root.
 su nobody -s /bin/sh -c "$PKG/usr/bin/$PRGNAM -T" | \
   tic -o $PKG/usr/share/terminfo -
-
-# The 64x64 icon was installed by 'make install', above.
-# Other icons extracted from the Mac .icns file:
-# sh extract-icns.sh /tmp/SBo/syncterm-1.1/src/syncterm/SyncTERM.icns
-# If you're copying this code for use in your own SlackBuild, please
-# don't change the "cat" to "cp -a", below: files copied from $CWD
-# might be owned by anybody (not necessarily root), and have wrong
-# permissions; using "cat >" takes care of both.
-# Also, please don't rewrite this to call icns2png in your script.
-# Otherwise you'd have to add libicns to REQUIRES.
-for png in $CWD/icons/*.png; do
-  px="$( basename $png | cut -d. -f1 )"
-  size=${px}x${px}
-  dir=$PKG/usr/share/icons/hicolor/$size/apps
-  mkdir -p $dir
-  cat $png > $dir/$PRGNAM.png
-done
 
 mkdir -p $PKG/usr/share/pixmaps
 ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
