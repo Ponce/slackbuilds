@@ -6,10 +6,14 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20241203 bkw: update for v1.4.2.
+# - use Debian URL to avoid content-disposition kerfluffle.
+# - don't use Debian packaging, just the raw source.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=iselect
-VERSION=${VERSION:-1.4.0_4}
+VERSION=${VERSION:-1.4.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -47,28 +51,24 @@ fi
 
 set -e
 
-TARVER=${VERSION/_*}
-DEBVER=${VERSION/*_}
-
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
+# 20241203 bkw: use own top-level dir with sane name.
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/${PRGNAM}_$TARVER.orig.tar.gz
-cd $PRGNAM-$TARVER
-tar xvf $CWD/${PRGNAM}_$TARVER-$DEBVER.debian.tar.xz
+mkdir -p $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+tar xvf $CWD/${PRGNAM}_$VERSION.orig.tar.gz --strip-components=1
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
-# Apply all Debian's patches except one.
-sed -i '/^dont-strip-binary/d' debian/patches/series
-for i in $( cat debian/patches/series ); do
-  patch -p1 < debian/patches/$i
-done
+# 20241203 bkw: I hate this. Upstream claims our autoconf is too
+# old... but it works just fine. I guess he just didn't test it, and
+# put the version number he happened to have installed.
+sed -i '/^AC_PREREQ/s,2\.71,2.69,' configure.ac
 
-# Man pages need the version number, not "EN"
-sed -i 's,"EN",'$PRGNAM-$VERSION, $PRGNAM.1 debian/screen-ir.1
+autoreconf -if
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -82,18 +82,21 @@ CXXFLAGS="$SLKCFLAGS" \
   --disable-static \
   --build=$ARCH-slackware-linux
 
-make CFLAGS="$SLKCFLAGS -fcommon"
+make CFLAGS="$SLKCFLAGS -fcommon" LDFLAGS="-Wl,-s"
 # warning: DESTDIR not supported here!
 make install prefix=$PKG/usr
 gzip -9 $PKG/usr/man/man*/*
 
-# Debian includes this handy script.
-install -m0755 debian/screen-ir $PKG/usr/bin
-gzip -9c < debian/screen-ir.1 > $PKG/usr/man/man1/screen-ir.1.gz
+# 20241203 bkw: This used to be provided separately as part of
+# Debian's packaging. It's now included in the src, but not installed
+# by default.
+mv example/screen-ir/screen-ir $PKG/usr/bin
+gzip -9c < example/screen-ir/screen-ir.1 > $PKG/usr/man/man1/screen-ir.1.gz
+rm -rf example/screen-ir
 
 PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
 mkdir -p $PKGDOC
-cp -a COPYING ChangeLog README VERSIONS example $PKGDOC
+cp -a LICENSES README *.txt example $PKGDOC
 cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
