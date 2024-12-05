@@ -12,3 +12,4 @@ config() {
 }
 
 config etc/sbotools/sbotools.conf.new
+config etc/sbotools/sbotools.hints.new
