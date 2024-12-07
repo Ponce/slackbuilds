@@ -6,15 +6,29 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20241206 bkw:
+# - update for last git commit, 0.6.2+20150813_a620840.
+# - add some patches, including one that fixes a segfault on startup.
+#   apparently, the previous version has segfaulted on startup ever
+#   since Slackware 15.0 came out, and nobody mentioned it (and I
+#   haven't used rakarrack in a while either).
+# - add SSE=no option.
+# - touch up README and slack-desc (mention guitar).
+
 # 20211205 bkw: BUILD=3, new-style icons.
 # 20140114 bkw: add 64-bit distortion fix and setcap stuff.
 # 20151126 bkw: fix build on -current, preparing for 14.2.
 
+# Note: Please don't remove this from the repo just because it's
+# no longer maintained upstream. It's useful, it works, it makes
+# interesting sounds, and some of us actually use it.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=rakarrack
-VERSION=${VERSION:-0.6.1}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-0.6.2+20150813_a620840}
+COMMIT=${COMMIT:-a6208406d94a1da978f435605072ee5caefe1491}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -51,63 +65,94 @@ fi
 
 set -e
 
+SRC=$PRGNAM-git-$COMMIT
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
-cd $PRGNAM-$VERSION
+rm -rf $SRC
+unzip $CWD/$SRC.zip
+cd $SRC
 chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
-sed -i "/Icon=/s,=.*,=$PRGNAM," data/$PRGNAM.desktop
+# 20241206 bkw: Every file is +x, do not revert to template.
+find . -type f -a -exec chmod 644 {} + -o -type d -a -exec chmod 755 {} +
 
-# work around a bug that causes distorion/overdrive not to work on 64-bit.
-# this is a band-aid, not a real solution, but it seems to work OK.
+# 20241206 bkw: patches mostly came from AUR and Debian.
+# format-security.diff had to be reworked (some of it had been applied
+# upstream, but not all), and 64bit_distortion.diff comes from:
 # http://sourceforge.net/p/rakarrack/discussion/778862/thread/e9559a34/
-patch -p1 < $CWD/64bit_distortion.diff
+for i in $CWD/patches/*; do
+  echo "===> applying $( basename $i )"
+  patch -p1 < $i
+done
 
-# Slackware's extra/fltk doesn't have /usr/include/Fl -> FL
-sed -i '/#include/s,Fl/,FL/,' src/*
+autoreconf -if
 
+# 20241207 bkw: Normally, it autodetects SSE and SSE2. Allow SSE=no
+# to disable them both. Not sure why anyone in 2025 wants to run this
+# on a box that's old enough to not support SSE... This option is
+# provided for building on a box *with* SSE/SSE2, for deployment on a
+# box that lacks it.
+# Setting SSE to a non-empty value in configure's env is required, to
+# make the --disable-sse --disable-sse2 work. No idea why; found this
+# in the debian/rules file, and it works.
+if [ "${SSE:-yes}" = "no" ]; then
+  OPTS="--disable-sse --disable-sse2"
+  SSE=" "
+else
+  SSE=""
+fi
+
+# 20241207 bkw: --enable-docdir makes it look in --docdir for the
+# HTML help files; otherwise, it looks in /usr/share/doc/rakarrack/,
+# and doesn't find them.
+SSE="$SSE" \
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
+  $OPTS \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --mandir=/usr/man \
+  --enable-docdir \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
   --build=$ARCH-slackware-linux
 
 make
 make install-strip DESTDIR=$PKG
+
 gzip $PKG/usr/man/man?/*.?
 
-rm -rf $PKG/usr/share/pixmaps/*
-for px in 32 64 128; do
-  size=${px}x${px}
-  dir=$PKG/usr/share/icons/hicolor/$size/apps
-  mkdir -p $dir
-  cp -a icons/icono_rakarrack_$size.png $dir/$PRGNAM.png
-done
-
-mkdir -p $PKG/usr/share/icons/hicolor/48x48/apps
+# 20241206 bkw: Upstream now installs icons, but there's no 48x48 one,
+# which is still the standard for /usr/share/pixmaps.
+mkdir -p $PKG/usr/share/{icons/hicolor/48x48/apps,pixmaps}
 convert -resize 48x48 \
         icons/icono_rakarrack_128x128.png \
         $PKG/usr/share/icons/hicolor/48x48/apps/$PRGNAM.png
 
 ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 
-cp -a AUTHORS COPYING ChangeLog NEWS README TODO $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+ln -s ../../share/licenses/$PRGNAM/COPYING $PKGDOC/COPYING
+
+# 20241207 bkw: Record in the slack-desc whether SSE/SSE2 are required.
+WITHSSE="does not require SSE or SSE2"
+grep -q -- -mfpmath=sse config.status && WITHSSE="requires SSE"
+grep -q -- -msse2 config.status && WITHSSE="requires SSE and SSE2"
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed "s,@WITHSSE@,$WITHSSE," < $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+# 20241207 bkw: Only the rakarrack binary needs setcap in doinst.sh.
+# The others (rakverb, rakconvert, etc) are file format conversion
+# tools, and don't play audio via jack even though they're linked with
+# libjack.
 
 # Only add capability stuff if not disabled:
 if [ "${SETCAP:-yes}" = "yes" ]; then
