@@ -1,0 +1,136 @@
+#!/bin/bash
+# Slackware build script for libgpr
+# Copyright 2012-2024, Zhu Qun-Ying
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=libgpr
+SRC_NAME=gprbuild
+VERSION=${VERSION:-25.0.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+KB_VERSION=${KB_VERSION:-25.0.0}
+GPRCONFIG_KB=gprconfig_kb-$KB_VERSION
+GPRCONFIG_KB_SRC_DIR=$GPRCONFIG_KB
+
+if [ -z "$ARCH" ]; then
+  case "$(uname -m)" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+    *) ARCH=$(uname -m) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-"/tmp/SBo"}
+PKG=${TMP}/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+elif [ "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+mkdir $PRGNAM-$VERSION
+tar xvf $CWD/$SRC_NAME-$VERSION.tar.gz -C $PRGNAM-$VERSION --strip-components=1
+
+cd $PRGNAM-$VERSION
+
+mkdir $GPRCONFIG_KB_SRC_DIR
+tar xvf $CWD/$GPRCONFIG_KB.tar.gz -C $GPRCONFIG_KB_SRC_DIR --strip-components=1
+
+sed -i -e 's/share\/doc/doc/g' \
+    -e 's/doc\/gprbuild\/info/info/g' gprbuild.gpr
+
+if [ "$ARCH" = "x86_64" ]; then
+    sed -i 's/\/lib\//\/lib64\//g' $GPRCONFIG_KB_SRC_DIR/db/compilers.xml
+    sed -i 's/\/lib\//\/lib64\//g' ./gpr/src/gpr-util.adb
+    sed -i 's/"lib"/"lib64"/g' ./gpr/src/gpr-util.adb
+    sed -i 's/lib\//lib64\//g' Makefile
+    # set the default lib directory to lib64
+    sed -i 's/\"lib\"/\"lib64\"/g' src/gprinstall.ads
+fi
+
+sed -i -e 's/"19940713"/"20241007"/' \
+       -e 's/"2016"/"2024"/' \
+       -e 's/"18.0w"/"25.0.0"/' \
+       -e 's/:= Gnatpro/:= FSF/' gpr/src/gpr-version.ads
+
+(cd share; ln -sfT ../$GPRCONFIG_KB_SRC_DIR/db gprconfig)
+export OS=UNIX
+
+export CC=gcc
+ADA_FLAGS=$SLKCFLAGS
+ADA_FLAGS="${ADA_FLAGS//-Wformat}"
+ADA_FLAGS="${ADA_FLAGS//-Werror=format-security}"
+
+export GPRBUILD_OPTIONS="-R -cargs $ADA_FLAGS -largs $LDFLAGS -s -gargs"
+
+# rename library name to gnatgpr, to avoid name conflict with library in grpc
+sed -i 's/"gpr"/"gnatgpr"/' gpr/gpr.gpr
+
+make BUILD=production prefix=/usr setup
+make BUILD=production GPRBUILD_OPTIONS="$GPRBUILD_OPTIONS" libgpr.build
+make BUILD=production prefix=$PKG/usr libgpr.install
+
+(cd $PKG/usr/lib$LIBDIRSUFFIX;
+ ln -sf ./gpr/relocatable/gpr/libgnatgpr.so libgnatgpr.so
+)
+# remove duplicate files
+(cd $PKG/usr/include/gpr
+ rm -rf gpr.static gpr.static-pic
+ ln -s gpr.relocatable gpr.static
+ ln -s gpr.relocatable gpr.static-pic
+)
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp README.md COPYING* $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-${VERSION}-$ARCH-$BUILD$TAG.$PKGTYPE
