@@ -1,0 +1,137 @@
+#!/bin/bash
+# gnatcoll-core package build script (written by zhu.qunying@gmail.com)
+# Copyright 2012-2024, Zhu Qun-Ying
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=gnatcoll-core
+VERSION=${VERSION:-25.0.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$(uname -m)" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+    *) ARCH=$(uname -m) ;;
+  esac
+  export ARCH
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-"/tmp/SBo"}
+PKG=${TMP}/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+else
+  SLKCFLAGS="-O2"
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+mkdir $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz -C $PRGNAM-$VERSION --strip-components=1
+
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find . \
+ \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+ -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+ -exec chmod 644 {} \; || exit 1
+
+ADA_FLAGS="$SLKCFLAGS"
+ADA_FLAGS="${ADA_FLAGS//-Wformat}"
+ADA_FLAGS="${ADA_FLAGS//-Werror=format-security}"
+
+patch -p1 < $CWD/compiler-error.patch
+
+COMMON_OPTIONS="-XGNATCOLL_BUILD_MODE=PROD \
+-XGNATCOLL_VERSION=$VERSION -XGNATCOLL_OS=unix "
+
+GPRINSTALL_OPTIONS="$COMMON_OPTIONS -p -f --prefix=$PKG/usr"
+GPRBUILD_OPTIONS="-R $COMMON_OPTIONS \
+-cargs $ADA_FLAGS -largs -s $LDFLAGS -gargs"
+
+sed -i 's/0.0/25.0.0/' core/config/gnatcoll_core_constants.gpr
+
+# upstream's build system too complicated to modified
+# build options. Use gprbuild directly and closely follow how upstream is built
+mkdir -p $PKG/usr/share/gpr
+export GPR_PROJECT_PATH="/usr/share/gpr:$PKG/usr/share/gpr"
+lib_types=(static relocatable static-pic)
+for lib in ${lib_types[@]} ; do
+    gprbuild -j0 $GPRBUILD_OPTIONS -XLIBRARY_TYPE=$lib \
+	    -P minimal/gnatcoll_minimal.gpr
+    gprinstall $GPRINSTALL_OPTIONS -XLIBRARY_TYPE=$lib \
+	    --sources-subdir=include/gnatcoll_minimal \
+	    --build-name=$lib --build-var=LIBRARY_TYPE \
+	    -P minimal/gnatcoll_minimal.gpr
+    gprbuild -j0 $GPRBUILD_OPTIONS -XLIBRARY_TYPE=$lib \
+	     -XGNATCOLL_BLAKE3_ARCH="$ARCH-linux" \
+	     -XGNATCOLL_XXHASH_ARCH="$ARCH" \
+	     -XGNATCOLL_MMAP="yes" -XGNATCOLL_MADVISE="yes" \
+	     -P core/gnatcoll_core.gpr
+    gprinstall $GPRINSTALL_OPTIONS -XLIBRARY_TYPE=$lib \
+	    --sources-subdir=include/gnatcoll_core \
+	    --build-name=$lib --build-var=LIBRARY_TYPE \
+	     -XGNATCOLL_BLAKE3_ARCH="$ARCH-linux" \
+	     -XGNATCOLL_XXHASH_ARCH="$ARCH" \
+	     -XGNATCOLL_MMAP="yes" -XGNATCOLL_MADVISE="yes" \
+	     -P core/gnatcoll_core.gpr
+    gprbuild -j0 $GPRBUILD_OPTIONS -XLIBRARY_TYPE=$lib \
+	    -P projects/gnatcoll_projects.gpr
+    gprinstall $GPRINSTALL_OPTIONS -XLIBRARY_TYPE=$lib \
+	    --sources-subdir=include/gnatcoll_projects \
+	    --build-name=$lib --build-var=LIBRARY_TYPE \
+	    -P projects/gnatcoll_projects.gpr
+done
+
+sed -e 's/^--  with "gnatcoll_projects"/with "gnatcoll_projects"/g' gnatcoll.gpr > $PKG/usr/share/gpr/gnatcoll.gpr
+
+make -C docs html
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a ./docs/_build/html $PKG/usr/doc/$PRGNAM-$VERSION
+rm -rf $PKG/usr/doc/$PRGNAM-$VERSION/html/_sources
+
+cp README.md COPYING* $PKG/usr/doc/$PRGNAM-$VERSION
+cp $CWD/$PRGNAM.SlackBuild $PKG/usr/doc/$PRGNAM-$VERSION
+
+mkdir -p $PKG/install
+cp $CWD/slack-desc $PKG/install
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-${VERSION}-$ARCH-$BUILD$TAG.$PKGTYPE
