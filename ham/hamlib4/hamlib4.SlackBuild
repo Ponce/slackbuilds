@@ -1,0 +1,182 @@
+#!/bin/bash
+# SlackBuild script for hamlib4
+#
+# Copyright 2010 Howard Pepper <h_pepper {at} bellsouth [dot] net>
+# Copyright 2017,2018 Nate Bargmann <n0nb@arrl.net>
+# Copyright 2020 JK Wood <joshuakwood@gmail.com>
+# Copyright 2024 Brian Cox <hamslackbuild@comcast.net>
+#
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=hamlib4
+SRCNAM=hamlib
+VERSION=${VERSION:-4.6}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+DOCFILES="AUTHORS COPYING COPYING.LIB ChangeLog LICENSE NEWS PLAN
+          README.betatester README.developer THANKS"
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+elif [ "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+if [ x"${PL_MOD}" = x"yes" ]; then
+  PERL_BINDING="--with-perl-binding"
+else
+  PERL_BINDING=""
+fi
+
+if { [ x"${PY_MOD}" = x"yes" ] || [ x"${PY3_MOD}" = x"yes" ]; } then
+  PYTHON_BINDING="--with-python-binding"
+  PYV=$( python -c "import sys;t='{v[0]}.{v[1]}'.format(v=list(sys.version_info[:2]));sys.stdout.write(t)"; )
+else
+  PYTHON_BINDING=""
+fi
+
+if [ x"${PY3_MOD}" = x"yes" ]; then
+  export PYTHON=$( which python3 )
+  PYV=$( python3 -c "import sys;t='{v[0]}.{v[1]}'.format(v=list(sys.version_info[:2]));sys.stdout.write(t)"; )
+fi
+
+if [ x"${TCL_MOD}" = x"yes" ]; then
+  TCL_BINDING="--with-tcl-binding"
+  TCLV=$( echo 'puts $tcl_version;exit 0' | tclsh )
+else
+  TCL_BINDING=""
+fi
+
+if [ x"${LUA_MOD}" = x"yes" ]; then
+  LUA_BINDING="--with-lua-binding"
+  export LUA=$( which lua )
+  export LUA_INCLUDE="-I/usr/include/lua"
+  export LUA_VER=$( lua -e "print(_VERSION)" | cut -d" " -f2 )
+else
+  LUA_BINDING=""
+fi
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --infodir=/usr/info \
+  --disable-static \
+  --disable-html-matrix \
+  $PERL_BINDING \
+  $PYTHON_BINDING \
+  $TCL_BINDING \
+  $LUA_BINDING
+
+make
+make install DESTDIR=$PKG
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+if [ x"${PL_MOD}" = x"yes" ]; then
+  find $PKG -name perllocal.pod \
+  -o -name ".packlist" \
+  -o -name "*.bs" \
+  | xargs rm -f
+fi
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/
+cp -a $DOCFILES $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+if [ x"${PY_MOD}" = x"yes" ]; then
+  rm -f $PKG/usr/lib${LIBDIRSUFFIX}/python${PYV}/site-packages/_Hamlib.la
+  rm -f $PKG/usr/lib${LIBDIRSUFFIX}/python${PYV}/site-packages/Hamlib.pyo
+fi
+
+if [ x"${PY3_MOD}" = x"yes" ]; then
+  rm -f $PKG/usr/lib${LIBDIRSUFFIX}/python${PYV}/site-packages/_Hamlib.la
+  rm -f $PKG/usr/lib${LIBDIRSUFFIX}/python${PYV}/site-packages/__pycache__/Hamlib.cpython-36.opt-1.pyc
+fi
+
+if [ x"${TCL_MOD}" = x"yes" ]; then
+  rm -f $PKG/usr/lib${LIBDIRSUFFIX}/tcl${TCLV}/Hamlib/hamlibtcl.la
+fi
+
+if [ x"${LUA_MOD}" = x"yes" ]; then
+  rm -f $PKG/usr/lib${LIBDIRSUFFIX}/lua/${LUA_VER}/Hamliblua.la
+fi
+
+rm -f $PKG/usr/lib*/*.la
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
