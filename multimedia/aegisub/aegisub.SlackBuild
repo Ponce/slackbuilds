@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright 2014-2023 Willy Sudiarto Raharjo <willysr@slackbuilds.org>
+# Copyright 2014-2025 Willy Sudiarto Raharjo <willysr@slackbuilds.org>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -20,15 +20,12 @@
 # OTHERWISE) ARISING IN ANY WAY OUTPUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# 20241017 bkw: Modified by SlackBuilds.org, BUILD=3: update for lua 5.4.
-# Just bump BUILD, no other changes.
-
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=aegisub
 SRCNAM=Aegisub
-VERSION=${VERSION:-3.3.3}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-3.4.1}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -78,22 +75,34 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
-# Patch for current
-patch -p1 < $CWD/boost-1.81.0.patch
+# Disable test to avoid downloading gtest
+sed -i "s|subdir('tests')||g" meson.build
 
-autoreconf -fiv
-LDFLAGS="$LDFLAGS -lz" \
-CFLAGS="$SLKCFLAGS" \
-CPPFLAGS+=' -DU_USING_ICU_NAMESPACE=1' \
-CXXFLAGS="$SLKCFLAGS" \
-FORCE_GIT_VERSION="TRUE" \
-./configure \
-  --prefix=/usr \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --build=$ARCH-slackware-linux
+# Thanks to Gentoo for this
+patch -p1 < $CWD/Fix-build-without-pch.patch
+cp $CWD/git_version.h .
 
-make
-make install DESTDIR=$PKG
+export CXXFLAGS+=" -fpermissive"
+mkdir build
+cd build
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  meson .. \
+    --buildtype=release \
+    --infodir=/usr/info \
+    --libdir=/usr/lib${LIBDIRSUFFIX} \
+    --localstatedir=/var \
+    --mandir=/usr/man \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    -Dopenal=disabled \
+    -Dportaudio=disabled \
+    -Dsystem_luajit=true \
+    -Denable_update_checker=false \
+    -Dstrip=true
+  "${NINJA:=ninja}"
+  DESTDIR=$PKG $NINJA install
+cd ..
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
