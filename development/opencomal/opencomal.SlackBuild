@@ -6,20 +6,25 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20250114 bkw: updated for v0.2.11.
+# - added file(1) magic for saved opencomal programs.
+# Upstream resumed development after a long hiatus, so there might be
+# more updates in the future.
+
+# I copy/pasted this from upstream's README:
+#   Comal is a crossover between Basic and Pascal, with
+#   the best features of both and none of the drawbacks of either.
+# ...but it's not quite true: Comal requires line numbers. I consider
+# this a drawback to any programming language. Also, unlike Pascal,
+# there's no compiler for it (that I know of). *Shrug*.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=opencomal
-VERSION=${VERSION:-0.2.6}
+VERSION=${VERSION:-0.2.11}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-
-if [ "${BETA:-no}" = "yes" ]; then
-  VERSION="0.2.7pre1"
-  TARVER="0.2.7-pre1-work"
-else
-  TARVER="$VERSION"
-fi
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -40,16 +45,12 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
 fi
 
 set -e
@@ -57,30 +58,58 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$TARVER
-tar xvf $CWD/$PRGNAM-$TARVER.tar.gz
-cd $PRGNAM-$TARVER
-rm -rf bin/*   # do not use prebuilt binaries
+rm -rf $PRGNAM-$VERSION
+
+# 20250114 bkw: for easier cleanup, extract into a dir with the
+# version number in it (the tarball just contains opencomal/).
+mkdir $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+
+# 20250114 bkw: fancy tar command. There's a bunch of extra junk
+# in the tarball, let's not even extract it.
+# - The bin/* dir contains prebuilt MacOSX binaries.
+# - src/*.d and src/*.o are by-products of an OSX compile.
+# - Not packaging the 'playground' webapp, so we don't need www/.
+# - Useless ._whatever files (editor backups?)
+# - Couple of .gitignore.
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz \
+        --wildcards \
+        --strip-components=1 \
+        --exclude='*/bin/*' \
+        --exclude='*/www/*' \
+        --exclude='*/src/*.d' \
+        --exclude='*/src/*.o' \
+        --exclude='*/._*' \
+        --exclude='*/*/._*' \
+        --exclude='*/*/*/._*' \
+        --exclude='*/.gitignore' \
+        --exclude='*/*/.gitignore' \
+        --exclude='*/*/*/.gitignore'
+
+# 20250114 bkw: don't trust the tarball permissions.
 chown -R root:root .
-find . -type d -exec chmod 755 {} \+
-find . -type f -exec chmod 644 {} \+
-chmod 755 tools/*
+find . -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} +
 
-# see patches/README to find out what all these patches are for.
-for i in $CWD/patches/*.diff; do
-  echo "Applying $(basename $i)"
-  patch -p1 < $i
-done
-
-# no point building in debug symbols that we strip out afterwards.
-sed -i 's,-ggdb,,' src/Makefile
+# 20250114 bkw: the patches I created for 0.2.6 have all been applied
+# upstream, so they're gone. makefile.diff just sets the default OS
+# to Linux and disables memory leak detection. Yes, there are leaks,
+# but it's not real helpful to have the program say so on exit. Also,
+# remove the need for tools/genversion to be +x.
+patch -p1 < $CWD/makefile.diff
 
 # not 100% sure -j1 is needed, but this is a small program anyway.
+rm -f src/*.{d,o}
 make -j1 -C src PROFILE="$SLKCFLAGS"
 
 # no 'make install' target.
 mkdir -p $PKG/usr/bin
 install -s -m0755 bin/* $PKG/usr/bin
+
+# 20250114 bkw: let the file(1) command recognized SAVEd programs. LISTed
+# ones would be a lot more difficult (they're text files and look very
+# similar to BASIC).
+mkdir -p $PKG/etc/file/magic
+cat $CWD/$PRGNAM.magic > $PKG/etc/file/magic/$PRGNAM
 
 # don't need to install build docs.
 rm -f doc/BUILD
@@ -92,7 +121,10 @@ mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a doc/* samples $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
+# 20250114 bkw: doinst.sh and douninst.sh are identical, this is not an error.
 mkdir -p $PKG/install
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/doinst.sh > $PKG/install/douninst.sh
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
