@@ -29,5 +29,6 @@ done
 
 config etc/logrotate.d/lighttpd.new
 config etc/rc.d/rc.lighttpd.new
+config etc/lighttpd/lighttpd.annotated.conf.new
 config etc/lighttpd/lighttpd.conf.new
 config etc/lighttpd/modules.conf.new
