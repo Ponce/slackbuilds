@@ -1,0 +1,118 @@
+#!/bin/bash
+
+# Slackware build script for kitscenarist
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Notes:
+
+# 1. You would think this would be a problem:
+#   sh: line 1: ./configure: Permission denied
+# ...in the hunspell directory. And that you'd fix it like:
+#   chmod 755 src/libs/hunspell/configure
+# ...but doing that actually causes the build to fail.
+# So that's not an error. And in fact libhunspell.a does get
+# built and (statically) linked to the Scenarist binary,
+# without the +x.
+
+# 2. There's a *very minor* runtime issue: on exit (when closing the window),
+# it fades its window out rather than just closing it. Which doesn't quite
+# work, you get these on stderr:
+# QBasicTimer::start: QBasicTimer can only be used with threads started with QThread
+# I'm not going to attempt to patch it; it doesn't hurt anything. The
+# issues seems to be that the app was developed for older Qt5 versions,
+# like 5.6 ot so, and ours is newer (5.15, in Slackware 15.0).
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=kitscenarist
+SRCNAM=KITScenarist
+CORENAM=KITScenaristCore
+COREVER=${COREVER:-a777107fb3058887630ad13a3e85a3118e42a51e}
+VERSION=${VERSION:-0.7.2.rc15}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# no need for LIBDIRSUFFIX or SLKCFLAGS, qmake uses the flags Qt was
+# built with already.
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+tar xvfC $CWD/$CORENAM-$COREVER.tar.gz \
+  $SRCNAM-$VERSION/src/bin/scenarist-core \
+  --strip-components=1
+cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L . \
+  '(' -type f -a -exec chmod 644 {} + ')' -o \
+  '(' -type d -a -exec chmod 755 {} + ')'
+
+cd src
+qmake-qt5
+make
+cd -
+
+mkdir -p $PKG/usr/{bin,share/{applications,mime/packages}}
+install -s -m0755 -oroot -groot \
+  build/Release/bin/scenarist-desktop/Scenarist \
+  $PKG/usr/bin/kitscenarist
+
+# symlink to the name used by the debian/ubuntu package, in case
+# someone's used to launching it from the shell.
+ln -s kitscenarist $PKG/usr/bin/scenarist
+
+# .desktop file made from scenarist.desktop and scenarist-ru.desktop
+# in the source.
+install -m0644 -oroot -groot \
+  $CWD/$PRGNAM.desktop \
+  $PKG/usr/share/applications/$PRGNAM.desktop
+
+# mime xml file comes from the debian binary package, it's not in the src.
+cat $CWD/kitscenarist.xml > $PKG/usr/share/mime/packages/kitscenarist.xml
+
+ICON=build/Ubuntu/scenarist_amd64/usr/share/pixmaps/scenarist.png
+for px in 16 22 24 32 48 64 128 256 512; do
+  sz=${px}x${px}
+  dir=$PKG/usr/share/icons/hicolor/$sz/apps
+  mkdir -p $dir
+  convert -resize $px $ICON $dir/$PRGNAM.png
+done
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a LICENSE* README* $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
