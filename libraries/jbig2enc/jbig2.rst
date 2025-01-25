@@ -2,7 +2,7 @@
 ..   rst2man.py jbig2.rst > jbig2.1
 .. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 0.28
+.. |version| replace:: 0.30
 .. |date| date::
 
 =====
@@ -164,7 +164,7 @@ by B. Watson, and is licensed under the WTFPL.
 SEE ALSO
 ========
 
-**pdf.py(1)**, **jbig2dec(1)**
+**jbig2topdf.py(1)**, **jbig2dec(1)**
 
 Full documentation for jbig2 and jbig2enc:
   /usr/doc/jbig2enc-|version|/jbig2enc.html
