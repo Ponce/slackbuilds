@@ -2,7 +2,7 @@
 
 # Slackware build script for yubioath-desktop
 
-# Copyright 2020 Spycrowsoft The Netherlands
+# Copyright 2023-2025 Vladislav 'fsLeg' Borisov, Moscow, Russia
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,14 +22,11 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# 20240720 bkw: Modified by SlackBuilds.org:
-# Do not write to $CWD. Not only was there a chmod +x, but mounting
-# the file loopback without "-o ro" was updating its timestamp.
-
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=yubioath-desktop
-VERSION=${VERSION:-5.1.0}
+TARNAM=yubico-authenticator
+VERSION=${VERSION:-7.1.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -42,6 +39,19 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
+if [ "x86_64" != "${ARCH}" ]; then
+  echo
+  echo "*************************************************************"
+  echo "It seems you are not running a x86_64 system. Yubico"
+  echo "Authenticator only supports x86_64 architecture."
+  echo "*************************************************************"
+  echo
+  exit 1
+fi
+
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -51,52 +61,47 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
-fi
+# This is just a repackaging of a pre-built binary, no compilation is needed
 
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
 
-mkdir -p $PRGNAM-$VERSION/mnt
-cd $PRGNAM-$VERSION
-cp $CWD/$PRGNAM-$VERSION-linux.AppImage .
-chmod +x $PRGNAM-$VERSION-linux.AppImage
+tar xvf $CWD/$TARNAM-$VERSION-linux.tar.gz
+cd $TARNAM-$VERSION-linux
+mkdir -p $PKG/opt/$PRGNAM
+cp -aR data/ helper/ lib/ linux_support/ authenticator $PKG/opt/$PRGNAM/
+mkdir -p $PKG/usr/share/applications
+sed -e "s|@EXEC_PATH|/opt/${PRGNAM}|g" \
+  < linux_support/com.yubico.authenticator.desktop \
+  > $PKG/usr/share/applications/com.yubico.authenticator.desktop
+mkdir -p $PKG/usr/bin
+cat << EOF > $PKG/usr/bin/authenticator
+#!/bin/sh
+/opt/${PRGNAM}/authenticator $@
+EOF
+chmod 755 $PKG/usr/bin/authenticator
+chown -R root:root $PKG
+find -L $PKG \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+ -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Get appimage mount offset
-MOUNT_OFFSET=$( ./$PRGNAM-$VERSION-linux.AppImage --appimage-offset )
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs chmod 755 || true
 
-# Mount the appimage so we can extract the .desktop and icon files.
-mount -o ro,loop -o offset=$MOUNT_OFFSET $CWD/$PRGNAM-$VERSION-linux.AppImage $TMP/$PRGNAM-$VERSION/mnt
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-# Add .desktop and icon to KDE/XFCE-menus
-mkdir -p $PKG/usr/share/applications/ $PKG/usr/share/pixmaps/
-cp mnt/com.yubico.yubioath.desktop ${PKG}/usr/share/applications/${PRGNAM}.desktop
-cp mnt/com.yubico.yubioath.svg ${PKG}/usr/share/pixmaps/com.yubico.yubioath.svg
+# Copy program license into the package
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+install -m 644 README.adoc $PKG/usr/doc/$PRGNAM-$VERSION/
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
-# Unmount appimage
-umount mnt
-cd $TMP
-rm -rf $TMP/$PRGNAM-$VERSION
-
-# Copy appimage to package-location
-mkdir -p $PKG/usr/bin/
-install -m0755 -oroot -groot $CWD/$PRGNAM-$VERSION-linux.AppImage $PKG/usr/bin/$PRGNAM
-
+# Copy the slack-desc into ./install
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
