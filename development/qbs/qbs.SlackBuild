@@ -2,8 +2,8 @@
 
 # Slackware build script for Qbs
 
+# Copyright 2025 Andrzej Telszewski, Koszalin
 # Copyright 2014-2017 Nikos Giotis <nikos.giotis@mail.com>
-# Copyright 2020 Andrzej Telszewski, Szczecin
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -26,7 +26,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=qbs
-VERSION=${VERSION:-1.16.0}
+VERSION=${VERSION:-2.5.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -39,9 +39,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -60,12 +57,15 @@ elif [ "$ARCH" = "i686" ]; then
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
+elif [ "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
 
-set -e
+set -eu
 
 if which qbs &>/dev/null; then
   echo "Found \"qbs\" in PATH."
@@ -86,29 +86,24 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 chmod -R a-st,u+rwX,go-w+rX .
 
-# Fix for missing *projectgeneratormanager.h*.
+cmake -S . -B build                           \
+  -GNinja                                     \
+  -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS"         \
+  -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS"       \
+  -DCMAKE_INSTALL_PREFIX=/usr                 \
+  -DQBS_LIB_INSTALL_DIR=lib$LIBDIRSUFFIX      \
+  -DQBS_PLUGINS_INSTALL_BASE=lib$LIBDIRSUFFIX \
+  -DQBS_DOC_INSTALL_DIR=doc/$PRGNAM-$VERSION  \
+  -DCMAKE_BUILD_TYPE=Release                  \
+  -DQBS_ENABLE_RPATH=OFF                      \
+  -DWITH_TESTS=OFF                            \
+  -DQBS_INSTALL_QCH_DOCS=ON                   \
+  -DQBS_INSTALL_MAN_PAGE=ON                   \
+  -DQBS_INSTALL_HTML_DOCS=ON                  \
+  -Wno-dev
 
-patch -p0 < $CWD/corelib-tools.pri.patch
-
-# Adjust docs location.
-
-sed -i "s|share/doc/qbs|doc/qbs-$VERSION|g" doc/doc.pri
-
-qmake-qt5 qbs.pro                         \
-  QMAKE_CXXFLAGS="$SLKCFLAGS"             \
-  QBS_INSTALL_PREFIX=/usr                 \
-  QBS_LIBRARY_DIRNAME=lib$LIBDIRSUFFIX    \
-  CONFIG+=qbs_enable_project_file_updates
-
-make
-make install INSTALL_ROOT=$PKG
-
-if which qdoc-qt5 &>/dev/null; then
-  make docs
-  make install_docs INSTALL_ROOT=$PKG
-else
-  echo "qdoc-qt5 not found in PATH.  Docs won't be built nor installed."
-fi
+cmake --build build
+cmake --install build --prefix=$PKG/usr
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -120,7 +115,7 @@ rm -r $PKG/usr/share/man
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a CONTRIBUTING.md LGPL_EXCEPTION.txt LICENSE.GPL3-EXCEPT \
-  LICENSE.{LGPLv21,LGPLv3} README.md $PKG/usr/doc/$PRGNAM-$VERSION
+  LICENSE.{LGPLv21,LGPLv3} README.md RELEASE.md $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/usr/share/applications
@@ -128,7 +123,7 @@ cat $CWD/qbs-config-ui.desktop > $PKG/usr/share/applications/qbs-config-ui.deskt
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-cat $CWD/doinst.sh  > $PKG/install/doinst.sh
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
