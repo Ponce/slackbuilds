@@ -25,7 +25,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=asterisk
-VERSION=${VERSION:-16.15.0}
+VERSION=${VERSION:-22.1.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -94,7 +94,7 @@ cd $TMP
 # configure script.
 CONFIGURE_OPTS=
 
-if [ "${VM_IMAP:-no}" != "no" ] && [ "${VM_ODBC:-no}" = "no" ]; then
+build_imap () {
   tar xvf $CWD/imap.tar.Z
   ( cd imap-2007f
     chown -R root:root .
@@ -110,16 +110,36 @@ if [ "${VM_IMAP:-no}" != "no" ] && [ "${VM_ODBC:-no}" = "no" ]; then
       make slx EXTRACFLAGS="-I/usr/include/openssl"
     fi
   )
+}
+
+VM_IMAP=${VM_IMAP:-no}
+if [ "${VM_IMAP}" != "no" ]; then
+  build_imap
   CONFIGURE_OPTS="--with-imap=$IMAPDIR"
 fi
 
-if [ "${JANSSON:-yes}" = "yes" ]; then
+VM_ODBC=${VM_ODBC:-no}
+if [ "${VM_ODBC}" != "no" ]; then
+  if [ "${USE_UNIXODBC:-yes}" = "yes" ]; then
+    CONFIGURE_OPTS="--with-unixodbc"
+  else
+    CONFIGURE_OPTS="--with-iodbc"
+  fi
+fi
+
+if [ "${JANSSON:-yes}" != "no" ]; then
   CONFIGURE_OPTS="${CONFIGURE_OPTS} --with-jansson-bundled"
 else
   CONFIGURE_OPTS="${CONFIGURE_OPTS} --without-jansson-bundled"
 fi
 
-if [ "${PJSIP:-no}" != "no" ]; then
+if [ "${LIBJWT:-yes}" != "no" ]; then
+  CONFIGURE_OPTS="${CONFIGURE_OPTS} --with-libjwt-bundled"
+else
+  CONFIGURE_OPTS="${CONFIGURE_OPTS} --without-libjwt-bundled"
+fi
+
+if [ "${PJSIP:-yes}" != "no" ]; then
   CONFIGURE_OPTS="${CONFIGURE_OPTS} --with-pjproject-bundled"
 else
   CONFIGURE_OPTS="${CONFIGURE_OPTS} --without-pjproject-bundled"
@@ -128,8 +148,8 @@ fi
 # The configure script will download additional files from the internet.
 # Make sure the additional files can be found by the configure script
 # before configuring the package.
-cp $CWD/asterisk-core-sounds* $CWD/asterisk-extra-sounds* \
-   $CWD/asterisk-moh-opsound* $CWD/jansson-*.tar.bz2 $CWD/pjproject-*.tar.bz2 \
+cp $CWD/asterisk-core-sounds* $CWD/asterisk-extra-sounds* $CWD/asterisk-moh-opsound* \
+   $CWD/jansson-*.tar.bz2 $CWD/libjwt-*.tar.gz $CWD/pjproject-*.tar.bz2 \
    $CACHEDIR
 
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
@@ -174,6 +194,7 @@ menuselect/menuselect \
   --enable CORE-SOUNDS-${LANGUAGE}-ALAW \
   --enable CORE-SOUNDS-${LANGUAGE}-G729 \
   --enable CORE-SOUNDS-${LANGUAGE}-G722 \
+  --enable app_voicemail \
   menuselect.makeopts
 
 if [ "${MOH:-no}" != "no" ]; then
@@ -200,17 +221,19 @@ if [ "${SOUNDS_EXTRA:-no}" != "no" ]; then
     menuselect.makeopts
 fi
 
-if [ "${VM_ODBC:-no}" != "no" ]; then
+if [ "${VM_IMAP}" != "no" ]; then
   menuselect/menuselect \
-    --enable ODBC_STORAGE \
-    menuselect.makeopts
-elif [ "${VM_IMAP:-no}" != "no" ]; then
-  menuselect/menuselect \
-    --enable IMAP_STORAGE \
+    --enable app_voicemail_imap \
     menuselect.makeopts
 fi
 
-if [ "${MEETME:-no}" != "no" ]; then
+if [ "${VM_ODBC}" != "no" ]; then
+  menuselect/menuselect \
+    --enable app_voicemail_odbc \
+    menuselect.makeopts
+fi
+
+if [ "${MEETME:-yes}" != "no" ]; then
   menuselect/menuselect \
     --enable app_meetme \
     menuselect.makeopts
@@ -219,6 +242,13 @@ fi
 if [ "${G711_NEW:-no}" != "no" ]; then
   menuselect/menuselect \
     --enable G711_NEW_ALGORITHM \
+    menuselect.makeopts
+fi
+
+if [ "${G711_REDUCED_BRANCHING:-no}" != "no" ]; then
+  menuselect/menuselect \
+    --enable G711_NEW_ALGORITHM \
+    --enable G711_REDUCED_BRANCHING \
     menuselect.makeopts
 fi
 
@@ -238,7 +268,7 @@ mv $PKG/etc/logrotate.d/asterisk $PKG/etc/logrotate.d/asterisk.new
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/sample_confs
 mv $PKG/etc/asterisk/* $PKG/usr/doc/$PRGNAM-$VERSION/sample_confs/
-cp -a CHANGES COPYING CREDITS ChangeLog LICENSE README* UPGRADE* doc/ contrib/ast-db-manage \
+cp -ar CHANGES.md COPYING CREDITS ChangeLogs LICENSE README* doc/ contrib/ast-db-manage \
   $PKG/usr/doc/$PRGNAM-$VERSION/
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
@@ -246,7 +276,7 @@ cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 # files don't make sense, but recent changes in the module autoloader
 # will require empty files to be in place for some items to work
 for i in \
-  asterisk codecs extensions iax indications musiconhold sip smdi modules voicemail ;
+  asterisk codecs extensions iax indications modules musiconhold smdi voicemail ;
   do
   cat $PKG/usr/doc/$PRGNAM-$VERSION/sample_confs/${i}.conf > \
     $PKG/etc/asterisk/${i}.conf.new ;
