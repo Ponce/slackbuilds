@@ -1,3 +1,6 @@
+perl-Test-Warnings
+perl-file-slurper
+perl-io-uncompress-brotli
 yt-dlp
 perl-html-tagset
 perl-lwp-mediatypes
