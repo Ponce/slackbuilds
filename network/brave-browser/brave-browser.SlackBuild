@@ -26,7 +26,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=brave-browser
-VERSION=${VERSION:-1.74.51}
+PRCNAM=amd64
+VERSION=${VERSION:-1.75.175}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -40,8 +41,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
 # could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
@@ -64,9 +63,13 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
+
+ar x $CWD/$PRGNAM"_"$VERSION"_"$PRCNAM.deb data.tar.xz
 mkdir -p $PRGNAM-$VERSION
+tar -xvf data.tar.xz -C $PRGNAM-$VERSION/
+rm data.tar.xz
+
 cd $PRGNAM-$VERSION
-rpm2cpio < $CWD/${PRGNAM}-${VERSION}-${DEBBUILD}.${ARCH}.rpm | cpio -imdv
 chown -R root:root .
 find -L . \
 \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -74,31 +77,46 @@ find -L . \
 \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
 -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# brave has its own symlinks from opt to bin
-cp -ap {opt,usr} $PKG/
+cp -apr * $PKG/
 
 # Slackware doesn't ship GNOME desktop
 rm -rf $PKG/usr/share/gnome-control-center
 
-# move icon into place
-mkdir -p $PKG/usr/share/pixmaps
-cp -a opt/brave.com/brave/product_logo_32.xpm \
-   $PKG/usr/share/pixmaps/brave-browser.xpm
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
 # move man pages into place
 mv $PKG/usr/share/man $PKG/usr/man
 
+# move icon into place
+mkdir -p $PKG/usr/share/pixmaps
+cp -a \
+   opt/brave.com/brave/product_logo_32.xpm \
+   $PKG/usr/share/pixmaps/brave-browser.xpm
+
+# Strip binaries and libraries - this can be done with 'make install-strip'
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Compress man pages
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+# Copy program documentation into the package
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a $PKG/opt/brave.com/brave/LICENSE \
+cp -a \
+   $PKG/opt/brave.com/brave/LICENSE \
    $PKG/usr/doc/$PRGNAM-$VERSION/
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+# put the doc folder contents in the right place
+mv $PKG/usr/share/doc/$PRGNAM/* $PKG/usr/doc/$PRGNAM-$VERSION/
+rm -r $PKG/usr/share/doc
+
+# move menu pages into place
+mv $PKG/usr/share/menu $PKG/usr/doc/$PRGNAM-$VERSION/
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
+# Make the package; be sure to leave it in $OUTPUT
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
