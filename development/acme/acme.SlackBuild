@@ -1,0 +1,109 @@
+#!/bin/bash
+
+# Slackware build script for acme
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Note: the latest release is from 2020. There's no source tarball for
+# it (only binaries for Win and Mac). I had to create my own source
+# tarball from the SVN repo, so I went ahead and packaged the latest
+# SVN.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=acme
+VERSION=${VERSION:-0.97+20250126_r434}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod -h 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod -h 644 {} +
+
+# fix warnings that probably actually cause problems on 64-bit.
+[ -n "$LIBDIRSUFFIX" ] && \
+  sed -i '/^typedef.*intval_t/s,\<int\>,long,' src/config.h
+
+# look in /usr/share/acme for the asm includes, if ACME not set
+# in the environment.
+patch -p1 < $CWD/default_lib_path.diff
+
+make -C src CFLAGS="$SLKCFLAGS"
+make -C contrib/toacme/src CFLAGS="$SLKCFLAGS"
+mkdir -p $PKG/usr/bin
+install -s -m0755 contrib/toacme/src/toacme src/$PRGNAM $PKG/usr/bin
+
+# this says it converts "masm" syntax to acme, but I don't know what "masm"
+# it means (definitely *not* Microsoft's MASM, which doesn't support 6502).
+install -m0755 contrib/toacme/masm2acme.py $PKG/usr/bin
+
+# man pages written by SlackBuild author (mostly copy/paste from docs).
+mkdir -p $PKG/usr/man/man1
+for i in acme toacme; do
+  gzip -9c < $CWD/$i.1 > $PKG/usr/man/man1/$i.1.gz
+done
+
+# asm includes (we patched it to look for them here, above).
+SHARE=$PKG/usr/share/acme
+mkdir -p $SHARE
+cp -a ACME_Lib $SHARE
+
+# syntax support for a couple of editors. untested.
+cp -a contrib/{joe_syntax,ultraedit_wordfile} $SHARE
+
+# this doesn't need to be in the package.
+rm -f contrib/toacme/docs/INSTALL
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC/toacme
+cp -a docs/* examples $PKGDOC
+cp -a contrib/toacme/docs/* $PKGDOC/toacme
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
