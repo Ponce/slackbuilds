@@ -1,0 +1,136 @@
+#!/bin/bash
+
+# Slackware build script for STM32CubeProgrammer (STM32CubeProg)
+
+# Copyright 2024 Andrzej Telszewski, Koszalin
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=stm32cubeprog
+VERSION=${VERSION:-2.18.0}
+SRCNAM=en.stm32cubeprg-lin-v$(echo $VERSION | tr . -).zip
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -eu
+
+if [ "${ARCH}" != x86_64 ]; then
+  echo "error: Only x86_64 is supported, exiting."
+  exit 1
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+
+# NOTE:
+# Heavily based on https://aur.archlinux.org/packages/stm32cubeprog
+
+rm -rf $PRGNAM-$VERSION
+mkdir $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+
+unzip $CWD/$SRCNAM
+
+javac --release 8 -cp SetupSTM32CubeProgrammer-${VERSION}.exe -d . \
+  $CWD/patches/AnalyticsPanelsConsoleHelper.java                   \
+  $CWD/patches/CheckedHelloPorgrammerPanelConsoleHelper.java       \
+  $CWD/patches/TargetProgrammerPanelConsoleHelper.java             \
+  $CWD/patches/FinishProgrammerPanelConsoleHelper.java
+
+7z a SetupSTM32CubeProgrammer-${VERSION}.exe                         \
+  com/st/CustomPanels/AnalyticsPanelsConsoleHelper.class             \
+  com/st/CustomPanels/CheckedHelloPorgrammerPanelConsoleHelper.class \
+  com/st/CustomPanels/TargetProgrammerPanelConsoleHelper.class       \
+  com/st/CustomPanels/FinishProgrammerPanelConsoleHelper.class
+
+mkdir -p $PKG/opt/$PRGNAM
+
+java -DINSTALL_PATH=$PKG/opt/$PRGNAM \
+  -jar ./SetupSTM32CubeProgrammer-${VERSION}.exe -options-system
+
+rm -rf $PKG/opt/$PRGNAM/uninstaller
+
+chown -R root:root $PKG/opt/$PRGNAM
+chmod -R a-st,u+rwX,go-w+rX $PKG/opt/$PRGNAM
+
+# NOTE:
+#
+# Do _not_ strip binaries/libraries. Some break because of stripping,
+# and some are for STM32 ARM architecture.
+
+mkdir -p $PKG/usr/bin
+
+for _cmd in STM32_Programmer_CLI    \
+            STM32_Programmer.sh     \
+            STM32MP_KeyGen_CLI      \
+            STM32MP_SigningTool_CLI \
+            STM32TrustedPackageCreator_CLI; do
+  ln -sf /opt/$PRGNAM/bin/$_cmd $PKG/usr/bin/$_cmd
+done
+
+magick $PKG/opt/stm32cubeprog/util/Programmer.ico -set filename:mysize \
+  "%wx%h" "stm32cubeprog-%[filename:mysize].png"
+magick $PKG/opt/stm32cubeprog/util/STM32TrustedPackageCreator.ico -set filename:mysize \
+  "%wx%h" "stm32cubeprog-trustedpackagecreator-%[filename:mysize].png"
+
+for size in 256 128 64 48 32 24 16; do
+  mkdir -p $PKG/usr/share/icons/hicolor/${size}x${size}/apps
+  mv stm32cubeprog-${size}x${size}.png \
+    $PKG/usr/share/icons/hicolor/${size}x${size}/apps/stm32cubeprog.png
+  mv stm32cubeprog-trustedpackagecreator-${size}x${size}.png \
+    $PKG/usr/share/icons/hicolor/${size}x${size}/apps/stm32cubeprog-trustedpackagecreator.png
+done
+
+mkdir -p $PKG/usr/share/applications
+cat $CWD/stm32cubeprog.desktop > \
+  $PKG/usr/share/applications/stm32cubeprog.desktop
+cat $CWD/stm32cubeprog-trustedpackagecreator.desktop > \
+  $PKG/usr/share/applications/stm32cubeprog-trustedpackagecreator.desktop
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp $PKG/opt/$PRGNAM/doc/{Readme,license}.txt $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
