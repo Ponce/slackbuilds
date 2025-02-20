@@ -1,0 +1,129 @@
+#!/bin/bash
+
+# Slackware build script for STM32CubeIDE
+
+# Copyright 2024 Andrzej Telszewski, Koszalin
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=stm32cubeide
+VERSION=${VERSION:-1.17.0_23558_20241125_2245}
+SRCNAM=st-stm32cubeide_${VERSION}_amd64
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -eu
+
+if [ "${ARCH}" != x86_64 ]; then
+  echo "error: Only x86_64 is supported, exiting."
+  exit 1
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+
+rm -rf $PRGNAM-$VERSION
+mkdir -p $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
+
+unzip $CWD/en.${SRCNAM}.sh.zip
+
+chmod +x ${SRCNAM}.sh
+./${SRCNAM}.sh --noexec --nox11 --nochown --target $(pwd)
+
+mkdir -p $PKG/opt/stm32cubeide
+tar zvxf ${SRCNAM}.tar.gz -C $PKG/opt/stm32cubeide
+
+chown -R root:root $PKG
+chmod -R a-st,u+rwX,go-w+rX $PKG
+
+# NOTE:
+#
+# Do _not_ strip binaries/libraries as some of them are for
+# STM32 ARM architecture.
+
+# Expose ST-LINK GDB Server.
+
+ST_LINK_GDBSERVER=$(cd $PKG; echo opt/stm32cubeide/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.linux64_*/tools/bin/ST-LINK_gdbserver)
+STM32_CUBEPROGRAMMER_DIR=$(cd $PKG; echo opt/stm32cubeide/plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.linux64_*/tools/bin)
+
+gdb_server_found=1
+
+if ! [ -f $PKG/$ST_LINK_GDBSERVER ]; then
+  echo "error: not a file: ${ST_LINK_GDBSERVER}"
+  gdb_server_found=0
+fi
+
+if ! [ -d $PKG/$STM32_CUBEPROGRAMMER_DIR ]; then
+  echo "error: not a dir: ${STM32_CUBEPROGRAMMER_DIR}"
+  gdb_server_found=0
+fi
+
+if [ $gdb_server_found -ne 1 ]; then
+  exit 1
+fi
+
+ST_LINK_GDBSERVER="/"${ST_LINK_GDBSERVER}
+STM32_CUBEPROGRAMMER_DIR="/"${STM32_CUBEPROGRAMMER_DIR}
+
+mkdir -p $PKG/usr/bin
+
+sed -e "s|@ST_LINK_GDBSERVER@|${ST_LINK_GDBSERVER}|g"                 \
+    -e "s|@STM32_CUBEPROGRAMMER_DIR@|${STM32_CUBEPROGRAMMER_DIR}|g"   \
+  $CWD/ST-LINK_gdbserver.in                                           \
+  > $PKG/usr/bin/ST-LINK_gdbserver
+chmod +x $PKG/usr/bin/ST-LINK_gdbserver
+
+chmod 0644 $PKG/opt/stm32cubeide/icon.xpm
+mkdir -p $PKG/usr/share/pixmaps
+cp -a $PKG/opt/stm32cubeide/icon.xpm $PKG/usr/share/pixmaps/stm32cubeide.xpm
+
+mkdir -p $PKG/usr/share/applications
+cat $CWD/stm32cubeide.desktop > $PKG/usr/share/applications/stm32cubeide.desktop
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
