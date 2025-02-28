@@ -8,8 +8,7 @@ config() {
   fi
 }
 
-config etc/sun/sun.toml.new
-config etc/sun/repositories.toml.new
+config etc/sun/sun.conf.new
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
