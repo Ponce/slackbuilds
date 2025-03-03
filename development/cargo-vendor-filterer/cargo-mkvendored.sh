@@ -51,7 +51,7 @@ source ./sbvars
 # if no SRCNAM in slackbuild set to PRGNAM
 SRCNAM=${SRCNAM:-$PRGNAM}
 
-tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+tar xvf $CWD/$SRCNAM-$VERSION.tar.?z
 cd $SRCNAM-$VERSION/$VSDIR || exit 1
 
 if [ ! -e "Cargo.toml" ]; then
