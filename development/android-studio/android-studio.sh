@@ -1,3 +1,5 @@
 #!/bin/bash
-cd ${HOME}
-/opt/android-studio/bin/studio.sh $@
+unset _JAVA_OPTIONS
+unset _JAVA_AWT_WM_NONREPARENTING
+cd "${HOME}"
+/opt/android-studio/bin/studio "$@"
