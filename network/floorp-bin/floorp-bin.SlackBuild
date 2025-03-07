@@ -2,6 +2,7 @@
 
 # Slackware build script for floorp-bin
 
+# Copyright 2025 Dimitris Zlatanidis Orestiada, Greece
 # Copyright 2024 Hunter Ellett <hunter2k1@disroot.org>
 # All rights reserved.
 #
@@ -25,7 +26,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=floorp-bin
-VERSION=${VERSION:-11.11.1}
+SRCNAM=floorp
+VERSION=${VERSION:-11.24.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -50,13 +52,8 @@ OUTPUT=${OUTPUT:-/tmp}
 
 ARCH="${ARCH:-$(uname -m)}"
 if [ "$ARCH" != "x86_64" ]; then
-	echo "$ARCH is not supported for $PRGNAM-$VERSION."
-	exit 1;
-fi
-
-if [ -n "${PRINT_PACKAGE_NAME}" ]; then
-	echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
-	exit 0
+  echo "$ARCH is not supported for $PRGNAM-$VERSION."
+  exit 1;
 fi
 
 set -e
@@ -65,18 +62,55 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-rm -rf floorp-$VERSION-linux-x86_64
-tar xvf $CWD/floorp-$VERSION.linux-x86_64.tar.?z*
-cd floorp
+mkdir -p $PRGNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.linux-x86_64.tar.bz2 -C $PRGNAM-$VERSION --strip-components=1
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-mkdir -p $PKG/$INSTALLDIR/floorp
-mkdir -p $PKG/usr/share/{applications,pixmaps}
+mkdir -p $PKG/$INSTALLDIR/$PRGNAM
+cp -rf * $PKG/$INSTALLDIR/$PRGNAM
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Install icons
+for i in 16 32 48 64 128; do
+  (
+   mkdir -p $PKG/usr/share/icons/hicolor/${i}x${i}/apps
+   ln -Ts $INSTALLDIR/$PRGNAM/browser/chrome/icons/default/default${i}.png \
+     $PKG/usr/share/icons/hicolor/${i}x${i}/apps/$SRCNAM.png
+  )
+done
+
+# Disable automatic updates and update notifications.
+mkdir -p $PKG/$INSTALLDIR/$PRGNAM/distribution/
+cat > $PKG/$INSTALLDIR/$PRGNAM/distribution/policies.json << END
+{
+  "policies": {
+    "DisableAppUpdate": true
+  }
+}
+END
+
+# Create soft link for launchers.
 mkdir -p $PKG/usr/bin
-mkdir -p $PKG/$INSTALLDIR/floorp/distribution
-cp $CWD/floorp.desktop $PKG/usr/share/applications
-mv * $PKG/$INSTALLDIR/floorp
-cp $PKG/$INSTALLDIR/floorp/browser/chrome/icons/default/default128.png $PKG/usr/share/pixmaps/floorp.png
-chmod +x $PKG/$INSTALLDIR/floorp/floorp
+(
+ cd $PKG/usr/bin
+ ln -sf /$INSTALLDIR/$PRGNAM/$PRGNAM $PRGNAM
+ ln -sf /$INSTALLDIR/$PRGNAM/$SRCNAM $SRCNAM
+)
+
+# Install .desktop file and icon.
+mkdir -p $PKG/usr/share/applications
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+mkdir -p $PKG/usr/share/pixmaps
+install -D -m0644 browser/chrome/icons/default/default128.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
@@ -86,26 +120,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-
-# Launch Floorp from the terminal
-install -Dm755 /dev/stdin $PKG/usr/bin/floorp << EOF
-#!/bin/sh
-#
-# Shell script to start the Floorp browser.
-#
-
-# Start Floorp:
-exec $INSTALLDIR/floorp/floorp "\$@"
-EOF
-
-# Disable auto updating
-install -Dvm644 /dev/stdin $PKG/$INSTALLDIR/floorp/distribution/policies.json << EOF
-{
-  "policies": {
-    "DisableAppUpdate": true
-  }
-}
-EOF
-
-# Make package
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
