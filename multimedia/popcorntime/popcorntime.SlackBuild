@@ -2,7 +2,7 @@
 
 # Slackware build script for popcorntime
 
-# Copyright 2015 Matthew Kuzminski
+# Copyright 2025 Vladislav 'fsleg' Borisov, Moscow, Russia
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -11,22 +11,22 @@
 # 1. Redistributions of this script must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 #
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
-# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
-# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
-PRGNAM='popcorntime'
-SRCNAM='Popcorn-Time'
-VERSION=${VERSION:-0.3.10}
+PRGNAM=popcorntime
+TARNAM=popcorn-desktop
+VERSION=${VERSION:-0.5.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -36,7 +36,6 @@ if [ -z "$ARCH" ]; then
     i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
-
   esac
 fi
 
@@ -54,16 +53,22 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
+  BITS="32"
+  PLATFORM="ia32"
+  NWVER="0.44.5"
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
+  BITS="32"
+  PLATFORM="ia32"
+  NWVER="0.44.5"
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
+  BITS="64"
+  PLATFORM="x64"
+  NWVER="0.86.0"
 else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
+  echo "Only x86 and x86_64 architectures are supported."
+  exit 1
 fi
 
 set -e
@@ -71,14 +76,15 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-mkdir -p $PRGNAM-$VERSION
-cd $PRGNAM-$VERSION
-if [ "$ARCH" = "x86_64" ]; then
-  tar xJvf $CWD/$SRCNAM-$VERSION-Linux-64.tar.xz
-else
-  tar xJvf $CWD/$SRCNAM-$VERSION-Linux-32.tar.xz
-fi
+rm -rf $TARNAM-$VERSION
+tar xvf $CWD/$TARNAM-$VERSION.tar.gz
+cd $TARNAM-$VERSION
+
+# Unpack vendored sources
+tar xfv $CWD/$PRGNAM-$VERSION-vendored-sources.tar
+mkdir -p cache/$NWVER-sdk
+tar xf $CWD/nwjs-sdk-v$NWVER-linux-$PLATFORM.tar.gz -C cache/$NWVER-sdk
+mv cache/$NWVER-sdk/nwjs-sdk-v$NWVER-linux-$PLATFORM cache/$NWVER-sdk/linux$BITS
 
 chown -R root:root .
 find -L . \
@@ -87,21 +93,56 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-mkdir -p "$PKG/usr/bin" "$PKG/usr/share/applications/" "$PKG/usr/share/${PRGNAM}"
+# Fix libatomic.so copying
+# https://aur.archlinux.org/cgit/aur.git/tree/copy-libatomic_fixes.patch?h=popcorntime
+patch -p1 < $CWD/copy-libatomic_fixes.patch
 
-install -dm755 "${PKG}/opt/share/${PRGNAM}"
-install -dm755 "${PKG}/usr/bin"
+# Use a proper nwjs version
+sed -i "s|\(const defaultNwVersion = '\)[0-9.]\+|\1${NWVER}|" gulpfile.js
 
-cp -a ./* "${PKG}/usr/share/${PRGNAM}/"
+YARN_YARN_OFFLINE_MIRROR="./vendor" \
+YARN_CACHE_FOLDER="./cache" \
+npm_config_cache="./cache" \
+npm_config_nodedir="/usr" \
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+yarn install --ignore-engines --frozen-lockfile --offline
 
-ln -s "/usr/share/${PRGNAM}/Popcorn-Time" "${PKG}/usr/bin/${PRGNAM}"
+YARN_CACHE_FOLDER="./cache" \
+npm_config_cache="./cache" \
+yarn build --no-update-notifier
 
-install -Dm644 "$CWD/popcorntime.desktop" "$PKG/usr/share/applications/popcorntime.desktop"
-install -Dm644 "$CWD/popcorntime.png" "$PKG/usr/share/pixmaps/popcorntime.png"
+# Fix permissions
+find build/Popcorn-Time/linux$BITS -type f -perm -u+r -exec chmod a+r {} \;
+find build/Popcorn-Time/linux$BITS -type f -perm -u+x -exec chmod a+x {} \;
+find build/Popcorn-Time/linux$BITS -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs chmod a+x 2> /dev/null || true
+
+# Move binaries
+mkdir -p $PKG/opt
+cp -aR build/Popcorn-Time/linux$BITS $PKG/opt/$PRGNAM
+
+# Strip binaries and libraries
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a build/Popcorn-Time/linux$BITS/{CHANGELOG.md,LICENSE.txt,README.md,credits.html} $PKG/usr/doc/$PRGNAM-$VERSION/
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
+# Copy .desktop file and make icons for it
+mkdir -p $PKG/usr/share/applications
+install -Dm644 dist/linux/appimage/Popcorn-Time.desktop $PKG/usr/share/applications/
+for geometry in 16x16 24x24 32x32 48x48 64x64 96x96 128x128 256x256; do
+  mkdir -p $PKG/usr/share/icons/hicolor/$geometry/apps
+  magick dist/linux/appimage/Popcorn-Time.png -resize $geometry $PKG/usr/share/icons/hicolor/$geometry/apps/Popcorn-Time.png
+done
+
+# Make a symlink
+mkdir -p $PKG/usr/bin
+ln -s /opt/$PRGNAM/Popcorn-Time $PKG/usr/bin/
+
+# Copy the slack-desc into ./install
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
