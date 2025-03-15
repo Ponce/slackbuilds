@@ -25,8 +25,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=yadifa
-VERSION=${VERSION:-2.5.3}
-VSUFFIX=${VSUFFIX:-10333}
+VERSION=${VERSION:-3.0.2}
+VSUFFIX=${VSUFFIX:-11672}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -66,6 +66,7 @@ fi
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
+USESTATIC=${USESTATIC:-no}
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
@@ -74,22 +75,25 @@ elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
+  # -fPIC and static build are incompatible, so don't even try
+  if [ "$USESTATIC" = "yes" ]; then
+    SLKCFLAGS="-O2"
+  else
+    SLKCFLAGS="-O2 -fPIC"
+  fi
   LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
 
-USESTATIC=${USESTATIC:-no}
 if [ "$USESTATIC" = "yes" ]; then
-  SHARED=no
-  STATIC=yes
+  SHARED=OFF
+  STATIC=ON
 else
-  SHARED=yes
-  STATIC=no
+  SHARED=ON
+  STATIC=OFF
 fi
-
 
 set -e
 
@@ -106,23 +110,36 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-./configure \
-  --prefix=/usr \
-  --sysconfdir=/etc/yadifa \
-  --libdir=/usr/lib/yadifa \
-  --localstatedir=/var/lib/yadifa \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --with-logdir=/var/log/yadifa \
-  --enable-silent-rules \
-  --enable-shared=$SHARED \
-  --enable-static=$STATIC \
-  --enable-messages \
-  --enable-ctrl \
-  --build=$ARCH-slackware-linux
+patch --verbose -p1 -i ${CWD}/01_yadifa-3.0.2-cmake_version.patch
+patch --verbose -p1 -i ${CWD}/02_yadifa-3.0.2_var_layout.patch
+patch --verbose -p1 -i ${CWD}/03-yadifa-3.0.2-disable_broken_test.patch
+patch --verbose -p1 -i ${CWD}/04-yadifa-3.0.2-fix_cmake_installation_procedure.patch
+patch --verbose -p1 -i ${CWD}/05-yadifa-3.0.2-remove_duplicate_declaration_in_dnscore_h.patch
 
-make
-make install DESTDIR=$PKG
+mkdir build
+cmake -B build -S . -G "Ninja" \
+  -DCMAKE_C_FLAGS="$SLKCFLAGS" \
+  -DBUILD_STATIC_LIBS=$STATIC \
+  -DBUILD_SHARED_LIBS=$SHARED \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_INSTALL_PREFIX=/usr \
+  -DCMAKE_INSTALL_SYSCONFDIR=/etc/yadifa \
+  -DSYSCONFDIR=/etc/yadifa \
+  -DCMAKE_INSTALL_LIBDIR=/usr/lib${LIBDIRSUFFIX} \
+  -DCMAKE_INSTALL_MANDIR=/usr/man \
+  -DCMAKE_INSTALL_DOCDIR=/usr/doc/$PRGNAM-$VERSION \
+  -DLOCALSTATEDIR=/var \
+  -DRUNSTATEDIR=/run \
+  -DDATAROOTDIR=/var/lib \
+  -DDATADIR=/var/lib/yadifa \
+  -DCMAKE_INSTALL_LOGDIR=/var/log/yadifa \
+  -DCMAKE_INSTALL_FULL_LOGDIR=/var/log/yadifa \
+  -DLOGDIR=/var/log/yadifa \
+  -DCTRL=ON \
+  -DZALLOC=OFF
+
+cmake --build build
+DESTDIR="$PKG" cmake --install build --strip
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
