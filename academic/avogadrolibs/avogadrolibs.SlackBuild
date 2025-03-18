@@ -2,7 +2,7 @@
 
 # Slackware build script for avogadrolibs
 
-# Copyright 2020-2022 Giancarlo Dessì, Cagliari, IT
+# Copyright 2020-2025 Giancarlo Dessì, Cagliari, IT
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,13 +25,12 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=avogadrolibs
-VERSION=${VERSION:-1.97.0}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-1.100.0}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-MVERSION=${MVERSION:-1.0.0}
-CVERSION=${CVERSION:-1.0.1}
-AVERSION=${AVERSION:-1.97.0}
+AVERSION=${AVERSION:-1.98.0}
+FVERSION=${FVERSION:-1.99.0}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -53,14 +52,12 @@ USEVTK="" ; [ "${VTK:-no}" = "yes" ] && USEVTK="-DUSE_VTK=ON"
 
 #These are features which are enabled by default
 USELIBMSYM="" ; [ "${LIBMSYM:-yes}" = "no" ] && USELIBMSYM="-DUSE_LIBMSYM=OFF"
-USESPGLIB="-DSPGLIB_INCLUDE_DIR=/usr/include/spglib" ; [ "${SPGLIB:-yes}" = "no" ] && \
-   USESPGLIB="-DUSE_SPGLIB=OFF"
+USESPGLIB="" ; [ "${SPGLIB:-yes}" = "no" ] && USESPGLIB="-DUSE_SPGLIB=OFF"
 USEMMTF="" ; [ "${MMTF:-yes}" = "no" ] && USEMMTF="-DUSE_MMTF=OFF"
 
 TMP=${TMP:-/tmp/SBo}	
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
-GENXRDPATH=$TMP/$PRGNAM-$VERSION/build/avogadro/qtplugins/plotxrd/bin
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
@@ -81,18 +78,35 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION molecules crystals avogadrogenerators
+rm -rf $PRGNAM-$VERSION molecules crystals avogadrogenerators fragments
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+
 # Following archives must be unpacked in /tmp since the build process
 # searches them as parallel directories and tries to connect to github
 # if not found
-tar xvf $CWD/molecules-$MVERSION.tar.gz
-tar xvf $CWD/crystals-$CVERSION.tar.gz
-mv molecules-$MVERSION molecules
-mv crystals-$CVERSION crystals
-if [ "${PYTHON}" = "yes" ]; then
-   tar xvf $CWD/avogenerators-$AVERSION.tar.gz
-   mv avogenerators-$AVERSION avogadrogenerators
+tar xvf $CWD/molecules-$AVERSION.tar.gz
+tar xvf $CWD/crystals-$AVERSION.tar.gz
+tar xvf $CWD/avogenerators-$AVERSION.tar.gz
+tar xvf $CWD/fragments-$FVERSION.tar.gz
+mv molecules-$AVERSION molecules
+mv crystals-$AVERSION crystals
+mv avogenerators-$AVERSION avogadrogenerators
+mv fragments-$FVERSION fragments
+
+# Show a warning if VTK is enabled and Qt6 is found in the system
+if [ -d /usr/include/qt6 ]; then
+ if [ "${VTK}" = "yes" ]; then
+    YELLOW=$'\033[0;33m'
+    NOCOL=$'\e[0m'
+    echo ""
+    echo "${YELLOW}************************ WARNING! ************************"
+    echo " You have enabled VTK but Qt6 is found in your system! "
+    echo " Make sure that VTK was built disabling the support "
+    echo " to Qt6, otherwise the build will fail. "
+    echo " For more information see the instructions in README.SBo "
+    echo "**********************************************************"
+    echo "${NOCOL} "
+ fi
 fi
 
 # Now we can change directory to $PRGNAM-$VERSION
@@ -104,19 +118,14 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# fix issues that generate cmake warnings
-patch -p1 < $CWD/fix_cmake-find-package.diff
-# fix build error cause ambiguous definition in source code 
-# (thanks to StefanBruens from OpenChemistry in GitHub)
-patch -p1 < $CWD/fix_mmtfformat_cpp.diff
+patch -p1 < $CWD/cmake-warnings.diff
+
+if [ $(cmake --version |head -1 |cut -f3 -d' ') == "3.21.4" ]; then
+    echo "export PATH for cmake-opt"
+    export PATH="/opt/cmake-opt/bin/:$PATH"
+fi
 
 mkdir -p build
-# Following steps prevent the download of the executable genXrdPattern
-# needed by the build process and include it in the source tree
-mkdir -p $GENXRDPATH
-cp $CWD/linux64-genXrdPattern $GENXRDPATH
-mv $GENXRDPATH/linux64-genXrdPattern $GENXRDPATH/genXrdPattern
-chmod 755 $GENXRDPATH/genXrdPattern
 
 cd build
   cmake \
@@ -124,7 +133,6 @@ cd build
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_POLICY_DEFAULT_CMP0072=NEW \
     -DENABLE_TESTING=OFF \
     -DENABLE_TRANSLATIONS=ON \
     $USEHDF5 \
