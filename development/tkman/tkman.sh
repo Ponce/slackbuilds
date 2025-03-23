@@ -5,4 +5,4 @@ if [[ $MANPATH != *"$_MANPATH"* ]]; then
 	MANPATH=/usr/man:$MANPATH
 fi
 
-MANPATH="$_MANPATH" sh /usr/share/tkman/tkman.tcl
+MANPATH="$_MANPATH" sh /usr/share/tkman/tkman.tcl $*
