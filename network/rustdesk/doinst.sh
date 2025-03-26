@@ -23,7 +23,7 @@ preserve_perms() {
 }
 
 ( cd usr/bin ; rm -rf rustdesk )
-( cd usr/bin ; ln -sf /usr/lib/rustdesk/rustdesk rustdesk )
+( cd usr/bin ; ln -sf /usr/share/rustdesk/rustdesk rustdesk )
 ( cp usr/share/rustdesk/files/rustdesk.desktop /usr/share/applications/)
 
 if [ -x /usr/bin/update-desktop-database ]; then
