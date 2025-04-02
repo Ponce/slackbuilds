@@ -1,0 +1,203 @@
+diff -Naupr a/CMakeLists.txt c/CMakeLists.txt
+--- a/CMakeLists.txt	2024-02-18 19:18:26.000000000 +0100
++++ c/CMakeLists.txt	2025-03-31 10:09:11.175008239 +0200
+@@ -47,7 +47,7 @@ include(dependencies)
+ include(Lucene++Docs)
+ 
+ # Enable C++11
+-set(CMAKE_CXX_STANDARD 11)
++set(CMAKE_CXX_STANDARD 17)
+ set(CMAKE_CXX_STANDARD_REQUIRED ON)
+ 
+ ####################################
+diff -Naupr a/src/core/document/NumericField.cpp c/src/core/document/NumericField.cpp
+--- a/src/core/document/NumericField.cpp	2024-02-18 19:18:26.000000000 +0100
++++ c/src/core/document/NumericField.cpp	2025-03-31 10:29:14.383300303 +0200
+@@ -4,6 +4,10 @@
+ // or the GNU Lesser General Public License.
+ /////////////////////////////////////////////////////////////////////////////
+ 
++#include <boost/variant/get.hpp>
++#include <locale>
++#include <codecvt>
++ 
+ #include "LuceneInc.h"
+ #include "NumericField.h"
+ #include "Field.h"
+@@ -53,9 +57,23 @@ ReaderPtr NumericField::readerValue() {
+ }
+ 
+ String NumericField::stringValue() {
+-    StringStream value;
+-    value << fieldsData;
+-    return value.str();
++    std::stringstream value;
++    
++    // Estrazione del valore numerico (come prima)
++    if (int* v = boost::get<int>(&fieldsData)) {
++        value << *v;
++    } else if (int64_t* v = boost::get<int64_t>(&fieldsData)) {
++        value << *v;
++    } else if (double* v = boost::get<double>(&fieldsData)) {
++        value << *v;
++    } else {
++        value << "0";
++    }
++    
++    std::string narrowStr = value.str();
++    std::wstring wideStr(narrowStr.begin(), narrowStr.end());
++    return String(wideStr);
++
+ }
+ 
+ int64_t NumericField::getNumericValue() {
+diff -Naupr a/src/core/search/FieldDoc.cpp c/src/core/search/FieldDoc.cpp
+--- a/src/core/search/FieldDoc.cpp	2024-02-18 19:18:26.000000000 +0100
++++ c/src/core/search/FieldDoc.cpp	2025-03-31 10:42:12.819612969 +0200
+@@ -6,6 +6,7 @@
+ 
+ #include "LuceneInc.h"
+ #include "FieldDoc.h"
++#include <boost/variant/get.hpp>
+ 
+ namespace Lucene {
+ 
+@@ -19,14 +20,31 @@ FieldDoc::~FieldDoc() {
+ String FieldDoc::toString() {
+     StringStream buffer;
+     buffer << ScoreDoc::toString() << L"[";
++    
++    bool first = true;
+     for (Collection<ComparableValue>::iterator field = fields.begin(); field != fields.end(); ++field) {
+-        if (field != fields.begin()) {
++        if (!first) {
+             buffer << L", ";
+         }
+-        buffer << *field;
++        first = false;
++        
++        // Gestione del boost::variant
++        if (const std::wstring* s = boost::get<std::wstring>(&*field)) {
++            buffer << *s;
++        } else if (const int32_t* i = boost::get<int32_t>(&*field)) {
++            buffer << *i;
++        } else if (const int64_t* l = boost::get<int64_t>(&*field)) {
++            buffer << *l;
++        } else if (const double* d = boost::get<double>(&*field)) {
++            buffer << *d;
++        } else if (const uint8_t* b = boost::get<uint8_t>(&*field)) {
++            buffer << static_cast<int>(*b);
++        }
++        // Aggiungi altri tipi se necessario
+     }
++    
+     buffer << L"]";
+     return buffer.str();
+ }
+ 
+-}
++} // namespace Lucene
+diff -Naupr a/src/core/search/NumericRangeQuery.cpp c/src/core/search/NumericRangeQuery.cpp
+--- a/src/core/search/NumericRangeQuery.cpp	2024-02-18 19:18:26.000000000 +0100
++++ c/src/core/search/NumericRangeQuery.cpp	2025-03-31 10:46:59.001580233 +0200
+@@ -3,7 +3,7 @@
+ // Distributable under the terms of either the Apache License (Version 2.0)
+ // or the GNU Lesser General Public License.
+ /////////////////////////////////////////////////////////////////////////////
+-
++#include <boost/variant/get.hpp>
+ #include "LuceneInc.h"
+ #include "NumericRangeQuery.h"
+ #include "_NumericRangeQuery.h"
+@@ -131,17 +131,36 @@ String NumericRangeQuery::toString(const
+         buffer << this->field << L":";
+     }
+     buffer << (minInclusive ? L"[" : L"{");
++    
++    // Gestione del valore minimo
+     if (VariantUtils::isNull(min)) {
+         buffer << L"*";
+     } else {
+-        buffer << min;
++        // Estrazione del valore dal variant
++        if (const int32_t* i = boost::get<int32_t>(&min)) {
++            buffer << *i;
++        } else if (const int64_t* l = boost::get<int64_t>(&min)) {
++            buffer << *l;
++        } else if (const double* d = boost::get<double>(&min)) {
++            buffer << *d;
++        }
+     }
++    
+     buffer << L" TO ";
++    
++    // Gestione del valore massimo (NOTA: c'è un bug nel codice originale che usa 'min' invece di 'max')
+     if (VariantUtils::isNull(max)) {
+         buffer << L"*";
+     } else {
+-        buffer << max;
++        if (const int32_t* i = boost::get<int32_t>(&max)) {
++            buffer << *i;
++        } else if (const int64_t* l = boost::get<int64_t>(&max)) {
++            buffer << *l;
++        } else if (const double* d = boost::get<double>(&max)) {
++            buffer << *d;
++        }
+     }
++    
+     buffer << (maxInclusive ? L"]" : L"}");
+     buffer << boostString();
+     return buffer.str();
+diff -Naupr a/src/core/search/TermRangeQuery.cpp c/src/core/search/TermRangeQuery.cpp
+--- a/src/core/search/TermRangeQuery.cpp	2024-02-18 19:18:26.000000000 +0100
++++ c/src/core/search/TermRangeQuery.cpp	2025-03-31 10:51:38.091670633 +0200
+@@ -10,6 +10,7 @@
+ #include "Collator.h"
+ #include "StringUtils.h"
+ #include "VariantUtils.h"
++#include <boost/variant/get.hpp>
+ 
+ namespace Lucene {
+ 
+@@ -72,22 +73,39 @@ String TermRangeQuery::toString(const St
+         buffer << getField() << L":";
+     }
+     buffer << (includeLower ? L"[" : L"{");
++    
++    // Gestione del lowerTerm
+     if (VariantUtils::isNull(lowerTerm)) {
+         buffer << L"*";
+     } else {
+-        buffer << lowerTerm;
++        // Estrazione del valore stringa dal variant
++        if (const String* s = boost::get<String>(&lowerTerm)) {
++            buffer << *s;
++        } else if (const std::wstring* ws = boost::get<std::wstring>(&lowerTerm)) {
++            buffer << *ws;
++        }
++        // Aggiungi altri tipi se necessario
+     }
++    
+     buffer << L" TO ";
++    
++    // Gestione dell'upperTerm
+     if (VariantUtils::isNull(upperTerm)) {
+         buffer << L"*";
+     } else {
+-        buffer << upperTerm;
++        if (const String* s = boost::get<String>(&upperTerm)) {
++            buffer << *s;
++        } else if (const std::wstring* ws = boost::get<std::wstring>(&upperTerm)) {
++            buffer << *ws;
++        }
+     }
++    
+     buffer << (includeUpper ? L"]" : L"}");
+     buffer << boostString();
+     return buffer.str();
+ }
+ 
++
+ bool TermRangeQuery::equals(const LuceneObjectPtr& other) {
+     if (LuceneObject::equals(other)) {
+         return true;
