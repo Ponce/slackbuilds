@@ -1,0 +1,312 @@
+diff -Naur 0ad-0.27.0.orig/libraries/source/spidermonkey/build.sh 0ad-0.27.0/libraries/source/spidermonkey/build.sh
+--- 0ad-0.27.0.orig/libraries/source/spidermonkey/build.sh	2025-01-28 20:57:29.000000000 +0100
++++ 0ad-0.27.0/libraries/source/spidermonkey/build.sh	2025-04-03 12:40:46.292288000 +0200
+@@ -1,12 +1,14 @@
+ #!/bin/sh
+ set -e
+ 
++: "${TAR:=tar}"
++
+ cd "$(dirname "$0")"
+ 
+ # This should match the version in config/milestone.txt
+ FOLDER="mozjs-115.16.1"
+ # If same-version changes are needed, increment this.
+-LIB_VERSION="115.16.1+1"
++LIB_VERSION="115.16.1+5"
+ LIB_NAME="mozjs115"
+ 
+ fetch()
+@@ -47,7 +49,7 @@
+ 
+ # unpack
+ rm -Rf "${FOLDER}"
+-tar xfJ "${FOLDER}.tar.xz"
++"${TAR}" xfJ "${FOLDER}.tar.xz"
+ 
+ # patch
+ (
+@@ -81,11 +83,16 @@
+ 	export MOZBUILD_STATE_PATH="${MOZBUILD_STATE_PATH:=$(pwd)/mozbuild-state}"
+ 
+ 	if [ -n "$PROFILE" ]; then
+-		CONF_OPTS="$CONF_OPTS --enable-profiling
+-		                      --enable-perf
+-		                      --enable-instruments
+-		                      --enable-jitspew
+-		                      --with-jitreport-granularity=3"
++		CONF_OPTS="$CONF_OPTS
++			--enable-profiling
++			--enable-perf
++			--enable-jitspew
++			--with-jitreport-granularity=3"
++
++		if [ "${OS}" = "Darwin" ]; then
++			CONF_OPTS="$CONF_OPTS
++				--enable-instruments"
++		fi
+ 	fi
+ 
+ 	if [ "${OS}" = "Windows_NT" ]; then
+@@ -128,20 +135,22 @@
+ 	# Build
+ 	# Debug (broken on FreeBSD)
+ 	if [ "${OS}" != "FreeBSD" ]; then
++		# shellcheck disable=SC2086
+ 		MOZCONFIG="$(pwd)/../mozconfig" \
+ 		MOZCONFIG_OPTIONS="${CONF_OPTS} \
+ 			--enable-debug \
+ 			--disable-optimize \
+ 			--enable-gczeal" \
+ 		BUILD_DIR="build-debug" \
+-			./mach build "${JOBS}"
++			./mach build ${JOBS}
+ 	fi
+ 	# Release
++	# shellcheck disable=SC2086
+ 	MOZCONFIG="$(pwd)/../mozconfig" \
+ 	MOZCONFIG_OPTIONS="${CONF_OPTS} \
+ 		--enable-optimize" \
+ 	BUILD_DIR="build-release" \
+-		./mach build "${JOBS}"
++		./mach build ${JOBS}
+ )
+ 
+ # install
+diff -Naur 0ad-0.27.0.orig/libraries/source/spidermonkey/patches/FixFpNormIssue.diff 0ad-0.27.0/libraries/source/spidermonkey/patches/FixFpNormIssue.diff
+--- 0ad-0.27.0.orig/libraries/source/spidermonkey/patches/FixFpNormIssue.diff	2025-01-28 20:57:29.000000000 +0100
++++ 0ad-0.27.0/libraries/source/spidermonkey/patches/FixFpNormIssue.diff	2025-04-03 12:40:46.287288000 +0200
+@@ -1,6 +1,6 @@
+ --- a/modules/fdlibm/src/math_private.h
+ +++ b/modules/fdlibm/src/math_private.h
+-@@ -30,8 +30,13 @@
++@@ -30,7 +30,11 @@
+   * Adapted from https://github.com/freebsd/freebsd-src/search?q=__double_t
+   */
+  
+@@ -10,10 +10,9 @@
+  typedef double      __double_t;
+ +#endif
+  typedef __double_t  double_t;
+-+typedef float   __float_t;
++ typedef float       __float_t;
+  
+- /*
+-  * The original fdlibm code used statements like:
++
+ @@ -630,6 +634,53 @@
+  	return ((double)(x + 0x1.8p52) - 0x1.8p52);
+  }
+diff -Naur 0ad-0.27.0.orig/libraries/source/spidermonkey/patches/FixProfiling.diff 0ad-0.27.0/libraries/source/spidermonkey/patches/FixProfiling.diff
+--- 0ad-0.27.0.orig/libraries/source/spidermonkey/patches/FixProfiling.diff	1970-01-01 01:00:00.000000000 +0100
++++ 0ad-0.27.0/libraries/source/spidermonkey/patches/FixProfiling.diff	2025-04-03 12:40:46.264288000 +0200
+@@ -0,0 +1,159 @@
++
++# HG changeset patch
++# User Markus Stange <mstange.moz@gmail.com>
++# Date 1706240334 0
++# Node ID a412d893c38f632f34b44a9c5b3fd8cc30bb87be
++# Parent  2a507cc2cf84980ce9f160d1ef80107ee7474ae4
++Bug 1876415 - Make timestamp formats consistent between Jitdump and the marker file. r=glandium
++
++On Linux and Android, both jitdump and the marker file will keep using
++`CLOCK_MONOTONIC` nanoseconds, as before.
++
++On macOS, both jitdump and the marker file will now be using
++`TimeStamp::RawMachAbsoluteTimeNanoseconds()` , i.e. "nanoseconds since
++mach_absolute_time origin".
++This value has the advantage that it is also relatively easy to obtain
++in other browser engines, because their internal timestamp value is stored
++in milliseconds or nanoseconds rather than in `mach_absolute_time` ticks.
++In the past, on macOS, Firefox was using `CLOCK_MONOTONIC` nanoseconds for
++jitdump and `TimeStamp::RawMachAbsoluteTimeValue()` for the marker file.
++This inconsistency is now fixed.
++I will update samply to change how it treats jitdump timestamps on macOS.
++There are no other consumers of jitdump files on macOS that I know of.
++
++On Windows, we will keep using raw QPC values for the marker file - this
++matches what's in the ETW events. Jitdump on Windows is mostly unused but
++I'm updating it to match.
++
++Furthermore, this fixes the order in mozglue/misc/moz.build to make sure
++we always use the TimeStamp_darwin implementation on Darwin (and not just
++due to a broken configure check, see bug 1681445), and it fixes the #ifdef
++in TimeStamp.h to match the Darwin check.
++
++Differential Revision: https://phabricator.services.mozilla.com/D199592
++
++diff --git a/js/src/jit/PerfSpewer.cpp b/js/src/jit/PerfSpewer.cpp
++--- a/js/src/jit/PerfSpewer.cpp
+++++ b/js/src/jit/PerfSpewer.cpp
++@@ -118,19 +118,26 @@ static bool IsPerfProfiling() { return J
++ #endif
++ 
++ AutoLockPerfSpewer::AutoLockPerfSpewer() { PerfMutex.lock(); }
++ 
++ AutoLockPerfSpewer::~AutoLockPerfSpewer() { PerfMutex.unlock(); }
++ 
++ #ifdef JS_ION_PERF
++ static uint64_t GetMonotonicTimestamp() {
++-  struct timespec ts = {};
++-  clock_gettime(CLOCK_MONOTONIC, &ts);
++-  return ts.tv_sec * 1000000000 + ts.tv_nsec;
+++  using mozilla::TimeStamp;
+++#  ifdef XP_LINUX
+++  return TimeStamp::Now().RawClockMonotonicNanosecondsSinceBoot();
+++#  elif XP_WIN
+++  return TimeStamp::Now().RawQueryPerformanceCounterValue().value();
+++#  elif XP_MACOSX
+++  return TimeStamp::Now().RawMachAbsoluteTimeNanoseconds();
+++#  else
+++  MOZ_CRASH("no timestamp");
+++#  endif
++ }
++ 
++ // values are from /usr/include/elf.h
++ static uint32_t GetMachineEncoding() {
++ #  if defined(JS_CODEGEN_X86)
++   return 3;  // EM_386
++ #  elif defined(JS_CODEGEN_X64)
++   return 62;  // EM_X86_64
++diff --git a/mozglue/misc/TimeStamp.h b/mozglue/misc/TimeStamp.h
++--- a/mozglue/misc/TimeStamp.h
+++++ b/mozglue/misc/TimeStamp.h
++@@ -469,18 +469,19 @@ class TimeStamp {
++   static MFBT_API void RecordProcessRestart();
++ 
++ #ifdef XP_LINUX
++   uint64_t RawClockMonotonicNanosecondsSinceBoot() {
++     return static_cast<uint64_t>(mValue);
++   }
++ #endif
++ 
++-#ifdef XP_MACOSX
++-  uint64_t RawMachAbsoluteTimeValue() { return static_cast<uint64_t>(mValue); }
+++#ifdef XP_DARWIN
+++  // Returns the number of nanoseconds since the mach_absolute_time origin.
+++  MFBT_API uint64_t RawMachAbsoluteTimeNanoseconds() const;
++ #endif
++ 
++ #ifdef XP_WIN
++   Maybe<uint64_t> RawQueryPerformanceCounterValue() {
++     // mQPC is stored in `mt` i.e. QueryPerformanceCounter * 1000
++     // so divide out the 1000
++     return mValue.mHasQPC ? Some(mValue.mQPC / 1000ULL) : Nothing();
++   }
++diff --git a/mozglue/misc/TimeStamp_darwin.cpp b/mozglue/misc/TimeStamp_darwin.cpp
++--- a/mozglue/misc/TimeStamp_darwin.cpp
+++++ b/mozglue/misc/TimeStamp_darwin.cpp
++@@ -131,26 +131,28 @@ void TimeStamp::Startup() {
++   // find the number of significant digits in sResolution, for the
++   // sake of ToSecondsSigDigits()
++   for (sResolutionSigDigs = 1; !(sResolutionSigDigs == sResolution ||
++                                  10 * sResolutionSigDigs > sResolution);
++        sResolutionSigDigs *= 10)
++     ;
++ 
++   gInitialized = true;
++-
++-  return;
++ }
++ 
++ void TimeStamp::Shutdown() {}
++ 
++ TimeStamp TimeStamp::Now(bool aHighResolution) {
++   return TimeStamp(ClockTime());
++ }
++ 
+++uint64_t TimeStamp::RawMachAbsoluteTimeNanoseconds() const {
+++  return static_cast<uint64_t>(double(mValue) * sNsPerTick);
+++}
+++
++ // Computes and returns the process uptime in microseconds.
++ // Returns 0 if an error was encountered.
++ uint64_t TimeStamp::ComputeProcessUptime() {
++   struct timeval tv;
++   int rv = gettimeofday(&tv, nullptr);
++ 
++   if (rv == -1) {
++     return 0;
++diff --git a/mozglue/misc/moz.build b/mozglue/misc/moz.build
++--- a/mozglue/misc/moz.build
+++++ b/mozglue/misc/moz.build
++@@ -105,24 +105,24 @@ if CONFIG["OS_ARCH"] == "WINNT":
++ 
++     if not CONFIG["JS_STANDALONE"]:
++         SOURCES += [
++             "/ipc/mscom/COMWrappers.cpp",
++             "/ipc/mscom/ProcessRuntime.cpp",
++             "PreXULSkeletonUI.cpp",
++         ]
++ 
+++elif CONFIG["OS_ARCH"] == "Darwin":
+++    SOURCES += [
+++        "TimeStamp_darwin.cpp",
+++    ]
++ elif CONFIG["HAVE_CLOCK_MONOTONIC"]:
++     SOURCES += [
++         "TimeStamp_posix.cpp",
++     ]
++-elif CONFIG["OS_ARCH"] == "Darwin":
++-    SOURCES += [
++-        "TimeStamp_darwin.cpp",
++-    ]
++ elif CONFIG["COMPILE_ENVIRONMENT"]:
++     error("No TimeStamp implementation on this platform.  Build will not succeed")
++ 
++ if CONFIG["OS_ARCH"] == "WINNT":
++     SOURCES += [
++         "ConditionVariable_windows.cpp",
++         "Mutex_windows.cpp",
++         "RWLock_windows.cpp",
++
+diff -Naur 0ad-0.27.0.orig/libraries/source/spidermonkey/patches/SupressDanglingPointerWarning.patch 0ad-0.27.0/libraries/source/spidermonkey/patches/SupressDanglingPointerWarning.patch
+--- 0ad-0.27.0.orig/libraries/source/spidermonkey/patches/SupressDanglingPointerWarning.patch	1970-01-01 01:00:00.000000000 +0100
++++ 0ad-0.27.0/libraries/source/spidermonkey/patches/SupressDanglingPointerWarning.patch	2025-04-03 12:40:46.268288000 +0200
+@@ -0,0 +1,31 @@
++From 0bfc032c102b8a251e4dc751d0b48992ebf72641 Mon Sep 17 00:00:00 2001
++From: phosit <phosit@autistici.org>
++Date: Sun, 5 Jan 2025 14:29:33 +0100
++Subject: [PATCH] Supress -Wdangling-pointer warning on GCC
++
++---
++ js/public/RootingAPI.h | 7 +++++++
++ 1 file changed, 7 insertions(+)
++
++diff --git a/js/public/RootingAPI.h b/js/public/RootingAPI.h
++index 42be14e67351..6b167cb8ea2e 100644
++--- a/js/public/RootingAPI.h
+++++ b/js/public/RootingAPI.h
++@@ -1166,7 +1166,14 @@ class MOZ_RAII Rooted : public detail::RootedTraits<T>::StackBase,
++   inline void registerWithRootLists(RootedListHeads& roots) {
++     this->stack = &roots[JS::MapTypeToRootKind<T>::kind];
++     this->prev = *this->stack;
+++#if defined(__GNUC__) && __GNUC__ >= 12
+++#pragma GCC diagnostic push
+++#pragma GCC diagnostic ignored "-Wdangling-pointer"
+++#endif
++     *this->stack = this;
+++#if defined(__GNUC__) && __GNUC__ >= 12
+++#pragma GCC diagnostic pop
+++#endif
++   }
++
++   inline RootedListHeads& rootLists(RootingContext* cx) {
++--
++2.47.1
++
+diff -Naur 0ad-0.27.0.orig/libraries/source/spidermonkey/patches/patch.sh 0ad-0.27.0/libraries/source/spidermonkey/patches/patch.sh
+--- 0ad-0.27.0.orig/libraries/source/spidermonkey/patches/patch.sh	2025-01-28 20:57:29.000000000 +0100
++++ 0ad-0.27.0/libraries/source/spidermonkey/patches/patch.sh	2025-04-03 12:40:46.282288000 +0200
+@@ -41,3 +41,11 @@
+ # Fix build with Python >=3.12.8 and Python >=3.13.1
+ # https://bugzilla.mozilla.org/show_bug.cgi?id=1935621
+ patch -p1 <"${PATCHES}"/FixPython3.12.8.diff
++
++# Fix build for profiling with samply.
++# https://bugzilla.mozilla.org/show_bug.cgi?id=1876415
++# Fixed in ESR 128
++patch -p1 <"${PATCHES}"/FixProfiling.diff
++
++# Supress warning on newer GCC compilers.
++patch -p1 <"${PATCHES}"/SupressDanglingPointerWarning.patch
