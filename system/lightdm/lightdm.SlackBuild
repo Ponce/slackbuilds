@@ -1,0 +1,164 @@
+#!/bin/bash
+
+# Slackware build script for lightdm
+
+# Copyright 2025 Isaac Yu <isaacyu@protonmail.com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# This SlackBuild is derived from the following sources:
+# Frank Honolka:
+# https://gitlab.com/slackernetuk/slackware-xfce-classic/-/tree/master/lightdm
+# Slint (SLKBUILD originally written by George Vlahavas):
+# https://slackware.uk/slint/x86_64/slint-15.0/source/lightdm/
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=lightdm
+VERSION=${VERSION:-1.32.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+# This SlackBuild requires a "lightdm" user and group, with UID 380 and GID 380.
+# See http://slackbuilds.org/uid_gid.txt for recommended UID/GIDs
+bailout() {
+  echo "  You must have lightdm user and group:"
+  echo "    # groupadd -g 380 lightdm"
+  echo "    # useradd -d /var/lib/lightdm -s /bin/false -u 380 -g 380 lightdm"
+  exit 1
+}
+
+# Bail if user isn't valid on your system
+if ! getent group lightdm 1>/dev/null 2>/dev/null ; then
+  bailout
+elif ! getent passwd lightdm 1>/dev/null 2>/dev/null ; then
+  bailout
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+patch -p1 < $CWD/default-config.patch
+sed -i s/systemd/elogind/ data/pam/*
+
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --libexecdir=/usr/lib${LIBDIRSUFFIX}/lightdm \
+  --localstatedir=/var \
+  --sbindir=/usr/bin \
+  --sysconfdir=/etc \
+  --disable-static \
+  --disable-tests \
+  --with-greeter-user=lightdm  \
+  --with-greeter-session=lightdm-gtk-greeter \
+  --disable-liblightdm-qt5 \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --build=$ARCH-slackware-linux
+
+make
+make install DESTDIR=$PKG
+
+cp tests/src/lightdm-session $PKG/usr/bin
+sed -i '1 s/sh/bash --login/' $PKG/usr/bin/lightdm-session
+rm -rf $PKG/etc/init
+
+install -v -dm755 -o lightdm -g lightdm $PKG/var/lib/lightdm
+install -v -dm755 -o lightdm -g lightdm $PKG/var/lib/lightdm-data
+install -v -dm755 -o lightdm -g lightdm $PKG/var/cache/lightdm
+install -v -dm770 -o lightdm -g lightdm $PKG/var/log/lightdm
+
+# Remove .la file
+rm $PKG/usr/lib${LIBDIRSUFFIX}/liblightdm-gobject-1.la
+
+# Remove apparmor profiles - they only work with Ubuntu's apparmor package
+# Refer to bug #494426 for more details:
+# https://bugs.gentoo.org/494426
+rm -rf $PKG/etc/apparmor.d
+
+# PAM
+cp $CWD/pam.d/* $PKG/etc/pam.d/
+
+# PolicyKit
+mkdir -p -m700 $PKG/usr/share/polkit-1/rules.d
+chown polkitd $PKG/usr/share/polkit-1/rules.d
+install -m 644 $CWD/42-lightdm.rules $PKG/usr/share/polkit-1/rules.d/42-lightdm.rules
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a COPYING.GPL3 COPYING.LGPL2 COPYING.LGPL3 NEWS README.md $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
