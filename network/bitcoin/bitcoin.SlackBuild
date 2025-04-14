@@ -25,7 +25,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=bitcoin
-VERSION=${VERSION:-28.1}
+VERSION=${VERSION:-29.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -64,10 +64,10 @@ else
   LIBDIRSUFFIX=""
 fi
 
-# Detect qrencode
-if [ -x /usr/bin/qrencode ]; then QRCODE="--with-qrencode"; else QRCODE=""; fi
-
 set -e
+
+# autodetect build time options
+if pkg-config --exists libzmq; then ZMQ=ON; else ZMQ=OFF; fi
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -82,24 +82,32 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# build bitcoin-core
-[ -f autogen.sh ] && ./autogen.sh
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --mandir=/usr/man \
-  $QRCODE \
-  --with-gui=qt5 \
-  --disable-bench \
-  --disable-tests \
-  --disable-static \
-  --build=$ARCH-slackware-linux
+# cmake in 15.0 is slightly too old, needs cmake-opt.
+if [ $(cmake /V | awk 'NR==1{print $3}') == "3.21.4" ]; then
+    echo "export PATH for cmake-opt"
+    export PATH="/opt/cmake-opt/bin/:$PATH"
+fi
 
-make
-make install DESTDIR=$PKG
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=/usr/lib${LIBDIRSUFFIX} \
+    -DCMAKE_INSTALL_MANDIR=/usr/man \
+    -DBUILD_TESTS=OFF \
+    -DBUILD_GUI=ON \
+    -DBUILD_TX=ON \
+    -DBUILD_UTIL=ON \
+    -DBUILD_WALLET_TOOL=ON \
+    -DWITH_BDB=ON \
+    -DWITH_QRENCODE=ON \
+    -DWITH_ZMQ=$ZMQ \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install/strip DESTDIR=$PKG
+cd ..
 
 rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
 
@@ -108,15 +116,14 @@ mkdir -p $PKG/usr/share/{applications,pixmaps}
 install -m 0644 src/qt/res/icons/bitcoin.png $PKG/usr/share/pixmaps/
 install -m 0644 $CWD/bitcoin-qt.desktop $PKG/usr/share/applications/
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a doc/README.md COPYING doc/assets-attribution.md \
-  doc/build-unix.md doc/release-notes.md doc/tor.md \
+cp -a \
+  COPYING doc/{bitcoin-conf,descriptors,files,i2p,{JSON-RPC,REST}-interface,\
+managing-wallets,multisig-tutorial,p2p-bad-ports,psbt,reduce-{memory,traffic},\
+release-notes,tor,zmq}.md share/rpcauth/rpcauth.py \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
