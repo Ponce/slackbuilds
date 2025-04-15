@@ -2,7 +2,7 @@
 #
 # Slackware build script for 0.A.D.
 #
-# Copyright 2020-2023 Tim Dickson, Scotland
+# Copyright 2020-2025 Tim Dickson, Scotland
 # Copyright 2016-2017 Reedych <reedych@ya.ru>
 # Copyright 2010-2016  Erik W. Hanson, Minneapolis, MN, USA
 # All rights reserved.
@@ -24,14 +24,11 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#build 3 adds patches for fmt >=v10
-
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=0ad
-VERSION=${VERSION:-0.0.26}
-RELEASE=${RELEASE:-alpha}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-0.27.0}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 TMP=${TMP:-/tmp/SBo}
@@ -73,9 +70,9 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION-$RELEASE
-tar xvf $CWD/$PRGNAM-$VERSION-$RELEASE-unix-build.tar.xz
-cd $PRGNAM-$VERSION-$RELEASE
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION-unix-build.tar.xz
+cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -91,39 +88,30 @@ export LDFLAGS="-L/usr/lib${LIBDIRSUFFIX}"
 export SDL2_CONFIG="/usr/bin/sdl2-config"
 #prevent out of tree files getting written.
 mkdir -p cargoh
-export CARGO_HOME="$TMP/$PRGNAM-$VERSION-$RELEASE/cargoh"
+export CARGO_HOME="$TMP/$PRGNAM-$VERSION/cargoh"
 
-#add patches for fmt>9.1.0 ie. 10.1.1
-sed -i 's/, header.GetType()/, static_cast<int>(header.GetType())/g' source/network/NetMessage.cpp
-sed -i 's/, arrayType/, static_cast<int>(arrayType)/g' source/simulation2/serialization/BinarySerializer.cpp
-
-# Fix boost names, include paths and remove isystem. commented stuff is fixed upstream already
-sed -i 's|-mt||g' build/premake/extern_libs5.lua || exit 1
-#sed -i 's|/usr/local/include|/usr/include|' build/premake/{extern_libs5.lua,premake5.lua} || exit 1
-sed -i 's|/usr/local/include|/usr/include|' build/premake/extern_libs5.lua || exit 1
-sed -i 's|-isystem |-I|' build/premake/premake5/{src/tools/gcc.lua,tests/tools/test_gcc.lua} || exit 1
- 
-#sed -i '/third_party/a #include <deque>' source/ps/CLogger.h || exit 1
-#sed -i '/ps\/Profiler2/a #include <stack>' source/ps/Profiler2GPU.cpp || exit 1
-
-#allow for ATLAS to be yes or no. if not specified we defaul to enable
-[ "x$ATLAS" = "xno" ]&& ATLAS="disable"
-[ "x$ATLAS" = "xyes" ]&& ATLAS="enable"
-# build/workspaces/update-workspaces.sh
-#   have a root check, let's disable it.
-patch -p1 < $CWD/disable-root-check.patch
-
+#patch root check in update-workspace.sh
+sed -i 's/\"0\"/\"-1\"/g' build/workspaces/update-workspaces.sh
+#we need to run a premake buuild (basically untars a file)
+libraries/source/premake-core/build.sh
+#the version of spidermonkey shipping with 0ad 0.27.0 requires rust 1.66.0 or higher
+#so set up environment for that
+export PATH="/opt/rust/bin:$PATH"
+if [ -z "$LD_LIBRARY_PATH" ]; then
+  export LD_LIBRARY_PATH="/opt/rust/lib$LIBDIRSUFFIX"
+else
+  export LD_LIBRARY_PATH="/opt/rust/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
+fi
+#we need to overwrite a patch for 32bit building of spidermonkey
+cp -a $CWD/FixFpNormIssue.diff libraries/source/spidermonkey/patches/
+libraries/build-source-libs.sh
 build/workspaces/update-workspaces.sh \
   --without-pch \
   --bindir=/usr/games \
   --datadir=/usr/share/games/0ad \
-  --libdir=/usr/lib${LIBDIRSUFFIX}/0ad \
-  --${ATLAS:-enable}-atlas
-
-sed -i 's|-isystem |-I|g' build/workspaces/gcc/*.make || exit 1
-
+  --libdir=/usr/lib${LIBDIRSUFFIX}/0ad
+#atlas is enabled by default since 0.27.0
 make CONFIG=Release -C build/workspaces/gcc
-
 mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/0ad
 cp binaries/system/*.so* $PKG/usr/lib${LIBDIRSUFFIX}/0ad
 chmod 0755 $PKG/usr/lib${LIBDIRSUFFIX}/0ad/*
@@ -142,14 +130,11 @@ install -Dm 0644 build/resources/0ad.desktop $PKG/usr/share/applications/0ad.des
 install -Dm 0644 build/resources/0ad.png $PKG/usr/share/pixmaps/0ad.png
 install -Dm 0755 build/resources/0ad.sh $PKG/usr/games/0ad
 
-#sed -i "s,/usr/bin/,/usr/games/," $PKG/usr/games/0ad
-#sed -i "s,/usr/bin/,/usr/games/," $PKG/usr/share/applications/0ad.desktop
-
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a LICENSE.txt README.txt license_dbghelp.txt license_gpl-2.0.txt license_lgpl-2.1.txt \
+cp -a LICENSE.md README.md license_dbghelp.txt license_gpl-2.0.txt license_lgpl-2.1.txt \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cp binaries/system/readme.txt \
   $PKG/usr/doc/$PRGNAM-$VERSION/README-options.txt
