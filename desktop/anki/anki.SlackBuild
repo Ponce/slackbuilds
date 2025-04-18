@@ -3,7 +3,7 @@
 # Slackware build script for anki
 
 # Written by Giuseppe Scalzi <giuseppe[at]osgate[dot]org>
-# Updated for new Anki build scheme by Caterino Tommaso, T.O.P. (2023)
+# Updated for new Anki build scheme by Caterino Tommaso, T.O.P. (2025)
 #
 # Redistribution and use of this script, with or without modification, is
 # permitted provided that the following conditions are met:
@@ -25,8 +25,9 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=anki
-VERSION=${VERSION:-2.1.65}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-25.02.1}
+PYVERSION=$(python -c 'import sys; print(".".join(map(str, sys.version_info[0:2])))')
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -49,52 +50,53 @@ fi
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
+PREFIX=${PREFIX:-$PKG/opt/anki}
 
-# Exit for errors or unset variables below.
-set -eu
+set -e # exit on errors
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
-cd $PKG
-python3 -m venv usr
-
-( cd usr ; bin/pip3 install -v --no-deps $CWD/aqt*.whl $CWD/anki*.whl )
-
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar --zstd -xvf $CWD/$PRGNAM-$VERSION-linux-qt6.tar.zst
+cd $PRGNAM-$VERSION-linux-qt6
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
   -o -perm 511 \) -exec chmod 755 {} \; -o \
-  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-find $PKG/usr -not -name lib -not -name bin -mindepth 1 -maxdepth 1 \
-  -execdir rm -rf '{}' \+
+# from istall.sh script:
+mkdir -p $PREFIX
+cp -av --no-preserve=owner,context -- * $PREFIX
+mkdir -p $PKG/usr/bin
+ln -sf /opt/anki/anki $PKG/usr/bin/anki
 
-find $PKG/usr/bin $PKG/usr/lib/python3.9/site-packages \
-  -mindepth 1 -maxdepth 1 \
-  -not -name "_aqt*" \
-  -not -name "aqt*" \
-  -not -name "anki*" \
-  -execdir rm -rf '{}' \+
+install -vD -m 0644 anki.{png,xpm} -t $PKG/usr/share/pixmaps
+install -vD -m 0644 anki.desktop -t $PKG/usr/share/applications
+install -vD -m 0644 anki.1 -t $PKG/usr/man/man1
+rm $PREFIX/anki.{png,xpm} $PREFIX/anki.desktop $PREFIX/anki.1
 
-mv -v $PKG/usr/lib $PKG/usr/lib64
-
-# delete line 1, insert python bang
-sed -i '1d;2i #!/usr/bin/python3' $PKG/usr/bin/anki
-
+# strip binaries and rpaths
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+  | cut -f 1 -d : \
+  | xargs -d $'\n' sh -c \
+  'for arg do xargs strip --strip-unneeded $arg; chmod +x $arg; done' _ \
+  2> /dev/null || true
 
-install -vD -m 0644 $CWD/anki/anki.{png,xpm} -t $PKG/usr/share/pixmaps
-install -vD -m 0644 $CWD/anki/anki.desktop -t $PKG/usr/share/applications
+# gzip man pages
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp $CWD/README $PKG/usr/doc/$PRGNAM-$VERSION
-chown root:root $PKG/usr/doc/$PRGNAM-$VERSION
+mv README.md $PKG/usr/doc/$PRGNAM-$VERSION
+chown -R root:root $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
+cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
