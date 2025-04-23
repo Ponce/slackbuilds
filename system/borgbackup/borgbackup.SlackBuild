@@ -2,7 +2,7 @@
 
 # Slackware build script for borgbackup
 
-# Copyright 2024 Andrzej Telszewski, Koszalin
+# Copyright 2025 Andrzej Telszewski, Koszalin
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,21 +22,11 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# 20230809 bkw: Modified by SlackBuilds.org, BUILD=2:
-# - stop the build from failing if Sphinx is installed but
-#   guzzle_sphinx_theme is not.
-# - always include man pages in package (upstream kindly included
-#   prebuilt ones in the tarball).
-# - clean up optional deps for HTML docs in README. python3-attrs
-#   is not required, and alabaster + imagesize are already required
-#   deps for Sphinx.
-# - make slack-desc say whether the HTML docs are included.
-
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=borgbackup
-VERSION=${VERSION:-1.2.8}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.4.1}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -57,8 +47,6 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-# 20230810 bkw: no flags or libdirsuffix, setup.py knows what to do.
-
 set -eu
 
 rm -rf $PKG
@@ -72,32 +60,28 @@ cd $PRGNAM-$VERSION
 chown -R root:root .
 chmod -R a-st,u+rwX,go-w+rX .
 
-python3 setup.py install --root=$PKG
+PYVER=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+export PYTHONPATH=/opt/python$PYVER/site-packages
+export PYTHONPATH=$PYTHONPATH:/opt/cython/python$PYVER/site-packages
+export PATH=/opt/cython/bin:$PATH
 
-# 20230810 bkw: faster than the find|file|xargs template stuff.
+python3 -m build --no-isolation
+python3 -m installer -d "$PKG" dist/*.whl
+
 find $PKG/usr/lib*/python* -name '*.so' | xargs strip --strip-unneeded
 
-PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
-mkdir -p $PKGDOC
-
-# 20230809 bkw: stop the build from failing if Sphinx is installed
-# but guzzle_sphinx_theme is not. upstream's README documents this, even.
-make -C docs html && cp -a docs/_build/html $PKGDOC
-
-# 20230810 bkw: for the slack-desc:
-WITH_HTML=WITHOUT
-[ -d $PKGDOC/html ] && WITH_HTML=WITH
-
-# 20230809 bkw: upstream ships prebuilt man pages, always install.
 mkdir -p $PKG/usr/man/man1
 cp -a docs/man/*.1 $PKG/usr/man/man1
 gzip -9 $PKG/usr/man/man1/*
 
-cp -a AUTHORS CHANGES.rst LICENSE README.rst SECURITY.md $PKGDOC
-cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a AUTHORS CHANGES.rst LICENSE README.rst SECURITY.md \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > \
+  $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-sed "s,@WITH_HTML@,$WITH_HTML," < $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
