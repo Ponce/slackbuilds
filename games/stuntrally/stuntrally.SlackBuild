@@ -2,7 +2,7 @@
 
 # Slackware build script for stuntrally
 
-# Copyright 2017-2020 Jeremy Hansen <jebrhansen+SBo -at- gmail.com>
+# Copyright 2017-2025 Jeremy Hansen <jebrhansen+SBo -at- gmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,16 +22,12 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# 20220501 bkw: Modified by SlackBuilds.org, BUILD=2:
-# - only package the correct set of binaries/libraries (32-bit or 64-bit).
-# - make .desktop files validate (mostly).
-
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=stuntrally
 SRCNAM=StuntRally
-VERSION=${VERSION:-2.6}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-3.3}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -43,10 +39,10 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-case "$ARCH" in
-  i?86|x86_64) ;;
-  *) echo "ARCH=$ARCH unsupported" ;;
-esac
+if [ "$ARCH" != "x86_64" ]; then
+  echo "ERROR: StuntRally's pre-built binaries only support x86_64."
+  exit 1
+fi
 
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
@@ -62,9 +58,9 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $SRCNAM-$VERSION-linux64
-tar xvf $CWD/$SRCNAM-$VERSION-linux.tar.gz
-cd $SRCNAM-$VERSION-linux64
+rm -rf $SRCNAM-$VERSION-Linux
+tar xvf $CWD/$SRCNAM-$VERSION-Linux.txz
+cd $SRCNAM-$VERSION-Linux
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -72,32 +68,37 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 cd ..
-mkdir -p $PKG/{opt/$PRGNAM/,usr/bin/}
-cp -r StuntRally-$VERSION-linux64/* $PKG/opt/$PRGNAM/
+mkdir -p $PKG/opt $PKG/usr/{bin,share/{applications,icons/hicolor/512x512/apps}}
 
+mv $SRCNAM-$VERSION-Linux $PKG/opt/
+
+# Set up symlinks and make them executable so the .desktop files work
 cd $PKG
-ln -s /opt/$PRGNAM/stuntrally usr/bin/
-ln -s /opt/$PRGNAM/sr-editor usr/bin/
-mv opt/$PRGNAM/share usr/
-rm -f $PKG/opt/$PRGNAM/lib/{32,64}/libstdc++.so.6
+ln -s /opt/$SRCNAM-$VERSION-Linux/stuntrally3.sh usr/bin/stuntrally3
+ln -s /opt/$SRCNAM-$VERSION-Linux/sr-editor3.sh usr/bin/sr-editor3
 
-# 20220501 bkw: x86_64 packages don't need the 32-bit exe and libs,
-# i?86 packages don't need the 64-bit ones. saves a bit of disk space.
-if [ "$ARCH" = "x86_64" ]; then
-  rm -rf $PKG/opt/$PRGNAM/bin/*_x86 $PKG/opt/$PRGNAM/lib/32
-else
-  rm -rf $PKG/opt/$PRGNAM/bin/*_x86_64 $PKG/opt/$PRGNAM/lib/64
-fi
+# Move desktop and icon files to correct locations
+cp $CWD/stuntrally3.desktop $CWD/sr-editor3.desktop $PKG/usr/share/applications
+cp -a $PKG/opt/$SRCNAM-$VERSION-Linux/data/gui/stuntrally.png \
+  $PKG/opt/$SRCNAM-$VERSION-Linux/data/gui/sr-editor.png \
+  $PKG/usr/share/icons/hicolor/512x512/apps/
+
+# Fix .desktop warning
+sed -i 's|Comment\[de\]=.*|Comment[de]=Streckeneditor für Stunt Rally|' $PKG/usr/share/applications/sr-editor3.desktop
+
+# Fix launching from /usr/bin symlink or .desktop files
+sed -i '/BINPATH\.*/a cd "$(FindPath $0)"' $PKG/opt/$SRCNAM-$VERSION-Linux/{stuntrally,sr-editor}3.sh
+
+# Correct permissions for all bundled libs
+find $PKG/opt/$SRCNAM-$VERSION-Linux/lib -type f -exec chmod 755 {} \+
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-# 20220501 bkw: pacify desktop-file-validate somewhat.
-sed -i -e '/^Categories/s,Application;,,' \
-       $PKG/usr/share/applications/*.desktop
-
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a opt/$PRGNAM/License.txt opt/$PRGNAM/Readme.txt $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  $PKG/opt/$SRCNAM-$VERSION-Linux/{License.txt,Readme.md} \
+  $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
