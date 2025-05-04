@@ -1,0 +1,385 @@
+From debc5051ddf02c4274cfe21eba3779a14a0fc55c Mon Sep 17 00:00:00 2001
+From: ronso0 <ronso0@mixxx.org>
+Date: Thu, 27 Feb 2025 13:45:15 +0100
+Subject: [PATCH] Track info: fix size of cover art label
+
+* max height is now height of the three top rows
+* max width is now width of the two rightmost columns
+
+This prevents
+* flickering of single-track dialog when switching tracks
+* unintentional vertical stretching grid rows
+---
+ src/library/dlgtagfetcher.cpp     |  8 ++--
+ src/library/dlgtrackinfo.cpp      | 36 ++++++++++++++-
+ src/library/dlgtrackinfo.h        |  4 ++
+ src/library/dlgtrackinfomulti.cpp | 31 +++++++++++--
+ src/library/dlgtrackinfomulti.h   |  4 +-
+ src/widget/wcoverartlabel.cpp     | 77 +++++++++++++++++++++++--------
+ src/widget/wcoverartlabel.h       | 13 ++++--
+ 7 files changed, 139 insertions(+), 34 deletions(-)
+
+diff --git a/src/library/dlgtagfetcher.cpp b/src/library/dlgtagfetcher.cpp
+index 59361de64b87..b460db7d62ad 100644
+--- a/src/library/dlgtagfetcher.cpp
++++ b/src/library/dlgtagfetcher.cpp
+@@ -255,7 +255,7 @@ void DlgTagFetcher::loadTrack(const TrackPointer& pTrack) {
+                 &DlgTagFetcher::slotTrackChanged);
+     }
+ 
+-    m_pWFetchedCoverArtLabel->setCoverArt(CoverInfo{}, QPixmap{});
++    m_pWFetchedCoverArtLabel->setCoverInfoAndPixmap(CoverInfo{}, QPixmap{});
+ 
+     m_coverCache.clear();
+ 
+@@ -580,7 +580,7 @@ void DlgTagFetcher::tagSelected() {
+     m_data.m_selectedTag = tagIndex;
+ 
+     m_fetchedCoverArtByteArrays.clear();
+-    m_pWFetchedCoverArtLabel->setCoverArt(CoverInfo{},
++    m_pWFetchedCoverArtLabel->setCoverInfoAndPixmap(CoverInfo{},
+             QPixmap(CoverArtUtils::defaultCoverLocation()));
+ 
+     const mixxx::musicbrainz::TrackRelease& trackRelease = m_data.m_tags[tagIndex];
+@@ -612,7 +612,7 @@ void DlgTagFetcher::slotCoverFound(
+             m_pTrack &&
+             m_pTrack->getLocation() == coverInfo.trackLocation) {
+         m_trackRecord.setCoverInfo(coverInfo);
+-        m_pWCurrentCoverArtLabel->setCoverArt(coverInfo, pixmap);
++        m_pWCurrentCoverArtLabel->setCoverInfoAndPixmap(coverInfo, pixmap);
+     }
+ }
+ 
+@@ -673,7 +673,7 @@ void DlgTagFetcher::loadPixmapToLabel(const QPixmap& pixmap) {
+     statusMessage->clear();
+     statusMessage->setVisible(true);
+ 
+-    m_pWFetchedCoverArtLabel->setCoverArt(coverInfo, pixmap);
++    m_pWFetchedCoverArtLabel->setCoverInfoAndPixmap(coverInfo, pixmap);
+ 
+     checkBoxCover->setEnabled(!pixmap.isNull());
+ }
+diff --git a/src/library/dlgtrackinfo.cpp b/src/library/dlgtrackinfo.cpp
+index 070658721c91..97dbf200d8b1 100644
+--- a/src/library/dlgtrackinfo.cpp
++++ b/src/library/dlgtrackinfo.cpp
+@@ -382,7 +382,7 @@ void DlgTrackInfo::replaceTrackRecord(
+     const auto coverInfo = CoverInfo(
+             m_trackRecord.getCoverInfo(),
+             trackLocation);
+-    m_pWCoverArtLabel->setCoverArt(coverInfo, QPixmap());
++    m_pWCoverArtLabel->setCoverInfoAndPixmap(coverInfo, QPixmap());
+     // Executed concurrently
+     CoverArtCache::requestCover(this, coverInfo);
+ 
+@@ -508,6 +508,9 @@ void DlgTrackInfo::loadTrack(const QModelIndex& index) {
+         return;
+     }
+     TrackPointer pTrack = m_pTrackModel->getTrack(index);
++    VERIFY_OR_DEBUG_ASSERT(pTrack) {
++        return;
++    }
+     m_currentTrackIndex = index;
+     loadTrackInternal(pTrack);
+     if (m_pDlgTagFetcher && m_pDlgTagFetcher->isVisible()) {
+@@ -537,7 +540,7 @@ void DlgTrackInfo::slotCoverFound(
+             m_pLoadedTrack &&
+             m_pLoadedTrack->getLocation() == coverInfo.trackLocation) {
+         m_trackRecord.setCoverInfo(coverInfo);
+-        m_pWCoverArtLabel->setCoverArt(coverInfo, pixmap);
++        m_pWCoverArtLabel->setCoverInfoAndPixmap(coverInfo, pixmap);
+     }
+ }
+ 
+@@ -863,3 +866,32 @@ void DlgTrackInfo::slotImportMetadataFromMusicBrainz() {
+     }
+     m_pDlgTagFetcher->show();
+ }
++
++void DlgTrackInfo::resizeEvent(QResizeEvent* pEvent) {
++    QDialog::resizeEvent(pEvent);
++
++    if (!isVisible()) {
++        // Likely one of the resize events before show().
++        // Widgets don't have their final size, yet, so it
++        // makes no sense to resize the cover label.
++        return;
++    }
++
++    // Set a maximum size on the cover label so it can use the available space
++    // but doesn't force-expand the dialog.
++    // The cover label spans across three tag rows and the two rightmost columns.
++    // Unfortunately we can't read row/column sizes directly, so we use the widgets.
++    int contHeight = txtTitle->height() + txtArtist->height() + txtAlbum->height();
++    int vSpacing = tags_layout->verticalSpacing();
++    int totalHeight = vSpacing * 2 + contHeight;
++
++    int contWidth = lblYear->width() + txtYear->width();
++    int hSpacing = tags_layout->horizontalSpacing();
++    int totalWidth = contWidth + hSpacing;
++
++    m_pWCoverArtLabel->setMaxSize(QSize(totalWidth, totalHeight));
++
++    // Also clamp height of the cover's parent widget. Keeping its height minimal
++    // can't be accomplished with QSizePolicies alone unfortunately.
++    coverWidget->setFixedHeight(totalHeight);
++}
+diff --git a/src/library/dlgtrackinfo.h b/src/library/dlgtrackinfo.h
+index 8949c530eb47..525042b5ed13 100644
+--- a/src/library/dlgtrackinfo.h
++++ b/src/library/dlgtrackinfo.h
+@@ -45,6 +45,10 @@ class DlgTrackInfo : public QDialog, public Ui::DlgTrackInfo {
+     void next();
+     void previous();
+ 
++  protected:
++    // used to set the maximum size of the cover label
++    void resizeEvent(QResizeEvent* pEvent) override;
++
+   private slots:
+     void slotNextButton();
+     void slotPrevButton();
+diff --git a/src/library/dlgtrackinfomulti.cpp b/src/library/dlgtrackinfomulti.cpp
+index bbcd07a46ca0..7977dd55bc71 100644
+--- a/src/library/dlgtrackinfomulti.cpp
++++ b/src/library/dlgtrackinfomulti.cpp
+@@ -613,10 +613,35 @@ void DlgTrackInfoMulti::addValuesToCommentBox(QSet<QString>& comments) {
+ 
+ void DlgTrackInfoMulti::resizeEvent(QResizeEvent* pEvent) {
+     Q_UNUSED(pEvent);
++    if (!isVisible()) {
++        // Likely one of the resize events before show().
++        // Dialog & widgets don't have their final size, yet,
++        // so it makes no sense to resize the cover label.
++        return;
++    }
++
+     // Limit comment popup to dialog width. This may introduce some linebreaks
+     // but is still much better than letting the popup expand to screen width,
+     // which it would do regrardless if it's actually necessary.
+     txtCommentBox->view()->parentWidget()->setMaximumWidth(width());
++
++    // Set a maximum size on the cover label so it can use the available space
++    // but doesn't force-expand the dialog.
++    // The cover label spans across three tag rows and the two rightmost columns.
++    // Unfortunately we can't read row/column sizes directly, so we use the widgets.
++    int contHeight = txtTitle->height() + txtArtist->height() + txtAlbum->height();
++    int vSpacing = tags_layout->verticalSpacing();
++    int totalHeight = vSpacing * 2 + contHeight;
++
++    int contWidth = lblYear->width() + txtYear->width();
++    int hSpacing = tags_layout->horizontalSpacing();
++    int totalWidth = contWidth + hSpacing;
++
++    m_pWCoverArtLabel->setMaxSize(QSize(totalWidth, totalHeight));
++
++    // Also clamp height of the cover's parent widget. Keeping its height minimal
++    // can't be accomplished with QSizePolicies alone unfortunately.
++    coverWidget->setFixedHeight(totalHeight);
+ }
+ 
+ void DlgTrackInfoMulti::saveTracks() {
+@@ -1043,12 +1068,12 @@ void DlgTrackInfoMulti::updateCoverArtFromTracks() {
+         // Just make sure the same track is used in slotCoverFound(): the track
+         // location has to match in order to load the cover image to the label.
+         auto trCover = pRefTrack->getCoverInfoWithLocation();
+-        m_pWCoverArtLabel->setCoverArt(trCover, QPixmap());
++        m_pWCoverArtLabel->setCoverInfoAndPixmap(trCover, QPixmap());
+         CoverArtCache::requestCover(this, trCover);
+     } else {
+         // Set empty cover + track location
+         auto trCover = CoverInfo(CoverInfoRelative(), pRefTrack->getLocation());
+-        m_pWCoverArtLabel->setCoverArt(trCover, QPixmap());
++        m_pWCoverArtLabel->setCoverInfoAndPixmap(trCover, QPixmap());
+     }
+ }
+ 
+@@ -1061,7 +1086,7 @@ void DlgTrackInfoMulti::slotCoverFound(
+             m_pLoadedTracks.cbegin().value()->getLocation() == coverInfo.trackLocation) {
+         // Track records have already been updated in slotCoverInfoSelected,
+         // now load the image to the label.
+-        m_pWCoverArtLabel->setCoverArt(coverInfo, pixmap);
++        m_pWCoverArtLabel->setCoverInfoAndPixmap(coverInfo, pixmap);
+     }
+ }
+ 
+diff --git a/src/library/dlgtrackinfomulti.h b/src/library/dlgtrackinfomulti.h
+index d733bda4788f..4c069f549d95 100644
+--- a/src/library/dlgtrackinfomulti.h
++++ b/src/library/dlgtrackinfomulti.h
+@@ -31,11 +31,11 @@ class DlgTrackInfoMulti : public QDialog, public Ui::DlgTrackInfoMulti {
+     void loadTracks(const QList<TrackPointer>& pTracks);
+     void focusField(const QString& property);
+ 
++  protected:
+     /// We need this to set the max width of the comment QComboBox which has
+     /// issues with long lines / multi-line content. See init() for details.
++    /// Also used to set the maximum size of the cover label
+     void resizeEvent(QResizeEvent* event) override;
+-
+-  protected:
+     bool eventFilter(QObject* pObj, QEvent* pEvent) override;
+ 
+   private slots:
+diff --git a/src/widget/wcoverartlabel.cpp b/src/widget/wcoverartlabel.cpp
+index 519c65b5de6f..fa08bc55767a 100644
+--- a/src/widget/wcoverartlabel.cpp
++++ b/src/widget/wcoverartlabel.cpp
+@@ -9,61 +9,100 @@
+ 
+ namespace {
+ 
+-constexpr QSize kDeviceIndependentCoverLabelSize = QSize(100, 100);
++// Device-independent size for the label
++constexpr QSize kDefaultSize = QSize(100, 100);
++
++// Size for the pixmap. Assumes frame width is 1px.
++constexpr QSize kDefaultPixmapSize = kDefaultSize - QSize(2, 2);
+ 
+ inline QPixmap scaleCoverLabel(
+-        QWidget* parent,
+-        QPixmap pixmap) {
+-    const auto devicePixelRatioF = parent->devicePixelRatioF();
++        QLabel* pLabel,
++        QPixmap pixmap,
++        QSize size) {
++    VERIFY_OR_DEBUG_ASSERT(size.isValid()) {
++        size = kDefaultPixmapSize;
++    }
++    const auto devicePixelRatioF = pLabel->devicePixelRatioF();
+     pixmap.setDevicePixelRatio(devicePixelRatioF);
+     return pixmap.scaled(
+-            kDeviceIndependentCoverLabelSize * devicePixelRatioF,
++            size * devicePixelRatioF,
+             Qt::KeepAspectRatio,
+             Qt::SmoothTransformation);
+ }
+ 
+-QPixmap createDefaultCover(QWidget* parent) {
++QPixmap createDefaultCover(QLabel* pLabel, QSize size) {
+     auto defaultCover = QPixmap(CoverArtUtils::defaultCoverLocation());
+-    return scaleCoverLabel(parent, defaultCover);
++    return scaleCoverLabel(pLabel, defaultCover, size);
+ }
+ 
+ } // anonymous namespace
+ 
+-WCoverArtLabel::WCoverArtLabel(QWidget* parent, WCoverArtMenu* pCoverMenu)
+-        : QLabel(parent),
++WCoverArtLabel::WCoverArtLabel(QWidget* pParent, WCoverArtMenu* pCoverMenu)
++        : QLabel(pParent),
+           m_pCoverMenu(pCoverMenu),
+           m_pDlgFullSize(make_parented<DlgCoverArtFullSize>(this, nullptr, pCoverMenu)),
+-          m_defaultCover(createDefaultCover(this)) {
+-    setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::MinimumExpanding);
++          m_maxSize(kDefaultSize),
++          m_pixmapSizeMax(kDefaultPixmapSize),
++          m_defaultCover(createDefaultCover(this, m_pixmapSizeMax)) {
++    setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+     setFrameShape(QFrame::Box);
+     setAlignment(Qt::AlignCenter);
+-    setPixmap(m_defaultCover);
++    setPixmapAndResize(m_defaultCover);
+ }
+ 
+ WCoverArtLabel::~WCoverArtLabel() = default;
+ 
+-void WCoverArtLabel::setCoverArt(const CoverInfo& coverInfo,
++void WCoverArtLabel::setCoverInfoAndPixmap(const CoverInfo& coverInfo,
+         const QPixmap& px) {
+     if (m_pCoverMenu != nullptr) {
+         m_pCoverMenu->setCoverArt(coverInfo);
+     }
++    setPixmapAndResize(px);
++}
++
++void WCoverArtLabel::setPixmapAndResize(const QPixmap& px) {
+     if (px.isNull()) {
+         m_loadedCover = px;
+         m_fullSizeCover = px;
+         setPixmap(m_defaultCover);
+     } else {
+-        m_loadedCover = scaleCoverLabel(this, px);
++        m_loadedCover = scaleCoverLabel(this, px, m_pixmapSizeMax);
+         m_fullSizeCover = px;
+         setPixmap(m_loadedCover);
+     }
+ #if (QT_VERSION >= QT_VERSION_CHECK(5, 15, 0))
+-    QSize frameSize = pixmap(Qt::ReturnByValue).size() / devicePixelRatioF();
++    QSize newSize = pixmap().size() / devicePixelRatioF();
+ #else
+-    QSize frameSize = pixmap()->size() / devicePixelRatioF();
++    QSize newSize = pixmap()->size() / devicePixelRatioF();
+ #endif
+-    frameSize += QSize(2, 2); // margin
+-    setMinimumSize(frameSize);
+-    setMaximumSize(frameSize);
++    // add the frame so the entire pixmap is visible
++    newSize += QSize(frameWidth() * 2, frameWidth() * 2);
++    if (size() != newSize) {
++        setFixedSize(newSize);
++    }
++}
++
++void WCoverArtLabel::setMaxSize(const QSize newSize) {
++    if (newSize == m_maxSize) {
++        return;
++    }
++
++    m_maxSize = newSize;
++    m_pixmapSizeMax = newSize - QSize(frameWidth() * 2, frameWidth() * 2);
++    // Skip resizing the pixmap and label if the pixmap already fits.
++    // Check if we got more space in one dimension and don't need it
++    // for the other.
++    const QSize pixmapSize = pixmap().size() / devicePixelRatioF();
++    if (m_pixmapSizeMax == pixmapSize ||
++            (m_pixmapSizeMax.height() == pixmapSize.height() &&
++                    m_pixmapSizeMax.width() > pixmapSize.width()) ||
++            (m_pixmapSizeMax.width() == pixmapSize.width() &&
++                    m_pixmapSizeMax.height() > pixmapSize.height())) {
++        return;
++    }
++
++    m_defaultCover = createDefaultCover(this, m_pixmapSizeMax);
++    setPixmapAndResize(m_fullSizeCover);
+ }
+ 
+ void WCoverArtLabel::slotCoverMenu(const QPoint& pos) {
+diff --git a/src/widget/wcoverartlabel.h b/src/widget/wcoverartlabel.h
+index 9b5421d26868..2611c7a140f4 100644
+--- a/src/widget/wcoverartlabel.h
++++ b/src/widget/wcoverartlabel.h
+@@ -19,24 +19,29 @@ class WCoverArtLabel : public QLabel {
+ 
+     ~WCoverArtLabel() override; // Verifies that the base destructor is virtual
+ 
+-    void setCoverArt(const CoverInfo& coverInfo, const QPixmap& px);
++    void setCoverInfoAndPixmap(const CoverInfo& coverInfo, const QPixmap& px);
+     void loadTrack(TrackPointer pTrack);
++    void setMaxSize(const QSize size);
+ 
+   protected:
+-    void mousePressEvent(QMouseEvent* event) override;
+-    void contextMenuEvent(QContextMenuEvent* event) override;
++    void mousePressEvent(QMouseEvent* pEvent) override;
++    void contextMenuEvent(QContextMenuEvent* pEvent) override;
+ 
+   private slots:
+       void slotCoverMenu(const QPoint& pos);
+ 
+   private:
++    void setPixmapAndResize(const QPixmap& px);
++
+     WCoverArtMenu* m_pCoverMenu;
+ 
+     const parented_ptr<DlgCoverArtFullSize> m_pDlgFullSize;
+ 
+     TrackPointer m_pLoadedTrack;
+ 
+-    const QPixmap m_defaultCover;
++    QSize m_maxSize;
++    QSize m_pixmapSizeMax;
++    QPixmap m_defaultCover;
+     QPixmap m_loadedCover;
+     QPixmap m_fullSizeCover;
+ };
