@@ -1,20 +1,24 @@
-Submitted by:            DJ Lucas (dj_AT_linuxfromscratch_DOT_org)
+Submitted by:            DJ Lucas (dj at linuxfromscratch dot org)
 Date:                    2017-05-27
 Initial Package Version: 1.0.3
 Update by:               Bruce Dubbs
 Date:                    2017-06-14
+Update by (#2):          Douglas R. Reno <renodr at linuxfromscratch dot org>
+Date:                    2019-01-02
 Upstream Status:         Submitted
 Origin:                  https://github.com/x42/liboauth/issues/9
-Description:             Fixes build issue with OpenSSL-1.1.0.
-Update:                  Additional fix from upstream.  Three lines changed.
+Description:             Fixes build issue with OpenSSL_1.1.0.
+Update:                  Additional fix from upstream. Three lines changed.
+Update #2:               Rebased patch, and fixed one more missed reference to md_ctx.
 
-diff -Naurp liboauth-1.0.3-orig/src/hash.c liboauth-1.0.3/src/hash.c
---- liboauth-1.0.3-orig/src/hash.c	2013-10-04 08:02:50.000000000 -0500
-+++ liboauth-1.0.3/src/hash.c	2017-05-27 00:51:04.708633351 -0500
-@@ -362,6 +362,11 @@ looser:
+diff -Naurp liboauth-1.0.3.orig/src/hash.c liboauth-1.0.3/src/hash.c
+--- liboauth-1.0.3.orig/src/hash.c	2013-10-04 08:02:50.000000000 -0500
++++ liboauth-1.0.3/src/hash.c	2019-01-01 23:41:47.027037421 -0600
+@@ -362,6 +362,12 @@ looser:
  #include "oauth.h" // base64 encode fn's.
  #include <openssl/hmac.h>
  
++
 +#if OPENSSL_VERSION_NUMBER < 0x10100000
 +#define EVP_MD_CTX_new EVP_MD_CTX_create
 +#define EVP_MD_CTX_free EVP_MD_CTX_destroy
@@ -23,7 +27,7 @@ diff -Naurp liboauth-1.0.3-orig/src/hash.c liboauth-1.0.3/src/hash.c
  char *oauth_sign_hmac_sha1 (const char *m, const char *k) {
    return(oauth_sign_hmac_sha1_raw (m, strlen(m), k, strlen(k)));
  }
-@@ -386,7 +391,7 @@ char *oauth_sign_rsa_sha1 (const char *m
+@@ -386,7 +392,7 @@ char *oauth_sign_rsa_sha1 (const char *m
    unsigned char *sig = NULL;
    unsigned char *passphrase = NULL;
    unsigned int len=0;
@@ -32,13 +36,13 @@ diff -Naurp liboauth-1.0.3-orig/src/hash.c liboauth-1.0.3/src/hash.c
  
    EVP_PKEY *pkey;
    BIO *in;
-@@ -399,24 +404,31 @@ char *oauth_sign_rsa_sha1 (const char *m
+@@ -399,24 +405,31 @@ char *oauth_sign_rsa_sha1 (const char *m
      return xstrdup("liboauth/OpenSSL: can not read private key");
    }
  
 +  md_ctx = EVP_MD_CTX_new();
 +  if (md_ctx == NULL) {
-+          return xstrdup("liboauth/OpenSSL: failed to allocate EVP_MD_CTX");
++    return xstrdup("liboauth/OpenSSL: failed to allocate EVP_MD_CTX");
 +  }
 +
    len = EVP_PKEY_size(pkey);
@@ -68,15 +72,16 @@ diff -Naurp liboauth-1.0.3-orig/src/hash.c liboauth-1.0.3/src/hash.c
    EVP_PKEY *pkey;
    BIO *in;
    X509 *cert = NULL;
-@@ -437,13 +449,18 @@ int oauth_verify_rsa_sha1 (const char *m
+@@ -437,13 +450,19 @@ int oauth_verify_rsa_sha1 (const char *m
      return -2;
    }
  
-+	md_ctx = EVP_MD_CTX_new();
-+	if (md_ctx == NULL) {
-+		return -2;
-+	}
 +
++  md_ctx = EVP_MD_CTX_new();
++  if (md_ctx == NULL) {
++    return -2;
++  }
++  
    b64d= (unsigned char*) xmalloc(sizeof(char)*strlen(s));
    slen = oauth_decode_base64(b64d, s);
  
@@ -87,11 +92,11 @@ diff -Naurp liboauth-1.0.3-orig/src/hash.c liboauth-1.0.3/src/hash.c
 +  EVP_VerifyInit(md_ctx, EVP_sha1());
 +  EVP_VerifyUpdate(md_ctx, m, strlen(m));
 +  err = EVP_VerifyFinal(md_ctx, b64d, slen, pkey);
-+  EVP_MD_CTX_free(pkey);
++  EVP_MD_CTX_free(md_ctx);
    EVP_PKEY_free(pkey);
    xfree(b64d);
    return (err);
-@@ -455,35 +472,41 @@ int oauth_verify_rsa_sha1 (const char *m
+@@ -455,35 +474,41 @@ int oauth_verify_rsa_sha1 (const char *m
   */
  char *oauth_body_hash_file(char *filename) {
    unsigned char fb[BUFSIZ];
@@ -106,7 +111,7 @@ diff -Naurp liboauth-1.0.3-orig/src/hash.c liboauth-1.0.3/src/hash.c
 -  EVP_DigestInit(&ctx,EVP_sha1());
 +  ctx = EVP_MD_CTX_new();
 +  if (ctx == NULL) {
-+          return xstrdup("liboauth/OpenSSL: failed to allocate EVP_MD_CTX");
++    return xstrdup("liboauth/OpenSSL: failed to allocate EVP_MD_CTX");
 +  }
 +  EVP_DigestInit(ctx,EVP_sha1());
    while (!feof(F) && (len=fread(fb,sizeof(char),BUFSIZ, F))>0) {
@@ -136,7 +141,7 @@ diff -Naurp liboauth-1.0.3-orig/src/hash.c liboauth-1.0.3/src/hash.c
 -  EVP_MD_CTX_cleanup(&ctx);
 +  ctx = EVP_MD_CTX_new();
 +  if (ctx == NULL) {
-+          return xstrdup("liboauth/OpenSSL: failed to allocate EVP_MD_CTX");
++    return xstrdup("liboauth/OpenSSL: failed to allocate EVP_MD_CTX");
 +  }
 +  EVP_DigestInit(ctx,EVP_sha1());
 +  EVP_DigestUpdate(ctx, data, length);
