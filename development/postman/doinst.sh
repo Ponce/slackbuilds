@@ -1,5 +1,5 @@
 ( cd usr/bin ; rm -rf postman )
-( cd usr/bin ; ln -sf /opt/postman/app/Postman postman )
+( cd usr/bin ; ln -sf /opt/postman/app/postman postman )
 
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
