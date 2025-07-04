@@ -2,7 +2,7 @@
 
 # Slackware build script for shiboken2
 
-# Copyright 2023 Christoph Willing  Brisbane, Australia
+# Copyright 2023-2025 Christoph Willing,  Sydney Australia
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,11 +25,16 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=shiboken2
-VERSION=${VERSION:-5.15.10}
+VERSION=${VERSION:-5.15.17}
 SRCNAM=pyside-setup-opensource-src
+SRCNAM_PATCHES=pyside2
+SRCNAM_PATCHES_VERSION=5.15.16-3.1
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+
+PYTHON_VERSION=${PYTHON_VERSION:-$(python3 -c 'import sys; print("{}.{}".format(sys.version_info.major, sys.version_info.minor))')}
+PYTHON_LIB_PATH=$(python3 -c "from sysconfig import get_path; print(get_path('platlib'))")
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -39,9 +44,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -65,6 +67,11 @@ else
   LIBDIRSUFFIX=""
 fi
 
+cmake_policy_version=""
+if pkg-config --atleast-version 1.2.14 alsa ; then
+  cmake_policy_version="-DCMAKE_POLICY_VERSION_MINIMUM=3.5" ;
+fi
+
 set -e
 
 rm -rf $PKG
@@ -72,7 +79,13 @@ mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $SRCNAM-$VERSION
 tar xvf $CWD/$SRCNAM-$VERSION.tar.xz
-cd $SRCNAM-$VERSION/sources/$PRGNAM
+cd $SRCNAM-$VERSION/
+
+tar xvf $CWD/${SRCNAM_PATCHES}_${SRCNAM_PATCHES_VERSION}.debian.tar.xz
+while read -r patch ; do patch -Np1 -i debian/patches/$patch ; done <debian/patches/series
+patch -Np1 < $CWD/Modify-sendCommand-signatures.patch
+sed -i -e 's:#!/usr/bin/env python:#!/usr/bin/env/python3:' sources/shiboken2/shiboken_tool.py
+
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -82,26 +95,30 @@ find -L . \
 
 mkdir -p build
 cd build
-  export CC=/usr/bin/clang
-  export CXX=/usr/bin/clang++
   cmake \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLIB_INSTALL_DIR=lib64 \
     -DLIB_SUFFIX=${LIBDIRSUFFIX} \
-    -DPYTHON_EXECUTABLE=/usr/bin/python3 \
-    -DBUILD_TESTS=ON \
+    $cmake_policy_version \
+    -DUSE_PYTHON_VERSION=$PYTHON_VERSION \
+    -DBUILD_TESTS=OFF \
     -DCMAKE_BUILD_TYPE=Release ..
-  make
-  make install DESTDIR=$PKG
+
+  cmake --build sources/$PRGNAM 
+  DESTDIR=$PKG cmake --install sources/$PRGNAM
 cd ..
+python$PYTHON_VERSION setup.py egg_info --build-type=shiboken2
+mkdir -p $PKG/$PYTHON_LIB_PATH
+mv shiboken2.egg-info $PKG/$PYTHON_LIB_PATH/
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  AUTHORS COPYING* doc \
+  sources/$PRGNAM/{AUTHORS,COPYING*,doc} \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
