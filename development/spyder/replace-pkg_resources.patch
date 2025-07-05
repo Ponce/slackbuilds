@@ -1,0 +1,291 @@
+--- a/binder/environment.yml
++++ b/binder/environment.yml
+@@ -12,6 +12,7 @@
+ - cloudpickle >=0.5.0
+ - cookiecutter >=1.6.0
+ - diff-match-patch >=20181111
++- importlib-metadata >=4.6.0
+ - intervaltree >=3.0.2
+ - ipython >=8.13.0,<9.0.0,!=8.17.1
+ - jedi >=0.17.2,<0.20.0
+--- a/conftest.py
++++ b/conftest.py
+@@ -113,13 +113,19 @@
+     from spyder.plugins.completion.api import COMPLETION_ENTRYPOINT
+     from spyder.plugins.completion.plugin import CompletionPlugin
+ 
++
++    # See compatibility note on `group` keyword:
++    # https://docs.python.org/3/library/importlib.metadata.html#entry-points
++    if sys.version_info < (3, 10):  # pragma: no cover
++        from importlib_metadata import entry_points
++    else:  # pragma: no cover
++        from importlib.metadata import entry_points
++
+     # Restore completion clients default settings, since they
+     # don't have default values on the configuration.
+-    from pkg_resources import iter_entry_points
+-
+     provider_configurations = {}
+-    for entry_point in iter_entry_points(COMPLETION_ENTRYPOINT):
+-        Provider = entry_point.resolve()
++    for entry_point in entry_points(group=COMPLETION_ENTRYPOINT):
++        Provider = entry_point.load()
+         provider_name = Provider.COMPLETION_PROVIDER_NAME
+ 
+         (provider_conf_version,
+--- a/install_dev_repos.py
++++ b/install_dev_repos.py
+@@ -15,7 +15,7 @@
+ from pathlib import Path
+ from subprocess import check_output
+ 
+-from importlib_metadata import PackageNotFoundError, distribution
++from importlib.metadata import PackageNotFoundError, distribution
+ from packaging.requirements import Requirement
+ 
+ # Remove current/script directory from sys.path[0] if added by the Python invocation,
+--- a/installers/macOS/packages.py
++++ b/installers/macOS/packages.py
+@@ -20,10 +20,6 @@
+     ModuleNotFoundError: No module named 'keyring.backends.chainer'
+     ModuleNotFoundError: No module named 'keyring.backends.libsecret'
+     ModuleNotFoundError: No module named 'keyring.backends.macOS'
+-pkg_resources:
+-    ImportError: The 'more_itertools' package is required; normally this is
+-    bundled with this package so if you get this warning, consult the
+-    packager of your distribution.
+ pygments:
+     ModuleNotFoundError: No module named 'pygments.formatters.latex'
+ pylint_venv:
+@@ -44,7 +40,6 @@
+ # Packages that cannot be in the zip folder
+ PACKAGES = [
+     'keyring',
+-    'pkg_resources',
+     'pygments',
+     'pylint_venv',
+     'pyls_spyder',
+--- a/requirements/main.yml
++++ b/requirements/main.yml
+@@ -10,6 +10,8 @@
+   - cloudpickle >=0.5.0
+   - cookiecutter >=1.6.0
+   - diff-match-patch >=20181111
++  # Need at least some compatibility with python 3.10 features
++  - importlib-metadata >=4.6.0
+   - intervaltree >=3.0.2
+   - ipython >=8.13.0,<9.0.0,!=8.17.1
+   - jedi >=0.17.2,<0.20.0
+--- a/setup.py
++++ b/setup.py
+@@ -210,6 +210,9 @@
+     'cloudpickle>=0.5.0',
+     'cookiecutter>=1.6.0',
+     'diff-match-patch>=20181111',
++    # While this is only required for python <3.10, it is safe enough to
++    # install in all cases and helps the tests to pass.
++    'importlib-metadata>=4.6.0',
+     'intervaltree>=3.0.2',
+     'ipython>=8.12.2,<8.13.0; python_version=="3.8"',
+     'ipython>=8.13.0,<9.0.0,!=8.17.1; python_version>"3.8"',
+@@ -246,7 +249,7 @@
+     'spyder-kernels>=2.5.0,<2.6.0',
+     'textdistance>=4.2.0',
+     'three-merge>=0.1.1',
+-    'watchdog>=0.10.3'
++    'watchdog>=0.10.3',
+ ]
+ 
+ # Loosen constraints to ensure dev versions still work
+--- a/spyder/app/find_plugins.py
++++ b/spyder/app/find_plugins.py
+@@ -17,6 +17,13 @@
+ from spyder.api.utils import get_class_values
+ from spyder.config.base import STDERR
+ 
++# See compatibility note on `group` keyword:
++# https://docs.python.org/3/library/importlib.metadata.html#entry-points
++if sys.version_info < (3, 10):  # pragma: no cover
++    from importlib_metadata import entry_points
++else:  # pragma: no cover
++    from importlib.metadata import entry_points
++
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -27,16 +34,15 @@
+     """
+     internal_plugins = {}
+ 
+-    entry_points = list(pkg_resources.iter_entry_points("spyder.plugins"))
+     internal_names = get_class_values(Plugins)
+ 
+-    for entry_point in entry_points:
++    for entry_point in entry_points(group="spyder.plugins"):
+         name = entry_point.name
+         if name not in internal_names:
+             continue
+ 
+-        class_name = entry_point.attrs[0]
+-        mod = importlib.import_module(entry_point.module_name)
++        class_name = entry_point.attr
++        mod = importlib.import_module(entry_point.module)
+         plugin_class = getattr(mod, class_name, None)
+         internal_plugins[name] = plugin_class
+ 
+@@ -55,21 +61,19 @@
+     Find available external plugins based on setuptools entry points.
+     """
+     internal_names = get_class_values(Plugins)
+-    plugins = list(pkg_resources.iter_entry_points("spyder.plugins"))
+     external_plugins = {}
+ 
+-    for entry_point in plugins:
++    for entry_point in entry_points(group="spyder.plugins"):
+         name = entry_point.name
+         if name not in internal_names:
+             try:
+-                class_name = entry_point.attrs[0]
+-                mod = importlib.import_module(entry_point.module_name)
++                class_name = entry_point.attr
++                mod = importlib.import_module(entry_point.module)
+                 plugin_class = getattr(mod, class_name, None)
+ 
+                 # To display in dependencies dialog.
+-                plugin_class._spyder_module_name = entry_point.module_name
+-                plugin_class._spyder_package_name = (
+-                    entry_point.dist.project_name)
++                plugin_class._spyder_module_name = entry_point.module
++                plugin_class._spyder_package_name = entry_point.dist.name
+                 plugin_class._spyder_version = entry_point.dist.version
+ 
+                 external_plugins[name] = plugin_class
+--- a/spyder/dependencies.py
++++ b/spyder/dependencies.py
+@@ -40,6 +40,7 @@
+ CLOUDPICKLE_REQVER = '>=0.5.0'
+ COOKIECUTTER_REQVER = '>=1.6.0'
+ DIFF_MATCH_PATCH_REQVER = '>=20181111'
++IMPORTLIB_METADATA_REQVER = '>=4.6.0'
+ # None for pynsist install for now
+ # (check way to add dist.info/egg.info from packages without wheels available)
+ INTERVALTREE_REQVER = None if is_pynsist() else '>=3.0.2'
+@@ -121,6 +122,10 @@
+      'package_name': "diff-match-patch",
+      'features': _("Compute text file diff changes during edition"),
+      'required_version': DIFF_MATCH_PATCH_REQVER},
++    {'modname': 'importlib_metadata',
++     'package_name': 'importlib-metadata',
++     'features': _('Access the metadata for a Python package'),
++     'required_version': IMPORTLIB_METADATA_REQVER},
+     {'modname': "intervaltree",
+      'package_name': "intervaltree",
+      'features': _("Compute folding range nesting levels"),
+--- a/spyder/plugins/completion/plugin.py
++++ b/spyder/plugins/completion/plugin.py
+@@ -12,6 +12,7 @@
+ """
+ 
+ # Standard library imports
++import sys
+ import functools
+ import inspect
+ import logging
+@@ -21,7 +22,6 @@
+ 
+ # Third-party imports
+ from packaging.version import parse
+-from pkg_resources import iter_entry_points
+ from qtpy.QtCore import QMutex, QMutexLocker, QTimer, Slot, Signal
+ 
+ # Local imports
+@@ -38,6 +38,14 @@
+ from spyder.plugins.completion.container import CompletionContainer
+ 
+ 
++# See compatibility note on `group` keyword:
++# https://docs.python.org/3/library/importlib.metadata.html#entry-points
++if sys.version_info < (3, 10):  # pragma: no cover
++    from importlib_metadata import entry_points
++else:  # pragma: no cover
++    from importlib.metadata import entry_points
++
++
+ logger = logging.getLogger(__name__)
+ 
+ # List of completion requests
+@@ -234,7 +242,7 @@
+ 
+         # Find and instantiate all completion providers registered via
+         # entrypoints
+-        for entry_point in iter_entry_points(COMPLETION_ENTRYPOINT):
++        for entry_point in entry_points(group=COMPLETION_ENTRYPOINT):
+             try:
+                 # This absolutely ensures that the Kite provider won't be
+                 # loaded. For instance, it can happen when you have an older
+@@ -243,7 +251,7 @@
+                 if 'kite' in entry_point.name:
+                     continue
+                 logger.debug(f'Loading entry point: {entry_point}')
+-                Provider = entry_point.resolve()
++                Provider = entry_point.load()
+                 self._instantiate_and_register_provider(Provider)
+             except Exception as e:
+                 logger.warning('Failed to load completion provider from entry '
+--- a/spyder/utils/programs.py
++++ b/spyder/utils/programs.py
+@@ -8,10 +8,10 @@
+ 
+ # Standard library imports
+ from ast import literal_eval
+-from getpass import getuser
+-from textwrap import dedent
+ import glob
++from getpass import getuser
+ import importlib
++from importlib.metadata import PackageNotFoundError, version as package_version
+ import itertools
+ import os
+ import os.path as osp
+@@ -19,12 +19,12 @@
+ import subprocess
+ import sys
+ import tempfile
++from textwrap import dedent
+ import threading
+ import time
+ 
+ # Third party imports
+ from packaging.version import parse
+-import pkg_resources
+ import psutil
+ 
+ # Local imports
+@@ -845,13 +845,9 @@
+ 
+ def get_package_version(package_name):
+     """Return package version or None if version can't be retrieved."""
+-
+-    # When support for Python 3.7 and below is dropped, this can be replaced
+-    # with the built-in importlib.metadata.version
+     try:
+-        ver = pkg_resources.get_distribution(package_name).version
+-        return ver
+-    except pkg_resources.DistributionNotFound:
++        return package_version(package_name)
++    except PackageNotFoundError:
+         return None
+ 
+ 
+--- a/spyder/utils/tests/test_programs.py
++++ b/spyder/utils/tests/test_programs.py
+@@ -287,7 +287,7 @@
+ 
+ 
+ def test_get_package_version():
+-    # Primarily a test of pkg_resources/setuptools being installed properly
++    # Primarily a test of importlib.metadata being installed properly
+     assert get_package_version('IPython')
+     assert get_package_version('python_lsp_black')
+ 
