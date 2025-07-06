@@ -24,6 +24,14 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20250704 bkw:
+# - update for v1.8.1.
+# - switch from autotools to cmake. this fixes building on -current. thanks
+#   to Andrea Sacchetti Picchio for spotting this.
+# - get rid of DOC=yes, upstream ships prebuilt docs, always include.
+# - cmake doesn't build the .info file, do it manually.
+# - build with our SLKCFLAGS only.
+
 # 20250528 bkw: update for v1.8.
 # 20231127 bkw:
 # - update for v1.7.3.
@@ -34,7 +42,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=libconfig
-VERSION=${VERSION:-1.8}
+VERSION=${VERSION:-1.8.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -82,50 +90,47 @@ chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
-# 20250528 bkw: 1.8 uses autoconf syntax not supported by our version
-# 2.69. revert to what the previous version did.
-sed -i 's,AC_CHECK_INCLUDES_DEFAULT,AC_HEADER_STDC,' configure.ac
+SLKCFLAGS="$SLKCFLAGS -DNDEBUG"
 
-autoreconf -if
+# Note: -DCMAKE_INSTALL_LIBDIR=/usr/lib64 results in broken .pc files
+# that reference /usr//usr/lib64. Using a relative (as below) path fixes it.
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_VERBOSE_MAKEFILE=ON \
+    -DBUILD_EXAMPLES=OFF \
+    -DBUILD_TESTS=OFF \
+    -DCMAKE_C_FLAGS_RELEASE="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS_RELEASE="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=lib$LIBDIRSUFFIX \
+    -DCMAKE_INSTALL_MANDIR=/usr/man \
+    -DCMAKE_INSTALL_DOCDIR=/usr/doc/$PRGNAM-$VERSION \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make install/strip DESTDIR=$PKG
+cd ..
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --infodir=/usr/info \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --disable-static \
-  --disable-examples \
-  --build=$ARCH-slackware-linux
+# 20250705 bkw: when we built with autoconf, it would create the .info
+# file. upstream hasn't added the .info to cmake yet, so do it this way.
+I=$PRGNAM.info
+make -C doc $I
+mkdir -p $PKG/usr/info
+gzip -9c < doc/$I > $PKG/usr/info/$I.gz
 
-make
-make install-strip DESTDIR=$PKG
-
-rm -f $PKG/usr/info/dir
-gzip -9 $PKG/usr/info/*.info*
-
+# 20250705 bkw: upstream stopped updating ChangeLog in 2022, after 1.7.4.
+# for now, include it in the package.
 PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
 mkdir -p $PKGDOC/examples/{c,c++}
-cp -a AUTHORS COPYING.LIB ChangeLog LICENSE README TODO $PKGDOC
+cp -a AUTHORS COPYING.LIB ChangeLog LICENSE README* TODO $PKGDOC
 cp -a examples/c/*.{cfg,c} $PKG/usr/doc/$PRGNAM-$VERSION/examples/c/
 cp -a examples/c++/*.{cfg,cpp} $PKG/usr/doc/$PRGNAM-$VERSION/examples/c++/
 cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
-INCLUDES="does NOT include"
-if [ "${DOC:-no}" = "yes" ]; then
-  make html pdf
-  cp -a doc/libconfig.{html,pdf} $PKGDOC
-  INCLUDES="includes"
-fi
-
-rm -f $PKG/usr/lib*/*.la
+# 20250705 bkw: upstream ships prebuilt docs, use them.
+cp -a docs/libconfig_manual.{html,pdf} $PKGDOC
 
 mkdir -p $PKG/install
-sed "s,@INCLUDES@,$INCLUDES," < $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 cat $CWD/doinst.sh > $PKG/install/douninst.sh
 
