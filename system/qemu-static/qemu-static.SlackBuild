@@ -1,0 +1,289 @@
+#!/bin/bash
+
+# Slackware build script for qemu
+
+# Copyright 2009, 2010  Andrew Brouwers <abrouwers@gmail.com>
+# Copyright 2013-2024  Edward W. Koenig, Vancouver, USA <kingbeowulf@linuxgalaxy.org>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=qemu-static
+VERSION=${VERSION:-9.2.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+TARNAM=${PRGNAM%-static}
+
+PCRE_VERSION=8.45
+GLIB2_VERSION=2.70.5
+GLIBC_VERSION=2.33
+
+KVMGROUP=${KVMGROUP:-users}
+TARGETS=${TARGETS:-all}
+VNC_ENABLE=${VNC_ENABLE:-yes}
+AUDIODRIVERS=${AUDIODRIVERS:-pa,alsa,oss,sdl}
+BRIDGE_HELPER_SETUID=${BRIDGE_HELPER_SETUID:-yes}
+SLIRP=${SLIRP:-=yes}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+  KVMARCH="i386"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+  KVMARCH="i386"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+  KVMARCH="x86_64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+
+(
+  rm -rf $TMP/static-glibc
+  mkdir -p $TMP/static-glibc
+  rm -rf glibc-$GLIBC_VERSION
+  tar xvf $CWD/glibc-$GLIBC_VERSION.tar.*z*
+  cd glibc-$GLIBC_VERSION
+  patch -p1 < $CWD/staticpie.patch
+
+  chown -R root:root .
+  find -L . \
+       \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+       -o -perm 511 \) -exec chmod 755 {} + -o \
+       \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+       -o -perm 440 -o -perm 400 \) -exec chmod 644 {} + || true
+
+  export CC='ccache gcc'
+  export CXX='ccache g++'
+  unset LD_LIBRARY_PATH
+  mkdir build
+  cd build
+  CFLAGS="$SLKCFLAGS" \
+        CXXFLAGS="$SLKCFLAGS" \
+        ../configure \
+        --enable-static-pie \
+        --prefix=$TMP/static-glibc/
+
+  make V=1
+  make install
+)
+
+L_LIBFLAG_PCRE=-L$TMP/static-pcre/usr/local/lib/
+(
+  rm -rf $TMP/static-pcre
+  mkdir -p $TMP/static-pcre
+rm -rf pcre-$PCRE_VERSION
+tar xvf $CWD/pcre-$PCRE_VERSION.tar.*z*
+cd pcre-$PCRE_VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} + -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} + || true
+
+export CC='ccache gcc'
+export CXX='ccache g++'
+
+LD_LIBRARY_PATH="$TMP/static-glibc/tmp/glibc/lib/" \
+LIBRARY_PATH="$TMP/static-glibc/tmp/glibc/lib/" \
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --enable-static \
+  --disable-shared \
+  --enable-utf8 \
+  --enable-pcre16 \
+  --enable-pcre32 \
+  --enable-jit \
+  --disable-cpp \
+  --enable-unicode-properties
+
+make V=1
+make install DESTDIR=$TMP/static-pcre
+)
+
+
+L_LIBFLAG_GLIB2=-L$TMP/static-glib2/usr/local/lib$LIBDIRSUFFIX/
+(
+  # TODO: https://gist.github.com/greyltc/c379a37366454ae6f6732fb23a80194b
+rm -rf glib-$GLIB2_VERSION
+tar xvf $CWD/glib-$GLIB2_VERSION.tar.*z*
+cd glib-$GLIB2_VERSION
+
+rm -rf  $TMP/static-glib2
+mkdir -p $TMP/static-glib2
+
+mkdir meson-build
+cd meson-build
+
+LDFLAGS='-static-pie' \
+CFLAGS="$SLKCFLAGS -I$TMP/static-pcre/usr/local/include $TMP/static-glibc/lib/rcrt1.o " \
+CXXFLAGS="$SLKCFLAGS  $TMP/static-glibc/lib/rcrt1.o "
+meson setup \
+  --default-library static \
+  --buildtype=release \
+  -Dselinux=disabled \
+  -Dfam=false \
+  -Dman=false \
+  -Dgtk_doc=false \
+  -Dtests=false \
+  -Dinstalled_tests=false \
+  .. || exit 1
+  "${NINJA:=ninja}" $NUMJOBS || exit 1
+  DESTDIR=$TMP/static-glib2 $NINJA install || exit 1
+)
+
+rm -rf $TARNAM-$VERSION
+tar xvf $CWD/$TARNAM-$VERSION.tar.xz
+cd $TARNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} + -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} + || true
+
+
+# Use newer meson from python3-meson-opt
+PYVER=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+export PYTHONPATH=/opt/python$PYVER/site-packages
+
+sed -i "/subdir('tests/d" meson.build
+
+LIBRARY_PATH="$TMP/static-glibc/lib/" \
+CC='ccache gcc' \
+LDFLAGS="$SLKCFLAGS $L_LIBFLAG_GLIB2 $L_LIBFLAG_PCRE -L$TMP/static-glibc/lib" \
+./configure \
+--prefix=/usr \
+--libdir=/usr/lib${LIBDIRSUFFIX} \
+--sysconfdir=/etc \
+--includedir=/usr/include \
+--localstatedir=/var \
+--docdir=/usr/doc/$PRGNAM-$VERSION \
+--enable-kvm \
+--disable-debug-info \
+--enable-user \
+--static \
+--disable-numa \
+--disable-linux-io-uring \
+--enable-attr \
+--enable-linux-user \
+--enable-tcg \
+--disable-bpf \
+--disable-bsd-user \
+--disable-capstone \
+--disable-docs \
+--disable-fdt \
+--disable-gcrypt \
+--disable-glusterfs \
+--disable-gnutls \
+--disable-gtk \
+--disable-install-blobs \
+--disable-kvm \
+--disable-libiscsi \
+--disable-libnfs \
+--disable-libssh \
+--disable-linux-io-uring \
+--disable-nettle \
+--disable-opengl \
+--disable-qom-cast-debug \
+--disable-sdl \
+--disable-system \
+--disable-tools \
+--disable-tpm \
+--disable-vde \
+--disable-vhost-crypto \
+--disable-vhost-kernel \
+--disable-vhost-net \
+--disable-vhost-user \
+--disable-vnc \
+--disable-werror \
+--disable-xen \
+--disable-zstd \
+--enable-pie
+
+LIBRARY_PATH="$TMP/static-glibc/lib/" \
+make V=1
+make install DESTDIR=$PKG
+
+(
+  cd $PKG/usr/bin/
+  for b in qemu-* ; do
+    mv $b $b-static
+  done
+)
+
+mkdir -p $PKG/usr/share/binfmts/
+cp $CWD/binfmts/* $PKG/usr/share/binfmts/
+chown root:root $PKG/usr/share/binfmts/*
+
+rm -rf $PKG/var
+rm -rf $PKG/usr/share/qemu
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Add docs to the proper location
+rm -rf $PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a COPYING* LICENSE \
+   $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+cat > $PKG/usr/doc/$PRGNAM-$VERSION/README <<EOF
+For actual documentation see /usr/doc/qemu-*/
+EOF
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
