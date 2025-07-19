@@ -2,14 +2,29 @@
 
 # Slackware build script for sslh
 
-#
-# Script created by mara <mara@fail.pp.ua>
-#
+# Script originally created by mara <email removed>.
+# Modified, updated, and now maintained by B. Watson <urchlay@slackware.uk>.
+# Original script had no license. Modified version is licensed under
+# the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20250706 bkw: normally I would go with the latest release, but there
+# are some pretty important-looking fixes in the last few git commits.
+# There's not a single line of mara's original script left, other than
+# boilerplate code copied from the SBo template, so I don't feel bad
+# relicensing it.
+
+# 20250719 bkw:
+# - updated for latest git, v2.2.4+20250630_11da63c.
+# - fix almost everything: README, slack-desc, rc script...
+# - allow libev to be optional and autodetected.
+# - document option libbsd dep in README.
+# - add /etc/default/sslh and make the rc.sslh script use it.
+# - make slack-desc reflect optional deps used.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=sslh
-VERSION=${VERSION:-1.18}
+VERSION=${VERSION:-2.2.4+20250630_11da63c}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -22,9 +37,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -40,7 +52,7 @@ if [ "$ARCH" = "i586" ]; then
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
+elif [ "$ARCH" = "x86_64" -o "$ARCH" = "aarch64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
@@ -53,43 +65,71 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-v$VERSION
-tar xvf $CWD/$PRGNAM-v$VERSION.tar.gz
-cd $PRGNAM-v$VERSION
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
-# fix slackware path in manpage
-sed -i 's/init.d/rc.d/' sslh.pod
-sed -i 's+/etc/default+/etc/sslh+' sslh.pod
-make VERSION=\"v$VERSION\"
+# fix slackware paths in manpage
+sed -i 's,init.d/sslh,rc.d/rc.sslh,' sslh.pod
 
-# install initscripts
-install -Dm 644 $CWD/rc.sslh $PKG/etc/rc.d/rc.sslh.new
-# install example file
-install -Dm 0644 example.cfg $PKG/etc/sslh/sslh.cfg.new
-# manually install to have both ssl-fork and ssl-select
-install -Dm 0755 sslh-fork $PKG/usr/bin/sslh-fork
-install -Dm 0755 sslh-select $PKG/usr/bin/sslh-select
-ln -s sslh-fork $PKG/usr/bin/sslh
-# install manpage
-install -Dm 0644 sslh.8.gz $PKG/usr/man/man8/sslh.8.gz
+# 20250706 bkw: configure script ignores CFLAGS in the env.
+sed -i "s/-O2/$SLKCFLAGS/" Makefile.in
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# 20250706 bkw: -lnsl allows configure to detect libwrap properly.
+LIBS="-lnsl" \
+./configure \
+  --prefix=/usr \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --sysconfdir=/etc \
+  --localstatedir=/var \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --build=$ARCH-slackware-linux
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+# 20250707 bkw: manual install, since there's 3 binaries and only
+# one gets installed with 'make install'.
+PBIN=$PKG/usr/sbin
+PMAN=$PKG/usr/man/man8
+mkdir -p $PBIN $PMAN
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+make sslh-fork sslh-select sslh.8.gz
+install -m0644 -oroot -groot sslh.8.gz $PMAN
+make sslh-ev || true # allow this to fail (if optional libev is missing)
+
+for i in ev fork select; do
+  bin=sslh-$i
+  if [ -e $bin ]; then
+    install -s -m0755 -oroot -groot $bin $PBIN
+    ln -s sslh.8.gz $PMAN/$bin.8.gz
+  fi
+done
+
+ln -s sslh-fork $PBIN/sslh
+
+WITHBSD=WITHOUT; WITHEV=WITHOUT
+objdump -p $PKG/usr/sbin/sslh | grep -q 'NEEDED.*libbsd' && WITHBSD=WITH
+[ -e $PKG/usr/sbin/sslh-ev ] && WITHEV=WITH
+
+mkdir -p $PKG/etc/{rc.d,sslh,default}
+cp -a *.cfg $PKG/etc/sslh
+cat basic.cfg > $PKG/etc/sslh/sslh.cfg.new
+cat $CWD/rc.sslh > $PKG/etc/rc.d/rc.sslh.new
+cat $CWD/sslh.default > $PKG/etc/default/sslh.new
+
+# 20250707 bkw: don't need these in a slackware package:
+rm -f doc/README.MacOSX doc/README.Windows.md doc/INSTALL.md
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a COPYING ChangeLog README* TODO doc/* $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s,@WITHBSD@,$WITHBSD," -e "s,@WITHEV@,$WITHEV," \
+  < $CWD/slack-desc \
+  > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
