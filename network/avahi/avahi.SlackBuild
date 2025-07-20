@@ -30,8 +30,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=avahi
-VERSION=${VERSION:-0.8}
-BUILD=${BUILD:-7}
+VERSION=${VERSION:-20240306_709e60f}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -51,14 +51,6 @@ fi
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
-
-# Support for mono
-if [ "${MONO:-no}" = "no" ]; then
-    MONO="--disable-mono"
-else
-    MONO="--enable-mono"
-fi
-MONO="--disable-mono" # mono support not working ATM
 
 warn_accounts() {
   echo "  You must have an avahi user and group to run this script. "
@@ -96,7 +88,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.lz
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
@@ -108,31 +100,7 @@ find -L . \
 # This patch is mine --rworkman
 patch -p1 --verbose < $CWD/patches/fixup_avahi-dnsconfd.action.patch
 
-# Thanks to LFS for this patch
-patch -p1 --verbose < $CWD/patches/ipv6_race_condition_fix.patch
-
-# Thanks to Debian for these patches
-patch -p1 --verbose < $CWD/patches/man-fix-reference-to-avahi-autoipd.action-8-in-avahi-auto.patch
-patch -p1 --verbose < $CWD/patches/man-add-missing-bshell.1-symlink.patch
-patch -p1 --verbose < $CWD/patches/Ship-avahi-discover-1-bssh-1-and-bvnc-1-also-for-GTK3.patch
-patch -p1 --verbose < $CWD/patches/avahi_dns_packet_consume_uint32-fix-potential-undefined-b.patch
-patch -p1 --verbose < $CWD/patches/fix-bytestring-decoding-for-proper-display.patch
-patch -p1 --verbose < $CWD/patches/avahi-discover-Don-t-decode-unicode-strings-only-bytestri.patch
-patch -p1 --verbose < $CWD/patches/Fetch-build-db-from-upstream-git.patch
-patch -p1 --verbose < $CWD/patches/build-db-Use-the-same-database-format-that-the-C-code-exp.patch
-patch -p1 --verbose < $CWD/patches/avahi-daemon-chroot-fix-bogus-assignments-in-assertions.patch
-patch -p1 --verbose < $CWD/patches/avahi-client-fix-resource-leak.patch
-patch -p1 --verbose < $CWD/patches/avoid-infinite-loop-in-avahi-daemon-by-handling-hup-event-in-client-work.patch
-patch -p1 --verbose < $CWD/patches/CVE-2021-3502.patch
-
-# Okay, I had to cheat a bit on the manual pages; there's a commit
-# in git that will fix this, so I just built a git checkout, grabbed
-# the built manual pages, and we'll drop them into place so the build
-# will work for this released version...
-cat $CWD/bssh.1 > man/bssh.1
-cat $CWD/avahi-discover.1 > man/avahi-discover.1
-
-autoreconf -vif
+NOCONFIGURE=1 ./autogen.sh
 
 export PYTHON=python3
 CFLAGS="$SLKCFLAGS" \
@@ -147,8 +115,10 @@ CXXFLAGS="$SLKCFLAGS" \
   --with-systemdsystemunitdir=no \
   --enable-tests \
   --disable-static \
+  --disable-mono \
   --disable-monodoc \
   --disable-autoipd \
+  --disable-libsystemd \
   --enable-compat-libdns_sd \
   --enable-python-dbus \
   --enable-glib \
@@ -160,6 +130,7 @@ CXXFLAGS="$SLKCFLAGS" \
   --disable-qt4 \
   --disable-qt3 \
   --enable-core-docs \
+  --disable-manpages \
   --with-dbus-sys=/usr/share/dbus-1/system.d \
   --with-avahi-user=avahi \
   --with-avahi-group=avahi \
@@ -167,8 +138,7 @@ CXXFLAGS="$SLKCFLAGS" \
   --with-distro=slackware \
   --program-prefix= \
   --program-suffix= \
-  --build=$ARCH-slackware-linux \
-  $MONO
+  --build=$ARCH-slackware-linux
 
 make
 make install-strip DESTDIR=$PKG
@@ -179,18 +149,27 @@ rmdir $PKG/run &> /dev/null || true
 
 rm -rf $PKG/usr/lib${LIBDIRSUFFIX}/*.la
 
+mkdir -p $PKG/usr/man/man1 $PKG/usr/man/man5 $PKG/usr/man/man8
+for i in $CWD/man/man1/* ; do cat $i > $PKG/usr/man/man1/$(basename $i) ; done
+for i in $CWD/man/man5/* ; do cat $i > $PKG/usr/man/man5/$(basename $i) ; done
+for i in $CWD/man/man8/* ; do cat $i > $PKG/usr/man/man8/$(basename $i) ; done
 find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $(find $PKG/usr/man -type l); do ln -s $(readlink $i).gz $i.gz; rm $i; done
 
 mv $PKG/etc/rc.d/rc.avahidaemon $PKG/etc/rc.d/rc.avahidaemon.new
 mv $PKG/etc/rc.d/rc.avahidnsconfd $PKG/etc/rc.d/rc.avahidnsconfd.new
 mv $PKG/etc/avahi/avahi-daemon.conf $PKG/etc/avahi/avahi-daemon.conf.new
 
+# Fix python3 shebangs:
 sed -i "s|#!python3|#!/usr/bin/python3|g" $PKG/usr/bin/avahi-{discover,bookmarks}
+
+# Don't ship .la files:
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 rm -f docs/INSTALL
-cp -a LICENSE docs/* $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a docs/* $PKG/usr/doc/$PRGNAM-$VERSION
+mv $PKG/usr/doc/$PRGNAM-$VERSION/README $PKG/usr/doc/$PRGNAM-$VERSION/README.too
+cp -a LICENSE* README* $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
