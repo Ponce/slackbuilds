@@ -1,0 +1,130 @@
+#!/bin/bash
+
+# Slackware build script for fscrypt
+
+# Copyright 2025 Isaac Yu <isaacyu@protonmail.com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=fscrypt
+VERSION=${VERSION:-0.3.5}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  LIBDIRSUFFIX="64"
+else
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+mkdir -p vendor
+cat $CWD/modules.txt > vendor/modules.txt
+for DIR in $(grep -o "^# .* " vendor/modules.txt | cut -d' ' -f2)
+do
+  NAME=$(echo $DIR | sed 's/[./]v[0-9]\+$//' | xargs basename)
+  DIR=vendor/$DIR
+
+  # Extract the tarball
+  if [ $DIR = "vendor/github.com/urfave/cli" ]; then
+    tar xvf $CWD/cli-1.22.14.tar.gz
+  elif [ $DIR = "vendor/golang.org/x/exp/typeparams" ]; then
+    tar xvf $CWD/exp-*.tar.gz
+  else
+    tar xvf $CWD/$NAME-*.tar.gz
+  fi
+
+  # Rename extracted folders
+  mkdir -p $(dirname $DIR)
+  if [ $DIR = "vendor/github.com/urfave/cli" ]; then
+    mv cli-1.22.14 $DIR
+  elif [ $DIR = "vendor/golang.org/x/exp/typeparams" ]; then
+    mv exp-* $DIR
+  else
+    mv $NAME-* $DIR
+  fi
+done
+
+# Make sure fscrypt uses the vendor directory for compilation
+# It must not download anything during the build process
+export GOFLAGS="-mod=vendor"
+
+# Prevent creation of cache files in /root/.cache/go-build
+export GOCACHE="${GOCACHE:-$TMP/$PRGNAM-$VERSION/go-cache}"
+export GOMODCACHE="${GOMODCACHE:-$TMP/$PRGNAM-$VERSION/go}"
+
+make
+make install DESTDIR=$PKG PREFIX=/usr PAM_MODULE_DIR=/lib${LIBDIRSUFFIX}/security
+
+# Allow fscrypt to check login passphrase when creating a login protector
+install -Dm644 $CWD/pam_config $PKG/etc/pam.d/fscrypt
+
+# Remove Ubuntu-specific PAM file
+rm -r $PKG/usr/share/pam-configs
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CODE_OF_CONDUCT.md CONTRIBUTING.md LICENSE NEWS.md README.md $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
