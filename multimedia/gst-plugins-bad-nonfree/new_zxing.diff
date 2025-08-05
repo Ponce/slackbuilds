@@ -1,0 +1,303 @@
+diff -Naur gst-plugins-bad-1.18.5/ext/zxing/gstzxing.cpp gst-plugins-bad-1.18.5.patched/ext/zxing/gstzxing.cpp
+--- gst-plugins-bad-1.18.5/ext/zxing/gstzxing.cpp	2021-09-08 15:03:40.879254300 -0400
++++ gst-plugins-bad-1.18.5.patched/ext/zxing/gstzxing.cpp	2025-08-05 04:32:36.736907205 -0400
+@@ -22,11 +22,11 @@
+  * @title: zxing
+  *
+  * Detect bar codes in the video streams and send them as element messages to
+- * the #GstBus if .#GstZXing:message property is %TRUE.
+- * If the .#GstZXing:attach-frame property is %TRUE, the posted barcode message
++ * the #GstBus if #GstZXing:message property is %TRUE.
++ * If the #GstZXing:attach-frame property is %TRUE, the posted barcode message
+  * includes a sample of the frame where the barcode was detected (Since 1.18).
+  *
+- * The element generate messages named `barcode`. The structure contains these fields:
++ * The element generates messages named `barcode`. The structure contains these fields:
+  *
+  * * #GstClockTime `timestamp`: the timestamp of the buffer that triggered the message.
+  * * gchar * `type`: the symbol type.
+@@ -36,14 +36,19 @@
+  * * #GstSample `frame`: the frame in which the barcode message was detected, if
+  *   the .#GstZXing:attach-frame property was set to %TRUE (Since 1.18)
+  *
++ *   This element is based on the c++ implementation of zxing which can found
++ *   at <https://github.com/zxing-cpp/zxing-cpp>.
++ *
+  * ## Example launch lines
+  * |[
+  * gst-launch-1.0 -m v4l2src ! videoconvert ! zxing ! videoconvert ! xvimagesink
+  * ]| This pipeline will detect barcodes and send them as messages.
+  * |[
+- * gst-launch-1.0 -m v4l2src ! tee name=t ! queue ! videoconvert ! zxing ! fakesink t. ! queue ! xvimagesink
++ * gst-launch-1.0 -m v4l2src ! tee name=t ! queue ! videoconvert ! zxing ! fakesink t. ! queue ! videoconvert ! xvimagesink
+  * ]| Same as above, but running the filter on a branch to keep the display in color
+  *
++ * Since: 1.18
++ *
+  */
+ 
+ #ifdef HAVE_CONFIG_H
+@@ -59,6 +64,7 @@
+ 
+ #include "ReadBarcode.h"
+ #include "TextUtfEncoding.h"
++#include "ZXVersion.h"
+ 
+ using namespace ZXing;
+ 
+@@ -80,7 +86,31 @@
+   PROP_FORMAT,
+ };
+ 
+-enum
++/**
++ * GstBarCodeFormat:
++ *
++ * @BARCODE_FORMAT_ALL all format
++ * @BARCODE_FORMAT_AZTEC aztec format
++ * @BARCODE_FORMAT_CODABAR codabar format
++ * @BARCODE_FORMAT_CODE_39 code39 format
++ * @BARCODE_FORMAT_CODE_93 code 93 format
++ * @BARCODE_FORMAT_CODE_128 code 128 format
++ * @BARCODE_FORMAT_DATA_MATRIX data matrix format
++ * @BARCODE_FORMAT_EAN_8 EAN 8 format
++ * @BARCODE_FORMAT_EAN_13 EAN 13 format
++ * @BARCODE_FORMAT_ITF ITF format
++ * @BARCODE_FORMAT_MAXICODE maxicode format
++ * @BARCODE_FORMAT_PDF_417 pdf 417 format
++ * @BARCODE_FORMAT_QR_CODE QR code format
++ * @BARCODE_FORMAT_RSS_14 RSS 14 format
++ * @BARCODE_FORMAT_RSS_EXPANDED RSS expanded format
++ * @BARCODE_FORMAT_UPC_A UPC_A format
++ * @BARCODE_FORMAT_UPC_E UPC_E format
++ * @BARCODE_FORMAT_UPC_EAN_EXTENSION UPC_EAN_EXTENSION format
++ *
++ * Since: 1.18
++ */
++typedef enum
+ {
+   BARCODE_FORMAT_ALL,
+   BARCODE_FORMAT_AZTEC,
+@@ -100,7 +130,7 @@
+   BARCODE_FORMAT_UPC_A,
+   BARCODE_FORMAT_UPC_E,
+   BARCODE_FORMAT_UPC_EAN_EXTENSION
+-};
++} GstBarCodeFormat;
+ 
+ static const GEnumValue barcode_formats[] = {
+   {BARCODE_FORMAT_ALL, "ALL", "all"},
+@@ -137,9 +167,8 @@
+   return barcode_format_type;
+ }
+ 
+-
+ #define ZXING_YUV_CAPS \
+-    "{ Y800, I420, YV12, NV12, NV21, Y41B, Y42B, YUV9, YVU9 }"
++    "{ARGB, xRGB, Y444, Y42B, I420, Y41B, YUV9, YV12}"
+ 
+ 
+ static GstStaticPadTemplate gst_zxing_src_template =
+@@ -171,13 +200,16 @@
+   gboolean attach_frame;
+   gboolean rotate;
+   gboolean faster;
+-  guint format;
++  ImageFormat image_format;
++  GstBarCodeFormat barcode_format;
+ };
+ 
+ static void gst_zxing_set_property (GObject * object, guint prop_id,
+     const GValue * value, GParamSpec * pspec);
+ static void gst_zxing_get_property (GObject * object, guint prop_id,
+     GValue * value, GParamSpec * pspec);
++static gboolean gst_zxing_set_info (GstVideoFilter * vfilter, GstCaps * in,
++    GstVideoInfo * in_info, GstCaps * out, GstVideoInfo * out_info);
+ static GstFlowReturn gst_zxing_transform_frame_ip (GstVideoFilter * vfilter,
+     GstVideoFrame * frame);
+ 
+@@ -201,27 +233,60 @@
+   gobject_class->set_property = gst_zxing_set_property;
+   gobject_class->get_property = gst_zxing_get_property;
+ 
++  /**
++   * GstZXing::message:
++   *
++   * Post a barcode message for each detected code.
++   *
++   * Since: 1.18
++   */
+   g_object_class_install_property (gobject_class, PROP_MESSAGE,
+       g_param_spec_boolean ("message",
+           "message", "Post a barcode message for each detected code",
+           DEFAULT_MESSAGE,
+           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+-
++  /**
++   * GstZXing::attach-frame:
++   *
++   * Attach a frame dump to each barcode message
++   *
++   * Since: 1.18
++   */
+   g_object_class_install_property (gobject_class, PROP_ATTACH_FRAME,
+       g_param_spec_boolean ("attach-frame", "Attach frame",
+           "Attach a frame dump to each barcode message",
+           DEFAULT_ATTACH_FRAME,
+           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+-
++  /**
++   * GstZXing::try-rotate:
++   *
++   * Try to rotate the frame to detect barcode (slower)
++   *
++   * Since: 1.18
++   */
+   g_object_class_install_property (gobject_class, PROP_TRY_ROTATE,
+       g_param_spec_boolean ("try-rotate", "Try rotate",
+           "Try to rotate the frame to detect barcode (slower)",
+           DEFAULT_TRY_ROTATE,
+           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
++  /**
++   * GstZXing::try-faster:
++   *
++   * Try faster to analyze the frame
++   *
++   * Since: 1.18
++   */
+   g_object_class_install_property (gobject_class, PROP_TRY_FASTER,
+       g_param_spec_boolean ("try-faster", "Try faster",
+           "Try faster to analyze the frame", DEFAULT_TRY_FASTER,
+           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
++  /**
++   * GstZXing::format:
++   *
++   * Barcode image format
++   *
++   * Since: 1.18
++   */
+   g_object_class_install_property (gobject_class, PROP_FORMAT,
+       g_param_spec_enum ("format", "barcode format", "Barcode image format",
+           GST_TYPE_BARCODE_FORMAT, BARCODE_FORMAT_ALL,
+@@ -239,6 +304,10 @@
+ 
+   vfilter_class->transform_frame_ip =
+       GST_DEBUG_FUNCPTR (gst_zxing_transform_frame_ip);
++  vfilter_class->set_info =
++      GST_DEBUG_FUNCPTR (gst_zxing_set_info);
++
++  gst_type_mark_as_plugin_api (GST_TYPE_BARCODE_FORMAT, (GstPluginAPIFlags)0);
+ }
+ 
+ static void
+@@ -248,7 +317,8 @@
+   zxing->attach_frame = DEFAULT_ATTACH_FRAME;
+   zxing->rotate = DEFAULT_TRY_ROTATE;
+   zxing->faster = DEFAULT_TRY_FASTER;
+-  zxing->format = BARCODE_FORMAT_ALL;
++  zxing->image_format = ImageFormat::None;
++  zxing->barcode_format = BARCODE_FORMAT_ALL;
+ }
+ 
+ static void
+@@ -274,7 +344,7 @@
+       zxing->faster = g_value_get_boolean (value);
+       break;
+     case PROP_FORMAT:
+-      zxing->format = g_value_get_enum (value);
++      zxing->barcode_format = (GstBarCodeFormat)g_value_get_enum (value);
+       break;
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+@@ -305,7 +375,7 @@
+       g_value_set_boolean (value, zxing->faster);
+       break;
+     case PROP_FORMAT:
+-      g_value_set_enum (value, zxing->format);
++      g_value_set_enum (value, zxing->barcode_format);
+       break;
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+@@ -313,12 +383,46 @@
+   }
+ }
+ 
++static gboolean
++gst_zxing_set_info (GstVideoFilter * vfilter, GstCaps * in,
++    GstVideoInfo * in_info, GstCaps * out, GstVideoInfo * out_info)
++{
++  GstZXing *zxing = GST_ZXING (vfilter);
++  switch (in_info->finfo->format) {
++    case GST_VIDEO_FORMAT_ARGB:
++    case GST_VIDEO_FORMAT_xRGB:
++      zxing->image_format = ImageFormat::XRGB;
++      break;
++    case GST_VIDEO_FORMAT_Y444:
++    case GST_VIDEO_FORMAT_Y42B:
++    case GST_VIDEO_FORMAT_I420:
++    case GST_VIDEO_FORMAT_Y41B:
++    case GST_VIDEO_FORMAT_YUV9:
++    case GST_VIDEO_FORMAT_YV12:
++      zxing->image_format = ImageFormat::Lum;
++      break;
++    default:
++      zxing->image_format = ImageFormat::None;
++      GST_WARNING_OBJECT (zxing, "This format is not supported %s", gst_video_format_to_string(in_info->finfo->format));
++  }
++  return TRUE;
++}
++
+ static GstFlowReturn
+ gst_zxing_transform_frame_ip (GstVideoFilter * vfilter, GstVideoFrame * frame)
+ {
+   GstZXing *zxing = GST_ZXING (vfilter);
+   gpointer data;
+   gint height, width;
++  #if ZXING_VERSION_MAJOR >= 2 && ZXING_VERSION_MINOR >= 2
++    ReaderOptions hints;
++  #else
++    DecodeHints hints;
++  #endif
++
++  hints.setTryRotate(zxing->rotate);
++  hints.setTryHarder(!zxing->faster);
++  hints.setFormats(BarcodeFormatFromString (barcode_formats[zxing->barcode_format].value_name));
+ 
+   /* all formats we support start with an 8-bit Y plane. zxing doesn't need
+    * to know about the chroma plane(s) */
+@@ -326,14 +430,15 @@
+   width = GST_VIDEO_FRAME_WIDTH (frame);
+   height = GST_VIDEO_FRAME_HEIGHT (frame);
+ 
+-  /*Init a grayscale source */
+-  auto result = ReadBarcode (width, height, (unsigned char *) data, width,
+-      { BarcodeFormatFromString (barcode_formats[zxing->format].value_name) },
+-      zxing->rotate, !zxing->faster);
++  auto result = ReadBarcode ({(unsigned char *)data, width, height, zxing->image_format}, hints);
+   if (result.isValid ()) {
+     GST_DEBUG_OBJECT (zxing, "Symbol found. Text: %s Format: %s",
+-        TextUtfEncoding::ToUtf8 (result.text ()).c_str (),
++        result.text ().c_str (),
++#if ZXING_VERSION_MAJOR >= 2
++        ToString (result.format ()).c_str ());
++#else
+         ToString (result.format ()));
++#endif
+   } else {
+     goto out;
+   }
+@@ -358,9 +463,13 @@
+         "timestamp", G_TYPE_UINT64, timestamp,
+         "stream-time", G_TYPE_UINT64, stream_time,
+         "running-time", G_TYPE_UINT64, running_time,
++#if ZXING_VERSION_MAJOR >= 2
++        "type", G_TYPE_STRING, ToString (result.format ()).c_str (),
++#else
+         "type", G_TYPE_STRING, ToString (result.format ()),
++#endif
+         "symbol", G_TYPE_STRING,
+-        TextUtfEncoding::ToUtf8 (result.text ()).c_str (), NULL);
++        result.text ().c_str (), NULL);
+ 
+     if (zxing->attach_frame) {
+       /* create a sample from image */
