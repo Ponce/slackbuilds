@@ -25,10 +25,12 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=openvdb
-VERSION=${VERSION:-10.0.1}
+VERSION=${VERSION:-12.0.1.20250803}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+
+COMMIT=8348da235cb7d57924012c5074d9489098f69736
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -69,21 +71,36 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+rm -rf $PRGNAM-$COMMIT
+tar xvf $CWD/$PRGNAM-$COMMIT.tar.gz
+cd $PRGNAM-$COMMIT
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} + -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} +
+
+sed -i 's/set(MINIMUM_PYTHON_VERSION 3.10)/set(MINIMUM_PYTHON_VERSION 3.9)/g' ./cmake/config/OpenVDBVersions.cmake
+sed -i 's/set(MINIMUM_BOOST_VERSION 1.80)/set(MINIMUM_BOOST_VERSION 1.78)/g'  ./cmake/config/OpenVDBVersions.cmake
+
+printf '%s\n' 'include(FeatureSummary)
+feature_summary(WHAT ALL INCLUDE_QUIET_PACKAGES)
+#message(FATAL_ERROR "Tbb_LIBRARIES=${Tbb_LIBRARIES}, Tbb_LIBRARY_DIRS=${Tbb_LIBRARY_DIRS} Tbb_INCLUDE_DIRS=${Tbb_INCLUDE_DIRS} ")
+' >> CMakeLists.txt
+
+sed -i 's|TBB ${MINIMUM_TBB_VERSION}|TBB ${MINIMUM_TBB_VERSION} NO_DEFAULT_PATH PATHS '"/usr/lib$LIBDIRSUFFIX/cmake"' |g' ./openvdb_ax/openvdb_ax/test/CMakeLists.txt \
+    ./nanovdb/nanovdb/CMakeLists.txt ./openvdb/openvdb/unittest/CMakeLists.txt ./openvdb/openvdb/CMakeLists.txt \
+    ./cmake/FindOpenVDB.cmake ./openvdb_cmd/CMakeLists.txt ./openvdb_cmd/CMakeLists.txt ./openvdb_cmd/vdb_ax/CMakeLists.txt
 
 mkdir -p build
 cd build
-  cmake \
+  cmake   \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_C_COMPILER=clang \
+    -DCMAKE_CXX_COMPILER=clang++ \
+    -DDISABLE_DEPENDENCY_VERSION_CHECKS=OFF \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DLIB_SUFFIX=${LIBDIRSUFFIX} \
     -DMAN_INSTALL_DIR=/usr/man \
@@ -99,12 +116,17 @@ cd build
     -DOPENVDB_BUILD_VDB_TOOL=ON \
     -DOPENVDB_BUILD_VDB_VIEW=ON \
     -DOPENVDB_CORE_STATIC=OFF \
+    -DCMAKE_SHARED_LINKER_FLAGS=' -ltbb ' \
+    -DCMAKE_EXE_LINKER_FLAGS=' -ltbb ' \
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
     -DUSE_PNG=ON \
+    -DTBB_LIBRARYDIR=/usr/lib$LIBDIRSUFFIX \
     -DCMAKE_BUILD_TYPE=Release ..
   make
   make install/strip DESTDIR=$PKG
 cd ..
+
+rm $PKG/usr/lib$LIBDIRSUFFIX/libopenvdb_ax.a
 
 rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
 
@@ -115,6 +137,7 @@ find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | gr
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 mv $PKG/usr/share/doc/* $PKG/usr/doc/$PRGNAM-$VERSION
 rm -rf $PKG/usr/share/doc
+rmdir $PKG/usr/share
 
 cp -a \
   CONTRIBUTING.md README.md LICENSE \
