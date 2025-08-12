@@ -9,6 +9,13 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20250811 bkw: Updated for v0.279. No groovy patch this time, the
+#   groovymame developer hasn't released one since May (for 0.277).
+# - Only use ld.gold if it's installed (fixes -current build).
+# - Upstream added pipewire support, but 15.0's pipewire is too old,
+#   only try to build it if pipewire is >= v1.2.x.
+
+# 20250515 bkw: Updated for v0.277 (incl. groovy patch).
 # 20250405 bkw: Updated for v0.276 (incl. groovy patch).
 # 20250304 bkw: Updated for v0.275 (incl. groovy patch).
 # 20250210 bkw: Added groovy patch for v0.274, no other changes.
@@ -24,7 +31,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=mame
-VERSION=${VERSION:-0.277}
+VERSION=${VERSION:-0.279}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -98,8 +105,8 @@ cd $DIRNAME
 chown -R root:root .
 
 # 20181201 bkw: Urchlay's personal template:
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
 # OK, building modern mame is a bit of a PITA. It uses genie (written
 # in lua, a fork of premake), but you don't get to run genie directly,
@@ -205,6 +212,12 @@ fi
 
 # Using ld.gold is *much* faster, and I see no disadvantage to it.
 
+# 20250812 bkw: -current no longer has ld.gold. Anyway, the default linker
+# has improved. Only use gold if we have it.
+if [ -x /usr/bin/ld.gold ]; then
+  GOLDOPT='LDOPTS="-fuse-ld=gold"'
+fi
+
 # The point of the OVERRIDE_CC and friends is to make the build use $PATH
 # to find gcc (so ccache will be found if it's using the symlink method).
 
@@ -234,18 +247,37 @@ if [ "${USE_CCACHE:-yes}" = "yes" ]; then
   CC="/usr/bin/ccache /usr/bin/clang"
   CXX="/usr/bin/ccache /usr/bin/clang++"
 else
-  CC="${CC:-$( which gcc )}"
-  CXX="${CXX:-$( which g++ )}"
+  # 20250812 bkw: default to clang/clang++, not gcc/g++, if CC and CXX not set.
+  CC="${CC:-$( which clang )}"
+  CXX="${CXX:-$( which clang++ )}"
+fi
+
+# 20250811 bkw: 0.279 has support for pipewire, enabled by default,
+# but 15.0's default pipewire is too old for mame. The one in testing/
+# is OK. Note that the old pipewire doesn't even have a .pc file,
+# which is fine for this purpose (pkg-config returns failure status).
+
+PWOPT='NO_USE_PIPEWIRE=1'
+if [ "${PIPEWIRE:-yes}" = "yes" ]; then
+  if pkg-config libpipewire-0.3 --atleast-version 1.2; then
+    echo "===> libpipewire-0.3 at least 1.2, building with pipewire"
+    PWOPT=""
+  else
+    echo "===> libpipewire-0.3 missing or too old: $PWOPT"
+  fi
+else
+  echo "===> user set PIPEWIRE=no: $PWOPT"
 fi
 
 make USE_QTDEBUG=$QTOPT \
+     $GOLDOPT \
+     $PWOPT \
      USE_SYSTEM_LIB_EXPAT=1 \
      USE_SYSTEM_LIB_ZLIB=1 \
      USE_SYSTEM_LIB_JPEG=1 \
      USE_SYSTEM_LIB_FLAC=1 \
      PYTHON_EXECUTABLE="/usr/bin/python3 -S" \
      OPT_FLAGS="$SLKCFLAGS" \
-     LDOPTS="-fuse-ld=gold" \
      OVERRIDE_CC="$CC" \
      OVERRIDE_CXX="$CXX" \
      CC="$CC" \
