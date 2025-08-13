@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Slackware build script for element-desktop
-#
-# Copyright 2022 marav, Paris, FR
+
+# Copyright 2025 Vladislav 'fsLeg' Borisov, Moscow, Russia
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -11,7 +11,7 @@
 # 1. Redistributions of this script must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 #
-#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
 #  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
 #  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
 #  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
@@ -25,8 +25,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=element-desktop
-VERSION=${VERSION:-1.11.87}
-SRCVERSION=$( echo $VERSION | tr _ - )
+WEBNAM=element-web
+VERSION=${VERSION:-1.11.109}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -39,9 +39,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -51,24 +48,51 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  DEBARCH="i386"
-  echo "This package is currently only available for 64bit."
+if [ "$ARCH" = "i586" -o "$ARCH" = "i686" ]; then
+  echo
+  echo "*************************************************************"
+  echo "Element-desktop relies on Electron which doesn't support"
+  echo "x86 architecture anymore, therefore it can't be built on"
+  echo "an x86 system."
+  echo "*************************************************************"
+  echo
   exit 1
-elif [ "$ARCH" = "x86_64" ]; then
-  DEBARCH="amd64"
+elif [ "$ARCH" = "x86_64" -o "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
 else
-  echo "Package for $(uname -m) architecture is not available."
-  exit 1
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
 fi
 
 set -e
 
+export PATH="/opt/rust/bin:$PATH"
+if [ -z "$LD_LIBRARY_PATH" ]; then
+  export LD_LIBRARY_PATH="/opt/rust/lib$LIBDIRSUFFIX"
+else
+  export LD_LIBRARY_PATH="/opt/rust/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
+fi
+
+BASE_TMP_DIR=$TMP/$PRGNAM-$VERSION
+export YARN_YARN_OFFLINE_MIRROR=$BASE_TMP_DIR/vendor
+export YARN_CACHE_FOLDER=$BASE_TMP_DIR/cache
+export npm_config_cache=$YARN_CACHE_FOLDER
+export npm_config_nodedir=/usr
+export XDG_CACHE_HOME=$BASE_TMP_DIR/electron-cache
+export CARGO_HOME=$BASE_TMP_DIR/cargo
+export CFLAGS="$SLKCFLAGS"
+export CXXFLAGS="$SLKCFLAGS"
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
-cd $PKG
-ar p $CWD/${PRGNAM}_${SRCVERSION}_amd64.deb data.tar.xz | tar Jxv
+cd $TMP
+rm -rf $PRGNAM-$VERSION $WEBNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$WEBNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION-vendored-sources.tar.xz
 
+cd $WEBNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -76,13 +100,64 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
+sed -i 's|yarn |yarn --offline |g' package.json
+yarn install --frozen-lockfile \
+             --ignore-engines \
+             --no-fund \
+             --update-checksums \
+             --offline
+VERSION=$VERSION \
+  yarn --offline build
+yarn --offline cache clean
+
+cd ../$PRGNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# fix autolaunch
+# https://gitlab.archlinux.org/archlinux/packaging/packages/element.io/-/blob/main/autolaunch.patch
+patch -p1 < $CWD/autolaunch.patch
+# use vendored sources and prevent warnings
+patch -p1 < $CWD/yarn-offline.patch
+sed -i 's|yarn |yarn --offline |g' package.json .hak/hakModules/matrix-seshat/package.json
+sed -i 's|cargo build |cargo build --frozen |' .hak/hakModules/matrix-seshat/package.json
+
+mkdir -p deploys
+mv ../$WEBNAM-$VERSION/webapp deploys/element-v$VERSION
+yarn install --frozen-lockfile \
+             --ignore-engines \
+             --no-fund \
+             --update-checksums \
+             --offline
+yarn --offline run fetch --noverify --cfgdir ""
+CRATE_CC_NO_DEFAULTS=1 \
+RUSTFLAGS="-C target-cpu=native" \
+  yarn --offline run build:native
+rm -r .hak/hakModules/matrix-seshat/{.cargo,node_modules,target,vendor}
+yarn --offline run build --publish never
+
+mkdir -p $PKG/usr/{bin,lib$LIBDIRSUFFIX,share/applications}
+mv dist/linux-unpacked $PKG/usr/lib$LIBDIRSUFFIX/element-desktop
+
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
+install -Dm644 $CWD/element-desktop.desktop $PKG/usr/share/applications/io.element.Element.desktop
+ln -s /usr/lib$LIBDIRSUFFIX/element-desktop/element-desktop $PKG/usr/bin/
+
+# 32x32 icon is missing for some reason
+magick build/icons/512x512.png -resize 32x32 build/icons/32x32.png
+for geometry in 16x16 24x24 32x32 48x48 64x64 96x96 128x128 256x256 512x512; do
+  mkdir -p $PKG/usr/share/icons/hicolor/$geometry/apps
+  install -Dm644 build/icons/$geometry.png $PKG/usr/share/icons/hicolor/$geometry/apps/$PRGNAM.png
+done
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a $PKG/usr/share/doc/$PRGNAM/* $PKG/opt/Element/LICENSE* \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-rm -rf $PKG/usr/share/doc
+cp -a CHANGELOG.md CONTRIBUTING.md README.md LICENSE-* docs/* $PKG/usr/doc/$PRGNAM-$VERSION/
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
