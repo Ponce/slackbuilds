@@ -1,7 +1,7 @@
 .. RST source for ovcc(1) man page. Convert with:
 ..   rst2man.py ovcc.rst > ovcc.6
 
-.. |version| replace:: 1.6.0+20230510_f6c395c
+.. |version| replace:: 1.6.1+20240328_cc936b2
 .. |date| date::
 
 ====
@@ -106,6 +106,10 @@ FILES
     **disk11.rom** is loaded when the **libfd502.so** module is loaded.
 
     Other modules may require other ROM images (not included in the SBo package).
+
+/usr/lib/ovcc or /usr/lib64/ovcc
+  ROM images and loadable modules, which are symlinked by the wrapper script.
+  **lib64** is used on 64-bit systems (x86_64 or aarch64).
 
 COPYRIGHT
 =========

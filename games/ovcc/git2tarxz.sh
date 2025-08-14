@@ -48,7 +48,7 @@ GIT_SHA=$( git rev-parse --short HEAD )
 DATE=$( git log --date=format:%Y%m%d --format=%cd | head -1 )
 
 # ovcc doesn't use tags, but does have a version number, in the git log.
-LOGVER=1.6.0
+LOGVER=1.6.1
 
 VERSION=$LOGVER+${DATE}_${GIT_SHA}
 

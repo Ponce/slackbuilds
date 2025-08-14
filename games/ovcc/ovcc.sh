@@ -21,14 +21,19 @@ fi
 set -e
 
 if [ ! -d $USERDIR ]; then
-  mkdir $USERDIR
-  cd $USERDIR
-  for i in $LIBDIR/*; do
-    ln -s $i $( basename $i )
-  done
+  mkdir $USERDIR || exit 1
 fi
 
-cd $USERDIR
+cd $USERDIR || exit 1
+
+# 20250814 bkw: had to change this because I share /home between 32-bit
+# and 64-bit. If the symlinks to /usr/lib64 exist, and I run the 32-bit
+# ovcc, they point to the wrong dir. Now, if there are broken symlinks,
+# they get recreated properly.
+for i in $LIBDIR/*; do
+  f="$( basename $i )"
+  [ -e "$f" ] || ln -sf "$i" "$f"
+done
 
 if [ "$ARG" = "" ]; then
   exec $REALBIN
