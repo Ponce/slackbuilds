@@ -6,6 +6,10 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20250817 bkw:
+# - update for v9.1.0 (libtsm v4.1.0).
+# - add python3-meson-opt to REQUIRES, remove meson-compat.diff.
+
 # 20230722 bkw: switch to Aetf's fork, which looks actively
 # maintained. Thanks to lockywolf for finding it. Also, include
 # libtsm here instead of as a separate build: it's been on SBo for ~9
@@ -17,13 +21,13 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=kmscon
-VERSION=${VERSION:-9.0.0}
+VERSION=${VERSION:-9.1.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
 LIBNAM=libtsm
-LIBVER=${LIBVER:-4.0.2}
+LIBVER=${LIBVER:-4.1.0}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -58,11 +62,31 @@ fi
 
 set -e
 
+# 20250817 bkw: meson can't easily be coerced to ignore the libs
+# in /usr/lib64 if already installed. just punt, if the old libs
+# are there.
+if pkg-config --exists libtsm && ! pkg-config --exact-version=$LIBVER libtsm; then
+  cat <<EOF
+
+***
+* An older version of kmscon's libtsm is installed. The build would
+* fail. Get rid of it:
+
+  removepkg kmscon
+
+* ...and try this build again.
+***
+
+EOF
+  exit 1
+fi
+
+
 TOPDIR=$TMP/$PRGNAM-build
 rm -rf $PKG $TOPDIR
 mkdir -p $TOPDIR $PKG $OUTPUT
 cd $TOPDIR
-tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.[xg]z
 tar xvf $CWD/$LIBNAM-$LIBVER.tar.gz
 chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
@@ -91,15 +115,18 @@ export PKG_CONFIG_PATH=$PKG/usr/lib$LIBDIRSUFFIX/pkgconfig:$PKG_CONFIG_PATH
 # now, build the app, using the lib we just built.
 cd $TOPDIR/$PRGNAM-$VERSION
 
-# meson is a moving target. this patch doesn't entirely fix things, we also
-# have to manually set some LDFLAGS and CFLAGS, below.
-patch -p1 < $CWD/meson-compat.diff
+# 20250817 bkw: I could probably patch meson.build to work with 15.0's
+# old meson, but I don't love meson enough to spend time learning how
+# just at the moment. Thanks to fourtysixandtwo for providing a newer
+# meson.
+PYVER=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+export PYTHONPATH=/opt/python$PYVER/site-packages
 
 mkdir build
 cd build
   LDFLAGS="-L$PKG/usr/lib$LIBDIRSUFFIX -ldl" \
   CFLAGS="-I$PKG/usr/include $SLKCFLAGS" \
-  meson .. \
+  meson setup .. \
     --buildtype=release \
     --infodir=/usr/info \
     --libdir=/usr/lib${LIBDIRSUFFIX} \
@@ -108,7 +135,7 @@ cd build
     --prefix=/usr \
     --sysconfdir=/etc \
     -Dstrip=true
-  "${NINJA:=ninja}"
+  "${NINJA:=ninja}" -v
   DESTDIR=$PKG $NINJA install
 cd ..
 
