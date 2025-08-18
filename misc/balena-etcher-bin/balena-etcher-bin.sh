@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /opt/balena-etcher/usr/lib/balena-etcher/balena-etcher
+exec /opt/balena-etcher/lib/balena-etcher/balena-etcher
