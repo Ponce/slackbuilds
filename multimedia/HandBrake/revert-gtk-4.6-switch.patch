@@ -1,0 +1,746 @@
+From d6cfc8d3ac413fbd1798ba8ed29f7dc1dbc58357 Mon Sep 17 00:00:00 2001
+From: robxnano <89391914+robxnano@users.noreply.github.com>
+Date: Fri, 25 Jul 2025 13:45:22 +0100
+Subject: [PATCH 1/5] libhb: Fallback to first audio track
+
+If no track was found in any of the selected languages, fall back to
+the first audio track.
+Fixes https://github.com/HandBrake/HandBrake/issues/6666.
+---
+ libhb/preset.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/libhb/preset.c b/libhb/preset.c
+index c7ea0dd9d1d3..7cf7152246f0 100644
+--- a/libhb/preset.c
++++ b/libhb/preset.c
+@@ -1050,12 +1050,19 @@ int hb_preset_job_add_audio(hb_handle_t *h, int title_index,
+         add_audio_for_lang(list, preset, title, mux, copy_mask, fallback,
+                            lang, behavior, mode, track_dict);
+     }
+-    // If AudioLanguageList is empty, try "any" language option
++    // If AudioLanguageList is empty, or AudioTrackSelectionBehavior
++    // is "first" and no track was found, try "any" language option
+     if (count <= 0)
+     {
+         add_audio_for_lang(list, preset, title, mux, copy_mask, fallback,
+                            "any", behavior, mode, track_dict);
+     }
++    else if (behavior != 0 && hb_value_array_len(list) == 0)
++    {
++        // Only add the first track
++        add_audio_for_lang(list, preset, title, mux, copy_mask, fallback,
++                           "any", 1, mode, track_dict);
++    }
+     hb_dict_free(&track_dict);
+     return 0;
+ }
+
+From b01b067c369881ddfed0294c2012885ad3a6d52c Mon Sep 17 00:00:00 2001
+From: robxnano <89391914+robxnano@users.noreply.github.com>
+Date: Tue, 29 Jul 2025 08:42:36 +0100
+Subject: [PATCH 2/5] LinGUI: Fix maximum bitrate calculation
+
+Use the current audio mixdown to determine the maximum bitrate in the
+audio defaults dialog, instead of only using the mono rate.
+Fixes https://github.com/HandBrake/HandBrake/issues/6997
+---
+ gtk/src/audiohandler.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/gtk/src/audiohandler.c b/gtk/src/audiohandler.c
+index ac2aafc08f41..71f4471c3f49 100644
+--- a/gtk/src/audiohandler.c
++++ b/gtk/src/audiohandler.c
+@@ -2243,8 +2243,9 @@ audio_def_set_limits (signal_user_data_t *ud, GtkWidget *widget, gboolean set_de
+         enc = ghb_select_fallback(ud->settings, enc);
+     }
+     int sr = ghb_settings_audio_samplerate_rate(adict, "AudioSamplerate");
++    int mix = ghb_settings_mixdown_mix(adict, "AudioMixdown");
+     int low, high;
+-    hb_audio_bitrate_get_limits(enc, sr, HB_AMIXDOWN_MONO, &low, &high);
++    hb_audio_bitrate_get_limits(enc, sr, mix, &low, &high);
+     GtkWidget *w = find_widget(GTK_WIDGET(row), "AudioBitrate");
+     ghb_audio_bitrate_opts_filter(GTK_COMBO_BOX(w), low, high);
+     w = find_widget(GTK_WIDGET(row), "AudioMixdown");
+
+From 6e6eabed1cb9eda4a5bd807306b6f1b8cc72a386 Mon Sep 17 00:00:00 2001
+From: robxnano <89391914+robxnano@users.noreply.github.com>
+Date: Tue, 29 Jul 2025 08:44:30 +0100
+Subject: [PATCH 3/5] LinGUI: Don't allow unsupported bitrates
+
+When the maximum bitrate is reduced due to a codec or mixdown change,
+and the previously selected bitrate is out of range, change to the
+highest allowed bitrate, and vice versa for the minimum bitrate.
+---
+ gtk/src/hb-backend.c | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/gtk/src/hb-backend.c b/gtk/src/hb-backend.c
+index ddeef7580ec6..4a193052016d 100644
+--- a/gtk/src/hb-backend.c
++++ b/gtk/src/hb-backend.c
+@@ -3358,6 +3358,8 @@ ghb_audio_bitrate_opts_filter(
+     store = GTK_LIST_STORE(gtk_combo_box_get_model (combo));
+     if (gtk_tree_model_get_iter_first (GTK_TREE_MODEL(store), &iter))
+     {
++        int highest_rate = -1;
++        int lowest_rate = -1;
+         do
+         {
+             gtk_tree_model_get(GTK_TREE_MODEL(store), &iter, 3, &ivalue, -1);
+@@ -3368,9 +3370,29 @@ ghb_audio_bitrate_opts_filter(
+             else
+             {
+                 gtk_list_store_set(store, &iter, 1, TRUE, -1);
++                // Store the highest and lowest supported rates
++                // Assume that the list of rates is sorted in ascending order
++                highest_rate = ivalue;
++                if (lowest_rate == -1)
++                    lowest_rate = ivalue;
+             }
+             done = !gtk_tree_model_iter_next (GTK_TREE_MODEL(store), &iter);
+         } while (!done);
++
++        const char *current_id = gtk_combo_box_get_active_id(combo);
++        int current_rate = ghb_lookup_audio_bitrate_rate(current_id);
++        // If the previously set value is not in the allowed range,
++        // set the new value to the lowest/highest allowed
++        if (current_rate < first_rate)
++        {
++            g_autofree char *lowest_id = g_strdup_printf("%d", lowest_rate);
++            gtk_combo_box_set_active_id(combo, lowest_id);
++        }
++        else if (current_rate > last_rate)
++        {
++            g_autofree char *highest_id = g_strdup_printf("%d", highest_rate);
++            gtk_combo_box_set_active_id(combo, highest_id);
++        }
+     }
+ }
+ 
+
+From deeae3462a852fc151e944c7c9512eca9509e092 Mon Sep 17 00:00:00 2001
+From: robxnano <89391914+robxnano@users.noreply.github.com>
+Date: Tue, 29 Jul 2025 09:11:05 +0100
+Subject: [PATCH 4/5] LinGUI: Bump GTK minimum version to 4.6
+
+The previous minimum version, 4.4, is no longer available in any
+supported distribution, so 4.6 is the lowest version which can be
+tested.
+---
+ gtk/meson.build       |  6 +++---
+ gtk/src/application.c | 10 +---------
+ 2 files changed, 4 insertions(+), 12 deletions(-)
+
+diff --git a/gtk/meson.build b/gtk/meson.build
+index 83233cea2063..0217154a88b4 100644
+--- a/gtk/meson.build
++++ b/gtk/meson.build
+@@ -9,7 +9,7 @@ project('handbrake-gtk', 'c', 'cpp',
+ 
+ # Minimum versions for dependencies
+ glib_min = '>= 2.68'
+-gtk_min  = '>= 4.4'
++gtk_min  = '>= 4.6'
+ 
+ cc = meson.get_compiler('c')
+ i18n = import('i18n')
+@@ -105,8 +105,8 @@ if (cc.has_function('strerror_r'))
+   add_project_arguments('-DHAS_STRERROR_R', language: 'c')
+ endif
+ 
+-add_project_arguments('-DGDK_VERSION_MIN_REQUIRED=GDK_VERSION_4_4',
+-'-DGDK_VERSION_MAX_ALLOWED=GDK_VERSION_4_4', language: 'c')
++add_project_arguments('-DGDK_VERSION_MIN_REQUIRED=GDK_VERSION_4_6',
++'-DGDK_VERSION_MAX_ALLOWED=GDK_VERSION_4_6', language: 'c')
+ 
+ compile_args = cc.get_supported_arguments(
+   '-Wno-missing-field-initializers',
+diff --git a/gtk/src/application.c b/gtk/src/application.c
+index 525e8945e46f..e52a5a2b8ae1 100644
+--- a/gtk/src/application.c
++++ b/gtk/src/application.c
+@@ -587,10 +587,8 @@ static gboolean
+ video_file_drop_received (GtkDropTarget* self, const GValue* value,
+                           double x, double y, signal_user_data_t *ud)
+ {
+-/* The GdkFileList method is preferred where supported as it handles multiple
++/* The GdkFileList method is preferred as it handles multiple
+  * files and also allows access to sandboxed files via the portal */
+-#if GTK_CHECK_VERSION(4, 6, 0)
+-G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+     if (G_VALUE_HOLDS(value, GDK_TYPE_FILE_LIST))
+     {
+         GdkFileList *gdk_file_list = g_value_get_boxed(value);
+@@ -628,8 +626,6 @@ G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+         }
+         return TRUE;
+     }
+-G_GNUC_END_IGNORE_DEPRECATIONS
+-#endif
+ 
+     g_autoptr(GFile) file = NULL;
+     g_autofree gchar *filename = NULL;
+@@ -666,9 +662,7 @@ video_file_drop_init (signal_user_data_t *ud)
+ {
+     GtkWidget *window = ghb_builder_widget("hb_window");
+     GType types[] = {
+-#if GTK_CHECK_VERSION(4, 6, 0)
+         GDK_TYPE_FILE_LIST,
+-#endif
+         G_TYPE_FILE,
+         G_TYPE_URI,
+     };
+@@ -973,10 +967,8 @@ ghb_application_handle_local_options (GApplication *app, GVariantDict *options)
+     if (g_variant_dict_lookup(options, "config", "s", &config_dir))
+         ghb_override_user_config_dir(config_dir);
+ 
+-#if GLIB_CHECK_VERSION(2, 72, 0)
+     if (g_variant_dict_lookup(options, "debug", "b", NULL))
+         g_log_set_debug_enabled(TRUE);
+-#endif
+ 
+     if (g_variant_dict_lookup(options, "console", "b", NULL))
+ #if defined(_WIN32)
+
+From 4f69ace02b00942ad8d6f084c2def29959a151bb Mon Sep 17 00:00:00 2001
+From: robxnano <89391914+robxnano@users.noreply.github.com>
+Date: Tue, 29 Jul 2025 09:42:30 +0100
+Subject: [PATCH 5/5] LinGUI: Replace deprecated GTK functions
+
+The gtk_widget_show() and gtk_widget_hide() functions are deprecated in
+GTK 4.10 in favor of gtk_widget_set_visible().
+---
+ gtk/src/audiohandler.c    | 56 +++++++++++++++++----------------------
+ gtk/src/callbacks.c       | 34 ++++++++++++------------
+ gtk/src/chapters.c        |  2 +-
+ gtk/src/presets.c         |  4 +--
+ gtk/src/preview.c         |  4 +--
+ gtk/src/queuehandler.c    |  2 +-
+ gtk/src/subtitlehandler.c | 12 ++++-----
+ gtk/src/title-add.c       | 12 ++++-----
+ gtk/src/util.c            |  2 +-
+ 9 files changed, 60 insertions(+), 68 deletions(-)
+
+diff --git a/gtk/src/audiohandler.c b/gtk/src/audiohandler.c
+index 71f4471c3f49..9580db4b4878 100644
+--- a/gtk/src/audiohandler.c
++++ b/gtk/src/audiohandler.c
+@@ -1415,7 +1415,7 @@ audio_add_cb (GSimpleAction *action, GVariant *param, gpointer data)
+         GtkWidget *dialog = ghb_builder_widget("audio_dialog");
+         gtk_window_set_title(GTK_WINDOW(dialog), _("Add Audio Track"));
+         g_signal_connect(dialog, "response", G_CALLBACK(audio_add_response), backup);
+-        gtk_widget_show(dialog);
++        gtk_widget_set_visible(dialog, TRUE);
+     }
+ }
+ 
+@@ -1424,7 +1424,7 @@ audio_add_response (GtkWidget *dialog, int response, GhbValue *backup)
+ {
+     signal_user_data_t *ud = ghb_ud();
+     g_signal_handlers_disconnect_by_data(dialog, backup);
+-    gtk_widget_hide(dialog);
++    gtk_widget_set_visible(dialog, FALSE);
+     if (response == GTK_RESPONSE_OK)
+     {
+         ghb_value_free(&backup);
+@@ -1507,7 +1507,7 @@ audio_row_activated_cb (GtkTreeView *tv, GtkTreePath *tp,
+         GtkWidget *dialog = ghb_builder_widget("audio_dialog");
+         gtk_window_set_title(GTK_WINDOW(dialog), _("Edit Audio Track"));
+         g_signal_connect(dialog, "response", G_CALLBACK(audio_edit_response), backup);
+-        gtk_widget_show(dialog);
++        gtk_widget_set_visible(dialog, TRUE);
+     }
+ }
+ 
+@@ -1516,7 +1516,7 @@ audio_edit_response (GtkWidget *dialog, int response, GhbValue *backup)
+ {
+     signal_user_data_t *ud = ghb_ud();
+     g_signal_handlers_disconnect_by_data(dialog, backup);
+-    gtk_widget_hide(dialog);
++    gtk_widget_set_visible(dialog, FALSE);
+     if (response != GTK_RESPONSE_OK)
+     {
+         GhbValue *audio_dict = ghb_get_job_audio_settings(ud->settings);
+@@ -1686,16 +1686,8 @@ static void audio_def_settings_bitrate_show(GtkWidget *widget, gboolean show)
+     bitrate_widget = find_widget(widget, "AudioBitrate");
+     quality_widget = find_widget(widget, "AudioTrackQualityBox");
+ 
+-    if (show)
+-    {
+-        gtk_widget_hide(quality_widget);
+-        gtk_widget_show(bitrate_widget);
+-    }
+-    else
+-    {
+-        gtk_widget_hide(bitrate_widget);
+-        gtk_widget_show(quality_widget);
+-    }
++    gtk_widget_set_visible(bitrate_widget, show);
++    gtk_widget_set_visible(quality_widget, !show);
+ }
+ 
+ static void audio_def_settings_quality_set_sensitive(GtkWidget *w, gboolean s)
+@@ -1781,13 +1773,13 @@ create_audio_settings_row (signal_user_data_t *ud)
+       _("Set the audio codec to encode this track with."));
+     gtk_widget_set_valign(GTK_WIDGET(combo), GTK_ALIGN_CENTER);
+     gtk_widget_set_name(GTK_WIDGET(combo), "AudioEncoder");
+-    gtk_widget_show(GTK_WIDGET(combo));
++    gtk_widget_set_visible(GTK_WIDGET(combo), TRUE);
+     g_signal_connect(combo, "changed", (GCallback)audio_def_encoder_changed_cb, ud);
+     gtk_box_append(box2, GTK_WIDGET(combo));
+ 
+     box3 = GTK_BOX(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0));
+     gtk_widget_set_name(GTK_WIDGET(box3), "br_q_box");
+-    gtk_widget_show(GTK_WIDGET(box3));
++    gtk_widget_set_visible(GTK_WIDGET(box3), TRUE);
+ 
+     // Bitrate vs Quality RadioButton
+     GtkBox *vbox;
+@@ -1801,7 +1793,7 @@ create_audio_settings_row (signal_user_data_t *ud)
+     gtk_widget_set_name(radio2, "AudioTrackQualityEnable");
+     g_signal_connect(radio2, "toggled", G_CALLBACK(audio_def_quality_enable_changed_cb), ud);
+     gtk_box_append(vbox, GTK_WIDGET(radio2));
+-    gtk_widget_show(GTK_WIDGET(vbox));
++    gtk_widget_set_visible(GTK_WIDGET(vbox), TRUE);
+     gtk_box_append(box3, GTK_WIDGET(vbox));
+ 
+     // Audio Bitrate ComboBox
+@@ -1813,7 +1805,7 @@ create_audio_settings_row (signal_user_data_t *ud)
+       _("Set the bitrate to encode this track with."));
+     gtk_widget_set_valign(GTK_WIDGET(combo), GTK_ALIGN_CENTER);
+     gtk_widget_set_name(GTK_WIDGET(combo), "AudioBitrate");
+-    gtk_widget_show(GTK_WIDGET(combo));
++    gtk_widget_set_visible(GTK_WIDGET(combo), TRUE);
+     g_signal_connect(combo, "changed", (GCallback)audio_def_encode_setting_changed_cb, ud);
+     gtk_box_append(box3, GTK_WIDGET(combo));
+ 
+@@ -1840,7 +1832,7 @@ create_audio_settings_row (signal_user_data_t *ud)
+ 
+     gtk_widget_set_valign(GTK_WIDGET(scale), GTK_ALIGN_CENTER);
+     gtk_widget_set_name(GTK_WIDGET(scale), "AudioTrackQualityX");
+-    gtk_widget_show(GTK_WIDGET(scale));
++    gtk_widget_set_visible(GTK_WIDGET(scale), TRUE);
+     g_signal_connect(scale, "value-changed", (GCallback)audio_def_quality_changed_cb, ud);
+     gtk_box_append(qbox, GTK_WIDGET(scale));
+ 
+@@ -1850,9 +1842,9 @@ create_audio_settings_row (signal_user_data_t *ud)
+     gtk_widget_set_halign(GTK_WIDGET(label), GTK_ALIGN_START);
+     gtk_widget_set_valign(GTK_WIDGET(label), GTK_ALIGN_CENTER);
+     gtk_widget_set_name(GTK_WIDGET(label), "AudioTrackQualityValue");
+-    gtk_widget_show(GTK_WIDGET(label));
++    gtk_widget_set_visible(GTK_WIDGET(label), TRUE);
+     gtk_box_append(qbox, GTK_WIDGET(label));
+-    gtk_widget_hide(GTK_WIDGET(qbox));
++    gtk_widget_set_visible(GTK_WIDGET(qbox), FALSE);
+     gtk_box_append(box3, GTK_WIDGET(qbox));
+     gtk_box_append(box2, GTK_WIDGET(box3));
+ 
+@@ -1865,7 +1857,7 @@ create_audio_settings_row (signal_user_data_t *ud)
+       _("Set the mixdown of the output audio track."));
+     gtk_widget_set_valign(GTK_WIDGET(combo), GTK_ALIGN_CENTER);
+     gtk_widget_set_name(GTK_WIDGET(combo), "AudioMixdown");
+-    gtk_widget_show(GTK_WIDGET(combo));
++    gtk_widget_set_visible(GTK_WIDGET(combo), TRUE);
+     g_signal_connect(combo, "changed", (GCallback)audio_def_encode_setting_changed_cb, ud);
+     gtk_box_append(box2, GTK_WIDGET(combo));
+ 
+@@ -1878,13 +1870,13 @@ create_audio_settings_row (signal_user_data_t *ud)
+       _("Set the sample rate of the output audio track."));
+     gtk_widget_set_valign(GTK_WIDGET(combo), GTK_ALIGN_CENTER);
+     gtk_widget_set_name(GTK_WIDGET(combo), "AudioSamplerate");
+-    gtk_widget_show(GTK_WIDGET(combo));
++    gtk_widget_set_visible(GTK_WIDGET(combo), TRUE);
+     g_signal_connect(combo, "changed", (GCallback)audio_def_encode_setting_changed_cb, ud);
+     gtk_box_append(box2, GTK_WIDGET(combo));
+ 
+     box3 = GTK_BOX(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0));
+     gtk_widget_set_name(GTK_WIDGET(box3), "gain_box");
+-    gtk_widget_show(GTK_WIDGET(box3));
++    gtk_widget_set_visible(GTK_WIDGET(box3), TRUE);
+ 
+     // Audio Gain ScaleButton
+     const gchar *gain_icons[] = {
+@@ -1902,7 +1894,7 @@ create_audio_settings_row (signal_user_data_t *ud)
+ 
+     gtk_widget_set_valign(GTK_WIDGET(scale), GTK_ALIGN_CENTER);
+     gtk_widget_set_name(GTK_WIDGET(scale), "AudioTrackGainSlider");
+-    gtk_widget_show(GTK_WIDGET(scale));
++    gtk_widget_set_visible(GTK_WIDGET(scale), TRUE);
+     g_signal_connect(scale, "value-changed", (GCallback)audio_def_gain_changed_cb, ud);
+     gtk_box_append(box3, GTK_WIDGET(scale));
+ 
+@@ -1912,13 +1904,13 @@ create_audio_settings_row (signal_user_data_t *ud)
+     gtk_widget_set_halign(GTK_WIDGET(label), GTK_ALIGN_START);
+     gtk_widget_set_valign(GTK_WIDGET(label), GTK_ALIGN_CENTER);
+     gtk_widget_set_name(GTK_WIDGET(label), "AudioTrackGainValue");
+-    gtk_widget_show(GTK_WIDGET(label));
++    gtk_widget_set_visible(GTK_WIDGET(label), TRUE);
+     gtk_box_append(box3, GTK_WIDGET(label));
+     gtk_box_append(box2, GTK_WIDGET(box3));
+ 
+     box3 = GTK_BOX(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0));
+     gtk_widget_set_name(GTK_WIDGET(box3), "drc_box");
+-    gtk_widget_show(GTK_WIDGET(box3));
++    gtk_widget_set_visible(GTK_WIDGET(box3), TRUE);
+ 
+     // Audio DRC ComboBox
+     const gchar *drc_icons[] = {
+@@ -1936,7 +1928,7 @@ create_audio_settings_row (signal_user_data_t *ud)
+ 
+     gtk_widget_set_valign(GTK_WIDGET(scale), GTK_ALIGN_CENTER);
+     gtk_widget_set_name(GTK_WIDGET(scale), "AudioTrackDRCSlider");
+-    gtk_widget_show(GTK_WIDGET(scale));
++    gtk_widget_set_visible(GTK_WIDGET(scale), TRUE);
+     g_signal_connect(scale, "value-changed", (GCallback)audio_def_drc_changed_cb, ud);
+     gtk_box_append(box3, GTK_WIDGET(scale));
+ 
+@@ -1946,7 +1938,7 @@ create_audio_settings_row (signal_user_data_t *ud)
+     gtk_widget_set_halign(GTK_WIDGET(label), GTK_ALIGN_START);
+     gtk_widget_set_valign(GTK_WIDGET(label), GTK_ALIGN_CENTER);
+     gtk_widget_set_name(GTK_WIDGET(label), "AudioTrackDRCValue");
+-    gtk_widget_show(GTK_WIDGET(label));
++    gtk_widget_set_visible(GTK_WIDGET(label), TRUE);
+     gtk_box_append(box3, GTK_WIDGET(label));
+     gtk_box_append(box2, GTK_WIDGET(box3));
+ 
+@@ -1962,14 +1954,14 @@ create_audio_settings_row (signal_user_data_t *ud)
+     gtk_widget_set_valign(GTK_WIDGET(button), GTK_ALIGN_CENTER);
+     gtk_widget_set_halign(GTK_WIDGET(button), GTK_ALIGN_END);
+     gtk_widget_set_name(GTK_WIDGET(button), "remove_button");
+-    gtk_widget_show(GTK_WIDGET(button));
++    gtk_widget_set_visible(GTK_WIDGET(button), TRUE);
+     g_signal_connect(button, "clicked", (GCallback)audio_def_setting_remove_cb, ud);
+     gtk_box_append(box2, GTK_WIDGET(button));
+ 
+-    gtk_widget_show(GTK_WIDGET(box2));
++    gtk_widget_set_visible(GTK_WIDGET(box2), TRUE);
+     gtk_box_append(box, GTK_WIDGET(box2));
+ 
+-    gtk_widget_show(GTK_WIDGET(box));
++    gtk_widget_set_visible(GTK_WIDGET(box), TRUE);
+ 
+     GtkWidget *widget;
+     GtkRequisition nat_req;
+diff --git a/gtk/src/callbacks.c b/gtk/src/callbacks.c
+index 4cf4f52bdb92..95544c85b34b 100644
+--- a/gtk/src/callbacks.c
++++ b/gtk/src/callbacks.c
+@@ -1431,10 +1431,10 @@ show_scan_progress(signal_user_data_t *ud)
+     GtkLabel       * label;
+ 
+     widget = ghb_builder_widget("SourceInfoBox");
+-    gtk_widget_hide(widget);
++    gtk_widget_set_visible(widget, FALSE);
+ 
+     widget = ghb_builder_widget("SourceScanBox");
+-    gtk_widget_show(widget);
++    gtk_widget_set_visible(widget, TRUE);
+ 
+     progress = GTK_PROGRESS_BAR(ghb_builder_widget("scan_prog"));
+     gtk_progress_bar_set_fraction(progress, 0);
+@@ -1454,10 +1454,10 @@ hide_scan_progress(signal_user_data_t *ud)
+     gtk_progress_bar_set_fraction(progress, 1.0);
+ 
+     widget = ghb_builder_widget("SourceScanBox");
+-    gtk_widget_hide(widget);
++    gtk_widget_set_visible(widget, FALSE);
+ 
+     widget = ghb_builder_widget("SourceInfoBox");
+-    gtk_widget_show(widget);
++    gtk_widget_set_visible(widget, TRUE);
+ }
+ 
+ static void
+@@ -1650,11 +1650,11 @@ single_title_dialog (GtkFileChooser *chooser)
+ 
+     adj = gtk_adjustment_new(1, 0, 1000, 1, 10, 10);
+     spin = gtk_spin_button_new(adj, 1, 0);
+-    gtk_widget_show(spin);
++    gtk_widget_set_visible(spin, TRUE);
+     msg = gtk_message_dialog_get_message_area(GTK_MESSAGE_DIALOG(dialog));
+     gtk_box_append(GTK_BOX(msg), spin);
+     g_signal_connect(dialog, "response", G_CALLBACK(single_title_dialog_response), chooser);
+-    gtk_widget_show(dialog);
++    gtk_widget_set_visible(dialog, TRUE);
+ }
+ 
+ static void
+@@ -2319,16 +2319,16 @@ mini_preview_update (gboolean has_preview, signal_user_data_t *ud)
+     if (ghb_dict_get_bool(ud->prefs, "ShowMiniPreview") && has_preview)
+     {
+         widget = ghb_builder_widget("summary_image");
+-        gtk_widget_hide(widget);
++        gtk_widget_set_visible(widget, FALSE);
+         widget = ghb_builder_widget("summary_preview_image");
+-        gtk_widget_show(widget);
++        gtk_widget_set_visible(widget, TRUE);
+     }
+     else
+     {
+         widget = ghb_builder_widget("summary_image");
+-        gtk_widget_show(widget);
++        gtk_widget_set_visible(widget, TRUE);
+         widget = ghb_builder_widget("summary_preview_image");
+-        gtk_widget_hide(widget);
++        gtk_widget_set_visible(widget, FALSE);
+     }
+ }
+ 
+@@ -3916,7 +3916,7 @@ ghb_countdown_dialog_show (const gchar *message, const gchar *action,
+ 
+     g_signal_connect(dialog, "response",
+                      G_CALLBACK(countdown_dialog_response), timeout_id);
+-    gtk_widget_show(dialog);
++    gtk_widget_set_visible(dialog, TRUE);
+ }
+ 
+ G_GNUC_PRINTF(6, 0) static GtkMessageDialog *
+@@ -4046,7 +4046,7 @@ ghb_alert_dialog_show (GtkMessageType type, const char *title,
+         g_free(message);
+     }
+     g_signal_connect(dialog, "response", G_CALLBACK(message_dialog_destroy), NULL);
+-    gtk_widget_show(dialog);
++    gtk_widget_set_visible(dialog, TRUE);
+ }
+ 
+ GtkWidget *
+@@ -4117,7 +4117,7 @@ ghb_stop_encode_dialog_show (signal_user_data_t *ud)
+         _("Finish Current and Stop"), _("Continue Encoding"));
+     g_signal_connect(dialog, "response",
+                      G_CALLBACK(stop_encode_dialog_response), ud);
+-    gtk_widget_show(dialog);
++    gtk_widget_set_visible(dialog, TRUE);
+ }
+ 
+ static void
+@@ -4140,7 +4140,7 @@ quit_dialog_show (void)
+         _("Your movie will be lost if you don't continue encoding."),
+         _("Cancel All and Quit"), NULL, NULL, _("Continue Encoding"));
+     g_signal_connect(dialog, "response", G_CALLBACK(quit_dialog_response), NULL);
+-    gtk_widget_show(dialog);
++    gtk_widget_set_visible(dialog, TRUE);
+ }
+ 
+ static void
+@@ -4326,7 +4326,7 @@ ghb_start_next_job(signal_user_data_t *ud)
+ 
+     ghb_log_func();
+     progress = ghb_builder_widget("progressbar");
+-    gtk_widget_show(progress);
++    gtk_widget_set_visible(progress, TRUE);
+ 
+     count = ghb_array_len(ud->queue);
+     for (ii = 0; ii < count; ii++)
+@@ -4348,7 +4348,7 @@ ghb_start_next_job(signal_user_data_t *ud)
+     ghb_send_notification(GHB_NOTIFY_QUEUE_DONE, 0, ud);
+     queue_done_action(ud);
+     ghb_update_pending(ud);
+-    gtk_widget_hide(progress);
++    gtk_widget_set_visible(progress, FALSE);
+     ghb_reset_disk_space_check();
+ }
+ 
+@@ -4726,7 +4726,7 @@ ghb_backend_events(signal_user_data_t *ud)
+         else
+         {
+             uninhibit_suspend();
+-            gtk_widget_hide(GTK_WIDGET(progress));
++            gtk_widget_set_visible(GTK_WIDGET(progress), FALSE);
+             ghb_reset_disk_space_check();
+         }
+         ghb_save_queue(ud->queue);
+diff --git a/gtk/src/chapters.c b/gtk/src/chapters.c
+index eaab30b9ce96..b6ec8a7881af 100644
+--- a/gtk/src/chapters.c
++++ b/gtk/src/chapters.c
+@@ -48,7 +48,7 @@ create_chapter_row (int index, gint64 start, gint64 duration,
+     gtk_widget_add_controller(row, econ);
+     g_signal_connect(econ, "key-pressed", G_CALLBACK(chapter_keypress_cb), ud);
+ 
+-    gtk_widget_show(row);
++    gtk_widget_set_visible(row, TRUE);
+     return row;
+ }
+ 
+diff --git a/gtk/src/presets.c b/gtk/src/presets.c
+index 1a6f93c6b964..ee8287316ffa 100644
+--- a/gtk/src/presets.c
++++ b/gtk/src/presets.c
+@@ -2162,7 +2162,7 @@ preset_import_response_cb (GtkFileChooser *chooser, GtkResponseType response,
+                     _("Overwrite Preset?"),
+                     _("The preset “%s” already exists. Do you want to overwrite it?"),
+                     preset_name);
+-            gtk_widget_show(GTK_WIDGET(overwrite_dialog));
++            gtk_widget_set_visible(GTK_WIDGET(overwrite_dialog), TRUE);
+             g_signal_connect(overwrite_dialog, "response", G_CALLBACK(preset_write_response), data);
+         }
+         else
+@@ -2545,7 +2545,7 @@ preset_save_as_response_cb (GtkDialog *dialog, int response,
+                     _("The preset “%s” already exists. Do you want to overwrite it?"),
+                     name);
+             g_signal_connect(overwrite, "response", G_CALLBACK(preset_save_as_write_cb), dialog);
+-            gtk_widget_show(GTK_WIDGET(overwrite));
++            gtk_widget_set_visible(GTK_WIDGET(overwrite), TRUE);
+         }
+         else
+         {
+diff --git a/gtk/src/preview.c b/gtk/src/preview.c
+index 697f4f364a65..77eb3bc323dc 100644
+--- a/gtk/src/preview.c
++++ b/gtk/src/preview.c
+@@ -223,7 +223,7 @@ preview_set_render_size(signal_user_data_t *ud, int width, int height)
+     if (gtk_window_is_fullscreen(window))
+     {
+         reset = ghb_builder_widget("preview_reset");
+-        gtk_widget_hide(reset);
++        gtk_widget_set_visible(reset, FALSE);
+     }
+     else
+     {
+@@ -662,7 +662,7 @@ preview_reset_clicked_cb (GtkWidget *toggle, gpointer data)
+         // is reset above.  So assume it got reset and disable the
+         // "Source Resolution" button.
+         GtkWidget * widget = ghb_builder_widget("preview_reset");
+-        gtk_widget_hide(widget);
++        gtk_widget_set_visible(widget, FALSE);
+     }
+ }
+ 
+diff --git a/gtk/src/queuehandler.c b/gtk/src/queuehandler.c
+index abe7b181b908..b5cc1793bc2f 100644
+--- a/gtk/src/queuehandler.c
++++ b/gtk/src/queuehandler.c
+@@ -1702,7 +1702,7 @@ queue_remove_dialog_show (GhbQueueRow *row)
+                 _("Cancel and Remove"), NULL, NULL, _("Continue Encoding"));
+ 
+     g_signal_connect(dialog, "response", G_CALLBACK(queue_remove_response), row);
+-    gtk_widget_show(dialog);
++    gtk_widget_set_visible(dialog, TRUE);
+ }
+ 
+ static void
+diff --git a/gtk/src/subtitlehandler.c b/gtk/src/subtitlehandler.c
+index fb23515488d6..dda042fd2863 100644
+--- a/gtk/src/subtitlehandler.c
++++ b/gtk/src/subtitlehandler.c
+@@ -1234,7 +1234,7 @@ subtitle_add_cb (GSimpleAction *action, GVariant *param, gpointer data)
+         GtkWidget *dialog = ghb_builder_widget("subtitle_dialog");
+         gtk_window_set_title(GTK_WINDOW(dialog), _("Add Subtitles"));
+         g_signal_connect(dialog, "response", G_CALLBACK(subtitle_add_response), backup);
+-        gtk_widget_show(dialog);
++        gtk_widget_set_visible(dialog, TRUE);
+     }
+ }
+ 
+@@ -1243,7 +1243,7 @@ subtitle_add_response (GtkWidget *dialog, int response, GhbValue *backup)
+ {
+     signal_user_data_t *ud = ghb_ud();
+     g_signal_handlers_disconnect_by_data(dialog, backup);
+-    gtk_widget_hide(dialog);
++    gtk_widget_set_visible(dialog, FALSE);
+     if (response == GTK_RESPONSE_OK)
+     {
+         ghb_value_free(&backup);
+@@ -1296,7 +1296,7 @@ subtitle_add_fas_cb (GSimpleAction *action, GVariant *param, gpointer data)
+     GtkWidget *dialog = ghb_builder_widget("subtitle_dialog");
+     gtk_window_set_title(GTK_WINDOW(dialog), _("Foreign Audio Scan"));
+     g_signal_connect(dialog, "response", G_CALLBACK(subtitle_add_fas_response), backup);
+-    gtk_widget_show(dialog);
++    gtk_widget_set_visible(dialog, TRUE);
+ }
+ 
+ static void
+@@ -1304,7 +1304,7 @@ subtitle_add_fas_response (GtkWidget *dialog, int response, GhbValue *backup)
+ {
+     signal_user_data_t *ud = ghb_ud();
+     g_signal_handlers_disconnect_by_data(dialog, backup);
+-    gtk_widget_hide(dialog);
++    gtk_widget_set_visible(dialog, FALSE);
+     if (response == GTK_RESPONSE_OK)
+     {
+         // Disable FAS button
+@@ -1810,7 +1810,7 @@ subtitle_edit(GtkTreeView *tv, GtkTreePath *tp, signal_user_data_t *ud)
+         GtkWidget *dialog = ghb_builder_widget("subtitle_dialog");
+         gtk_window_set_title(GTK_WINDOW(dialog), _("Edit Subtitles"));
+         g_signal_connect(dialog, "response", G_CALLBACK(subtitle_edit_response), backup);
+-        gtk_widget_show(dialog);
++        gtk_widget_set_visible(dialog, TRUE);
+     }
+ }
+ 
+@@ -1819,7 +1819,7 @@ subtitle_edit_response (GtkWidget *dialog, int response, GhbValue *backup)
+ {
+     signal_user_data_t *ud = ghb_ud();
+     g_signal_handlers_disconnect_by_data(dialog, backup);
+-    gtk_widget_hide(dialog);
++    gtk_widget_set_visible(dialog, FALSE);
+     if (response == GTK_RESPONSE_OK)
+     {
+         ghb_value_free(&backup);
+diff --git a/gtk/src/title-add.c b/gtk/src/title-add.c
+index c859f2c8e06c..77406a4d0516 100644
+--- a/gtk/src/title-add.c
++++ b/gtk/src/title-add.c
+@@ -436,7 +436,7 @@ static GtkWidget *title_create_row (signal_user_data_t *ud)
+     gtk_box_set_spacing(hbox, 6);
+     gtk_widget_set_margin_start(GTK_WIDGET(hbox), 6);
+     gtk_widget_set_margin_end(GTK_WIDGET(hbox), 6);
+-    gtk_widget_show(GTK_WIDGET(hbox));
++    gtk_widget_set_visible(GTK_WIDGET(hbox), TRUE);
+ 
+     // Select checkbox
+     selected = GTK_CHECK_BUTTON(gtk_check_button_new());
+@@ -445,7 +445,7 @@ static GtkWidget *title_create_row (signal_user_data_t *ud)
+       _("Select this title for adding to the queue.\n"));
+     gtk_widget_set_valign(GTK_WIDGET(selected), GTK_ALIGN_CENTER);
+     gtk_widget_set_name(GTK_WIDGET(selected), "title_selected");
+-    gtk_widget_show(GTK_WIDGET(selected));
++    gtk_widget_set_visible(GTK_WIDGET(selected), TRUE);
+     g_signal_connect(selected, "toggled", (GCallback)title_selected_cb, ud);
+     gtk_box_append(hbox, GTK_WIDGET(selected));
+ 
+@@ -455,7 +455,7 @@ static GtkWidget *title_create_row (signal_user_data_t *ud)
+     gtk_widget_set_halign(GTK_WIDGET(title), GTK_ALIGN_START);
+     gtk_widget_set_valign(GTK_WIDGET(title), GTK_ALIGN_CENTER);
+     gtk_widget_set_name(GTK_WIDGET(title), "title_label");
+-    gtk_widget_show(GTK_WIDGET(title));
++    gtk_widget_set_visible(GTK_WIDGET(title), TRUE);
+     gtk_box_append(hbox, GTK_WIDGET(title));
+ 
+     default_title_attrs = gtk_label_get_attributes(title);
+@@ -474,7 +474,7 @@ static GtkWidget *title_create_row (signal_user_data_t *ud)
+     gtk_editable_set_width_chars(GTK_EDITABLE(dest_file), 40);
+     gtk_widget_set_name(dest_file, "title_file");
+     //gtk_widget_set_hexpand(dest_file, TRUE);
+-    gtk_widget_show(dest_file);
++    gtk_widget_set_visible(dest_file, TRUE);
+     g_signal_connect(dest_file, "changed", (GCallback)title_dest_file_cb, ud);
+     gtk_box_append(vbox_dest, dest_file);
+     dest_dir = ghb_file_button_new(_("Destination Directory"), GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER);
+@@ -482,9 +482,9 @@ static GtkWidget *title_create_row (signal_user_data_t *ud)
+                      G_CALLBACK(title_dest_dir_cb), ud);
+     gtk_widget_set_name(GTK_WIDGET(dest_dir), "title_dir");
+     gtk_widget_set_hexpand(GTK_WIDGET(dest_dir), TRUE);
+-    gtk_widget_show(GTK_WIDGET(dest_dir));
++    gtk_widget_set_visible(GTK_WIDGET(dest_dir), TRUE);
+     gtk_box_append(vbox_dest, GTK_WIDGET(dest_dir));
+-    gtk_widget_show(GTK_WIDGET(vbox_dest));
++    gtk_widget_set_visible(GTK_WIDGET(vbox_dest), TRUE);
+     gtk_box_append(hbox, GTK_WIDGET(vbox_dest));
+ 
+     return GTK_WIDGET(hbox);
+diff --git a/gtk/src/util.c b/gtk/src/util.c
+index 65c9456be880..b56cfc2ab789 100644
+--- a/gtk/src/util.c
++++ b/gtk/src/util.c
+@@ -88,7 +88,7 @@ int ghb_dialog_run (GtkDialog *dialog)
+         gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+ 
+     if (!gtk_widget_get_visible(GTK_WIDGET(dialog)))
+-        gtk_widget_show(GTK_WIDGET(dialog));
++        gtk_widget_set_visible(GTK_WIDGET(dialog), TRUE);
+ 
+     response_handler = g_signal_connect(dialog,
+                                         "response",
