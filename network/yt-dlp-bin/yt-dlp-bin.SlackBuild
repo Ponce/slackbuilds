@@ -2,41 +2,61 @@
 
 # Slackware build script for yt-dlp-bin
 
-# Copyright 2024-2025 G. Galdini <dioniso@disroot.org> Brazil
-# All rights reserved.
-#
-# Redistribution and use of this script, with or without modification, is
-# permitted provided that the following conditions are met:
-#
-# 1. Redistributions of this script must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-#
-#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
-#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
-#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Originally written by G. Galdini. Modified and now maintained by
+# B. Watson <urchlay@slackware.uk>.
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20250825 bkw:
+# - take over maintenance.
+# - relicense as WTFPL.
+# - update for v2025.08.22.
+# - add getdocs.sh script to auto-download the documentation from github.
+# - use the ELF binary compiled for linux (yt-dlp_linux) rather than
+#   the python-wrapped zip file (yt-dlp), to avoid the impending EOL
+#   of python-3.9: the ELF binary includes its own python interpreter.
+#   probably this can be changed back after the next Slackware release
+#   (15.1 or 16.0, whatever it ends up being called). this means no
+#   32-bit x86 support, sorry.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=yt-dlp-bin
 SRCNAM=${PRGNAM%-bin}
-VERSION=${VERSION:-2025.03.27}
+VERSION=${VERSION:-2025.08.22}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
-ARCH=noarch
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
 
+# 20250826 bkw: Should this come before or after the unsupported arch
+# error? I think it's safer but more confusing if it's before...
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
 fi
+
+case "$ARCH" in
+  x86_64)  SRCNAM=yt-dlp_linux         ;;
+  aarch64) SRCNAM=yt-dlp_linux_aarch64 ;;
+  *) # get the user's attention.
+    cat <<EOF
+
+****************************************************
+* Unsupported architecture: ARCH=$ARCH
+* Supported ARCH values are "x86_64" and "aarch64".
+****************************************************
+
+EOF
+    exit 1
+esac
 
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
@@ -47,13 +67,18 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 
-install -Dm755 -oroot -groot $CWD/$SRCNAM -t $PKG/usr/bin
+# 20250826 bkw: the -s option for install means we can't build an
+# aarch64 package on x86_64 or vice versa. stripping the binary
+# doesn't make it much smaller, but it doesn't hurt either.
+mkdir -p $PKG/usr/bin
+install -s -m0755 -oroot -groot $CWD/$SRCNAM $PKG/usr/bin/yt-dlp
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a $CWD/docs/[A-Z]* \
- $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-chown root:root $PKG/usr/doc/$PRGNAM-$VERSION/*
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+for i in $CWD/docs/*; do
+  cat $i > $PKGDOC/$( basename $i )
+done
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
