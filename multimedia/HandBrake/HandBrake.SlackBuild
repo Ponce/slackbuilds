@@ -35,7 +35,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=HandBrake
 VERSION=${VERSION:-1.10.0}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -114,11 +114,66 @@ find -L . \
 # Correct dependency tarball naming inconsistency
 mv download/AMF-${amfVER}-slim.tar.gz download/AMF-${amfVER}.0.tar.gz
 
-# Disable 10/12bit x265 on 32bit since it fails compilation
+# x265 support on i?86 is not officially supported anymore.
+# https://github.com/HandBrake/HandBrake/issues/6111
+# I will keep trying to support it until I come across the roadblock
+# I can't fix :)
 if echo "$ARCH" | grep -q "i.86"; then
+  # Disable 10/12bit x265 on 32bit since it fails compilation
   sed -i '/1[02]bit/d' make/include/main.defs
   sed -i '/1[02]bit/d;s|main.a \\|main.a|' contrib/x265/module.defs
   sed -i 's|-DEXTRA_LIB="x265_main10.a;x265_main12.a" -DEXTRA_LINK_FLAGS=-L. -DLINKED_10BIT=ON -DLINKED_12BIT=ON ||' contrib/x265_8bit/module.defs
+
+  # x265 compilation was broken on i?86 when UNIX64 was replaced with FORMAT_ELF
+  # Reverting that change allows compilation to occur.
+  cat << EOF > contrib/x265/A09-Fix-compilation-on-x86.patch
+diff --git a/source/common/x86/cpu-a.asm b/source/common/x86/cpu-a.asm
+index 747b921f7..2f469f6ec 100644
+--- a/source/common/x86/cpu-a.asm
++++ b/source/common/x86/cpu-a.asm
+@@ -177,7 +177,7 @@ cglobal safe_intel_cpu_indicator_init
+ %if WIN64
+     lea rax, [intel_cpu_indicator_init]
+     call rax
+-%elif FORMAT_ELF
++%elif UNIX64
+     call [rel intel_cpu_indicator_init wrt ..plt]
+ %else
+     call intel_cpu_indicator_init
+diff --git a/source/common/x86/pixel-util8.asm b/source/common/x86/pixel-util8.asm
+index 6ad2852d3..6d25c4112 100644
+--- a/source/common/x86/pixel-util8.asm
++++ b/source/common/x86/pixel-util8.asm
+@@ -8485,7 +8485,7 @@ cglobal costCoeffNxN, 6,11,6
+     ; r5 - scanFlagMask
+     ; r6 - sum
+ 
+-%if FORMAT_ELF
++%if UNIX64
+     mov         r0, [private_prefix %+ _entropyStateBits wrt ..gotpc]
+ %else
+     lea         r0, [private_prefix %+ _entropyStateBits]
+@@ -8670,7 +8670,7 @@ cglobal costCoeffNxN, 6,10,5
+     ; r6 - sum
+     ; {r3,r4} - ctxSig[15-0]
+     ; r8m - (numNonZero != 0) || (subPosBase == 0)
+-%if FORMAT_ELF
++%if UNIX64
+     mov             r0, [private_prefix %+ _entropyStateBits wrt ..gotpc]
+ %else
+     lea             r0, [private_prefix %+ _entropyStateBits]
+@@ -8914,7 +8914,7 @@ cglobal costC1C2Flag, 4,12,2
+     or          r11d, 0x100                     ; default value setting to 8
+     bsf         r11d, r11d
+ 
+-%if FORMAT_ELF
++%if UNIX64
+     mov             r5, [private_prefix %+ _entropyStateBits wrt ..gotpc]
+ %else
+     lea             r5, [private_prefix %+ _entropyStateBits]
+-- 
+2.49.0
+EOF
 fi
 
 # Make the GUI optional
