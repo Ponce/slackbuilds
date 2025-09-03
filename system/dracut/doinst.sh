@@ -13,3 +13,4 @@ config() {
 
 config etc/dracut.conf.d/elogind.conf.new
 config etc/dracut.conf.d/omit_systemd_modules.conf.new
+config etc/dracut.conf.d/hostonly_cmdline_yes.conf.new
