@@ -3,6 +3,7 @@
 # Slackware build script for xreader
 
 # Copyright 2017 Rodrigo Gimenez <estrod[at]zoho[dot]com>
+# Copyright 2025 Isaac Yu <isaacyu@protonmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,11 +26,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=xreader
-VERSION=${VERSION:-1.4.4}
-# To configure the source we need macros that exist in mate-common
-# This defines the version of mate-common we'll use
-MATECOMMONVERSION=1.18.0
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-4.4.0}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -41,9 +39,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -75,9 +70,6 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/xreader-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
-tar --strip-components=1 -xvf $CWD/mate-common-$MATECOMMONVERSION.tar.gz \
-    mate-common-$MATECOMMONVERSION/macros/
-chmod +x macros/mate-autogen
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -85,23 +77,28 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# This configures autogen to use the locally extracted macros
-PATH=$PATH:$(pwd)/macros \
-ACLOCAL_FLAGS="-I $(pwd)/macros" \
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./autogen.sh \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --build=$ARCH-slackware-linux \
-  --disable-caja \
-  --disable-nemo \
-  --disable-static
+# If libgxps is installed, build xreader with xps support
+# This bypasses a build error from libgxps not being installed 
+xpstopdf --help >/dev/null 2&>1 && XPS=true || XPS=false
 
-make
-make install DESTDIR=$PKG
+mkdir -p build
+cd build
+meson setup \
+  --prefix=/usr \
+  --buildtype=release \
+  --libdir=lib${LIBDIRSUFFIX} \
+  --libexecdir=/usr/lib${LIBDIRSUFFIX} \
+  --mandir=/usr/man \
+  -Dxps=$XPS \
+  -Dmathjax-directory=/usr/share/mathjax2 \
+  ..
+
+  ninja
+  DESTDIR=$PKG ninja install
+cd ..
+
+# Add Office category to .desktop file
+sed -i 's/Viewer;/Viewer;Office;/g' $PKG/usr/share/applications/xreader.desktop
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -112,12 +109,9 @@ mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a AUTHORS ChangeLog COPYING $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
-rm -f $PKG/usr/lib*/*.la
-
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
-
