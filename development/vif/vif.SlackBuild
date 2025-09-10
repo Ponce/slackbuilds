@@ -1,0 +1,133 @@
+#!/bin/bash
+
+# Slackware build script for vif
+
+# Written by B. Watson (urchlay@slackware.uk)
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# Note to self: the actual upstream download file doesn't seem
+# to change names (it's "vif-current.tar.gz") when there's a new
+# version... but the top-level dir inside the tarball does have the
+# version number (e.g. vif-1.2.16/). So I host the tarball myself,
+# renamed to match the version number. See getsrc.sh.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=vif
+VERSION=${VERSION:-1.2.16}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+# "make check" doesn't work until after the package has been installed
+# (and even then it's checking the installed version, not the binaries
+# we just built).
+if [ "${CHECK:-no}" = "yes" ]; then
+  CHECK=yes
+
+  if [ ! -x /usr/bin/vif ]; then
+    CHECK=no
+  elif [ "$( /usr/bin/vif -v | head -1 | cut -d' ' -f2 )" != "$VERSION" ]; then
+    CHECK=no
+  fi
+
+  if [ "$CHECK" = "no" ]; then
+    cat <<EOF
+
+To use CHECK=yes, you must first build and install vif without it,
+then re-run this script with CHECK=yes.
+
+EOF
+    exit 1
+  fi
+fi
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+chown -R root:root .
+# Some files have +x for no reason, do not revert to template.
+find -L .  -type f -a -exec chmod 644 {} + -o \
+           -type d -a -exec chmod 755 {} +
+
+LIB=lib$LIBDIRSUFFIX
+
+# Make the man page show the vif version.
+sed -i "/\\.Os/s,LINUX,$VERSION," src/man/vif.1
+
+# Upstream hardcodes silent make rules, I need to see the compile
+# commands, so...
+find . -name Makefile | xargs sed -i '/\$(\(C_COMPILER\|VIF\))/s,@ *,,'
+
+# Can't pass CFLAGS or COPT just for optimization flags...
+sed -i "/COPT/s,-O2,$SLKCFLAGS," Makefile
+
+[ "$CHECK" = "yes" ] && make check 2>&1 | tee make_check.log
+
+# The recursive Makefiles can't be parallelized. Using -jN where N>1
+# works, but spews "jobserver unavailable" warnings.
+# Allowing CC overrides in the env, but this *does not* compile
+# with Slack 15.0's clang.
+make -j1 C_COMPILER=${CC:-gcc} LOCDIR=/usr
+
+# Do not use 'make install', it doesn't support DESTDIR, and does a
+# "make clean" followed by "make all", so we can't use LOCDIR=$PKG/usr
+# either (the $PKG would end up hardcoded in the binaries). Also,
+# 'make install' uses sudo, which would normally be OK since we run as
+# root, but if the local sysadmin has removed root from /etc/sudoers,
+# it would break...
+mkdir -p $PKG/usr/{bin,$LIB,include,man/man1}
+install -s -m0755 src/bin/vif       $PKG/usr/bin
+install    -m0644 src/include/vif.h $PKG/usr/include
+install    -m0644 src/lib/libvif.a  $PKG/usr/$LIB
+gzip -9c < src/man/vif.1 > $PKG/usr/man/man1/vif.1.gz
+
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a AUTHORS COPYING NEWS README $PKGDOC
+[ "$CHECK" = "yes" ] && cp -a make_check.log $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
