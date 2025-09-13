@@ -8,49 +8,72 @@ PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
 BASE=nordvpn
 
 DAEMON=/usr/sbin/${BASE}d
-PID=/var/run/$BASE.pid
+PID=/run/$BASE.pid
 SOCK=/run/$BASE/${BASE}d.sock
 SOCKDIR=/run/$BASE
 
 create_socket_dir() {
-  if [[ -d $SOCKDIR ]]; then
-    return
-  fi
-  mkdir -m 0770 $SOCKDIR
-  chown root:$BASE $SOCKDIR
+  mkdir -p "$SOCKDIR"
+  chown root:$BASE "$SOCKDIR" 2>/dev/null || true
+  chmod 0770 "$SOCKDIR" 2>/dev/null || true
 }
 
-checkuser() {
-    status=0
-    for u in $(who | awk '{print $1}' | sort | uniq)
-    do
-          if [ "$u" == "$1" ]; then
-                return 0
-	  fi
-    done
-    return 1
+# Wait up to ~5s for the daemon to create the socket
+wait_for_socket() {
+  i=0
+  while [ $i -lt 50 ]; do
+    [ -S "$SOCK" ] && return 0
+    sleep 0.1
+    i=$((i+1))
+  done
+  return 1
 }
+
+# Wait up to ~2s for the PID in $PID to exit
+wait_for_exit() {
+  [ -s "$PID" ] || return 0
+  _pid="$(cat "$PID" 2>/dev/null)"
+  i=0
+  while [ $i -lt 20 ]; do
+    [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null || return 0
+    sleep 0.1
+    i=$((i+1))
+  done
+  return 1
+}
+
 #
 # Function that starts the daemon
 #
 nordvpnd_start()
 {
-  checkuser
   create_socket_dir
-  rm -rf $SOCK
-  if [ -s $PID ]; then
-    echo "$BASE is already running: $(cat $PID)"
+  if [ -s "$PID" ]; then
+    echo "$BASE is already running: $(cat "$PID")"
     exit 1
   fi
 
-  if [ -x $DAEMON ]; then
+  rm -f -- "$SOCK"
+
+  if [ -x "$DAEMON" ]; then
     echo "Starting $BASE"
-    sleep 1
-    # $DAEMON start-stop-daemon --start --quiet -g "nordvpn" --pidfile $PID --exec $DAEMON
-    $DAEMON > /dev/null &
-    pidof $DAEMON > $PID
-    sleep 10
-    if [ -S "$SOCK" ]; then
+
+    # Scope NordVPN private libs to the daemon only
+    if [ -d /usr/lib64/nordvpn ]; then
+      _nvlib=/usr/lib64/nordvpn
+    elif [ -d /usr/lib/nordvpn ]; then
+      _nvlib=/usr/lib/nordvpn
+    else
+      _nvlib=
+    fi
+    [ -n "$_nvlib" ] && export LD_LIBRARY_PATH="$_nvlib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+    "$DAEMON" > /dev/null &
+    pidof "${BASE}d" > "$PID"
+
+    if wait_for_socket; then
+      chown root:$BASE "$SOCK" 2>/dev/null || true
+      chmod 0770 "$SOCK" 2>/dev/null || true
       echo "$BASE has been started."
     else
       echo "$BASE failed to start. Please restart the daemon."
@@ -63,12 +86,11 @@ nordvpnd_start()
 #
 nordvpnd_stop()
 {
-  if [ -s $PID ]; then
+  if [ -s "$PID" ]; then
     echo "Stopping $BASE"
-    sleep 1
-    kill $(cat $PID)
-    rm -rf $PID $SOCK
-    sleep 1
+    kill "$(cat "$PID")"
+    wait_for_exit
+    rm -f -- "$PID" "$SOCK"
     echo "$BASE has been stopped."
   else
     echo "$BASE is not running."
@@ -81,7 +103,6 @@ nordvpnd_stop()
 nordvpnd_restart()
 {
   nordvpnd_stop
-  sleep 1
   nordvpnd_start
 }
 
@@ -90,13 +111,12 @@ nordvpnd_restart()
 #
 nordvpnd_status()
 {
-  if [ -s $PID ]; then
-    echo "$BASE is running: $(cat $PID)"
+  if [ -s "$PID" ]; then
+    echo "$BASE is running: $(cat "$PID")"
   else
     echo "$BASE is not running."
   fi
 }
-
 
 case "$1" in
   start)
