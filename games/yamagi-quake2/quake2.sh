@@ -1,2 +1,2 @@
 #!/bin/sh
-exec /usr/share/quake2/quake2 +set basedir /usr/share/quake2 $*
+exec /usr/share/games/quake2/quake2 +set basedir /usr/share/games/quake2 $*
