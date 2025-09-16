@@ -1,0 +1,320 @@
+From 21d7e40b2ccc2a3209341264bae97cc0a64cc068 Mon Sep 17 00:00:00 2001
+From: Axel Svensson <mail@axelsvensson.com>
+Date: Sun, 29 Jun 2025 17:30:53 +0200
+Subject: [PATCH 3/3] Add option -d,--dir
+
+Fixes #48
+---
+ fatrace.8     |  27 ++++++++++++-
+ fatrace.c     |  50 ++++++++++++++++++++++-
+ tests/test.py | 107 ++++++++++++++++++++++++++++++++++++++++++++------
+ 3 files changed, 168 insertions(+), 16 deletions(-)
+
+diff --git a/fatrace.8 b/fatrace.8
+index 7117ee2..aa355b1 100644
+--- a/fatrace.8
++++ b/fatrace.8
+@@ -1,4 +1,4 @@
+-.TH fatrace 8 "August 20, 2020" "Martin Pitt"
++.TH fatrace 8 "September 5, 2025" "Martin Pitt"
+ 
+ .SH NAME
+ 
+@@ -10,6 +10,10 @@ fatrace \- report system wide file access events
+ [
+ .I OPTIONS
+ ]
++[
++--
++]
++[ \fIDIR\fR... ]
+ 
+ .SH DESCRIPTION
+ 
+@@ -212,6 +216,27 @@ Print information about all parent processes.
+ .B \-e\fR, \fB\-\-exe
+ Print executable path.
+ 
++.TP
++.B \-d \fIDIR\fR, \fB\-\-dir=\fIDIR\fR
++Show only events where the affected file is \fIdirectly\fR under this directory.
++Can be specified multiple times to include events from several directories.
++.IP
++This is \fInot\fR recursive. For example, \fB\-d /home/user\fR will show events
++for \fB/home/user/file\fR but not for \fB/home/user/subdir/file\fR.
++.IP
++\fIDIR\fRs can also be specified at the end of the command line, advisably
++preceded by the \fB\-\-\fR separator. As long as no directories will be created
++or moved under a subtree, it's possible to watch that subtree like so:
++.RS
++.IP "" 4
++fatrace -- $(find /path/to/subtree -type d)
++.RE
++.IP
++The attachment is to a directory inode, not the path. For example, this means
++that 1) If you move a watched directory while fatrace runs, you may receive
++events for a path that is not listed on the command line; 2) If you delete and
++recreate a watched directory you will no longer receive events.
++
+ .TP
+ .B \-h \fR, \fB\-\-help
+ Print help and exit.
+diff --git a/fatrace.c b/fatrace.c
+index 836c431..1c9042d 100644
+--- a/fatrace.c
++++ b/fatrace.c
+@@ -48,6 +48,9 @@
+ 
+ #define BUFSIZE 256*1024
+ 
++/* Likely to be less than /proc/sys/fs/fanotify/max_user_marks */
++#define MAX_DIRS 4096
++
+ /* https://man7.org/linux/man-pages/man5/proc_pid_comm.5.html ; not defined in any include file */
+ #ifndef TASK_COMM_LEN
+ #define TASK_COMM_LEN 16
+@@ -73,6 +76,8 @@ static char* option_comm = NULL;
+ static bool option_json = false;
+ static bool option_parents = false;
+ static bool option_exe = false;
++static const char *option_dirs[MAX_DIRS];
++static unsigned int option_dirs_len = 0;
+ 
+ /* --time alarm sets this to 0 */
+ static volatile int running = 1;
+@@ -594,6 +599,26 @@ do_mark (int fan_fd, const char *dir, bool fatal)
+ static void
+ setup_fanotify (int fan_fd)
+ {
++    if (option_dirs_len > 0) {
++        mark_mode = FAN_MARK_ADD;
++        char resolved[PATH_MAX];
++        struct stat st;
++        for (unsigned i = 0; i < option_dirs_len; i++) {
++            if (realpath(option_dirs[i], resolved) &&
++                stat(resolved, &st) == 0) {
++                if (S_ISDIR(st.st_mode))
++                    do_mark (fan_fd, resolved, false);
++                else
++                    errx(EXIT_FAILURE,
++                         "Not a directory: %s", option_dirs[i]);
++            }
++            else
++                err(EXIT_FAILURE,
++                    "Cannot resolve directory: %s", option_dirs[i]);
++        }
++        return;
++    }
++
+     FILE* mounts;
+     struct mntent* mount;
+ 
+@@ -644,7 +669,7 @@ setup_fanotify (int fan_fd)
+ static void
+ help (void)
+ {
+-    puts ("Usage: fatrace [options...] \n"
++    puts ("Usage: fatrace [options...] [--] [DIR...]\n"
+ "\n"
+ "Options:\n"
+ "  -c, --current-mount           Only record events on partition/mount of\n"
+@@ -663,6 +688,10 @@ help (void)
+ "  -j, --json                    Write events in JSONL format.\n"
+ "  -P, --parents                 Include information about all parent processes.\n"
+ "  -e, --exe                     Add executable path to events.\n"
++"  -d DIR, --dir=DIR             Show only events on files directly under this\n"
++"                                directory. NOT recursive. Can be specified\n"
++"                                multiple times. DIRs can also be specified at\n"
++"                                the end of the command line.\n"
+ "  -h, --help                    Show help.");
+ }
+ 
+@@ -691,12 +720,13 @@ parse_args (int argc, char** argv)
+         {"json",          no_argument,       0, 'j'},
+         {"parents",       no_argument,       0, 'P'},
+         {"exe",           no_argument,       0, 'e'},
++        {"dir",           required_argument, 0, 'd'},
+         {"help",          no_argument,       0, 'h'},
+         {0,               0,                 0,  0 }
+     };
+ 
+     while (1) {
+-        c = getopt_long (argc, argv, "C:co:s:tup:f:jPeh", long_options, NULL);
++        c = getopt_long (argc, argv, "C:co:s:tup:f:jPed:h", long_options, NULL);
+ 
+         if (c == -1)
+             break;
+@@ -801,6 +831,13 @@ parse_args (int argc, char** argv)
+                 option_exe = true;
+                 break;
+ 
++            case 'd':
++                if (option_dirs_len >= MAX_DIRS)
++                    errx (EXIT_FAILURE, "Error: Too many --dir arguments"
++                          " (maximum is %d).", MAX_DIRS);
++                option_dirs[option_dirs_len++] = optarg;
++                break;
++
+             case 'h':
+                 help ();
+                 exit (EXIT_SUCCESS);
+@@ -813,6 +850,15 @@ parse_args (int argc, char** argv)
+                 errx (EXIT_FAILURE, "Internal error: unexpected option '%c'", c);
+         }
+     }
++    for (int i = optind; i < argc; i++) {
++        if (option_dirs_len >= MAX_DIRS)
++            errx (EXIT_FAILURE, "Error: Too many --dir and DIR arguments"
++                  " (maximum is %d).", MAX_DIRS);
++        option_dirs[option_dirs_len++] = argv[i];
++    }
++    if (option_current_mount && option_dirs_len > 0)
++        errx (EXIT_FAILURE,
++              "Error: -c,--current-mount and -d,--dir are mutually exclusive.");
+ }
+ 
+ static void
+diff --git a/tests/test.py b/tests/test.py
+index 0dd904a..f86c0e1 100644
+--- a/tests/test.py
++++ b/tests/test.py
+@@ -72,18 +72,30 @@ class FatraceRunner:
+             self.log_content = f.read()
+         self.log_dir.cleanup()
+ 
+-    def assert_log(self, pattern: str) -> None:
++    def has_log(self, pattern: str) -> bool:
+         """Check if a regex pattern exists in the log content."""
+ 
+         assert self.log_content, "Need to call run() first"
+ 
+-        if not re.search(pattern, self.log_content, re.MULTILINE):
+-            raise AssertionError(f"""Pattern not found in log: {pattern}
+----- Log content ----
+-{self.log_content}
+------------------""")
++        return bool(re.search(pattern, self.log_content, re.MULTILINE))
+ 
+-    def assert_json(self, condition_func: Callable[[dict], bool]) -> None:
++    def assert_log(self, pattern: str) -> None:
++        if self.has_log(pattern):
++            return
++        raise AssertionError(f"Pattern not found in log: {pattern}\n"
++                             "---- Log content ----\n"
++                             f"{self.log_content}\n"
++                             "-----------------")
++
++    def assert_not_log(self, pattern: str) -> None:
++        if not self.has_log(pattern):
++            return
++        raise AssertionError(f"Pattern found in log: {pattern}\n"
++                             "---- Log content ----\n"
++                             f"{self.log_content}\n"
++                             "-----------------")
++
++    def has_json(self, condition_func: Callable[[dict], bool]) -> bool:
+         """Check if any JSON line matches the condition function."""
+ 
+         assert self.log_content, "Need to call run() first"
+@@ -94,16 +106,27 @@ class FatraceRunner:
+             entry = json.loads(line)
+             try:
+                 if condition_func(entry):
+-                    return
++                    return True
+             except KeyError:
+                 # Ignore entries that do not match the expected structure
+                 pass
++        return False
+ 
+-        raise AssertionError(f"""No JSON entry matched condition
+----- Log content ----
+-{self.log_content}
+------------------""")
+-
++    def assert_json(self, condition_func: Callable[[dict], bool]) -> None:
++        if self.has_json(condition_func):
++            return
++        raise AssertionError("No JSON entry matched condition\n"
++                             "---- Log content ----\n"
++                             f"{self.log_content}\n"
++                             "-----------------")
++
++    def assert_not_json(self, condition_func: Callable[[dict], bool]) -> None:
++        if not self.has_json(condition_func):
++            return
++        raise AssertionError("At least one JSON entry matched condition\n"
++                             "---- Log content ----\n"
++                             f"{self.log_content}\n"
++                             "-----------------")
+ 
+ class FatraceTests(unittest.TestCase):
+     def setUp(self):
+@@ -574,6 +597,64 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
+                     "path" not in e
+                 ))
+ 
++    def test_dir(self):
++        yes1 = str(self.tmp_path / "yes-1")
++        yes2 = str(self.tmp_path / "yes-2")
++        no1 = str(self.tmp_path / "no-1")
++
++        exe(["mkdir", yes1])
++        exe(["mkdir", yes2])
++        exe(["mkdir", no1])
++
++        f = FatraceRunner(["-s", "3", "-d", yes1, f"--dir={yes2}"])
++        f_json = FatraceRunner(["-s", "3", "--json", "--", yes1, yes2])
++
++        slow_exe(["mkdir", f"{yes1}/subA"])
++        slow_exe(["mkdir", f"{no1}/subB"])
++
++        slow_exe(["touch", f"{yes1}/yesC"])
++        slow_exe(["touch", f"{yes1}/subA/noD"])
++        slow_exe(["touch", f"{yes2}/yesE"])
++        slow_exe(["touch", f"{no1}/noF"])
++        slow_exe(["touch", f"{no1}/subB/noG"])
++
++        slow_exe(["mv", yes1, yes2])
++        new_yes1 = str(self.tmp_path / "yes-2" / "yes-1")
++        slow_exe(["mv", no1, yes2])
++        new_no1 = str(self.tmp_path / "yes-2" / "no-1")
++
++        slow_exe(["touch", f"{new_yes1}/yesH"])
++        slow_exe(["touch", f"{new_yes1}/subA/noI"])
++        slow_exe(["touch", f"{new_no1}/noJ"])
++        slow_exe(["touch", f"{new_no1}/subB/noK"])
++
++        f.finish()
++        f_json.finish()
++
++        f.assert_log    (rf"^mkdir\([0-9]*\): \+ +{re.escape(yes1)}")
++        f.assert_not_log(rf"^mkdir\([0-9]*\): \+ +{re.escape(no1)}")
++        f.assert_log    (rf"^touch\([0-9]*\): C?WO? +{re.escape(yes1)}/yesC")
++        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(yes1)}/subA/noD")
++        f.assert_log    (rf"^touch\([0-9]*\): C?WO? +{re.escape(yes2)}/yesE")
++        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(no1)}/noF")
++        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(no1)}/subB/noG")
++        f.assert_log    (rf"^touch\([0-9]*\): C?WO? +{re.escape(new_yes1)}/yesH")
++        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(new_yes1)}/subA/noI")
++        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(new_no1)}/noJ")
++        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(new_no1)}/subB/noK")
++
++        f_json.assert_json    (lambda e: e["comm"] == "mkdir" and e["types"] == "+" and e["path"] == yes1)
++        f_json.assert_not_json(lambda e: e["comm"] == "mkdir" and e["types"] == "+" and e["path"] == no1)
++        f_json.assert_json    (lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes1}/yesC")
++        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes1}/subA/noD")
++        f_json.assert_json    (lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes2}/yesE")
++        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{no1}/noF")
++        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{no1}/subB/noG")
++        f_json.assert_json    (lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{new_yes1}/yesH")
++        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{new_yes1}/subA/noI")
++        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{new_no1}/noJ")
++        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{new_no1}/subB/noK")
++
+     @unittest.skipIf("container" in os.environ, "Not supported in container environment")
+     @unittest.skipIf(os.path.exists("/sysroot/ostree"), "Test does not work on OSTree")
+     @unittest.skipIf(root_is_btrfs, "FANOTIFY does not work on btrfs, https://github.com/martinpitt/fatrace/issues/3")
+-- 
+2.46.3
+
