@@ -88,6 +88,54 @@ find dict/src/sigc++* -type f \( -name \*.h -o -name \*.cc \) -delete
 ./autogen.sh
 ( cd dict ; ./autogen.sh )
 
+# --- Patch for Slackware current and its time to replace this package with something modern ---
+
+# Create stardict_mod.h with typedef g_stat and g_fopen wrappers
+cat > lib/src/stardict_mod.h <<'EOF'
+#ifndef STARDICT_MOD_H
+#define STARDICT_MOD_H
+
+#include <sys/stat.h>
+#include <unistd.h>
+#include <cstdio>   // for fopen
+
+// Define stardict_stat_t for modern Linux
+typedef struct stat stardict_stat_t;
+
+// Define g_stat as a wrapper for stat
+#define g_stat(path, buf) stat(path, buf)
+
+// Provide g_fopen for modern GLib
+inline FILE* g_fopen(const char* path, const char* mode) {
+    return fopen(path, mode);
+}
+
+#endif // STARDICT_MOD_H
+EOF
+
+# Patch bgl_babylon.cpp for iconv const correctness
+sed -i '/void Babylon::convertToUtf8/,${
+    s/ICONV_CONST char \*inbuf;/const char* input = nullptr;\n    size_t inbytes = 0;\n    char* inbuf = nullptr;/g
+    s/inbuf = (ICONV_CONST char \*)s.data();/input = s.data();\n    inbytes = s.size();\n    inbuf = const_cast<char*>(input);/g
+}' tools/src/bgl_babylon.cpp
+
+
+# Patch ICONV_CONST for modern iconv
+for f in tools/src/*.cpp; do
+    sed -i '1i#ifndef ICONV_CONST\n#define ICONV_CONST const\n#endif' "$f"
+done
+
+
+# --- Patch library sources globally ---
+for f in lib/src/*.cpp; do
+    sed -i '1i#include "stardict_mod.h"' "$f"
+done
+
+# --- Patch tools sources globally ---
+for f in tools/src/*.cpp; do
+    sed -i '1i#include "../../lib/src/stardict_mod.h"' "$f"
+done
+
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS -std=gnu++11" \
 ./configure \
