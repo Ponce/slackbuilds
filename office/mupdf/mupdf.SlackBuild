@@ -7,6 +7,12 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20250918 bkw:
+# - update for 1.26.8. can't build older versions, sorry.
+# - move old change-comments to ChangeLog.old.
+# - fix .pc file generation.
+# 20241010 bkw: Modified by SlackBuilds.org, BUILD=2:
+# - Bump BUILD for gumbo-parser-0.12.1
 # 20240925 bkw: update for 1.24.9.
 # 20240813 bkw: update for 1.24.8.
 # 20240314 bkw: update for 1.23.11.
@@ -18,58 +24,11 @@
 # - tesseract builds work, so make that an option.
 # - Include pre-scaled PNG icons.
 
-# 20201020 bkw: update for 1.18.0. See notes, below.
-# 20200217 bkw: update for 1.16.1.
-# 20180623 bkw: BUILD=2, add patch for dynamic linking. Thanks
-#               to Thomas Morper for pointing me in the right direction.
-# 20180615 bkw: update for 1.13.0, move old change comments to ChangeLog.old
-# 20180101 bkw: update for 1.12.0.
-# 20170711 bkw: update for 1.11.
-# 20170621 bkw: fix build with -current's newer openjpeg, BUILD=2.
-# 20170122 bkw: update for 1.10a.
-
-# Notes for 1.18.0:
-# - This script can no longer build older versions, too many changes.
-# - Upstream *finally* supports building as a shared library, so I and
-#   all other distro packagers can stop patching it... except the
-#   shared lib is unversioned, which means upgrades would cause more
-#   breakage than they should. So there's still some trickery here to
-#   build a versioned solib.
-# - I've got rid of the STATIC=yes option and now only build shared libs.
-#   As a side effect, libmupdf-third is gone, but I've included a
-#   placeholder so stuff that links with it, will work without patching.
-# - gumbo (HTML parser) is now a hard dep. The source is bundled, so
-#   there's no need to create a new gumbo SlackBuild, but it does mean
-#   the mupdf shared lib has grown in size.
-# - mupdf-gl uses freeglut. The version we have in 14.2 is new enough to
-#   build with, but old enough that you can't copy text from mupdf-gl.
-#   So we build the bundled version here.
-# - API docs are now included in the package.
-# - Now using upstream's icons, including scalable SVG.
-# - Add missing doinst.sh
-# - There's now the option to build with tesseract and leptonica,
-#   but it's disabled in this script. I have yet to get it to
-#   actually *do* anything other than fail to build (when using
-#   upstream's tesseract/leptonica forks) or complain about being
-#   unable to load eng.traineddata (using SBo tesseract/leptonica,
-#   and yes eng.traineddata is fine). Until I work out what's wrong,
-#   or upstream releases a new version, this script doesn't support
-#   building with tesseract. Don't contact me about this before March
-#   1, 2021, unless you actually have a patch that fixes it. After
-#   that, if this message is still here, feel free to remind me to
-#   revisit it.
-# - Slackware 14.2's libcrypto (from openssl) is too old for mupdf,
-#   and there's no bundled souce for it. So currently mupdf is being
-#   built without libcrypto. Hope that's OK.
-
-# 20241010 bkw: Modified by SlackBuilds.org, BUILD=2:
-# - Bump BUILD for gumbo-parser-0.12.1
-
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=mupdf
-VERSION=${VERSION:-1.24.9}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.26.8}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -133,9 +92,12 @@ rm -rf $PRGNAM-$VERSION-source
 tar xvf $CWD/$PRGNAM-$VERSION-source.tar.lz
 cd $PRGNAM-$VERSION-source
 
+# 20250918 bkw: || true here because there are dangling symlinks in
+# the source. They don't actually hurt anything.
 chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +    \
+     || true
 
 # 20230531 bkw: derp. Never did apply the flags...
 sed -i "s,-O2,$SLKCFLAGS," Makerules
@@ -145,11 +107,17 @@ sed -i "s,-O2,$SLKCFLAGS," Makerules
 # Also, we *still* (in Slack 15.0) have to use the bundled freeglut
 # to get copy/paste working in mupdf-gl.
 # C++ (XCXXFLAGS) is only actually used if building with tesseract.
+# 20250918 bkw: v1.26.8 adds barcode support via zxing. I used the
+# bundled zxing source because the one on SBo is too old, and to
+# avoid yet another dependency. I could have just said 'barcode=no'
+# but it seems like a useful feature.
 
 make verbose=yes \
   shared=yes \
+  barcode=yes \
   USE_SYSTEM_LIBS=yes \
   USE_SYSTEM_GLUT=no \
+  USE_SYSTEM_ZXINGCPP=no \
   tesseract=$TESS \
   build=release \
   prefix=/usr \
@@ -157,7 +125,8 @@ make verbose=yes \
   mandir=/usr/man \
   docdir=/usr/doc/$PRGNAM-$VERSION \
   DESTDIR=$PKG \
-  all install || print_failed_message
+  all extra-apps install install-extra-apps || print_failed_message
+
 
 # bins and libs are already stripped.
 gzip -9 $PKG/usr/man/man1/*.1
@@ -167,9 +136,11 @@ cd $PKG/usr/lib$LIBDIRSUFFIX
   # 20230117 bkw: AFAIK, we have to list every shared lib this one
   # depends on in the .pc file. This rather odd-looking bit of code
   # creates the list.
+  # 20250918 bkw: skip ld-linux-* if it shows up. this avoids the
+  # .pc file including "NEEDED     ld-linux-x86-64.so.2".
   PCLIBS="-lmupdf $(
     objdump -p libmupdf.so.*.* | \
-       perl -ne 'next unless /NEEDED/;
+       perl -ne 'next unless /NEEDED\s+lib/;
                  chomp;
                  s,.* lib([^.]*)\.so.*,\1,;
                  print "-l$_ " unless /^(c|gcc_s)$/;'
@@ -178,14 +149,14 @@ cd $PKG/usr/lib$LIBDIRSUFFIX
   echo "$PCLIBS" | grep -q ltesseract && WITHTESS=WITH
   echo "==> PCLIBS='$PCLIBS'"
 
-
   # 20240813 bkw: shared library gets installed without symlinks...
+  # 20250918 bkw: not in 1.26.8, but keep this here just in case.
   SO="$( echo libmupdf.so.*.* )"
   SOVER="$( echo $SO | cut -d. -f3,4 )"
   SOMAJOR="$( echo $SO | cut -d. -f3 )"
   chmod 755 $SO
-  ln -s libmupdf.so.$SOVER libmupdf.so
-  ln -s libmupdf.so.$SOVER libmupdf.so.$SOMAJOR
+  ln -s libmupdf.so.$SOVER libmupdf.so || true
+  ln -s libmupdf.so.$SOVER libmupdf.so.$SOMAJOR || true
 
   # .pc file taken from debian and parameterized.
   mkdir -p pkgconfig/
