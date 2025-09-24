@@ -7,6 +7,12 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20250924 bkw, BUILD=3:
+# - add a patch from MadMaverick9 to stop evince segfaulting on
+#   exit when viewing "optimized/linearized" PDFs.
+# - fix NLS --disable/--enable args.
+# - explain why NLS=no is the default in README.
+
 # 20240819 bkw, BUILD=2:
 # - new maintainer.
 # - relicense as WTFPL.
@@ -21,7 +27,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 PRGNAM=evince-gtk2
 SRCNAM=evince
 VERSION=${VERSION:-2.32.0}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -70,7 +76,22 @@ chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
-NLSOPT="--disable-nls"
+# 20250924 bkw: MadMaverick9 from IRC sent me this patch.
+# The 'linearized' struct member is declared as a string and assigned
+# a boolean value (0 or 1). Then on exit, gfree(linearized) was being
+# called, which didn't hurt anything when linearized was false (aka
+# 0) due to the real free() having a NULL check. But calling it when
+# true results in free(1), which it doesn't check for. Result: *Boom*,
+# segfault!
+# Linearized (aka 'optimized') PDFs have always been fairly rare, and
+# were really only (mildly) useful on slow dialup lines. You could see
+# the first page of the PDF before the rest was downloaded. Of course
+# that's usually useless since it's generally just a cover or title page.
+# It might be worth mentioning that mupdf just recently dropped support
+# for linearized PDFs, too.
+patch -p1 < $CWD/003-linearized.is.a.boolean.patch
+
+NLSOPT="--enable-nls"
 if [ "$NLS" != "yes" ]; then
   # disable NLS - we're going for a small package here.
   # 20240819 bkw: --disable-nls by itself *should* be enough, but this
@@ -79,7 +100,7 @@ if [ "$NLS" != "yes" ]; then
   sed -i -e 's/USE_NLS=yes/USE_NLS=no/g' \
          -e 's/ENABLE_NLS 1/ENABLE_NLS 0/g' \
          configure
-  NLSOPT="--enable-nls"
+  NLSOPT="--disable-nls"
 fi
 
 # 20240819 bkw: add the correct MIME types for CBZ/CBR/CB7/CBT to actually
