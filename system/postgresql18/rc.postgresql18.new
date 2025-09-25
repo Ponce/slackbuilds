@@ -1,0 +1,172 @@
+#!/bin/bash
+
+# PostgreSQL startup script for Slackware Linux
+#
+# $Revision$
+# $Date$
+#
+# Copyright 2007-2018 Adis Nezirovic <adis_at_linux.org.ba>
+# Copyright 2025 Willy Sudiarto Raharjo <willysr@slackbuilds.org>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Do not source this script (since it contains exit() calls)
+#
+# Since version 9.3 this startup script can run multiple PostgreSQL
+# versions on different ports and with different data dirs.
+#
+# e.g. PG_VERSION=18 PG_PORT=6432 /etc/rc.d/rc.@PRGNAM@ start
+
+PG_VERSION=${PG_VERSION:-@PG_VERSION@}
+PG_PORT=${PG_PORT:-@PG_PORT@}
+LIBDIRSUFFIX="@LIBDIRSUFFIX@"
+LOGFILE=/var/log/@PRGNAM@-$PG_VERSION
+DATADIR=/var/lib/pgsql/$PG_VERSION/data
+POSTGRES=/usr/lib${LIBDIRSUFFIX}/@PRGNAM@/$PG_VERSION/bin/postgres
+PG_CTL=/usr/lib${LIBDIRSUFFIX}/@PRGNAM@/$PG_VERSION/bin/pg_ctl
+PIDFILE=$DATADIR/postmaster.pid
+
+# oom-killer score
+#
+# https://www.postgresql.org/docs/18/kernel-resources.html#LINUX-MEMORY-OVERCOMMIT
+PG_OOM_ADJUST_FILE=/proc/self/oom_score_adj
+PG_MASTER_OOM_SCORE_ADJ=-1000
+PG_CHILD_OOM_SCORE_ADJ=0
+PG_ENV="PG_OOM_ADJUST_FILE=$PG_OOM_ADJUST_FILE PG_OOM_ADJUST_VALUE=$PG_CHILD_OOM_SCORE_ADJ"
+
+# Return values (according to LSB):
+# 0 - success
+# 1 - generic or unspecified error
+# 2 - invalid or excess argument(s)
+# 3 - unimplemented feature (e.g. "reload")
+# 4 - insufficient privilege
+# 5 - program is not installed
+# 6 - program is not configured
+# 7 - program is not running
+
+pg_ctl()
+{
+	CMD="$PG_CTL -o '-p $PG_PORT' $@"
+	su - postgres -c "$PG_ENV $CMD"
+}
+
+if [ ! -f $POSTGRES ]; then
+	echo "Could not find 'postgres' binary. Maybe PostgreSQL is not installed properly?"
+	exit 5
+fi
+
+case "$1" in
+
+	"start")
+		echo "Starting PostgreSQL"
+		touch $LOGFILE
+		chown postgres:wheel $LOGFILE
+		chmod 0640 $LOGFILE
+
+		if [ ! -e $DATADIR/PG_VERSION ]; then
+			echo "You should initialize the PostgreSQL database at location $DATADIR"
+			echo "e.g. su postgres -c \"initdb -D $DATADIR --no-data-checksums --locale=en_US.UTF-8 -A md5 -W\""
+			exit 6
+		fi
+
+		if [ $(pgrep -f $POSTGRES) ]; then
+
+			echo "PostgreSQL daemon already running"
+			if [ ! -f $PIDFILE ]; then
+				echo "Warning: Missing pid file $PIDFILE"
+			fi
+			exit 1
+
+		else
+			test -e "$PG_OOM_ADJUST_FILE" && echo "$PG_MASTER_OOM_SCORE_ADJ" > "$PG_OOM_ADJUST_FILE"
+			pg_ctl start -w -l $LOGFILE -D $DATADIR
+			exit 0
+		fi
+	;;
+
+	"stop")
+		echo "Shutting down PostgreSQL..."
+		pg_ctl stop -l $LOGFILE -D $DATADIR -m smart
+	;;
+
+	"force-stop")
+		# Take care! This will kill _all_ client connections
+		# and rollback current transactions.
+		echo "Shutting down PostgreSQL (fast)..."
+		pg_ctl stop -l $LOGFILE -D $DATADIR -m fast
+	;;
+
+	"unclean-stop")
+		# Take care! This will abort server process itself
+		# resulting with database recovery on next start.
+		echo "Shutting down PostgreSQL (immediate)..."
+		pg_ctl stop -l $LOGFILE -D $DATADIR -m immediate
+	;;
+
+	"restart")
+		echo "Restarting PostgreSQL..."
+		test -e "$PG_OOM_ADJUST_FILE" && echo "$PG_MASTER_OOM_SCORE_ADJ" > "$PG_OOM_ADJUST_FILE"
+		pg_ctl restart -l $LOGFILE -D $DATADIR -m smart
+	;;
+
+	"force-restart")
+		# Take care! This will kill _all_ client connections
+		# and rollback current transactions.
+		echo "Restarting PostgreSQL (fast)..."
+		pg_ctl restart -l $LOGFILE -D $DATADIR -m fast
+	;;
+
+	"unclean-restart")
+		# Take care: This will abort server process itself
+		# resulting with database recovery on start.
+		echo "Restarting PostgreSQL (immediate)..."
+		pg_ctl restart -l $LOGFILE -D $DATADIR -m immediate
+	;;
+
+	"reload")
+		echo "Reloading configuration for PostgreSQL..."
+		pg_ctl reload -l $LOGFILE -D $DATADIR -m smart
+	;;
+
+	"status")
+		if [ $(pgrep -f $POSTGRES) ]; then
+			echo "PostgreSQL is running"
+
+			if [ ! -e $PIDFILE ]; then
+				echo "Warning: Missing pid file $PIDFILE"
+			fi
+
+			exit 0
+		else
+			echo "PostgreSQL is stopped"
+
+			if [ -e $PIDFILE ]; then
+				echo "Detected stale pid file $PIDFILE"
+			fi
+
+			exit 0
+		fi
+	;;
+
+	*)
+		# unclean-stop and unclean-restart are not documented on purpose.
+		echo "Usage: $0 {start|stop|force-stop|status|restart|force-restart|reload}"
+		exit 1
+	;;
+esac

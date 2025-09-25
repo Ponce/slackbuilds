@@ -1,0 +1,218 @@
+#!/bin/bash
+
+# Slackware build script for PostgreSQL
+#
+# Copyright 2007-2018 Adis Nezirovic <adis_at_linux.org.ba>
+# Copyright 2024-2025 Willy Sudiarto Raharjo <willysr@slackbuilds.org>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=postgresql18
+SRCNAM=postgresql
+VERSION=${VERSION:-18.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+PG_VERSION=${PG_VERSION:-18}
+PG_PORT=${PG_PORT:-5432}
+PG_UID=${PG_UID:-209}
+PG_GID=${PG_GID:-209}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+# Bail out if user or group isn't valid on your system
+# For slackbuilds.org, assigned postgres uid/gid are 209/209
+# See http://slackbuilds.org/uid_gid.txt
+# Other popular choice is 26/26
+if ! grep ^postgres: /etc/group > /dev/null 2>&1 ; then
+  echo "  You must have a postgres group to run this script."
+  echo "    # groupadd -g $PG_GID postgres"
+  exit 1
+elif ! grep ^postgres: /etc/passwd > /dev/null 2>&1 ; then
+  echo "  You must have a postgres user to run this script."
+  echo "    # useradd -u $PG_UID -g $PG_GID -d /var/lib/pgsql postgres"
+  exit 1
+fi
+
+# Enable NLS builds using 'ENABLE_NLS=1 ./postgresql.SlackBuild'
+if [ ! -z $ENABLE_NLS  ];then
+  NLS=enable
+else
+  NLS=disable
+fi
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686 -msse2"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686 -msse2"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $TMP/$SRCNAM-$VERSION $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+ -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+export CC="clang"
+export CPP="clang-cpp"
+export CXX="clang++"
+
+CFLAGS="$SLKCFLAGS" \
+PYTHON="/usr/bin/python3" \
+./configure \
+  --prefix=/usr/lib${LIBDIRSUFFIX}/$PRGNAM/$PG_VERSION \
+  --sysconfdir=/etc/$PRGNAM/$PG_VERSION \
+  --includedir=/usr/include \
+  --datarootdir=/usr/share \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --datadir=/usr/share/$PRGNAM-$PG_VERSION \
+  --with-openssl \
+  --with-tcl \
+  --with-perl \
+  --with-python \
+  --with-libxml \
+  --with-libxslt \
+  --with-system-tzdata=/usr/share/zoneinfo \
+  --$NLS-nls \
+  --build=$ARCH-slackware-linux
+
+make
+make install-strip DESTDIR=$PKG
+make install-docs DESTDIR=$PKG
+
+# 20220414 bkw: this one binary wasn't getting stripped...
+strip $PKG/usr/lib${LIBDIRSUFFIX}/$PRGNAM/$PG_VERSION/bin/pg_config
+
+# create symlinks to shared library for other programs to link against
+( cd $PKG/usr/lib${LIBDIRSUFFIX}
+  for i in $(ls $PRGNAM/$PG_VERSION/lib/lib*.so*) ; do ln -sf $i ; done
+)
+
+# create symlinks to pkg-config scripts
+( mkdir -p $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig
+  cd $PKG/usr/lib${LIBDIRSUFFIX}/pkgconfig
+  for i in $(ls ../$PRGNAM/$PG_VERSION/lib/pkgconfig/*) ; do ln -sf $i ; done
+)
+
+# Some interesting additional modules:
+#   https://www.postgresql.org/docs/18/contrib.html
+#
+# pgcrypto - extension for some business applications
+# ltree, xml2 - useful extensions for developers
+# postgres_fdw - foreign-data wrapper for access to external PostgreSQL servers
+# file_fdw - foreign-data wrapper for access to data files on filesystem
+
+PG_EXTENSIONS=${PG_EXTENSIONS:-"pgcrypto ltree xml2 postgres_fdw file_fdw hstore citext"}
+
+if [ "$PG_EXTENSIONS" = "ALL" ];then
+  cd $TMP/$SRCNAM-$VERSION/contrib
+  make all
+  make install-strip DESTDIR=$PKG
+else
+  for ext in $PG_EXTENSIONS; do
+    cd $TMP/$SRCNAM-$VERSION/contrib/$ext
+    make
+    make install-strip DESTDIR=$PKG
+  done
+fi
+
+cd $TMP/$SRCNAM-$VERSION
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+cp -a COPYRIGHT README.md HISTORY doc/KNOWN_BUGS doc/MISSING_FEATURES doc/TODO $PKG/usr/doc/$PRGNAM-$VERSION/
+rm -rf $PKG/usr/doc/$PRGNAM-$VERSION/{man.tar.gz,man1,manl,man7,postgres.tar.gz}
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README.SBo > $PKG/usr/doc/$PRGNAM-$VERSION/README.SBo
+
+# base database directory
+# assumes you are using /var/lib/pgsql as a homedir for postgres user
+mkdir -p $PKG/var/lib/pgsql/$PG_VERSION/data
+chown -R postgres:postgres $PKG/var/lib/pgsql
+chmod 700 $PKG/var/lib/pgsql
+# permissions for DATADIR should be u=rwx (0700)
+chmod 700 $PKG/var/lib/pgsql/$PG_VERSION/data
+
+# Install init script
+mkdir -p $PKG/etc/rc.d
+sed -e "s%@PG_VERSION@%$PG_VERSION%" \
+  -e "s%@PRGNAM@%$PRGNAM%" \
+  -e "s%@PG_PORT@%$PG_PORT%" \
+  -e "s%@LIBDIRSUFFIX@%$LIBDIRSUFFIX%" \
+  $CWD/rc.$PRGNAM.new > $PKG/etc/rc.d/rc.$PRGNAM.new
+chmod 0755 $PKG/etc/rc.d/rc.$PRGNAM.new
+
+# Install logrotate script
+mkdir -p $PKG/etc/logrotate.d
+sed -e "s%@PG_VERSION@%$PG_VERSION%" \
+  -e "s%@PRGNAM@%$PRGNAM%" \
+  $CWD/$PRGNAM.logrotate > $PKG/etc/logrotate.d/$PRGNAM.new
+
+mkdir -p $PKG/var/log/setup
+sed -e "s%@UID@%$PG_UID%" \
+  -e "s%@GID@%$PG_GID%" \
+  -e "s%@PG_VERSION@%$PG_VERSION%" \
+  $CWD/setup.$PRGNAM  > $PKG/var/log/setup/setup.$PRGNAM
+chmod 755 $PKG/var/log/setup/setup.$PRGNAM
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s%@PG_VERSION@%$PG_VERSION%" \
+  -e "s%@PRGNAM@%$PRGNAM%" \
+  -e "s%@LIBDIRSUFFIX@%$LIBDIRSUFFIX%" \
+  $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
