@@ -1,0 +1,8 @@
+setenv CLOUDSDK_ROOT_DIR /opt/google-cloud-cli
+setenv GOOGLE_CLOUD_SDK_HOME $CLOUDSDK_ROOT_DIR
+setenv CLOUDSDK_PYTHON /usr/bin/python3
+setenv CLOUDSDK_GSUTIL_PYTHON /usr/bin/python3
+setenv CLOUDSDK_BQ_PYTHON /usr/bin/python3
+#export CLOUDSDK_ENCODING
+#export CLOUDSDK_PYTHON_ARGS
+#export CLOUDSDK_PYTHON_SITEPACKAGES
