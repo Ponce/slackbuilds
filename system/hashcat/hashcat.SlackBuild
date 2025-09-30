@@ -2,25 +2,17 @@
 
 # Slackware build script for hashcat
 
-# Copyright 2017 Andre Fernando, Indonesia
-# All rights reserved.
-#
-# Redistribution and use of this script, with or without modification, is
-# permitted provided that the following conditions are met:
-#
-# 1. Redistributions of this script must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-#
-#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
-#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
-#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Originally written by Andre Fernando, Indonesia.
+# Modified and now maintained by B. Watson (urchlay@slackware.uk).
+
+# Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20250929 bkw:
+# - take over maintenance.
+# - update for v7.1.2.
+# - install modules to /usr/lib(64), not /usr/share.
+# - install bash completion properly.
+# - remove some cruft from the package (.gitkeep and empty /usr/share).
 
 # 20220211 bkw: Modified by SlackBuilds.org: updated for v6.2.4. The
 # old version wouldn't build on 15.0, and it was getting a bit long
@@ -29,7 +21,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=hashcat
-VERSION=${VERSION:-6.2.4}
+VERSION=${VERSION:-7.1.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -57,7 +49,7 @@ if [ "$ARCH" = "i586" ]; then
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
+elif [ "$ARCH" = "x86_64" -o "$ARCH" = "aarch64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
@@ -73,32 +65,49 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \+ -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
+
+ULIB=/usr/lib$LIBDIRSUFFIX
+DOC=/usr/doc/$PRGNAM-$VERSION
+PKGDOC=$PKG/$DOC
 
 # 20220211 bkw: build stripped.
 SLKCFLAGS+=" -Wl,-s"
 
 # 20220211 bkw: lots of make arguments, deduplicate.
+# 20250930 bkw: use system libs where possible. can't say
+# USE_SYSTEM_LZMA=1, our version isn't compatible.
 runmake() {
   make "$@" \
     CC="gcc $SLKCFLAGS" \
     CXX="g++ $SLKCFLAGS" \
     PREFIX=/usr \
-    LIBRARY_FOLDER=/usr/lib$LIBDIRSUFFIX \
-    DOCUMENT_FOLDER=/usr/doc/$PRGNAM-$VERSION \
+    LIBRARY_FOLDER=$ULIB \
+    SHARED_FOLDER=$ULIB/$PRGNAM \
+    DOCUMENT_FOLDER=$DOC \
+    USE_SYSTEM_ZLIB=1 \
     DESTDIR=$PKG
 }
 
 runmake
 runmake install
 
-PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
-chmod -x $PKGDOC/*.sh $PKGDOC/extra/tab_completion/install
+# 20250930 bkw: make sbopkglint happy
+chmod +x $PKG/$ULIB/$PRGNAM/*/*.so
+
+# 20250930 bkw: include the bash completion correctly, not in the doc dir.
+install -D -m0644 extra/tab_completion/hashcat.sh \
+           $PKG/etc/bash_completion.d/hashcat
+rm -rf $PKGDOC/extra
+
+# 20250930 bkw: don't include this cruft:
+rm -f $PKG/$ULIB/hashcat/*/.gitkeep
+
+# 20250930 bkw: or this:
+rmdir $PKG/usr/share || true
+
+chmod -x $PKGDOC/*.sh
 cp -a README.md $PKGDOC
 cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
