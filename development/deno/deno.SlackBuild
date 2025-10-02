@@ -2,6 +2,7 @@
 
 # Slackware build script for deno
 
+# Copyright 2025  fourtysixandtwo <fourtysixandtwo@sliderr.net>
 # Copyright 2025, Lockywolf
 # All rights reserved.
 #
@@ -29,8 +30,7 @@ VERSION=${VERSION:-2.5.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-
-TARNAM=${PRGNAM}_src
+VSBUILD=${VSBUILD:-1}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -72,67 +72,28 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-mkdir $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-vendored-sources-$VERSION-$VSBUILD.tar.?z
 cd $PRGNAM-$VERSION
-tar xvf $CWD/$TARNAM.tar.gz
-cd $PRGNAM
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
-rm -rf ./".cargo"
-mkdir .cargo
-cat << EOF >> .cargo/config
-[source.crates-io]
-registry = 'https://github.com/rust-lang/crates.io-index'
-replace-with = 'vendored-sources'
+#mkdir -p ./vendor/v8-140.2.0/.cargo/.rusty_v8/
+#cp $CWD/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz ./vendor/v8-140.2.0/.cargo/.rusty_v8/https___github_com_denoland_rusty_v8_releases_download_v140_2_0_librusty_v8_release_x86_64_unknown_linux_gnu_a_gz
 
-[source.vendored-sources]
-directory = '$(pwd)/vendor'
-EOF
+export RUSTY_V8_ARCHIVE=$CWD/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz
 
-# deps and versions come from Cargo.lock
-mkdir vendor
-(
-  cd vendor
+# prevent cargo from using the network.
+# this only works because we have a vendored sources tarball with
+# everything cargo would have downloaded.
+export CARGO_NET_OFFLINE=true
 
-  grep -h -A 3 "\[\[package\]\]" $(find ../ -maxdepth 1 -mindepth 1 -name Cargo.lock | tr '\n' ' ') | \
-    sed 's/[[:space:]]*=[[:space:]]*/=/g;s/^--//;s/^\[\[/--\n[[/' | \
-    awk 'BEGIN { RS = "--\n" ; FS="\n" } { print $2, $3, $4 }' | sed 's/"//g;s/name=//;s/ version=/=/' | \
-    grep crates\.io-index | sed 's/ source=.*$//' | sort -u | while read -r dep ; do
-
-    ver="$(printf "%s\n" "$dep" | cut -d= -f2)"
-    dep="$(printf "%s\n" "$dep" | cut -d= -f1)"
-
-    tar xvf $CWD/"$dep-$ver".crate
-
-    touch "$dep-$ver/.cargo-ok"
-
-    # generate checksum
-    {
-      printf "{\n"
-      printf '    "files": {\n'
-
-      (
-        cd "$dep-$ver"
-        find . -type f -print0 | xargs -0 sha256sum | sed -n '/\.cargo-checksum\.json/!p' | sed 's/\.\///;s/^\([^ ]*\)[[:space:]][[:space:]]*\(.*\)$/"\2":"\1",/'
-      ) | sed '$ s/,$//'
-
-      printf "    },\n"
-      printf '    "package": "'
-
-      sha256sum "$CWD/$dep-$ver.crate" | cut -f1 -d' ' | sed 's/$/"/'
-
-      printf "}\n"
-    } > "$dep"-"$ver"/.cargo-checksum.json
-  done
-)
-
-mkdir -p ./vendor/v8-140.2.0/.cargo/.rusty_v8/
-cp $CWD/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz ./vendor/v8-140.2.0/.cargo/.rusty_v8/https___github_com_denoland_rusty_v8_releases_download_v140_2_0_librusty_v8_release_x86_64_unknown_linux_gnu_a_gz
+# prevent cargo from writing outside of $TMP
+export CARGO_HOME=$(pwd)/.cargo
 
 export PATH="/opt/rust/bin:$PATH"
 if [ -z "$LD_LIBRARY_PATH" ]; then
@@ -141,12 +102,9 @@ else
   export LD_LIBRARY_PATH="/opt/rust/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
 fi
 
-CARGO_HOME=.cargo \
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 cargo build --release --locked
-
-printf "LWF:cargo build succeeded.\n"
 
 install -Dm755 target/release/deno "$PKG"/usr/bin/deno
 install -dm755 "$PKG"/usr/share/bash-completion/completions
@@ -155,8 +113,6 @@ install -dm755 "$PKG"/usr/share/zsh/site-functions
 ./target/release/deno completions zsh > "$PKG"/usr/share/zsh/site-functions/_deno
 install -dm755 "$PKG"/usr/share/fish/vendor_completions.d
 ./target/release/deno completions fish > "$PKG"/usr/share/fish/vendor_completions.d/deno.fish
-
-printf "LWF:AUR install succeeded.\n"
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
