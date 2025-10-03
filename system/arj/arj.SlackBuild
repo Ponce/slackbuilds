@@ -6,6 +6,13 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20251003 bkw: BUILD=3
+# - update to (most of) Debian's 3.10.22-28 patches, prompted
+#   by Gilberto F da Silva's report that arj wouldn't build on
+#   -current. Thanks to MLanden and TommyC for testing on -current,
+#   since I don't have it installed.
+# - add -D_GNU_SOURCE to fix build on -current.
+
 # 20150406 bkw: security vulns in arj!
 # http://www.securityfocus.com/archive/1/535190
 # Already patched in debian, add their patches here.
@@ -14,7 +21,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=arj
 VERSION=${VERSION:-3.10.22}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -58,25 +65,33 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
+        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
 # Use Debian's patches. See https://packages.debian.org/sid/arj. These are
 # needed to get the source to build on modern systems, and work correctly
 # on 64-bit systems.
+# 20251003 bkw: Add patches from Debian's 3.10.22-28, except that
+# remove_build_date.patch and reproducible_help_archive.patch cause
+# the build to fail, so leave them out. Also gnu_build_cross.patch
+# fails to apply because it needs those two. We aren't concerned
+# with cross builds anyway. One of these patches fixes builds on
+# -current, and another fixes a potential security hole, an
+# possible out-of-bounds read.
 for i in $( cat $CWD/patches/series ); do
+  echo "===> $i"
   patch -p1 < $CWD/patches/$i
 done
 
 # Truly archaic autoconf stuff. The funkiness with config.sub is meant
 # to deal with the unlikely situation that multiple automake versions
-# are installed.
+# are installed. We have to overwrite config.sub so x86_64-slackware
+# will be a supported arch (though, why does it matter?)
 cd gnu
 cp $( ls /usr/share/automake-*/config.sub | head -1 ) .
-autoreconf -if || true   # exits with error, generates configure anyway
+autoreconf -if
 
-CFLAGS="-D_UNIX $SLKCFLAGS" \
-CXXFLAGS="-D_UNIX $SLKCFLAGS" \
+CFLAGS="-D_UNIX -D_GNU_SOURCE $SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
@@ -93,9 +108,10 @@ make install DESTDIR=$PKG
 
 gzip -9 $PKG/usr/man/man1/*.1
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a ChangeLog doc/* $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a ChangeLog doc/* $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
