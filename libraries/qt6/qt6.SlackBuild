@@ -3,6 +3,7 @@
 # Slackware build script for qt6
 
 # Copyright 2022-2023 Steven Voges <Oregon, USA>
+# Copyright 2025 Ruoh-Shoei LIN
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -26,17 +27,8 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=qt6
 SRCNAM=qt-everywhere-src
-VERSION=${VERSION:-6.5.2}
-BSCLANG=libclang-release_130-based-linux-Ubuntu20.04-gcc9.3-x86_64
-CCACHE=${CCACHE:-OFF}
-EXAMPLES=${EXAMPLES:-OFF}
-LINKED_OPENSSL=${LINKED_OPENSSL:-ON}
-PROPRIETARY_CODECS=${PROPRIETARY_CODECS:-OFF}
-SYSTEM_FFMPEG=${SYSTEM_FFMPEG:-ON}
-SYSTEM_HARFBUZZ=${SYSTEM_HARFBUZZ:-OFF} #Link against qt6's harfbuzz because Slackware 15.0's package is too old
-SYSTEM_SQLITE=${SYSTEM_SQLITE:-ON}
-SYSTEM_XCB_INPUT=${SYSTEM_XCB_INPUT:-ON}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-6.8.3}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -79,7 +71,6 @@ cd $TMP
 rm -rf $SRCNAM-$VERSION
 tar xvf $CWD/$SRCNAM-$VERSION.tar.xz
 cd $SRCNAM-$VERSION
-bsdtar xvf $CWD/$BSCLANG.7z
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -87,105 +78,212 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-patch -p1 < $CWD/newer_protobuf_1.patch
-patch -p1 < $CWD/newer_protobuf_2.patch
+if [ "$QTWEBENGINE" = "OFF" ]; then
+   QTWEBENGINE="-skip qtwebengine"
+else
+   QTWEBENGINE="-webengine-proprietary-codecs -webengine-printing-and-pdf"
+fi
 
-#Fix compile on -current/gcc13+
-sed -i '54i #include <cstdint>' qt3d/src/3rdparty/assimp/src/code/AssetLib/FBX/FBXBinaryTokenizer.cpp
+if [ "$QT3D" = "OFF" ]; then
+   QT3D="-skip qt3d -skip qtquick3dphysics"
+fi
 
-export CC=clang
-export CXX=clang++
-export CFLAGS="$SLKCFLAGS"
+if [ "${QTGRPC:-OFF}" = "OFF" ]; then
+   QTGRPC="-skip qtgrpc"
+fi
 
-mkdir -p build
-cd build
-  cmake \
-    -G Ninja \
-    -Wno-dev \
-    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DClang_DIR=$TMP/$SRCNAM-$VERSION/libclang/lib/cmake/clang \
-    -DFEATURE_openssl_linked=$LINKED_OPENSSL \
-    -DFEATURE_system_harfbuzz=$SYSTEM_HARFBUZZ \
-    -DFEATURE_system_sqlite=$SYSTEM_SQLITE \
-    -DFEATURE_system_xcb_xinput=$SYSTEM_XCB_INPUT \
-    -DFEATURE_webengine_proprietary_codecs=$PROPRIETARY_CODECS \
-    -DFEATURE_webengine_system_ffmpeg=$SYSTEM_FFMPEG \
-    -DFEATURE_webengine_system_re2=OFF \
-    -DINSTALL_ARCHDATADIR=./lib${LIBDIRSUFFIX} \
-    -DINSTALL_BINDIR=./lib${LIBDIRSUFFIX}/$PRGNAM/bin \
-    -DINSTALL_DESCRIPTIONSDIR=./lib${LIBDIRSUFFIX}/$PRGNAM/modules \
-    -DINSTALL_DOCDIR=./doc/$PRGNAM-$VERSION \
-    -DINSTALL_EXAMPLESDIR=./doc/$PRGNAM-$VERSION/examples \
-    -DINSTALL_INCLUDEDIR=./include/$PRGNAM \
-    -DINSTALL_LIBDIR=./lib${LIBDIRSUFFIX} \
-    -DINSTALL_LIBEXECDIR=./lib${LIBDIRSUFFIX}/$PRGNAM/libexec \
-    -DINSTALL_MKSPECSDIR=./lib${LIBDIRSUFFIX}/$PRGNAM/mkspecs \
-    -DINSTALL_PLUGINSDIR=./lib${LIBDIRSUFFIX}/$PRGNAM/plugins \
-    -DINSTALL_QMLDIR=./lib${LIBDIRSUFFIX}/$PRGNAM/qml \
-    -DINSTALL_TRANSLATIONSDIR=./share/$PRGNAM/translations \
-    -DINSTALL_TESTSDIR=./lib${LIBDIRSUFFIX}/$PRGNAM/tests \
-    -DQT_BUILD_EXAMPLES=$EXAMPLES \
-    -DQT_USE_CCACHE=$CCACHE \
-    -DCMAKE_BUILD_TYPE=Release ..
-  cmake --build .
-  DESTDIR=$PKG cmake --install . --strip
+cd qtbase
+patch -Np1 -i $CWD/CVE-2025-3512-qtbase-6.8.diff
+patch -Np1 -i $CWD/CVE-2025-4211-qtbase-6.8.diff
+patch -Np1 -i $CWD/CVE-2025-5455-qtbase-6.8.patch
+
+sed -i '21,36d' $CWD/CVE-2025-5992-qtbase-6.8.patch
+patch -Np1 -i $CWD/CVE-2025-5992-qtbase-6.8.patch
+
+sed -i 's/QPCCertContextPointer certificateContext;/const CERT_CONTEXT *certificateContext = nullptr;/g' $CWD/CVE-2025-6338-qtbase-6.8.patch
+patch -Np1 -i $CWD/CVE-2025-6338-qtbase-6.8.patch
+cd ../qtsvg
+patch -Np1 -i $CWD/CVE-2025-10728-qtsvg-6.8.diff
+patch -Np1 -i $CWD/CVE-2025-10729-qtsvg-6.8.diff
+cd ../qtimageformats
+patch -Np1 -i $CWD/CVE-2025-5683-qtimageformats-6.8.patch
 cd ..
 
-rm -R $PKG/usr/lib$LIBDIRSUFFIX/cmake/Qt6/QtBuildInternals
-rmdir $PKG/usr/lib$LIBDIRSUFFIX/cmake/Qt6/ios
-rmdir $PKG/usr/lib$LIBDIRSUFFIX/cmake/Qt6/macos
+export QT6PREFIX="/usr"
+export CFLAGS="$SLKCFLAGS"
+export CXXFLAGS="$SLKCFLAGS"
+export OPENSOURCE_CXXFLAGS="$SLKCFLAGS"
+export QTDIR="${TMP}/$SRCNAM-$VERSION"
 
-if [ -d "$PKG/usr/phrasebooks" ]; then
-  mv $PKG/usr/phrasebooks $PKG/usr/share/$PRGNAM/
+if [ ! -z "${LD_LIBRARY_PATH}" ]; then
+  export LD_LIBRARY_PATH="${QTDIR}/qtbase/lib:${QTDIR}/qttools/lib:${LD_LIBRARY_PATH}"
+else
+  export LD_LIBRARY_PATH="${QTDIR}/qtbase/lib:${QTDIR}/qttools/lib"
 fi
-if [ -d "$PKG/usr/resources" ]; then
-  mv $PKG/usr/resources $PKG/usr/share/$PRGNAM/
+export QT_PLUGIN_PATH="${QTDIR}/qtbase/plugins"
+
+if [ "${LLVM_OPT:-ON}" = "ON" ]; then
+    export PATH="/opt/llvm-opt/bin:$PATH"
+    if [ -z "$LD_LIBRARY_PATH" ]; then
+	export LD_LIBRARY_PATH="/opt/llvm-opt/lib$LIBDIRSUFFIX"
+    else
+	export LD_LIBRARY_PATH="/opt/llvm-opt/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
+    fi
 fi
 
-if [ "$EXAMPLES" = "ON" ]; then
-  find -L $PKG/usr/doc/$PRGNAM-$VERSION/examples \
-    -type d -exec chmod 755 {} \;
-  find -L $PKG/usr/doc/$PRGNAM-$VERSION/examples \
-    -type f -exec chmod 644 {} \;
-fi
+./configure \
+  -prefix $QT6PREFIX \
+  -sysconfdir /etc/xdg \
+  -libdir $QT6PREFIX/lib${LIBDIRSUFFIX} \
+  -release \
+  -dbus-linked \
+  -nomake examples \
+  -no-rpath \
+  -no-sbom \
+  -syslog \
+  ${QT3D} \
+  ${QTGRPC} \
+  ${QTWEBENGINE} \
+  -- -DCMAKE_MESSAGE_LOG_LEVEL=STATUS \
+  -DQT_INSTALL_CONFIG_INFO_FILES=ON \
+  -DINSTALL_GN=OFF \
+  -DINSTALL_BINDIR=$QT6PREFIX/lib${LIBDIRSUFFIX}/$PRGNAM/bin \
+  -DINSTALL_PUBLICBINDIR=$QT6PREFIX/bin \
+  -DINSTALL_LIBDIR=$QT6PREFIX/lib${LIBDIRSUFFIX} \
+  -DINSTALL_LIBEXECDIR=$QT6PREFIX/lib${LIBDIRSUFFIX}/$PRGNAM/bin \
+  -DINSTALL_ARCHDATADIR=$QT6PREFIX/lib${LIBDIRSUFFIX}/$PRGNAM \
+  -DINSTALL_DATADIR=$QT6PREFIX/share/$PRGNAM \
+  -DINSTALL_INCLUDEDIR=$QT6PREFIX/include/$PRGNAM \
+  -DINSTALL_MKSPECSDIR=lib${LIBDIRSUFFIX}/$PRGNAM/mkspecs \
+  -DINSTALL_DOCDIR=$QT6PREFIX/doc/$PRGNAM-${VERSION} \
+  -DINSTALL_EXAMPLESDIR=$QT6PREFIX/doc/$PRGNAM-${PKGVER}/examples \
+  -Wno-dev
+
+ninja || ninja -j1 -v
+DESTDIR=$PKG ninja install
+
+pushd "$PKG/$QT6PREFIX/lib${LIBDIRSUFFIX}/$PRGNAM/bin"
+for i in \
+    assistant canbusutil cooker designer \
+    linguist lrelease lupdate pixeltool \
+    qdbus qdbusviewer qdistancefieldgenerator qdoc \
+    qml qmleasing qmlls qmlpreview qmlscene \
+    qqem qtplugininfo; do
+    ln -sfv "${i}" "${i}${VERSION%.*.*}"
+done
+popd
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-for i in $CWD/desktop/*.desktop; do
-  install -D -m 0644 $i $PKG/usr/share/applications/$(basename $i)
-done
-sed -i "s|@LIBDIR@|$LIBDIRSUFFIX|" $PKG/usr/share/applications/*
+# Fix the path in prl files:
+find "$PKG/$QT6PREFIX/lib${LIBDIRSUFFIX}" -type f -name '*.prl' \
+  -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d;s/\(QMAKE_PRL_LIBS =\).*/\1/' {} \;
 
-# Install symlinks to the Qt6 binaries in the $PATH (avoid the ones already ending in "6" or "cmake"):
-mkdir -p $PKG/usr/bin
-for FILE in $PKG/usr/lib${LIBDIRSUFFIX}/qt6/bin/* ; do
-  if ! [[ $FILE =~ (6$|cmake$) ]]; then
-    ln -s ../lib${LIBDIRSUFFIX}/qt6/bin/$(basename $FILE) $PKG/usr/bin/$(basename $FILE)-qt6
-  fi
-done
+install -Dm644 qttools/src/assistant/assistant/images/assistant-128.png \
+  $PKG/usr/share/icons/hicolor/128x128/apps/$PRGNAM-assistant.png
+install -Dm644 qttools/src/designer/src/designer/images/designer.png \
+  $PKG/usr/share/icons/hicolor/128x128/apps/$PRGNAM-designer.png
+install -Dm644 qttools/src/qdbus/qdbusviewer/images/qdbusviewer-128.png \
+  $PKG/usr/share/icons/hicolor/128x128/apps/$PRGNAM-qdbusviewer.png
+install -Dm644 qttools/src/linguist/linguist/images/icons/linguist-128-32.png \
+  $PKG/usr/share/icons/hicolor/128x128/apps/$PRGNAM-linguist.png
 
-install -D -m 0644 qttools/src/assistant/assistant/images/assistant-128.png \
-  $PKG/usr/share/icons/hicolor/128x128/apps/assistant-qt6.png
-install -D -m 0644 qttools/src/designer/src/designer/images/designer.png \
-  $PKG/usr/share/icons/hicolor/128x128/apps/designer-qt6.png
-install -D -m 0644 qttools/src/qdbus/qdbusviewer/images/qdbusviewer-128.png \
-  $PKG/usr/share/icons/hicolor/128x128/apps/qdbusviewer-qt6.png
-install -D -m 0644 qttools/src/linguist/linguist/images/icons/linguist-128-32.png \
-  $PKG/usr/share/icons/hicolor/128x128/apps/linguist-qt6.png
+# And the .desktop files too:
+mkdir -p $PKG/usr/share/applications
+cat <<EOF > $PKG/usr/share/applications/$PRGNAM-designer.desktop
+[Desktop Entry]
+Name=Qt6 Designer
+GenericName=Interface Designer
+Comment=Design GUIs for Qt6 applications
+Exec=$QT6PREFIX/bin/designer
+Icon=qt6-designer
+MimeType=application/x-designer;
+Terminal=false
+Encoding=UTF-8
+Type=Application
+Categories=Qt;Development;
+EOF
+cat <<EOF > $PKG/usr/share/applications/$PRGNAM-assistant.desktop
+[Desktop Entry]
+Name=Qt6 Assistant
+Comment=Shows Qt6 documentation and examples
+Exec=$QT6PREFIX/bin/assistant
+Icon=qt6-assistant
+Terminal=false
+Encoding=UTF-8
+Type=Application
+Categories=Qt;Development;Documentation;
+EOF
+cat <<EOF > $PKG/usr/share/applications/$PRGNAM-linguist.desktop
+[Desktop Entry]
+Name=Qt6 Linguist
+Comment=Add translations to Qt6 applications
+Exec=$QT6PREFIX/bin/linguist
+Icon=qt6-linguist
+MimeType=text/vnd.trolltech.linguist;application/x-linguist;
+Terminal=false
+Encoding=UTF-8
+Type=Application
+Categories=Qt;Development;
+EOF
+cat <<EOF > $PKG/usr/share/applications/$PRGNAM-qdbusviewer.desktop
+[Desktop Entry]
+Name=Qt6 QDbusViewer
+GenericName=Qt6 D-Bus Debugger
+Comment=Debug D-Bus applications
+Exec=$QT6PREFIX/bin/qdbusviewer
+Icon=qt6-qdbusviewer
+Terminal=false
+Type=Application
+Categories=Qt;Development;Debugger;
+EOF
 
-mkdir -p $PKG/etc/profile.d
-sed -e "s|@LIBDIRSUFFIX@|${LIBDIRSUFFIX}|g" $CWD/profile.d/$PRGNAM.sh \
-  > $PKG/etc/profile.d/$PRGNAM.sh
-sed -e "s|@LIBDIRSUFFIX@|${LIBDIRSUFFIX}|g" $CWD/profile.d/$PRGNAM.csh \
-  > $PKG/etc/profile.d/$PRGNAM.csh
-chmod 0755 $PKG/etc/profile.d/*
+cat > $CWD/$PRGNAM.csh << "EOF"
+# Begin /etc/profile.d/qt6.csh
+
+if ( ! $?QT6DIR ) then
+    if ( -d /usr/libLIBDIRSUFFIX/qt6 ) then
+	setenv QT6DIR /usr/libLIBDIRSUFFIX/qt6
+    else
+	foreach qtd ( /usr/libLIBDIRSUFFIX/qt6-* )
+	    if ( -d $qtd ) then
+		setenv QT6DIR $qtd
+	    endif
+	end
+    endif
+endif
+set path = ( $path $QT6DIR/bin )
+
+# End /etc/profile.d/qt6.csh
+EOF
+
+cat > $CWD/$PRGNAM.sh << "EOF"
+# Begin /etc/profile.d/qt6.sh
+
+if [ -d /usr/libLIBDIRSUFFIX/qt6 ]; then
+  QT6DIR=/usr/libLIBDIRSUFFIX/qt6
+else
+  # Find the newest Qt directory and set $QT6DIR to that:
+  for qtd in /usr/libLIBDIRSUFFIX/qt6-* ; do
+    if [ -d $qtd ]; then
+      QT6DIR=$qtd
+    fi
+  done
+fi
+PATH="$PATH:$QT6DIR/bin"
+export QT6DIR
+
+# End /etc/profile.d/qt6.sh
+EOF
+
+sed -i "/LIBDIRSUFFIX/ s/LIBDIRSUFFIX/${LIBDIRSUFFIX}/g" \
+    $CWD/$PRGNAM.sh $CWD/$PRGNAM.csh
+install -Dm755 $CWD/$PRGNAM.sh $CWD/$PRGNAM.csh -t $PKG/etc/profile.d
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  .QT-ENTERPRISE-LICENSE-AGREEMENT LICENSE.* README.md \
+   LICENSES README.md \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
