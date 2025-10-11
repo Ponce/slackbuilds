@@ -7,7 +7,7 @@
 
 set -e
 
-KERNEL=${KERNEL:-5.15.161}
+KERNEL=${KERNEL:-5.15.193}
 
 # Build an image for the root file system and another for the swap
 # Default values : 8GB and 500MB resepectively.
