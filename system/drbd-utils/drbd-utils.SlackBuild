@@ -2,7 +2,7 @@
 
 # Slackware build script for drbd-utils
 
-# Copyright 2014, 2021  Mario Preksavec, Zagreb, Croatia
+# Copyright 2014, 2025  Mario Preksavec, Zagreb, Croatia
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,7 +25,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=drbd-utils
-VERSION=${VERSION:-9.18.2}
+VERSION=${VERSION:-9.32.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -79,26 +79,21 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# This patch allows resources with path: drbd:/dev/drbd/by-res/<resource>
-# Xen HVM domains will be able to live migrate with qemu-xen-traditional
-patch -p1 <$CWD/patches/xen_handle_physical_device_paths.diff
-
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
   --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --localstatedir=/var \
+  --runstatedir=/run \
   --mandir=/usr/man \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
   --build=$ARCH-slackware-linux \
   --with-udev \
-  --with-xen \
   --with-pacemaker \
   --without-rgmanager \
   --with-bashcompletion \
-  --with-distro=slackware \
+  --with-initscripttype=sysv \
   --with-prebuiltman \
   --build=$ARCH-slackware-linux
 
@@ -110,12 +105,15 @@ find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | gr
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 
-# Remove dead symlink
-unlink $PKG/usr/man/man8/drbd-overview.8 || true
-
 # Unbreak manpage symlinks after gzip (above)
 find $PKG/usr/man -type l ! -name '*.gz' \
   -exec bash -c 'ln -s $(readlink $1).gz $1.gz && unlink $1' doh {} \;
+
+# Remove systemd and version 9.x manuals
+rm $PKG/usr/man/man7/drbd*.gz $PKG/usr/man/{ja/,}*/*-9.?.?.gz
+
+# Make it easier to open version 8.4 manuals
+for i in $PKG/usr/man/{ja/,}*/*-8.?.?.gz ; do mv $i ${i/-8.?.?} ; done
 
 # Configuration tune-up
 mv $PKG/etc/init.d $PKG/etc/rc.d
@@ -126,9 +124,18 @@ mv $PKG/etc/drbd.d/global_common.conf $PKG/etc/drbd.d/global_common.conf.new
 # Let's not connect to the Internet, user knows what he wants to do
 sed -i 's/\(usage-count\) yes/\1 no/' $PKG/etc/drbd.d/global_common.conf.new
 
-if [ $ARCH = "x86_64" ]; then
-  mv $PKG/usr/lib $PKG/usr/lib${LIBDIRSUFFIX}
-fi
+# Move binary executables out of libdir
+for i in drbd{adm,setup}-84 ; do mv $PKG/usr/lib/drbd/$i $PKG/usr/sbin/ ; done
+
+# Fixes a bug where symlinks are not created by udev
+sed 's|drbdsetup|drbdsetup-84|' -i $PKG/lib/udev/rules.d/65-drbd.rules
+
+# Upstream dropped XEN block-drbd script, we bring it back
+install -D -m 755 $CWD/xen/block-drbd $PKG/etc/xen/scripts/block-drbd
+
+# This patch allows resources with path: drbd:/dev/drbd/by-res/<resource>
+# Xen HVM domains will be able to live migrate with qemu-xen-traditional
+patch -d $PKG/etc/xen/scripts -p2 <$CWD/xen/xen_handle_physical_device_paths.diff
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a COPYING ChangeLog README.md $PKG/usr/doc/$PRGNAM-$VERSION
