@@ -1,0 +1,163 @@
+#!/bin/bash
+
+# Slackware build script for piavpn-app
+
+# Copyright 2025, Matt Dinslage, Springfield Missouri
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=piavpn-app
+SRCNAM=pia-linux
+SRCVER=3.7-08412
+VERSION=${VERSION:-3.7_08412}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+  echo "This package is currently only available for 64bit."
+  exit 1
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+  echo "This package is currently only available for 64bit."
+  exit 1
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+elif [ "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  SRCARCH="arm64"
+  LIBDIRSUFFIX="64"
+else
+  echo "Package for $(uname -m) architecture is not available."
+  exit 1
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+
+# choose the correct upstream .run filename
+if [ "$ARCH" = "aarch64" ]; then
+  SRCFILE="${SRCNAM}-${SRCARCH}-${SRCVER}.run"
+else
+  SRCFILE="${SRCNAM}-${SRCVER}.run"
+fi
+
+rm -rf "$PRGNAM-$VERSION"
+sh "$CWD/$SRCFILE" --noexec --target "$TMP/$PRGNAM-$VERSION"
+cd "$TMP/$PRGNAM-$VERSION"
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Create target directories
+mkdir -p "$PKG/opt/piavpn/bin"
+mkdir -p "$PKG/usr/share/applications"
+mkdir -p "$PKG/usr/share/pixmaps"
+
+# Copy PIA core files
+cp -a piafiles/* "$PKG/opt/piavpn/"
+
+# Copy helper scripts into bin/
+cp installfiles/*.sh "$PKG/opt/piavpn/bin/"
+chmod 755 "$PKG/opt/piavpn/bin/"*.sh
+
+# Remove unneeded scripts
+rm -f "$PKG/opt/piavpn/bin/install-wireguard.sh" \
+      "$PKG/opt/piavpn/bin/pia-uninstall.sh"
+
+# Install icons and desktop entry
+cp installfiles/app-icon.png "$PKG/usr/share/pixmaps/piavpn.png"
+cp installfiles/piavpn.desktop "$PKG/usr/share/applications/piavpn.desktop"
+
+# NetworkManager: By default keep PIA's WireGuard interface unmanaged
+if [ "${NMMANAGER:-no}" != "yes" ]; then
+  mkdir -p "$PKG/etc/NetworkManager/conf.d"
+  cat > "$PKG/etc/NetworkManager/conf.d/wgpia.conf" << EOF
+[keyfile]
+unmanaged-devices=interface-name:wgpia*
+EOF
+fi
+
+# Fix .desktop file: remove hardcoded X11 env to support Wayland sessions
+if [ -f "$PKG/usr/share/applications/piavpn.desktop" ]; then
+  sed -i 's|^Exec=.*|Exec=/opt/piavpn/bin/pia-client %u|' \
+    "$PKG/usr/share/applications/piavpn.desktop"
+fi
+
+if [ -x "$PKG/opt/piavpn/bin/pia-unbound" ]; then
+  setcap 'cap_net_bind_service=+ep' "$PKG/opt/piavpn/bin/pia-unbound" || true
+fi
+
+# Create the rc file
+mkdir -p $PKG/etc/rc.d
+cp -a $CWD/rc.piavpn $PKG/etc/rc.d/rc.piavpn
+chmod 755 $PKG/etc/rc.d/rc.piavpn
+chown root:root $PKG/etc/rc.d/rc.piavpn
+chmod 644 $PKG/usr/share/applications/piavpn.desktop
+
+# limit log to the minimum to avoid excessive flooding
+mkdir -p "$PKG/opt/piavpn/var"
+cat > "$PKG/opt/piavpn/var/debug.txt" << EOF
+[rules]
+*.debug=false
+*.info=false
+*.warning=false
+EOF
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  piafiles/share/LICENSE.txt \
+  $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
