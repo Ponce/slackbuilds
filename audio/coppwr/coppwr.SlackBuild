@@ -1,0 +1,263 @@
+#!/bin/bash
+
+# Slackware build script for coppwr
+
+# Ioannis Anagnostakis 2025
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=coppwr
+VERSION=${VERSION:-1.7.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+elif [ "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+if [ -d /opt/rust ]; then
+  export PATH="/opt/rust/bin:$PATH"
+  if [ -z "$LD_LIBRARY_PATH" ]; then
+    export LD_LIBRARY_PATH="/opt/rust/lib$LIBDIRSUFFIX"
+  else
+    export LD_LIBRARY_PATH="/opt/rust/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
+  fi
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+
+tar xvf $CWD/pipewire-rs-605d15996f3258b3e1cc34e445dfbdf16a366c7e.tar.gz -C $TMP
+tar xvf $CWD/egui-snarl-0d51e7a24e1849114c8806dc6351cebc58dbabcc.tar.gz -C $TMP
+
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+mkdir -p vendor
+pushd $CWD
+mkdir -p crates
+mv *.crate crates 2>/dev/null || true
+for crate in ./crates/*.crate; do
+  [ -f "$crate" ] && tar xf "$crate" -C $TMP/$PRGNAM-$VERSION/vendor
+done
+popd
+
+PIPEWIRE_RS_DIR=$TMP/pipewire-rs-605d15996f3258b3e1cc34e445dfbdf16a366c7e
+
+for crate_dir in $PIPEWIRE_RS_DIR/*/; do
+  [ ! -f "$crate_dir/Cargo.toml" ] && continue
+
+  crate_name=$(grep "^name = " "$crate_dir/Cargo.toml" | head -1 | cut -d'"' -f2)
+  crate_ver=$(grep "^version = " "$crate_dir/Cargo.toml" | head -1 | cut -d'"' -f2)
+
+  [ -z "$crate_name" ] || [ -z "$crate_ver" ] && continue
+
+  echo "Vendoring $crate_name-$crate_ver from pipewire-rs workspace"
+  mkdir -p vendor/${crate_name}-${crate_ver}
+  cp -r "$crate_dir"/* vendor/${crate_name}-${crate_ver}/
+done
+
+SNARL_VER=$(grep "^version = " $TMP/egui-snarl-0d51e7a24e1849114c8806dc6351cebc58dbabcc/Cargo.toml | head -1 | cut -d'"' -f2)
+mkdir -p vendor/egui-snarl-${SNARL_VER}
+cp -r $TMP/egui-snarl-0d51e7a24e1849114c8806dc6351cebc58dbabcc/* \
+      vendor/egui-snarl-${SNARL_VER}/
+
+for cratedir in vendor/*/; do
+  touch "${cratedir}/.cargo-ok"
+  cratename=$(basename "$cratedir")
+
+  # For git dependencies checksum file
+  if [[ "$cratename" =~ ^(pipewire|pipewire-sys|libspa|libspa-sys)-[0-9] ]] || \
+     [[ "$cratename" =~ ^egui-snarl-[0-9] ]]; then
+    echo '{"files":{},"package":null}' > "${cratedir}/.cargo-checksum.json"
+    continue
+  fi
+
+  python3 -c "
+import json
+import os
+from hashlib import sha256
+from pathlib import Path
+
+crate_dir = Path('${cratedir}')
+crate_file = Path('$CWD/crates/${cratename}.crate')
+
+if not crate_file.exists():
+    exit(0)
+
+# Calculate file checksums
+files = {}
+for file in crate_dir.rglob('*'):
+    if file.is_file() and file.name not in ['.cargo-ok', '.cargo-checksum.json']:
+        rel_path = str(file.relative_to(crate_dir))
+        with open(file, 'rb') as f:
+            files[rel_path] = sha256(f.read()).hexdigest()
+
+# Calculate package checksum
+with open(crate_file, 'rb') as f:
+    package_hash = sha256(f.read()).hexdigest()
+
+# Write checksum file
+with open(crate_dir / '.cargo-checksum.json', 'w') as f:
+    json.dump({'files': files, 'package': package_hash}, f)
+"
+done
+
+# Create Cargo config for vendored sources
+mkdir -p .cargo
+cat > .cargo/config.toml << EOF
+[source.crates-io]
+replace-with = 'vendored-sources'
+
+[source.vendored-sources]
+directory = 'vendor'
+EOF
+
+# Patch Cargo.toml to use vendored versions
+PIPEWIRE_VER=$(grep "^version = " $TMP/pipewire-rs-605d15996f3258b3e1cc34e445dfbdf16a366c7e/pipewire/Cargo.toml | head -1 | cut -d'"' -f2)
+
+sed -i "s|pipewire = {version = \"\*\", git = \"https://gitlab.freedesktop.org/dimtpap/pipewire-rs.git\", rev = \"605d15996f3258b3e1cc34e445dfbdf16a366c7e\"}|pipewire = \"${PIPEWIRE_VER}\"|" Cargo.toml
+
+sed -i "s|egui-snarl = {version = \"\*\", git = \"https://github.com/dimtpap/egui-snarl.git\", rev = \"0d51e7a24e1849114c8806dc6351cebc58dbabcc\"}|egui-snarl = \"${SNARL_VER}\"|" Cargo.toml
+
+# Detect Slackware version to continue patching for slackware-15.0...
+VERSION_CODENAME=$(grep "VERSION_CODENAME=" /etc/os-release 2>/dev/null | cut -d'=' -f2)
+
+if [ "$VERSION_CODENAME" = "stable" ]; then
+# Patch libspa for compatibility with older PipeWire (Slackware 15.0)
+  echo "Patching libspa for older PipeWire compatibility"
+
+# Note: We use grep -v to exclude libspa-sys because the file we need to patch
+  # (src/param/video/raw.rs) exists in libspa, not libspa-sys. The find command
+  # can return directories in different orders depending on filesystem/environment,
+  # so we explicitly filter to get the correct crate.
+# Following echo debug outputs to verify we found the correct directory structure in github sbo-bot container.
+# (can be removed once confirmed building in all environments or in first pkg update)
+# https://github.com/SlackBuildsOrg/slackbuilds/pull/12831
+  LIBSPA_DIR=$(find vendor -maxdepth 1 -name "libspa-[0-9]*" -type d | grep -v "libspa-sys" | head -1)
+  echo "DEBUG: LIBSPA_DIR (without sys) = $LIBSPA_DIR"
+
+  if [ -n "$LIBSPA_DIR" ]; then
+    echo "DEBUG: Checking for raw.rs in libspa:"
+    ls -la "$LIBSPA_DIR/src/param/video/raw.rs" 2>/dev/null || echo "Not found in libspa"
+
+    LIBSPA_RAW="$LIBSPA_DIR/src/param/video/raw.rs"
+
+    if [ -f "$LIBSPA_RAW" ]; then
+      echo "DEBUG: Found! Patching $LIBSPA_RAW"
+
+      sed -i '/^[[:space:]]*flags: 0,$/d' "$LIBSPA_RAW"
+
+      sed -i 's/self\.0\.flags = flags\.bits();/\/\/ self.0.flags = flags.bits(); \/\/ removed for older PipeWire/' "$LIBSPA_RAW"
+
+      sed -i 's/VideoFlags::from_bits_retain(self\.0\.flags)/VideoFlags::empty() \/\/ flags removed for older PipeWire/' "$LIBSPA_RAW"
+
+      sed -i 's/self\.0\.modifier = modifier;/self.0.modifier = modifier as i64;/' "$LIBSPA_RAW"
+
+      sed -i 's/^\([[:space:]]*\)self\.0\.modifier$/\1self.0.modifier as u64/' "$LIBSPA_RAW"
+    else
+      echo "ERROR: Could not find raw.rs file to patch!"
+    fi
+  fi
+else
+  echo ""
+fi
+
+
+export RUSTUP_TOOLCHAIN=stable
+export CARGO_TARGET_DIR=target
+
+# We must remove old Cargo.lock and regenerate it offline
+rm -f Cargo.lock
+
+# We must generate new Cargo.lock using vendored dependencies (no network)
+CARGO_HOME=.cargo \
+    cargo generate-lockfile --offline
+
+CARGO_HOME=.cargo \
+    cargo build --release --frozen --offline
+
+mkdir -p $PKG/usr/bin
+install -m 0755 target/release/"$PRGNAM" $PKG/usr/bin/$PRGNAM
+install -Dm644 "assets/io.github.dimtpap.coppwr.desktop" "$PKG/usr/share/applications/io.github.dimtpap.coppwr.desktop"
+install -Dm644 "assets/io.github.dimtpap.coppwr.metainfo.xml" "$PKG/usr/share/metainfo/io.github.dimtpap.coppwr.metainfo.xml"
+install -Dm644 "assets/icon/scalable.svg" "$PKG/usr/share/icons/hicolor/scalable/apps/io.github.dimtpap.coppwr.svg"
+install -Dm644 "assets/icon/512.png" "$PKG/usr/share/icons/hicolor/512x512/apps/io.github.dimtpap.coppwr.png"
+install -Dm644 "assets/icon/256.png" "$PKG/usr/share/icons/hicolor/256x256/apps/io.github.dimtpap.coppwr.png"
+install -Dm644 "assets/icon/128.png" "$PKG/usr/share/icons/hicolor/128x128/apps/io.github.dimtpap.coppwr.png"
+install -Dm644 "assets/icon/64.png" "$PKG/usr/share/icons/hicolor/64x64/apps/io.github.dimtpap.coppwr.png"
+install -Dm644 "assets/icon/48.png" "$PKG/usr/share/icons/hicolor/48x48/apps/io.github.dimtpap.coppwr.png"
+install -Dm644 "assets/icon/32.png" "$PKG/usr/share/icons/hicolor/32x32/apps/io.github.dimtpap.coppwr.png"
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE* *.md $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
