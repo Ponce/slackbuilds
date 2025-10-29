@@ -1,0 +1,3 @@
+
+update-desktop-database
+
