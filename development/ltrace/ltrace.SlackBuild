@@ -6,13 +6,22 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20251029 bkw: updated for 0.8.1 (new upstream)
+# - the /etc/ltrace.conf file is no more. It's been split up into
+#   multiple .conf files which are in /usr/share/ltrace. I didn't
+#   make these .new config files because users shouldn't be
+#   editing them. Customization would be done on a per-library
+#   basis by adding your own libwhatever.so.conf, not editing
+#   the existing ones.
+# - remove doinst.sh, now that there's no .new config.
+# - patch man page slightly to show where the new config files live.
 # 20230507 bkw: updated for 0.7.3_6.4 (the _6 source went away)
 # 20170628 bkw: updated for 0.7.3_6
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=ltrace
-VERSION=${VERSION:-0.7.3_6.4}
+VERSION=${VERSION:-0.8.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -50,29 +59,23 @@ fi
 
 set -e
 
-# VERSION is upstream's plus Debian's (since we use their patchset)
-SRCVER=$( echo $VERSION | cut -d_ -f1 )
-DEBVER=$( echo $VERSION | cut -d_ -f2 )
-
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$SRCVER
-tar xvf $CWD/${PRGNAM}_$SRCVER.orig.tar.bz2
-cd $PRGNAM-$SRCVER
-tar xvf $CWD/${PRGNAM}_$SRCVER-$DEBVER.debian.tar.?z debian/patches
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+find . ! -type l    -a \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \)
 
-# apply Debian's patches, which fix a few bugs.
-for i in $( cat debian/patches/series ); do
-  patch -p1 < debian/patches/$i
-done
+patch -p1 < $CWD/manpage.diff
 
-# Slackware's gelf.h lives in /usr/include/libelf. Normally not a problem,
-# but ltrace is old enough that it doesn't use pkg-config.
-SLKCFLAGS="$SLKCFLAGS -I/usr/include/libelf"
+DOC=/usr/doc/$PRGNAM-$VERSION
+PKGDOC=$PKG/$DOC
+
+sh autogen.sh
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -82,24 +85,22 @@ CXXFLAGS="$SLKCFLAGS" \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --docdir=$DOC \
   --disable-werror \
+  --without-elfutils \
   --build=$ARCH-slackware-linux
 
 make
 make install-strip DESTDIR=$PKG
 
 gzip $PKG/usr/man/man?/*
-mv $PKG/etc/$PRGNAM.conf $PKG/etc/$PRGNAM.conf.new
 
 # docs already installed in right place, we don't need this one:
-rm -f $PKG/usr/doc/$PRGNAM-$VERSION/INSTALL
-
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+rm -f $PKGDOC/INSTALL
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
