@@ -11,5 +11,6 @@ config() {
 }
 config etc/authlib/authdaemonrc.new
 config etc/authlib/authldaprc.new
+config etc/authlib/authsqliterc.new
 config etc/authlib/authmysqlrc.new
 
