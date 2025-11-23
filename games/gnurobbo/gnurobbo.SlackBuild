@@ -22,6 +22,12 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20251123 bkw: BUILD=3
+# - take over maintenance.
+# - simplify script.
+# - get VERSION out of doc dir, not needed.
+# - add desktop and icon.
+
 # 20220220 bkw: Modified by SlackBuilds.org, BUILD=2:
 # - fix build on 15.0.
 # - actually use SLKCFLAGS.
@@ -31,7 +37,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=gnurobbo
 VERSION=${VERSION:-0.66}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -54,16 +60,12 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
 fi
 
 set -e
@@ -75,43 +77,51 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION-source.tar.gz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \+ -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
-
-# fix the linking process
-patch -p0 < $CWD/gnurobbo-fix_linking.diff
+find . ! -type l    -a \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \)
 
 # use a pixmap font to reduce deps by default, also it looks cooler
-TTFONTS=${TTFONTS:-no}
-if [ ! $TTFONTS == "yes" ]; then
-  sed -i Makefile -e 's/^FONT_USE_SDL_TTF/#FONT_USE_SDL_TTF/' \
-    -e 's/#FONT_USE_PIXMAP/FONT_USE_PIXMAP/'
-fi
+[ "${TTFONTS:-no}" = "no" ] && \
+  sed -i Makefile -e '/^FONT_USE_SDL_TTF/s,^,#,' \
+                  -e '/#FONT_USE_PIXMAP/s,#,,'
 
-sed -i "/^CFLAGS/s,-O3,$SLKCFLAGS -fcommon," Makefile
+sed -i Makefile -e "/^CFLAGS/s,-O3,$SLKCFLAGS -fcommon," \
+                -e '/^LIBS/s,$, -lm,'
 
-make \
-  PACKAGE_DATA_DIR=/usr/share/games/$PRGNAM \
-  BINDIR=/usr/games \
-  DOCDIR=/usr/share/$PRGNAM \
+DOC=/usr/doc/$PRGNAM-$VERSION
 
-make install BINDIR=$PKG/usr/games \
-  DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION \
-  PACKAGE_DATA_DIR=$PKG/usr/share/games/$PRGNAM
+runmake() {
+  make $1 \
+    PACKAGE_DATA_DIR=$2/usr/share/games/$PRGNAM \
+    BINDIR=$2/usr/games \
+    DOCDIR=$2/$DOC
+}
 
-strip $PKG/usr/games/$PRGNAM
+runmake
+strip $PRGNAM
+runmake install $PKG
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  README AUTHORS Bugs TODO VERSION \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# 20251123 bkw: upstream ships an icon, use it.
+ICONDIR=$PKG/usr/share/icons/hicolor/32x32/apps
+PIXDIR=$PKG/usr/share/pixmaps
+mkdir -p $ICONDIR $PIXDIR
+cat icon32.png > $ICONDIR/$PRGNAM.png
+ln -s ../icons/hicolor/32x32/apps/$PRGNAM.png $PIXDIR/$PRGNAM.png
+
+# 20251123 bkw: .desktop written by me.
+mkdir -p $PKG/usr/share/applications
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
+
+PKGDOC=$PKG/$DOC
+mkdir -p $PKGDOC
+cp -a README AUTHORS Bugs TODO $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/doinst.sh > $PKG/install/douninst.sh # this is not an error!
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
