@@ -25,25 +25,25 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=virtualbox-addons
-SRCNAM=VirtualBox
-VERSION=${VERSION:-6.1.50}
+VERSION=${VERSION:-7.2.4}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
-  case "$( uname -m )" in
+  case "$(uname -m)" in
     i?86) ARCH=i586 ;;
-    arm*) ARCH=arm ;;
-       *) ARCH=$( uname -m ) ;;
+    arm*) readelf /usr/bin/file -A | egrep -q "Tag_CPU.*[4,5]" && ARCH=arm || ARCH=armv7hl ;;
+    *) ARCH=$(uname -m) ;;
   esac
+  export ARCH
 fi
 
 # If the variable PRINT_PACKAGE_NAME is set, then this script will report what
 # the name of the created package would be, and then exit. This information
 # could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
-  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.txz"
   exit 0
 fi
 
@@ -57,8 +57,8 @@ if ! grep ^vboxadd: /etc/passwd 2>&1 > /dev/null; then
   exit 1
 fi
 
-# kmk doesn't support MAKEFLAGS, so we use JOBS here
-JOBS=${JOBS:-3}
+
+NUMJOBS=${NUMJOBS:-" -j$(expr $(nproc) + 1) "}
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
@@ -68,28 +68,41 @@ elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
   TARGET="x86"
+elif [ "$ARCH" = "s390" ]; then
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+  TARGET=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
   TARGET="amd64"
+elif [ "$ARCH" = "armv7hl" ]; then
+  SLKCFLAGS="-O3 -march=armv7-a -mfpu=vfpv3-d16"
+  LIBDIRSUFFIX=""
+  TARGET=""
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+  TARGET=""
 fi
-
-set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
-cd $TMP
-rm -rf $SRCNAM-${VERSION}
-tar xvf $CWD/$SRCNAM-${VERSION}.tar.bz2
-cd $SRCNAM-${VERSION}
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-patch -p0 < $CWD/gcc13.patch
+cd $TMP
+rm -rf VirtualBox-$VERSION
+tar xvf $CWD/VirtualBox-$VERSION.tar.bz2 || exit 1
+cd VirtualBox-$VERSION || exit 1
+
+chown -R root:root .
+find . \
+  \( -perm 777 -o -perm 775 -o -perm 711 -o -perm 555 -o -perm 511 \) \
+  -exec chmod 755 {} \+ -o \
+  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
+  -exec chmod 644 {} \+
+
+# Fix issue with gcc 13
+zcat $CWD/virtualbox-guest-additions-7.0.8-fix-gcc13.patch.gz | patch -p1 --verbose || exit 1
 
 ./configure \
   --only-additions \
@@ -98,7 +111,7 @@ patch -p0 < $CWD/gcc13.patch
 
 . ./env.sh
 
-kmk -j ${JOBS} LOCALCFG=$CWD/LocalConfig.kmk
+kmk -j ${NUMJOBS} LOCALCFG=$CWD/LocalConfig.kmk VBOX_ONLY_ADDITIONS=1
 
 mkdir -p $PKG/lib/udev/rules.d $PKG/sbin \
   $PKG/lib$LIBDIRSUFFIX/security \
@@ -130,6 +143,7 @@ cd out/linux.$TARGET/release/bin/additions
   install -m 755 VBoxService $PKG/usr/sbin/
   install -m 4755 mount.vboxsf $PKG/sbin/mount.vboxsf
   install -m 755 pam_vbox.so $PKG/lib$LIBDIRSUFFIX/security/pam_vbox.so
+  install -m 755 VBoxAudioTest $PKG/usr/bin/
 
   install -m 755 $CWD/vbox-uninstall-guest-additions $PKG/usr/sbin/
 cd -
@@ -150,8 +164,8 @@ cat $CWD/README.SLACKWARE > $PKG/usr/doc/$PRGNAM-$VERSION/README.SLACKWARE
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
+zcat $CWD/doinst.sh.gz > $PKG/install/doinst.sh
 cat $CWD/slack-desc > $PKG/install/slack-desc
-cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
+/sbin/makepkg -l y -c n $TMP/${PRGNAM}-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
