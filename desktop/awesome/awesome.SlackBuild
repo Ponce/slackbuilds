@@ -23,12 +23,13 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 # 20241019 bkw: Modified by SlackBuilds.org, BUILD=2: build with lua51.
+# 20251127 bkw: Modified by SlackBuilds.org, BUILD=3: build with luajit.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=awesome
 VERSION=${VERSION:-4.3}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -75,28 +76,31 @@ chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
+sed -i 's/COMMAND lua /COMMAND luajit /' awesomeConfig.cmake
+sed -i -e 's/ lua / luajit /' -e 's/lua)/luajit)/' tests/examples/CMakeLists.txt
+sed -i '1s|/usr/bin/env lua$|/usr/bin/env luajit|' build-utils/check_for_invalid_requires.lua
+sed -i 's/"lua"/"luajit"/' tests/test-spawn.lua
+
+# https://gitlab.archlinux.org/archlinux/packaging/packages/awesome/-/issues/1
+sed -e '/^local Gio = lgi.Gio$/alocal GioUnix = lgi.GioUnix' \
+  -e 's/Gio\.UnixInputStream/GioUnix\.InputStream/g' \
+  -e 's/Gio\.UnixOutputStream/GioUnix\.OutputStream/g' \
+  -i lib/awful/spawn.lua tests/_client.lua tests/test-spawn.lua
+
+sed -i 's| check-examples||' CMakeLists.txt
+
 mkdir -p build
 cd build
-  # 20241020 bkw: it insists on running "lua" during the build, I don't see
-  # a way to make it run "lua51" (which it *must* use), so fake it out by
-  # messing with $PATH.
-  mkdir -p tmplua
-  ln -s /usr/bin/lua51 tmplua/lua
-  export PATH=`pwd`/tmplua:$PATH
-
   cmake \
     -DLUA_FOUND=ON \
-    -DLUA_LIBRARY="/usr/lib$LIBDIRSUFFIX/liblua5.1.so" \
-    -DLUA_INCLUDE_DIR="/usr/include/lua5.1" \
-    -DLUA_VERSION_STRING="5.1" \
-    -DLUA_VERSION_MAJOR="5" \
-    -DLUA_VERSION_MINOR="1" \
-    -DLUA_VERSION_PATCH="5" \
-    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS -ldl -w -Wl,--allow-multiple-definition" \
+    -DLUA_LIBRARY="/usr/lib$LIBDIRSUFFIX/libluajit-5.1.so" \
+    -DLUA_INCLUDE_DIR="/usr/include/luajit-2.1" \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS -ldl -w -Wl,--allow-multiple-definition -fcommon" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DAWESOME_MAN_PATH=/usr/man \
     -DAWESOME_DOC_PATH=/usr/doc/$PRGNAM-$VERSION \
     -DSYSCONFDIR=/etc \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_BUILD_TYPE=Release ..
   make VERBOSE=1
   make install/strip DESTDIR=$PKG
