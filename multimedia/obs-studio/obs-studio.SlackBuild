@@ -26,7 +26,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=obs-studio
-VERSION=${VERSION:-30.1.2}
+VERSION=${VERSION:-32.1.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -55,7 +55,7 @@ OUTPUT=${OUTPUT:-/tmp}
 if [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
-  CEF_ROOT=cef_binary_5060_linux_x86_64
+  CEF_ROOT=cef_binary_6533_linux_x86_64
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
@@ -74,13 +74,27 @@ mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.lz
-tar xvf $CWD/${CEF_ROOT}_v3.tar.xz
+tar xvf $CWD/${CEF_ROOT}_v6.tar.xz
 ( cd $CEF_ROOT && strip -v Release/*.so )
 
 cd $PRGNAM-$VERSION
-sed -i -e '/OBS_VERSION_CANONICAL/ s=^=#=' CMakeLists.txt
-sed -i -e 's/qrcodegen.hpp/QrCode.hpp/' \
-    plugins/obs-websocket/src/forms/ConnectInfo.cpp
+
+# OBS finder looks for simde-common.h which is missing from SBo package.
+sed -e 's:simde-common:x86/sse2:g' \
+    -i cmake/finders/FindSIMDe.cmake
+
+# OBS finder looks for wrong name (probably renamed in another distro)
+# while SBo package keeps the original upstream name (QrCode.hpp).
+sed -e 's/qrcodegen.hpp/QrCode.hpp/' \
+    -i plugins/obs-websocket/src/forms/ConnectInfo.cpp
+
+# Fixes for Qt 6.10
+sed -e 's&Qt::GuiPrivate&&' \
+    -i frontend/cmake/os-freebsd.cmake frontend/cmake/os-linux.cmake
+sed -e '/GuiPrivate/d' \
+    -i frontend/plugins/aja-output-ui/CMakeLists.txt \
+       frontend/plugins/decklink-output-ui/CMakeLists.txt \
+       frontend/plugins/frontend-tools/CMakeLists.txt
 
 # Deal with GCC toolset 15.2.0 from testing
 GCC_VERSION=$(g++ --version |head -1|cut -d' ' -f3)
@@ -104,15 +118,13 @@ cd build
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DOBS_VERSION_OVERRIDE=${VERSION} \
-    -DUNIX_STRUCTURE=ON \
     -DENABLE_JACK=ON \
     -DENABLE_LIBFDK=ON \
     -DENABLE_NEW_MPEGTS_OUTPUT=OFF \
     -DENABLE_AJA=OFF \
-    -DBUILD_BROWSER=ON \
+    -DENABLE_BROWSER=ON \
     -DCEF_ROOT_DIR="../../$CEF_ROOT" \
     -Dqrcodegencpp_INCLUDE_DIR=/usr/include/qrcodegen \
-	-DCALM_DEPRECATION=ON \
     -DCMAKE_BUILD_TYPE=Release ..
   make
   make install DESTDIR=$PKG
@@ -123,7 +135,6 @@ cd ..
 )
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a AUTHORS CONTRIBUTING* COPYING INSTALL README* \
