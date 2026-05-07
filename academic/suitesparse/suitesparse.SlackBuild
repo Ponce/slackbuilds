@@ -2,7 +2,7 @@
 
 # Slackware build script for suitesparse
 
-# Copyright 2017-2023 Christoph Willing,  Brisbane Australia
+# Copyright 2017-2026 Christoph Willing,  Brisbane Australia
 # All rights reserved.
 # Thanks to Pablo Santamaria for previous versions
 #
@@ -27,8 +27,8 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=suitesparse
 SRCNAM=SuiteSparse
-VERSION=${VERSION:-5.13.0}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-7.12.2}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -63,49 +63,56 @@ else
   LIBDIRSUFFIX=""
 fi
 
+# Ensure cmake-opt is beong used in 15.0
+if [ -f /etc/profile.d/cmake-opt.sh ]; then
+  . /etc/profile.d/cmake-opt.sh
+else
+  echo "On Slackware 15.0, cmake-opt is a required dependency but not found. Exiting now ..."
+  exit 1
+fi
+
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $SRCNAM
+echo -n "Unpacking source tarball ... "
 tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+echo
 cd $SRCNAM-$VERSION
+echo -n "Sanitizing source code ... "
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
   -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+echo
 
 mkdir -p $PKG/usr/include/suitesparse
 mkdir -p $PKG/usr/lib$LIBDIRSUFFIX
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 
 export BLAS="$(pkg-config --libs openblas)"
-make
+make CMAKE_OPTIONS="-DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_LIBDIR=lib$LIBDIRSUFFIX" || exit 1
 make install \
+    DESTDIR=$PKG \
     INSTALL_INCLUDE=$PKG/usr/include/suitesparse \
     INSTALL_LIB=$PKG/usr/lib$LIBDIRSUFFIX \
     INSTALL_DOC=$PKG/usr/doc/$PRGNAM-$VERSION
 
-# Check that each library already has an rpath before attempting to modify it
-# (libmetis.so does not, causing `chrpath --replace` to fail)
-for l in $PKG/usr/lib${LIBDIRSUFFIX}/*
-do
-  if chrpath -l $l ; then
-    chrpath --replace /usr/lib$LIBDIRSUFFIX  $l
-  fi
-done
+# Don't package static libraries:
+rm -f $PKG/usr/lib$LIBDIRSUFFIX/*.a
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-cp -a LICENSE.txt CONTRIBUTOR-LICENSE.txt README.md $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a CITATION* CODE_OF_CONDUCT* LICENSE* README* $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
+/sbin/makepkg -l y -c n --remove-rpaths $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
