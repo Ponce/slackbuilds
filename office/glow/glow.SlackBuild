@@ -2,7 +2,7 @@
 
 # Slackware build script for glow
 
-# Copyright 2023-2025  Vijay Marcel
+# Copyright 2023-2026 Vijay Marcel
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -10,6 +10,10 @@
 #
 # 1. Redistributions of this script must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in
+#    the documentation and/or other materials provided with the distribution.
 #
 #  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
 #  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
@@ -25,25 +29,19 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=glow
-VERSION=${VERSION:-2.1.1}
+VERSION=${VERSION:-2.1.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 sys_arch=${sys_arch:-$(uname -m)}
-SRCNAM=${SRCNAM:-glow_2.1.1_Linux_}
 
-case "$sys_arch" in
-    i?86)
-    ARCH=i586
-    SRCARCH=i386
-     ;;
-  x86_64)
-   ARCH=x86_64
-   SRCARCH=x86_64
-   ;;
-       *) echo "This slackbuild will only run x86and x86_64 only exiting" && exit 1 ;;
-esac
-
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
 
 if [ ! -z "${PRINT_PACKAGE_NAME}"  ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
@@ -54,55 +52,93 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-   SRCARCH="i386"
-   LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SRCARCH="i386"
+if [ "$ARCH" = "i586" -o "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-march=$ARCH -mtune=i686 -pipe -O2 -fPIC -fPIE"
+  SLDFLAGS="-pie"
   LIBDIRSUFFIX=""
+  GARCH=386
 elif [ "$ARCH" = "x86_64" ]; then
-  SRCARCH="x86_64"
+  SLKCFLAGS="-march=x86-64 -mtune=generic -pipe -O2 -fPIC -fPIE"
+  SLDFLAGS="-pie"
   LIBDIRSUFFIX="64"
+  GARCH=amd64
 else
- echo "This slackbuild only builds on x86 and x86_64 only" && exit 1
+  echo "This SlackBuild will not run on $ARCH" && exit 1
 fi
 
-set -e
+set -euo pipefail
 trap 'echo "$0 FAILED at line $LINENO!" | tee $OUTPUT/error-${PRGNAM}.log' ERR
-
-
-echo "the system arch is $ARCH and the souce file arch is $SRCARCH"
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-mkdir -pv $TMP/$PRGNAM-$VERSION
-tar xvf "$CWD/$SRCNAM$SRCARCH.tar.gz" -C $TMP/$PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
-cd $SRCNAM$SRCARCH
 
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
+mkdir -pv $TMP/$PRGNAM-$VERSION/go/{cache,mod,tmp}
+mkdir -pv $TMP/$PRGNAM-$VERSION/build
 mkdir -pv $PKG/usr/bin
 mkdir -pv $PKG/usr/share/bash-completion/completions/
-mkdir -pv $PKG/usr/share/fish/vendor_completions.d/
 mkdir -pv $PKG/usr/share/zsh/site-functions/
+mkdir -pv $PKG/usr/man/man1
 
-install -vm0755  glow -t $PKG/usr/bin
-install -Dvm0644 completions/glow.bash -t $PKG/usr/share/bash-completion/completions/glow
-install -Dvm0644 completions/glow.fish -t $PKG/usr/share/fish/vendor_completions.d/glow.fish
-install -Dvm0644 completions/glow.zsh -t $PKG/usr/share/zsh/site-functions/_glow
+export GOOS=linux
+export GOARCH="$GARCH"
+export GOPATH="$TMP/$PRGNAM-$VERSION/go"
+export GOCACHE=$TMP/$PRGNAM-$VERSION/go/cache
+export GOMODCACHE=$TMP/$PRGNAM-$VERSION/go/mod
+export GOTMPDIR=$TMP/$PRGNAM-$VERSION/go/tmp
+export GOBIN=$TMP/$PRGNAM-$VERSION/build
+export GO111MODULE=on
+export CGO_ENABLED=1
+export CGO_CFLAGS="${SLKCFLAGS}"
+export CGO_CXXFLAGS="${SLKCFLAGS}"
+export CGO_LDFLAGS="${SLDFLAGS}"
+
+gofmt -s -w .
+go install -v \
+    -buildmode=pie \
+    -trimpath \
+    -mod=readonly \
+    -modcacherw \
+    -ldflags "-s -w \
+    -linkmode external \
+    -extldflags '${SLDFLAGS}' \
+    -X main.Version='${VERSION}'" \
+	./...
+
+cd $TMP/$PRGNAM-$VERSION/build
+
+./glow completion bash > glow.bash
+./glow completion zsh > glow.zsh
+./glow man >> glow.1
+
+cd $TMP/$PRGNAM-$VERSION
+
+install -vm0755  $TMP/$PRGNAM-$VERSION/build/glow -t $PKG/usr/bin
+cp -av $TMP/$PRGNAM-$VERSION/build/glow.bash  $PKG/usr/share/bash-completion/completions/glow
+cp -av $TMP/$PRGNAM-$VERSION/build/glow.zsh $PKG/usr/share/zsh/site-functions/_glow
+
+chmod -v 0644 $PKG/usr/share/bash-completion/completions/glow
+chmod -v 0644 $PKG/usr/share/zsh/site-functions/_glow
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded --remove-section=.comment --remove-section=.note 2> /dev/null || true
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+install -vm0644 $TMP/$PRGNAM-$VERSION/build/glow.1 -t $PKG/usr/man/man1
+
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+mkdir -pv $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a LICENSE README.md  $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
@@ -110,4 +146,4 @@ mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
+/sbin/makepkg -l y -c n --remove-rpaths --remove-tmp-rpaths $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
