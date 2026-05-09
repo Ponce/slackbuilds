@@ -2,7 +2,7 @@
 
 # Slackware build script for distrobuilder
 
-# Copyright 2025 Vijay Marcel
+# Copyright 2025-2026 Vijay Marcel
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -10,6 +10,10 @@
 #
 # 1. Redistributions of this script must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in
+#    the documentation and/or other materials provided with the distribution.
 #
 #  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
 #  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
@@ -25,7 +29,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=distrobuilder
-VERSION=${VERSION:-3.2}
+VERSION=${VERSION:-3.3.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -47,23 +51,21 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-march=i586 -mtune=i686 -pipe -O2 -fPIC -fPIE"
-  SLDFLAGS="-pie -Wl,--sort-common=ascending -Wl,--sort-section=alignment -Wl,--gc-sections -Wl,-z,unique-symbol"
+if [ "$ARCH" = "i586" -o "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-march=$ARCH -mtune=i686 -pipe -O2 -fPIC -fPIE"
+  SLDFLAGS="-pie"
   LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-march=i686 -mtune=i686 -pipe -O2 -fPIC -fPIE"
-  SLDFLAGS="-pie -Wl,--sort-common=ascending -Wl,--sort-section=alignment -Wl,--gc-sections -Wl,-z,unique-symbol"
-  LIBDIRSUFFIX=""
+  GARCH=386
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-march=x86-64 -mtune=generic -pipe -O2 -fPIC -fPIE"
-  SLDFLAGS="-pie -Wl,--sort-common=ascending -Wl,--sort-section=alignment -Wl,--gc-sections -Wl,-z,unique-symbol"
+  SLDFLAGS="-pie"
   LIBDIRSUFFIX="64"
+  GARCH=amd64
 else
-  echo "This SlackBuild will not run on $ARCK" && exit 1
+  echo "This SlackBuild will not run on $ARCH" && exit 1
 fi
 
-set -e
+set -euo pipefail
 trap 'echo "$0 FAILED at line $LINENO!" | tee -a $OUTPUT/error-${PRGNAM}.log' ERR
 
 rm -rf $PKG
@@ -79,30 +81,39 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
-mkdir -pv $TMP/$PRGNAM-$VERSION/go/{cache,mod}
+mkdir -pv $TMP/$PRGNAM-$VERSION/go/{cache,mod,tmp}
+mkdir -pv $TMP/$PRGNAM-$VERSION/build
+mkdir -pv $PKG/usr/bin
 
+export GOOS=linux
+export GOARCH="$GARCH"
 export GOPATH="$TMP/$PRGNAM-$VERSION/go"
+export GOCACHE=$TMP/$PRGNAM-$VERSION/go/cache
+export GOMODCACHE=$TMP/$PRGNAM-$VERSION/go/mod
+export GOTMPDIR=$TMP/$PRGNAM-$VERSION/go/tmp
+export GOBIN=$TMP/$PRGNAM-$VERSION/build
+export GO111MODULE=on
+export CGO_ENABLED=1
 export CGO_CFLAGS="${SLKCFLAGS}"
 export CGO_CXXFLAGS="${SLKCFLAGS}"
 export CGO_LDFLAGS="${SLDFLAGS}"
-export GOCACHE=$TMP/$PRGNAM-$VERSION/go/cache
-export GOMODCACHE=$TMP/$PRGNAM-$VERSION/go/mod
-export GOOS=linux
+dver=$(grep '^var Version' shared/version/version.go | cut -d'"' -f2)
+modnam=$(grep '^module' go.mod | awk '{print $2}')
 
-mkdir build
-
-go build -v \
+gofmt -s -w .
+go install -v \
     -buildmode=pie \
-    -mod=vendor \
+    -trimpath \
+    -mod=readonly \
     -modcacherw \
-    -ldflags "-compressdwarf=false \
+    -tags="containers_image_storage_stub,containers_image_docker_daemon_stub,containers_image_openpgp" \
+    -ldflags "-s -w \
     -linkmode external \
-    -extldflags '${SLDFLAGS}'" \
-    -o build \
+    -extldflags '${SLDFLAGS}' \
+    -X '${modnam}/shared/version.Version=${dver}'" \
 	./...
 
-mkdir -pv $PKG/usr/bin
-install -Dvm 0755 $TMP/$PRGNAM-$VERSION/build/distrobuilder -t $PKG/usr/bin
+install -vm0755 $GOBIN/distrobuilder -t $PKG/usr/bin
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded --remove-section=.comment --remove-section=.note 2> /dev/null || true
@@ -115,4 +126,4 @@ mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
+/sbin/makepkg -l y -c n --remove-rpaths --remove-tmp-rpaths $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
