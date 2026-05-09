@@ -14,41 +14,59 @@ concurrency:
 
 env:
   # renovate: datasource=docker depName=aclemons/sbo-maintainer-tools versioning=loose
-  SBO_MAINTAINER_TOOLS_IMAGE: aclemons/sbo-maintainer-tools:0.9.3-15.0@sha256:de34e45ef403b6431e392c5943ae09fe663e46f8c04118bd64d220298e66e602
+  SBO_MAINTAINER_TOOLS_IMAGE: aclemons/sbo-maintainer-tools:0.9.4@sha256:c7c84bb146efb38fffb2c5e57e023439a4b7148ce9c4f0d88b45342f94d97a67
+
+permissions: {}
 
 jobs:
   changes:
+    name: Detect changed SlackBuilds
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-    if: contains(fromJSON('["SlackBuildsOrg/slackbuilds"]'), github.repository)
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+      has_changes: ${{ steps.get-changes.outputs.has_changes }}
     steps:
       - name: Calculate clone depth.
-        run: printf "CHECKOUT_FETCH_DEPTH=%s\n" "$(( ${{ github.event.pull_request.commits }} + 1 ))" >> "${GITHUB_ENV}"
+        id: clone-depth
+        env:
+          PR_COMMITS: ${{ github.event.pull_request.commits }}
+        run: printf "fetch_depth=%s\n" "$(( PR_COMMITS + 1 ))" >> "${GITHUB_OUTPUT}"
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           show-progress: false
-          fetch-depth: ${{ env.CHECKOUT_FETCH_DEPTH }}
+          fetch-depth: ${{ steps.clone-depth.outputs.fetch_depth }}
           ref: ${{ github.head_ref }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           persist-credentials: false
 
       - name: Get slackbuild directories which have changes.
+        id: get-changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          CHANGED_FILES="$(git diff-tree --name-only --diff-filter=d --no-commit-id -r ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | sed '/^\./d' | sed -n '/[^\/][^\/]*\/[^\/][^\/]*\//p' | xargs -I xx dirname xx | sort -u | sed '/.github/d' | sed 's/^/"/;s/$/"/g' | paste -d, -s | sed 's/^/[/;s/$/]/')"
+          CHANGED_FILES="$(git diff-tree --name-only --diff-filter=d --no-commit-id -r "$BASE_SHA" "$HEAD_SHA" | sed '/^\./d' | sed -n '/[^\/][^\/]*\/[^\/][^\/]*\//p' | xargs -I xx dirname xx | sort -u | sed '/.github/d' | sed 's/^/"/;s/$/"/g' | paste -d, -s | sed 's/^/[/;s/$/]/')"
 
           delimiter="$(openssl rand -hex 8)"
-          printf "CHANGED_FILES<<%s\n" "$delimiter" >> "$GITHUB_ENV"
+          {
+            printf "CHANGED_FILES<<%s\n" "$delimiter"
+            printf "%s\n" "$CHANGED_FILES"
+            printf "%s\n" "$delimiter"
+          } >> "$GITHUB_OUTPUT"
 
-          printf "%s\n" "$CHANGED_FILES" | tee -a "$GITHUB_ENV"
-
-          printf "%s\n" "$delimiter" >> "$GITHUB_ENV"
+          if [[ "$CHANGED_FILES" == '[]' || -z "$CHANGED_FILES" ]] ; then
+            printf 'has_changes=false\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'has_changes=true\n' >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Get matrix output
         id: set-matrix
+        env:
+          CHANGED_FILES: ${{ steps.get-changes.outputs.CHANGED_FILES }}
         run: |
           {
             printf 'matrix<<SLACKBUILDS\n'
@@ -61,8 +79,9 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: write # for peter-evans/create-or-update-comment
     needs: [changes]
+    if: needs.changes.outputs.has_changes == 'true'
     strategy:
       matrix:
         include: ${{ fromJSON(needs.changes.outputs.matrix) }}
@@ -78,13 +97,13 @@ jobs:
         env:
           MATRIX_DIR: ${{ matrix.dir }}
         run: |
-          docker pull ${{ env.SBO_MAINTAINER_TOOLS_IMAGE }}
+          docker pull "$SBO_MAINTAINER_TOOLS_IMAGE"
 
           mkfifo pipe
           tee sbolint-output < pipe &
           set +e
 
-          docker run --rm -v "$(pwd):/work" -w /work ${{ env.SBO_MAINTAINER_TOOLS_IMAGE }} sbolint "$MATRIX_DIR" > pipe 2>&1
+          docker run --rm -v "$(pwd):/work" -w /work "$SBO_MAINTAINER_TOOLS_IMAGE" sbolint "$MATRIX_DIR" > pipe 2>&1
 
           sbolint_status="$?"
           set -e
@@ -125,8 +144,9 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: write # for peter-evans/create-or-update-comment
     needs: [changes]
+    if: needs.changes.outputs.has_changes == 'true'
     strategy:
       matrix:
         include: ${{ fromJSON(needs.changes.outputs.matrix) }}
