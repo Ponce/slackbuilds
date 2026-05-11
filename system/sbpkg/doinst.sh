@@ -8,5 +8,5 @@ config() {
   fi
 }
 
-config etc/sbpkg/sbpkg.conf.new
-config etc/sbpkg/blacklist.new
+config etc/sbpkg/sbpkg.toml.new
+config etc/sbpkg/blacklist.toml.new

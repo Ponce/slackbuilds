@@ -2,7 +2,7 @@
 
 # Slackware build script for sbpkg
 
-# Copyright 2024-2025 Dimitris Zlatanidis Greece, Orestiada
+# Copyright 2024-2026 Dimitris Zlatanidis  Orestiada, Greece
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,7 +25,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=sbpkg
-VERSION=${VERSION:-1.1.4}
+VERSION=${VERSION:-2.0.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -38,9 +38,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -52,18 +49,19 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  CARGOTARGET="--target $ARCH-unknown-linux-gnu"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  CARGOTARGET="--target $ARCH-unknown-linux-gnu"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-elif [ "$ARCH" = "aarch64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
+  CARGOTARGET="--target $ARCH-unknown-linux-gnu"
   LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
+  CARGOTARGET=""
   LIBDIRSUFFIX=""
 fi
 
@@ -75,6 +73,59 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
+
+# Build offline using vendored .crate files
+mkdir .cargo
+cat << EOF >> .cargo/config.toml
+[source.crates-io]
+registry = 'https://github.com/rust-lang/crates.io-index'
+replace-with = 'vendored-sources'
+
+[source.vendored-sources]
+directory = '$(pwd)/vendor'
+EOF
+
+mkdir vendor
+(
+  cd vendor
+
+  grep -h -A 4 "\[\[package\]\]" \
+      $(find "../" -maxdepth 1 -mindepth 1 -name Cargo.lock | tr '\n' ' ') | \
+      sed 's/[[:space:]]*=[[:space:]]*/=/g;s/^--//;s/^\[\[/--\n[[/' | \
+      awk 'BEGIN { RS = "--\n" ; FS="\n" } { print $2, $3, $4, $5 }' | \
+      sed 's/"//g;s/name=//;s/ version=/=/' | \
+      grep " source=" | \
+      sed 's/ dependencies=.*$//' | \
+      sed 's/ source=[^ ]*//' | \
+      sed 's/ checksum=/=/' | \
+      sort -u | \
+      while read -r dep ; do
+
+    cksum="$(printf "%s\n" "$dep" | cut -d= -f3)"
+    ver="$(printf "%s\n" "$dep" | cut -d= -f2)"
+    dep="$(printf "%s\n" "$dep" | cut -d= -f1)"
+
+    tar xvf $CWD/$dep-$ver.crate
+
+    touch $dep-$ver/.cargo-ok
+
+    {
+      printf "{\n"
+      printf '    "files": {\n'
+
+      (
+        cd $dep-$ver
+        find . -type f -print0 | xargs -0 sha256sum | sed -n '/\.cargo-checksum\.json/!p' | sed 's/\.\///;s/^\([^ ]*\)[[:space:]][[:space:]]*\(.*\)$/"\2":"\1",/'
+      ) | sed '$ s/,$//'
+
+      printf "    },\n"
+      printf '    "package": "%s"'  "$cksum"
+
+      printf "}\n"
+    } > $dep-$ver/.cargo-checksum.json
+  done
+)
+
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -82,25 +133,35 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-python3 -m build --wheel --no-isolation
-python3 -m installer --destdir "$PKG" dist/*.whl
+export PATH="/opt/rust/bin:$PATH"
+if [ -z "$LD_LIBRARY_PATH" ]; then
+  export LD_LIBRARY_PATH="/opt/rust/lib$LIBDIRSUFFIX"
+else
+  export LD_LIBRARY_PATH="/opt/rust/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
+fi
 
-mkdir -p $PKG/usr/sbin $PKG/etc/$PRGNAM $PKG/usr/man/man1
-mv $PKG/usr/bin/$PRGNAM $PKG/usr/sbin/$PRGNAM
-rm -rf $PKG/usr/bin
-install -D -m0644 config/$PRGNAM.conf $PKG/etc/$PRGNAM/$PRGNAM.conf.new
-install -D -m0644 config/blacklist $PKG/etc/$PRGNAM/blacklist.new
+CARGO_HOME=.cargo \
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+cargo build --offline --release $CARGOTARGET
+
+mkdir -p $PKG/usr/sbin
+find target -name $PRGNAM -exec install -m 755 {} $PKG/usr/sbin/$PRGNAM \;
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
+install -D -m0644 config/$PRGNAM.toml $PKG/etc/$PRGNAM/$PRGNAM.toml.new
+install -D -m0644 config/blacklist.toml $PKG/etc/$PRGNAM/blacklist.toml.new
+
+mkdir -p $PKG/usr/man/man1
 cp man/$PRGNAM.1 $PKG/usr/man/man1
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a LICENSE.txt README.md ChangeLog.md $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README.md ChangeLog.md LICENSE.txt $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
