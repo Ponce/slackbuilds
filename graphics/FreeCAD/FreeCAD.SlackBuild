@@ -23,15 +23,17 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 # Maintained by David Spencer <baildon.research@googlemail.com>
-# Maintained 2025 by Christoph Willing, Sydney Australia
+# Maintained 2025-2026 by Christoph Willing, Sydney Australia
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=FreeCAD
 VERSION=${VERSION:-1.0.2}
-BUILD=${BUILD:-3}
+BUILD=${BUILD:-4}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+
+CONTINUE=${CONTINUE:-no}
 
 # These are required external modules not included in FreeCAD release 1.0.1
 GSL_tarball=GSL-20240226_b39e7e4.tar.lz
@@ -45,9 +47,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -76,37 +75,45 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
 
-echo "Adding GSL module ..."
-(cd src/3rdParty/GSL/ && tar xf $CWD/$GSL_tarball --strip-components=1)
+if [ "$CONTINUE" = "yes" ]; then
+  echo "CONTINUE mode"
+  cd $PRGNAM-$VERSION
+else
+  rm -rf $PRGNAM-$VERSION
+  echo -n "Unpacking source tarball ... "
+  tar xf $CWD/$PRGNAM-$VERSION.tar.gz
+  echo
+  cd $PRGNAM-$VERSION
 
-echo "Adding OndselSolver module ..."
-(cd src/3rdParty/OndselSolver/ && tar xf $CWD/$OndselSolver_tarball --strip-components=1)
+  echo "Adding GSL module ..."
+  (cd src/3rdParty/GSL/ && tar xf $CWD/$GSL_tarball --strip-components=1)
 
-echo "Sanitizing source ..."
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  echo "Adding OndselSolver module ..."
+  (cd src/3rdParty/OndselSolver/ && tar xf $CWD/$OndselSolver_tarball --strip-components=1)
 
-if pkg-config --atleast-version 1.2.14 alsa ; then
-  sed -i 's/regex system /regex /' cMake/FreeCAD_Helpers/SetupBoost.cmake
-  sed -i '/#include "GeoEnum.h"/a #include <algorithm>' src/Mod/Sketcher/App/SolverGeometryExtension.h
+  echo "Sanitizing source ..."
+  chown -R root:root .
+  find -L . \
+   \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+    -o -perm 511 \) -exec chmod 755 {} \; -o \
+   \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+    -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+  if pkg-config --atleast-version 1.2.14 alsa ; then
+    sed -i 's/regex system /regex /' cMake/FreeCAD_Helpers/SetupBoost.cmake
+    sed -i '/#include "GeoEnum.h"/a #include <algorithm>' src/Mod/Sketcher/App/SolverGeometryExtension.h
+  fi
 fi
 
-mkdir build
+mkdir -p build
 cd build
   cmake \
     -Wno-dev \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/opt/$PRGNAM \
-    -DDOCDIR=/usr/doc/$PRGNAM-$VERSION \
+    -DCMAKE_INSTALL_DOCDIR=/usr/doc/$PRGNAM-$VERSION \
     -DOCC_INCLUDE_DIR:PATH=/usr/include/opencascade \
     -DOCC_LIBRARY:PATH=/usr/lib${LIBDIRSUFFIX} \
     -DRESOURCEDIR=/opt/$PRGNAM/share/data \
@@ -118,6 +125,7 @@ cd build
     -DFREECAD_USE_PYSIDE=ON \
     -DFREECAD_USE_SHIBOKEN=ON \
     -DOCCT_CMAKE_FALLBACK=ON \
+    -DUSE_OPENCV=ON \
     -DBUILD_TEST=OFF \
     -DBUILD_TESTING=OFF \
     -DENABLE_DEVELOPER_TESTS=OFF \
@@ -152,4 +160,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
+/sbin/makepkg -l y -c n --remove-tmp-rpaths $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
