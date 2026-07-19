@@ -20,6 +20,7 @@ config etc/amanda/EXB-8500.ps.new
 config etc/amanda/HP-DAT.ps.new
 config etc/amanda/amanda-client-postgresql.conf.new
 config etc/amanda/amanda-client.conf.new
+config etc/amanda/amanda-security.conf.new
 config etc/amanda/amanda.conf.new
 config etc/amanda/chg-multi.conf.new
 config etc/amanda/chg-scsi.conf.new
