@@ -21,6 +21,12 @@
 # The other frontends are mac/windows only.
 # Anyway, it has a nice Qt GUI, I don't see why it needs a frontend.
 
+# 20260719 bkw:
+# - update for v6.0.
+# - sadly, 32-bit x86 support was dropped due to use of __int128.
+# - always build with dynamic recompilation.
+# - x86_64 defaults to NEW_DYNAREC=OFF, aarch64 is always on.
+
 # 20251228 bkw: update for v5.3.
 # - the floppy drive .wav samples have been broken out into a separate
 #   'assets' tarball, so add that.
@@ -42,7 +48,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=86box
 SRCNAM=86Box
-VERSION=${VERSION:-5.3}
+VERSION=${VERSION:-6.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -60,29 +66,6 @@ if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   exit 0
 fi
 
-# 20250829 bkw: Starting with version 5.0, SSE2 is required at
-# runtime, for x86 and x86_64. If we're somehow building on an ancient
-# CPU that lacks SSE2, warn the user, but don't stop the build.
-# There is probably a way to patch it to build without SSE2 on x86,
-# but I'm not spending a lot of time to figure it out because I doubt
-# anyone really needs it.
-check_sse2() {
-  grep -q '\<sse2\>' /proc/cpuinfo && return
-  cat <<EOF
-
-********************************************************************
-* WARNING: 86box requires SSE2 extensions, but you are building on a
-* system without SSE2. If you install the resulting package on this
-* system, it will fail with "Illegal Instruction" errors.
-*
-* Press ^C within 5 seconds to abort the build, or wait 5 seconds to
-* continue.
-********************************************************************
-
-EOF
-  sleep 5
-}
-
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
@@ -90,29 +73,24 @@ OUTPUT=${OUTPUT:-/tmp}
 # 20251117 bkw: in 86box <= 5.1, dynamic recompilation worked on x86.
 # In 5.2, they seem to have dropped support for it (on x86), but not
 # added a cmake check to auto-disable it. Have to turn it off myself.
-DYNAREC=ON
+# 20260719 bkw: in 6.0, they dropped x86 support entirely. x86_64
+# defaults to the 'old' dynarec, aarch64 only supports 'new'. I won't
+# provide an option to disable dynamic recompilation entirely.
 NDOPT=OFF
+SLKCFLAGS="-O2 -fPIC"
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686 -msse2"
-  check_sse2
-  DYNAREC=OFF
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686 -msse2"
-  check_sse2
-  DYNAREC=OFF
-elif [ "$ARCH" = "x86_64" -o "$ARCH" = "aarch64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
+if [ "$ARCH" = "x86_64" ]; then
+  [ "${NEW_DYNAREC:-no}" = "yes" ] && NDOPT="ON"
+elif [ "$ARCH" = "aarch64" ]; then
+  NDOPT="ON"
 else
-  SLKCFLAGS="-O2"
-fi
-
-if [ "${NEW_DYNAREC:-no}" = "yes" ]; then
-  if [ "$DYNAREC" = "OFF" ]; then
-    echo "*** Dynamic recompilation not supported on this platform"; exit 1
-  else
-    NDOPT="ON"
-  fi
+  cat <<EOF 1>&2
+*******
+* Unsupported ARCH '$ARCH'.
+* Only 'x86_64' and (maybe) 'aarch64' are supported.
+*******
+EOF
+  exit 1
 fi
 
 set -e
@@ -133,23 +111,28 @@ find . ! -type l    -a \
 # 20240311 bkw: rtmidi still not autodetected in 4.1.
 # 20250829 bkw: or 5.0 either.
 # 20251228 bkw: or 5.3...
+# 20260719 bkw: or 6.0...
 if [ "${RTMIDI:-yes}" != "yes" ] || ! pkg-config --exists rtmidi; then
   RTMIDI="-DRTMIDI=OFF"
 fi
 
+# 20260719 bkw: override the _RELEASE flags, because otherwise upstream
+# puts a -O3 after our -O2.
+SLKCFLAGS+=" -DNDEBUG"
+
 mkdir -p build
 cd build
   cmake \
-    -DDYNAREC=$DYNAREC \
+    -DDYNAREC=ON \
     -DNEW_DYNAREC=$NDOPT \
     $RTMIDI \
     -DMUNT=ON \
     -DMUNT_EXTERNAL=OFF \
-    -DCMAKE_C_FLAGS="$SLKCFLAGS" \
-    -DCMAKE_CXX_FLAGS="$SLKCFLAGS" \
+    -DCMAKE_C_FLAGS_RELEASE="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS_RELEASE="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_BUILD_TYPE=Release ..
-  make
+  make VERBOSE=1
   make install/strip DESTDIR=$PKG
 cd ..
 
@@ -189,7 +172,6 @@ cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 sed -e "s,@WITH@,$WITH," \
-    -e "s,@DR@,$DYNAREC," \
     -e "s,@NDR@,$NDOPT," \
     < $CWD/slack-desc > $PKG/install/slack-desc
 	cat $CWD/doinst.sh > $PKG/install/doinst.sh
