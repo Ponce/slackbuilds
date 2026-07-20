@@ -72,7 +72,7 @@ AUTHOR
 
 Matthias Reichl <hias@horus.com>.
 
-Man page by B. Watson <urchlay@urchlay.com>.
+Man page by B. Watson <urchlay@slackware.uk>.
 
 SEE ALSO
 ========
