@@ -1,0 +1,138 @@
+#!/bin/bash
+
+# Slackware build script for Cemu
+
+# Copyright 2026 Ruoh-Shoei LIN
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=Cemu
+VERSION=${VERSION:-2.6}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$VERSION
+tar -xvf $CWD/Vulkan-Headers-9b9fd871b08110cd8f0b74e721b03213d9cc3081.tar.gz \
+    -C dependencies/Vulkan-Headers --strip-components=1
+tar -xvf $CWD/ZArchive-d2c717730092c7bf8cbb033b12fd4001b7c4d932.tar.gz \
+    -C dependencies/ZArchive --strip-components=1
+tar -xvf $CWD/cubeb-2071354a69aca7ed6df3b4222e305746c2113f60.tar.gz \
+    -C dependencies/cubeb --strip-components=1
+tar -xvf $CWD/googletest-800f5422ac9d9e0ad59cd860a2ef3a679588acb4.tar.gz \
+    -C dependencies/cubeb/googletest --strip-components=1
+tar -xvf $CWD/imgui-f65bcf481ab34cd07d3909aab1479f409fa79f2f.tar.gz \
+    -C dependencies/imgui --strip-components=1
+tar -xvf $CWD/sanitizers-cmake-aab6948fa863bc1cbe5d0850bc46b9ef02ed4c1a.tar.gz \
+    -C dependencies/cubeb/cmake/sanitizers-cmake --strip-components=1
+tar -xvf $CWD/vcpkg-a4275b7eee79fb24ec2e135481ef5fce8b41c339.tar.gz \
+    -C dependencies/vcpkg --strip-components=1
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
+
+sed -i 's/glm::glm/glm/' src/Common/CMakeLists.txt src/input/CMakeLists.txt
+
+if [ "${CURRENT:-OFF}" = "OFF" ]; then
+    # https://github.com/cemu-project/Cemu/issues/1034
+    sed -i "/find_package(glslang / s|glslang|Vulkan COMPONENTS glslang|;/add_library(glslang/d;" CMakeLists.txt
+    sed -i "/set(glslang_target/ s|glslang::SPIRV|Vulkan::glslang|" src/Cafe/CMakeLists.txt
+fi
+mkdir -p build
+cd build
+  cmake -GNinja \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_DOCDIR=doc/$PRGNAM-$VERSION \
+    -DLIB_SUFFIX="$LIBDIRSUFFIX" \
+    -DCMAKE_INSTALL_LIBDIR=lib${LIBDIRSUFFIX} \
+    -DUSE_DISCORD_RPC=OFF \
+    -DENABLE_VCPKG=OFF \
+    -DEMULATOR_VERSION_MAJOR="${VERSION%.*}" \
+    -DEMULATOR_VERSION_MINOR="${VERSION:2}" \
+    -DEMULATOR_VERSION_PATCH="0" \
+    -DCMAKE_BUILD_TYPE=Release ..
+  "${NINJA:=ninja}"
+cd ..
+
+install -dm755 $PKG/usr/share/$PRGNAM
+cp -a bin/gameProfiles bin/resources $PKG/usr/share/$PRGNAM
+install -Dm644 dist/linux/info.cemu.Cemu.metainfo.xml -t $PKG/usr/share/appdata
+install -Dm644 dist/linux/info.cemu.Cemu.desktop -t $PKG/usr/share/applications
+install -Dm644 dist/linux/info.cemu.Cemu.png -t $PKG/usr/share/icons/hicolor/128x128/apps
+install -Dm755 bin/Cemu_release $PKG/usr/bin/$PRGNAM
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE.txt README.md \
+   $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
