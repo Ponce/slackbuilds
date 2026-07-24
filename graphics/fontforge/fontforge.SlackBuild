@@ -22,7 +22,13 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# Currently maintained by David Woodfall <dave@slackbuilds.org>
+# Currently maintained by B. Watson <urchlay@slackware.uk>
+
+# 20260724 bkw, BUILD=4:
+# - take over maintenance.
+# - actually use SLKCFLAGS.
+# - TODO: update for 20251009 at some point.
+
 #
 # 2022-02-08 19:11:35 +0000,20201107
 # Switch to cmake
@@ -39,7 +45,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=fontforge
 VERSION=${VERSION:-20201107}
-BUILD=${BUILD:-3}
+BUILD=${BUILD:-4}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -65,14 +71,8 @@ if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   exit 0
 fi
 
-# This ought to be more reliable than testing if a package DB file
-# exists.  A little convoluted perhaps.
-if $PRGNAM -v 2>/dev/null |
-     sed -n "s,^\($PRGNAM .*\),Found existing installation:\n \n\1,p
-     n;p;a\ " | grep -v "^$"; then
-
-  echo "Please uninstall any previous versions of $PRGNAM before building
-a new one."
+if $PRGNAM -v &>/dev/null; then
+  echo "Please uninstall any previous versions of $PRGNAM before building a new one."
   exit 1
 fi
 
@@ -93,6 +93,7 @@ else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
+SLKCFLAGS+=" -DNDEBUG"
 
 set -e
 
@@ -115,17 +116,18 @@ chmod -R u+w,go+r-w,a-s gnulib uthash
 mkdir -p build
 cd build
   cmake \
-    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_C_FLAGS_RELEASE="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS_RELEASE="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
-    -DMAN_INSTALL_DIR=/usr/man \
+    -DCMAKE_INSTALL_MANDIR=man \
+    -DCMAKE_INSTALL_LIBDIR=lib$LIBDIRSUFFIX \
     -DENABLE_LIBSPIRO=OFF \
     -DENABLE_LIBUNINAMESLIST=OFF \
     -DENABLE_DOCS=${DOCS:-OFF} \
     -DCMAKE_BUILD_TYPE=Release ..
-  make
-  make install DESTDIR=$PKG
+  make VERBOSE=1
+  make install/strip DESTDIR=$PKG
+  gzip -9 $PKG/usr/man/man*/*
 cd ..
 
 # Let's add the cidmaps
@@ -134,25 +136,19 @@ tar xvf $CWD/cidmaps.tgz -C $PKG/usr/share/fontforge || exit 1
 chmod 0644 $PKG/usr/share/fontforge/*.cidmap
 chown root:root $PKG/usr/share/fontforge/*.cidmap
 
-rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | \
-  grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-mv $PKG/usr/share/man $PKG/usr
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 
-# Move docs
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+
+# Move docs (if Sphinx was installed)
 if [ -d $PKG/usr/share/doc/$PRGNAM/ ]; then
-  mv $PKG/usr/share/doc/$PRGNAM/* $PKG/usr/doc/$PRGNAM-$VERSION
+  mv $PKG/usr/share/doc/$PRGNAM/* $PKGDOC
   rm -rf $PKG/usr/share/doc
 fi
 
-cp -a AUTHORS LICENSE $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cp -a AUTHORS LICENSE $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 find $PKG/usr/doc -type f -exec chmod 644 {} \+
 
 mkdir -p $PKG/install
