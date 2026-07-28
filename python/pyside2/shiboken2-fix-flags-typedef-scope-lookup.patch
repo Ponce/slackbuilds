@@ -1,0 +1,92 @@
+# Fix shiboken2 flags/typedef scope lookup for modern libclang.
+#
+# Symptom (after nested-enum Type fix): QTextOption::flags()/setFlags()
+# generate QFlags<QCommandLineOption::Flag> instead of QTextOption::Flags.
+#
+# Causes:
+# 1. Nested typedefs like Flags are spelled bare by clang; type lookup
+#    then uses findFlagsType("Flags") which matched the wrong Class::Flags.
+# 2. findTypeEntryUsingContext only used findType(); FlagsTypeEntry lives
+#    in m_flagsEntries under originalName "Class::Flags".
+# 3. findFlagsType endsWith fallback still returned the first of many
+#    "::Flags" matches.
+#
+# Apply after shiboken2-fix-clang-nested-enum-type-lookup.patch.
+
+--- a/sources/shiboken2/ApiExtractor/clangparser/clangbuilder.cpp
++++ b/sources/shiboken2/ApiExtractor/clangparser/clangbuilder.cpp
+@@ -531,6 +531,32 @@
+            || TypeInfo::stripLeadingVolatile(&typeName)) {
+     }
+ 
++    // Nested typedefs/enums used without qualification are often spelled as
++    // bare "Flags" / "Flag" / "Type". Qualify them with the enclosing class
++    // so type lookup can distinguish QTextOption::Flags from
++    // QCommandLineOption::Flags (etc.).
++    if (!typeName.contains(QLatin1String("::"))) {
++        const CXCursor decl = clang_getTypeDeclaration(nestedType);
++        if (!clang_Cursor_isNull(decl)
++            && clang_getCursorKind(decl) != CXCursor_NoDeclFound) {
++            const CXCursorKind declKind = clang_getCursorKind(decl);
++            if (declKind == CXCursor_TypedefDecl
++                || declKind == CXCursor_TypeAliasDecl
++                || declKind == CXCursor_EnumDecl) {
++                const CXCursor parent = clang_getCursorSemanticParent(decl);
++                const CXCursorKind parentKind = clang_getCursorKind(parent);
++                if (parentKind == CXCursor_ClassDecl
++                    || parentKind == CXCursor_StructDecl
++                    || parentKind == CXCursor_ClassTemplate
++                    || parentKind == CXCursor_ClassTemplatePartialSpecialization) {
++                    const QString parentName = getCursorSpelling(parent);
++                    if (!parentName.isEmpty())
++                        typeName = parentName + QLatin1String("::") + typeName;
++                }
++            }
++        }
++    }
++
+     // Obtain template instantiations if the name has '<' (thus excluding
+     // typedefs like "std::string".
+     if (typeName.contains(QLatin1Char('<')))
+--- a/sources/shiboken2/ApiExtractor/abstractmetabuilder.cpp
++++ b/sources/shiboken2/ApiExtractor/abstractmetabuilder.cpp
+@@ -2070,7 +2070,14 @@
+     const TypeEntry* type = nullptr;
+     QStringList context = metaClass->qualifiedCppName().split(colonColon());
+     while (!type && !context.isEmpty()) {
+-        type = TypeDatabase::instance()->findType(context.join(colonColon()) + colonColon() + qualifiedName);
++        const QString candidate = context.join(colonColon()) + colonColon() + qualifiedName;
++        type = TypeDatabase::instance()->findType(candidate);
++        // FlagsTypeEntry is stored in m_entries as "QFlags<Enum>" but in
++        // m_flagsEntries under originalName "Class::Flags". Bare "Flags" from
++        // clang must resolve via the latter when we have class context
++        // (e.g. QTextOption::flags() vs QCommandLineOption::Flags).
++        if (!type)
++            type = TypeDatabase::instance()->findFlagsType(candidate);
+         context.removeLast();
+     }
+     return type;
+--- a/sources/shiboken2/ApiExtractor/typedatabase.cpp
++++ b/sources/shiboken2/ApiExtractor/typedatabase.cpp
+@@ -469,13 +469,19 @@
+         if (!fte) {
+             // Last hope: match "Scope::FlagsName" when looking up "FlagsName".
+             // Require a "::" separator so "Type" does not match "ShaderType".
++            // If several flags share the same trailing name (e.g. many
++            // Class::Flags), refuse to guess — callers with class context
++            // should pass a qualified name instead.
+             const QString scopeSuffix = QLatin1String("::") + name;
++            TypeEntry *found = nullptr;
+             for (auto it = m_flagsEntries.cbegin(), end = m_flagsEntries.cend(); it != end; ++it) {
+                 if (it.key() == name || it.key().endsWith(scopeSuffix)) {
+-                    fte = it.value();
+-                    break;
++                    if (found)
++                        return nullptr; // ambiguous
++                    found = it.value();
+                 }
+             }
++            fte = found;
+         }
+     }
+     return static_cast<FlagsTypeEntry *>(fte);
