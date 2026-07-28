@@ -22,14 +22,23 @@
 # Now maintained by Dave Woodfall <dave@slackbuilds.org> (2018)
 # Much appreciation to the debian maintainers for keeping w3m alive and
 # patched https://packages.debian.org/stretch/w3m
+#
+# 2026/07/27 Ioannis Anagnostakis: switched upstream from the dormant Debian
+#   fork (tats/w3m, last touched 2023) to Rene Kita's actively maintained
+#   fork at https://sr.ht/~rkta/w3m, (not gemini) which is where w3m development lives
+#   now for most distros.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=w3m
-VERSION=${VERSION:-0.5.3+git20230121}
+VERSION=${VERSION:-0.5.6}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+
+# Upstream ships no release tarballs; the source is the SourceHut archive
+# of the v$VERSION tag, which unpacks into w3m-v$VERSION.
+SRCNAM=$PRGNAM-v$VERSION
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -39,9 +48,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -69,23 +75,52 @@ set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
+
+# The SourceHut archive downloads as the bare tag name, v$VERSION.tar.gz.
+# Accept $SRCNAM.tar.gz as well, for anyone who renamed it on the way in
+# or is building from a rehosted copy.
+if [ -f $CWD/v$VERSION.tar.gz ]; then
+  SRCTAR=$CWD/v$VERSION.tar.gz
+elif [ -f $CWD/$SRCNAM.tar.gz ]; then
+  SRCTAR=$CWD/$SRCNAM.tar.gz
+else
+  echo "$PRGNAM: no source tarball in $CWD" 1>&2
+  echo "expected v$VERSION.tar.gz or $SRCNAM.tar.gz" 1>&2
+  exit 1
+fi
+
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-# source
-tar xvf $CWD/${PRGNAM}_${VERSION}.orig.tar.xz
-cd $PRGNAM-$VERSION
+rm -rf $SRCNAM
+tar xvf $SRCTAR
+cd $SRCNAM
 
 chown -R root:root .
-find -L . \
+find . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
  -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \;
 
-[ -n "$NOMOUSE" ] && mouse="--disable-mouse"
-[ -n "$NOMAILER" ] && mailer="--disable-w3mmailer"
-[ -n "$GUIBROWSER" ] && browser="--with-browser=$GUIBROWSER"
-[ -n "$EDITOR" ] && editor="--with-editor=$EDITOR"
+# Upstream's po/Makefile.in.in still uses the automake<=1.9 $(mkdir_p)
+# variable, which configure never substitutes. The literal string
+# "@mkdir_p@" then gets run as a command, every mkdir in install-po fails,
+# and the .mo files are silently dropped from the package -- "make install"
+# does not return an error, so this is easy to miss. Reported upstream.
+sed -i 's|^mkdir_p = @mkdir_p@|mkdir_p = $(MKDIR_P)|' po/Makefile.in.in
+
+# Optional build-time knobs; see README.
+[ -n "$NOMOUSE" ]     && mouse="--disable-mouse"
+[ -n "$NOMAILER" ]    && mailer="--disable-w3mmailer"
+[ -n "$W3M_BROWSER" ] && browser="--with-browser=$W3M_BROWSER"
+[ -n "$W3M_EDITOR" ]  && editor="--with-editor=$W3M_EDITOR"
+
+# Inline images need gdk-pixbuf2 + gdk-pixbuf2-xlib (both in Slackware).
+# NOIMAGE=yes drops w3mimgdisplay entirely and unlinks us from gdk-pixbuf2.
+if [ -n "$NOIMAGE" ]; then
+  image="--enable-image=no"
+else
+  image="--enable-image=x11,fb --with-imagelib=gtk2"
+fi
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -96,17 +131,11 @@ CXXFLAGS="$SLKCFLAGS" \
   --sysconfdir=/etc \
   --localstatedir=/var \
   --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
   --with-gc \
   --with-ssl \
-  --enable-image="x11,fb" \
-  --enable-keymap="w3m" \
-  --enable-gopher \
-  --enable-unicode \
-  --enable-nls \
-  --enable-m17n \
-  --with-imagelib="gtk2 gdk-pixbuf2" \
   --with-termlib="terminfo ncurses" \
+  --enable-keymap="w3m" \
+  $image \
   $mouse \
   $mailer \
   $browser \
@@ -116,55 +145,37 @@ CXXFLAGS="$SLKCFLAGS" \
 make
 make install DESTDIR=$PKG
 
+# Compiled-in CONF_DIR, but nothing installs it.
+mkdir -p $PKG/etc/w3m
+
+# "make install" ships these helpers unconditionally, even when the
+# feature that calls them has been compiled out. Drop the dead ones.
+[ -n "$NOIMAGE" ]  && rm -f $PKG/usr/libexec/w3m/xface2xpm
+[ -n "$NOMAILER" ] && rm -f $PKG/usr/libexec/w3m/cgi-bin/w3mmail.cgi
+
+# When configure cannot find nkf it bakes a /usr/local/bin/nkf fallback
+# into multipart.cgi, which is never a valid path here. Point it at the
+# location the SBo nkf package uses, so the script starts working if nkf
+# is installed later. No-op when configure found nkf itself.
+sed -i 's|/usr/local/bin/nkf|/usr/bin/nkf|g' \
+  $PKG/usr/libexec/w3m/cgi-bin/multipart.cgi
+
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/examples/Bonus
-find Bonus -type f | while read f; do
-  install -m 644 $f $PKG/usr/doc/$PRGNAM-$VERSION/examples/Bonus
-done
+find $PKG/usr/man -type f -exec gzip -9 {} \+
 
-mkdir -p $PKG/etc/w3m
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+# All shipped documentation is UTF-8 since 0.5.4, no recoding needed.
+# ChangeLog is deprecated upstream in favour of NEWS and the git log.
+cp -a COPYING NEWS README doc doc-de doc-jp $PKG/usr/doc/$PRGNAM-$VERSION
 
-DOCS="ChangeLog NEWS doc* ABOUT-NLS README TODO"
-
-cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
-
-mv $PKG/usr/doc/$PRGNAM-$VERSION/examples/Bonus/README \
-  $PKG/usr/doc/$PRGNAM-$VERSION/examples/Bonus/README.ja
-
-for f in \
-   $PKG/usr/doc/$PRGNAM-$VERSION/examples/Bonus/README.ja \
-   $PKG/usr/doc/$PRGNAM-$VERSION/doc-jp/FAQ.html \
-   $PKG/usr/doc/$PRGNAM-$VERSION/doc-jp/HISTORY \
-   $PKG/usr/doc/$PRGNAM-$VERSION/doc-jp/MANUAL.html \
-   $PKG/usr/doc/$PRGNAM-$VERSION/doc-jp/README \
-   $PKG/usr/doc/$PRGNAM-$VERSION/doc-jp/README.SSL \
-   $PKG/usr/doc/$PRGNAM-$VERSION/doc-jp/README.cookie \
-   $PKG/usr/doc/$PRGNAM-$VERSION/doc-jp/README.dict \
-   $PKG/usr/doc/$PRGNAM-$VERSION/doc-jp/README.func \
-   $PKG/usr/doc/$PRGNAM-$VERSION/doc-jp/README.keymap \
-   $PKG/usr/doc/$PRGNAM-$VERSION/doc-jp/README.m17n \
-   $PKG/usr/doc/$PRGNAM-$VERSION/doc-jp/README.mailcap \
-   $PKG/usr/doc/$PRGNAM-$VERSION/doc-jp/README.menu \
-   $PKG/usr/doc/$PRGNAM-$VERSION/doc-jp/README.migemo \
-   $PKG/usr/doc/$PRGNAM-$VERSION/doc-jp/README.mouse \
-   $PKG/usr/doc/$PRGNAM-$VERSION/doc-jp/README.siteconf \
-   $PKG/usr/doc/$PRGNAM-$VERSION/doc-jp/STORY.html \
-   $PKG/usr/doc/$PRGNAM-$VERSION/doc-jp/menu.default \
-   $PKG/usr/doc/$PRGNAM-$VERSION/doc-jp/menu.submenu \
-   $PKG/usr/man/ja/man1/w3m.1; do \
-   iconv -f euc-jp -t utf-8 "$f" > "$f".tmp \
-    && mv -f "$f".tmp "$f" || rm -f "$f".tmp; \
- done
-
-find $PKG -name CVS -type d -exec rm -rf '{}' \+
-
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz \
-  rm $i ; done
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/examples
+cp -a Bonus $PKG/usr/doc/$PRGNAM-$VERSION/examples
+chmod 644 $PKG/usr/doc/$PRGNAM-$VERSION/examples/Bonus/*
 
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
