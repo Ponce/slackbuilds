@@ -1,0 +1,224 @@
+#!/bin/bash
+
+# Slackware build script for fpc-mingw-w64
+
+# Copyright 2026 Pablo Romano, Seville, Spain
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd "$(dirname "$0")" ; CWD=$(pwd)
+
+PRGNAM=fpc-mingw-w64
+VERSION=${VERSION:-3.2.2}
+BOOTSTRAPVER=${BOOTSTRAPVER:-3.2.2}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  ARCH=$(uname -m)
+fi
+
+case "$ARCH" in
+  x86_64)
+    LIBDIRSUFFIX=64
+    ;;
+  *)
+    echo "$ARCH is not supported."
+    exit 1
+    ;;
+esac
+
+if [ -n "$PRINT_PACKAGE_NAME" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+WORK=$TMP/$PRGNAM-$VERSION
+SRCDIR=$WORK/fpcbuild-$VERSION
+FPCSRC=$SRCDIR/fpcsrc
+BOOTDIR=$WORK/bootstrap
+STAGEDIR=$WORK/stage
+CHECKDIR=$WORK/check
+
+set -e
+
+find_one() {
+  find "$1" -type f -name "$2" -print -quit
+}
+
+build_cross() {
+  CPU_TARGET=$1
+  OS_TARGET=$2
+  BINUTILSPREFIX=$3
+  CROSS_COMPILER=$4
+  UNIT_TARGET=$5
+  NATIVE_COMPILER=$6
+
+  make -C "$FPCSRC" -j1 compiler_clean \
+    CPU_TARGET="$CPU_TARGET" \
+    OS_TARGET="$OS_TARGET"
+
+  # crossall builds the cross compiler, target RTL, and target units.
+  # Only the cross compiler and RTL are installed by this package.
+  make -C "$FPCSRC" -j1 crossall \
+    PP="$NATIVE_COMPILER" \
+    FPC="$NATIVE_COMPILER" \
+    CPU_TARGET="$CPU_TARGET" \
+    OS_TARGET="$OS_TARGET" \
+    BINUTILSPREFIX="$BINUTILSPREFIX" \
+    CROSSOPT="-O2" \
+    NOGDB=1
+
+  # Preserve the output before the next compiler_clean invocation.
+  install -Dm755 "$FPCSRC/compiler/$CROSS_COMPILER" \
+    "$STAGEDIR/$CROSS_COMPILER"
+  mkdir -p "$STAGEDIR/units"
+  rm -rf "$STAGEDIR/units/$UNIT_TARGET"
+  cp -a "$FPCSRC/rtl/units/$UNIT_TARGET" \
+    "$STAGEDIR/units/$UNIT_TARGET"
+}
+
+rm -rf "$PKG" "$WORK"
+mkdir -p "$TMP" "$PKG" "$OUTPUT" "$WORK" "$BOOTDIR" "$STAGEDIR"
+
+cd "$WORK"
+tar xvf "$CWD/fpcbuild-$VERSION.tar.gz"
+
+# The official binary archive is used only to create a native temporary
+# compiler. No file from the downloaded binary archive is packaged.
+tar xvf "$CWD/fpc-$BOOTSTRAPVER.x86_64-linux.tar" -C "$BOOTDIR"
+BINARY_ARCHIVE=$(find_one "$BOOTDIR" binary.x86_64-linux.tar)
+if [ -z "$BINARY_ARCHIVE" ]; then
+  echo "Unable to locate binary.x86_64-linux.tar in the bootstrap archive."
+  exit 1
+fi
+tar xvf "$BINARY_ARCHIVE" -C "$BOOTDIR"
+
+BASE_ARCHIVE=$(find_one "$BOOTDIR" base.x86_64-linux.tar.gz)
+if [ -z "$BASE_ARCHIVE" ]; then
+  echo "Unable to locate base.x86_64-linux.tar.gz in the bootstrap archive."
+  exit 1
+fi
+tar xvf "$BASE_ARCHIVE" -C "$BOOTDIR"
+
+START_COMPILER=$(find_one "$BOOTDIR" ppcx64)
+if [ -z "$START_COMPILER" ]; then
+  echo "Unable to locate ppcx64 in the bootstrap archive."
+  exit 1
+fi
+chmod 755 "$START_COMPILER"
+
+cd "$SRCDIR"
+chown -R root:root .
+find -L . \
+  \( -perm 777 -o -perm 775 -o -perm 750 \) -exec chmod 755 {} + -o \
+  \( -perm 666 -o -perm 664 -o -perm 640 \) -exec chmod 644 {} +
+
+# Build a native compiler from the same source release. This compiler is
+# temporary and is not installed in the resulting package.
+make -C "$FPCSRC" -j1 compiler_cycle PP="$START_COMPILER"
+install -Dm755 "$FPCSRC/compiler/ppcx64" \
+  "$STAGEDIR/ppcx64-bootstrap"
+NATIVE_COMPILER=$STAGEDIR/ppcx64-bootstrap
+
+# Rebuild the native RTL with the newly created temporary compiler.
+make -C "$FPCSRC" -j1 rtl_clean rtl_all PP="$NATIVE_COMPILER"
+
+# Build the 32-bit and 64-bit Windows cross compilers and their RTLs.
+build_cross i386 win32 i686-w64-mingw32- \
+  ppcross386 i386-win32 "$NATIVE_COMPILER"
+build_cross x86_64 win64 x86_64-w64-mingw32- \
+  ppcrossx64 x86_64-win64 "$NATIVE_COMPILER"
+
+# Compile minimal programs without reading any system FPC configuration.
+mkdir -p "$CHECKDIR/win32" "$CHECKDIR/win64"
+cat > "$CHECKDIR/hello.pas" <<'EOF_PASCAL'
+program hello;
+begin
+  writeln('hello from a cross-compiled binary');
+end.
+EOF_PASCAL
+
+"$STAGEDIR/ppcross386" -n -Twin32 -Pi386 \
+  -XPi686-w64-mingw32- \
+  -Fu"$STAGEDIR/units/i386-win32" \
+  -FE"$CHECKDIR/win32" \
+  "$CHECKDIR/hello.pas"
+
+"$STAGEDIR/ppcrossx64" -n -Twin64 -Px86_64 \
+  -XPx86_64-w64-mingw32- \
+  -Fu"$STAGEDIR/units/x86_64-win64" \
+  -FE"$CHECKDIR/win64" \
+  "$CHECKDIR/hello.pas"
+
+file "$CHECKDIR/win32/hello.exe" | grep -q "PE32 executable"
+file "$CHECKDIR/win64/hello.exe" | grep -q "PE32+ executable"
+
+FPCLIB=usr/lib$LIBDIRSUFFIX/fpc/$VERSION
+install -Dm755 "$STAGEDIR/ppcross386" "$PKG/$FPCLIB/ppcross386"
+install -Dm755 "$STAGEDIR/ppcrossx64" "$PKG/$FPCLIB/ppcrossx64"
+
+mkdir -p "$PKG/usr/bin"
+(
+  cd "$PKG/usr/bin"
+  ln -s "../lib$LIBDIRSUFFIX/fpc/$VERSION/ppcross386" ppcross386
+  ln -s "../lib$LIBDIRSUFFIX/fpc/$VERSION/ppcrossx64" ppcrossx64
+)
+
+# Install only the target RTL units, not the remaining cross-built packages.
+mkdir -p \
+  "$PKG/$FPCLIB/units/i386-win32" \
+  "$PKG/$FPCLIB/units/x86_64-win64"
+cp -a "$STAGEDIR/units/i386-win32" \
+  "$PKG/$FPCLIB/units/i386-win32/rtl"
+cp -a "$STAGEDIR/units/x86_64-win64" \
+  "$PKG/$FPCLIB/units/x86_64-win64/rtl"
+
+install -Dm644 "$CWD/fpc-mingw-w64.cfg" \
+  "$PKG/etc/fpc-mingw-w64.cfg.new"
+
+DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p "$DOCDIR"
+for DOC in COPYING.v2 rtl/COPYING.FPC; do
+  if [ -f "$FPCSRC/$DOC" ]; then
+    cp -a "$FPCSRC/$DOC" "$DOCDIR/"
+  fi
+done
+cat "$CWD/README" > "$DOCDIR/README"
+cat "$CWD/$PRGNAM.SlackBuild" > "$DOCDIR/$PRGNAM.SlackBuild"
+
+# Strip only native ELF executables. Windows objects and RTL archives must not
+# be processed with the host strip utility.
+find "$PKG" -type f -perm /111 -print0 | \
+  xargs -0 -r file -m /etc/file/magic/elf | \
+  grep -E "ELF.*(executable|shared object)" | \
+  cut -d: -f1 | \
+  xargs -r strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p "$PKG/install"
+cat "$CWD/slack-desc" > "$PKG/install/slack-desc"
+cat "$CWD/doinst.sh" > "$PKG/install/doinst.sh"
+
+cd "$PKG"
+/sbin/makepkg -l y -c n \
+  "$OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
