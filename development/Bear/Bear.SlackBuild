@@ -25,7 +25,7 @@
 cd "$(dirname "$0")" ; CWD=$(pwd)
 
 PRGNAM=Bear
-VERSION=${VERSION:-4.0.3}
+VERSION=${VERSION:-4.1.5}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -69,15 +69,12 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Adjust the hardcoded path according to our installation path.
-sed -i 's|/usr/local/libexec/bear|/usr/libexec/bear|g' bear/build.rs
-
 # Use rust-opt. This is particularly a necessity on Slackware-15.0.
 export PATH="/opt/rust/bin:$PATH"
 if [ -z "$LD_LIBRARY_PATH" ]; then
-  export LD_LIBRARY_PATH="/opt/rust/lib$LIBDIRSUFFIX"
+  export LD_LIBRARY_PATH="/opt/rust/lib"
 else
-  export LD_LIBRARY_PATH="/opt/rust/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
+  export LD_LIBRARY_PATH="/opt/rust/lib:$LD_LIBRARY_PATH"
 fi
 
 # On Slackware-15.0 there's no "ld.lld". Luckily, "rust-opt" provides it.
@@ -92,25 +89,31 @@ export CARGO_NET_OFFLINE=true
 # got created by extracting the vendored sources archive.
 export CARGO_HOME=$(pwd)/.cargo
 
-cargo build --release
+INTERCEPT_LIBDIR=lib$LIBDIRSUFFIX cargo build --release
+./target/release/generate-completions target/release/completions
+DESTDIR=$PKG PREFIX=/usr INTERCEPT_LIBDIR=lib$LIBDIRSUFFIX ./scripts/install.sh
 
-mkdir -p $PKG/usr/bin
-mkdir -p $PKG/usr/libexec/bear
-mkdir -p $PKG/usr/libexec/bear/lib$LIBDIRSUFFIX
+chmod +x $PKG/usr/libexec/bear/lib$LIBDIRSUFFIX/libexec.so
+
+# Assume there's only one file (bear.1) and then use rmdir.
+# If in future updates, there comes more, rmdir will let us know.
 mkdir -p $PKG/usr/man/man1
-install -m 755 target/release/bear       $PKG/usr/bin/
-install -m 755 target/release/wrapper    $PKG/usr/libexec/bear/
-install -m 644 man/bear.1                $PKG/usr/man/man1/
-install -m 755 target/release/libexec.so $PKG/usr/libexec/bear/lib$LIBDIRSUFFIX
+install -m 644 $PKG/usr/share/man/man1/bear.1 $PKG/usr/man/man1
+rm $PKG/usr/share/man/man1/bear.1
+rmdir $PKG/usr/share/man/man1
+rmdir $PKG/usr/share/man
 
 # Compress man pages.
 find "$PKG/usr/man" -type f -exec gzip -9 {} \;
 
 mkdir -p "$PKG/usr/doc/$PRGNAM-$VERSION"
-cat "$PWD/COPYING"            > "$PKG/usr/doc/$PRGNAM-$VERSION/LICENSE"
-cat "$PWD/README.md"          > "$PKG/usr/doc/$PRGNAM-$VERSION/README.md"
+for doc in "$PKG"/usr/share/doc/bear/*
+do
+  cat "$doc" > "$PKG/usr/doc/$PRGNAM-$VERSION/$(basename $doc)"
+done
+rm -r "$PKG/usr/share/doc"
 cat "$CWD/$PRGNAM.SlackBuild" > "$PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild"
-cat "$CWD/README"             > "$PKG/usr/doc/$PRGNAM-$VERSION/README.slackware"
+cat "$CWD/README"             > "$PKG/usr/doc/$PRGNAM-$VERSION/README.maintainer"
 
 mkdir -p "$PKG/install"
 cat "$CWD/slack-desc"         > "$PKG/install/slack-desc"
