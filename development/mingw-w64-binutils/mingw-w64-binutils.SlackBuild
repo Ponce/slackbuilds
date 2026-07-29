@@ -1,0 +1,173 @@
+#!/bin/bash
+
+# Slackware build script for mingw-w64-binutils
+
+# Copyright 2026 Pablo Romano, Seville, Spain
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd "$(dirname "$0")" ; CWD=$(pwd)
+
+PRGNAM=mingw-w64-binutils
+VERSION=${VERSION:-2.46.1}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$(uname -m)" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$(uname -m) ;;
+  esac
+fi
+
+case "$ARCH" in
+  i?86)
+    SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+    LIBDIRSUFFIX=""
+    ;;
+  x86_64)
+    SLKCFLAGS="-O2 -fPIC"
+    LIBDIRSUFFIX="64"
+    ;;
+  arm*)
+    SLKCFLAGS="-O2 -march=armv7-a -mfpu=vfpv3-d16"
+    LIBDIRSUFFIX=""
+    ;;
+  aarch64)
+    SLKCFLAGS="-O2 -fPIC"
+    LIBDIRSUFFIX="64"
+    ;;
+  *)
+    echo "$ARCH is not supported."
+    exit 1
+    ;;
+esac
+
+if [ -n "$PRINT_PACKAGE_NAME" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+SRCDIR=$TMP/binutils-$VERSION
+TOOLROOT=/usr/libexec/$PRGNAM
+
+set -e
+
+rm -rf "$PKG" "$SRCDIR" "$TMP/$PRGNAM-$VERSION"
+mkdir -p "$TMP" "$PKG" "$OUTPUT" "$TMP/$PRGNAM-$VERSION"
+
+cd "$TMP"
+tar xvf "$CWD/binutils-$VERSION.tar.xz"
+cd "$SRCDIR"
+chown -R root:root .
+find -L . \
+  \( -perm 777 -o -perm 775 -o -perm 750 \) -exec chmod 755 {} + -o \
+  \( -perm 666 -o -perm 664 -o -perm 640 \) -exec chmod 644 {} +
+
+for TARGET in i686-w64-mingw32 x86_64-w64-mingw32; do
+  BUILDDIR=$TMP/$PRGNAM-$VERSION/build-$TARGET
+  DESTDIR=$TMP/$PRGNAM-$VERSION/dest-$TARGET
+  rm -rf "$BUILDDIR" "$DESTDIR"
+  mkdir -p "$BUILDDIR" "$DESTDIR"
+
+  cd "$BUILDDIR"
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  "$SRCDIR/configure" \
+    --prefix="$TOOLROOT" \
+    --bindir="$TOOLROOT/bin" \
+    --libdir="$TOOLROOT/lib$LIBDIRSUFFIX" \
+    --mandir=/usr/man \
+    --infodir=/usr/info \
+    --target="$TARGET" \
+    --disable-nls \
+    --disable-werror \
+    --disable-multilib \
+    --disable-shared \
+    --enable-static \
+    --disable-gdb \
+    --disable-gdbserver \
+    --disable-gprofng \
+    --disable-sim
+
+  make
+  make DESTDIR="$DESTDIR" install
+
+  # Keep Binutils' private target hierarchy below /usr/libexec. This is a
+  # standard Slackware directory and preserves the paths compiled into ld.
+  mkdir -p "$PKG$TOOLROOT/bin"
+  cp -a "$DESTDIR$TOOLROOT/bin/$TARGET-"* "$PKG$TOOLROOT/bin/"
+
+  if [ -d "$DESTDIR$TOOLROOT/$TARGET" ]; then
+    mkdir -p "$PKG$TOOLROOT"
+    cp -a "$DESTDIR$TOOLROOT/$TARGET" "$PKG$TOOLROOT/"
+  fi
+
+  # Expose only target-prefixed entry points in /usr/bin. Relative links keep
+  # the package relocatable inside DESTDIR while resolving correctly after
+  # installation.
+  mkdir -p "$PKG/usr/bin"
+  for PROGRAM in "$PKG$TOOLROOT/bin/$TARGET-"*; do
+    BASENAME=$(basename "$PROGRAM")
+    ln -s "../libexec/$PRGNAM/bin/$BASENAME" "$PKG/usr/bin/$BASENAME"
+  done
+
+  if [ -d "$DESTDIR/usr/man" ]; then
+    while IFS= read -r MANPAGE; do
+      RELATIVE=${MANPAGE#"$DESTDIR"/}
+      install -Dm644 "$MANPAGE" "$PKG/$RELATIVE"
+    done < <(find "$DESTDIR/usr/man" -type f -name "$TARGET-*" -print)
+  fi
+done
+
+find "$PKG" -type f -perm /111 -print0 | \
+  xargs -0 -r file -m /etc/file/magic/elf | \
+  grep -E "ELF.*(executable|shared object)" | \
+  cut -d: -f1 | \
+  xargs -r strip --strip-unneeded 2> /dev/null || true
+
+if [ -d "$PKG/usr/man" ]; then
+  find "$PKG/usr/man" -type f -exec gzip -9 {} +
+  for LINK in $(find "$PKG/usr/man" -type l); do
+    ln -s "$(readlink "$LINK").gz" "$LINK.gz"
+    rm "$LINK"
+  done
+fi
+
+DOCDIR=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p "$DOCDIR"
+for DOC in COPYING COPYING3 COPYING.LIB COPYING3.LIB README; do
+  if [ -f "$SRCDIR/$DOC" ]; then
+    cp -a "$SRCDIR/$DOC" "$DOCDIR/"
+  fi
+done
+cat "$CWD/README" > "$DOCDIR/README.SBo"
+cat "$CWD/$PRGNAM.SlackBuild" > "$DOCDIR/$PRGNAM.SlackBuild"
+
+mkdir -p "$PKG/install"
+cat "$CWD/slack-desc" > "$PKG/install/slack-desc"
+
+cd "$PKG"
+/sbin/makepkg -l y -c n \
+  "$OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
