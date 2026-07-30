@@ -6,6 +6,18 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20260728 bkw: upstream's alive again, ported to SDL3.
+# - updated for v4.0.2.
+# - upstream installs everything in the same dir, so use /opt/$PRGNAM
+#   because I don't feel like spending hours fighting with it...
+# - patch it to start windowed by default. SDL3 windows are arbitrarily
+#   resizable so you can just maximize the game. Also fullscreen doesn't
+#   play well with multi-head. The --fullscreen option still works, it
+#   just isn't the default now.
+# - get rid of maelstrom_addon_package.pl, since mods are no longer done
+#   the same way. will add a maelstrom-mods build to replace it.
+# - update man page.
+
 # 20211020 bkw: upstream's first update since 2002! ported to SDL2!
 # - update for v3.0.7.
 # - new-style icons.
@@ -22,7 +34,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=maelstrom
-VERSION=${VERSION:-3.0.7}
+VERSION=${VERSION:-4.0.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -59,6 +71,7 @@ else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
+SLKCFLAGS+=" -DNDEBUG"
 
 set -e
 
@@ -69,41 +82,40 @@ rm -rf $SRCNAM-$VERSION
 tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
 cd $SRCNAM-$VERSION
 chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+find . ! -type l    -a \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \)
 
-# Look for game data in /usr/share/games/Maelstrom, not /usr/games/Maelstrom
-sed -i '/GAME_INSTALLDIR=.*games/s,/games,/share/games,' configure
+# 20260730 bkw: starting in windowed mode by default makes more sense on
+# modern desktop platforms.
+patch -p1 < $CWD/no_fullscreen_default.diff
 
-# 20180627 bkw: It seems structs and typedefs now share a namespace
-# in gcc-8.1's g++. So rename this struct to keep the compiler happy
-# on -current (and it does no harm on 14.2 either):
-sed -i 's,struct *button,struct b_utton,g' buttonlist.h
+mkdir -p build
+cd build
+  cmake \
+    -DUSE_VENDORED_SDL=OFF \
+    -DCMAKE_C_FLAGS_RELEASE="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS_RELEASE="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/opt/$PRGNAM \
+    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
+    -DMAN_INSTALL_DIR=/usr/man \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make VERBOSE=1
+  make install/strip DESTDIR=$PKG
+cd ..
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --bindir=/usr/games \
-  --build=$ARCH-slackware-linux
+mkdir -p $PKG/usr/games
+ln -s ../../opt/$PRGNAM/Maelstrom $PKG/usr/games/Maelstrom
+ln -s ../../opt/$PRGNAM/Maelstrom $PKG/usr/games/maelstrom
 
-make
-
-# 20211020 bkw: 3.0.7's make install is hard to deal with, do without.
-GAMEDIR=$PKG/usr/share/games/$SRCNAM
-mkdir -p $PKG/usr/games $GAMEDIR
-cp -a Images Maelstrom_{Fonts,Sounds,Sprites} icon.* $GAMEDIR
-rm $GAMEDIR/Images/Makefile*
-install -s -m0755 $SRCNAM $SRCNAM-netd $PKG/usr/games
-
-# CLI users would probably prefer to type 'maelstrom', not 'Maelstrom'
-( cd $PKG/usr/games && ln -s $SRCNAM $PRGNAM )
-
-install -m0755 -o root -g root $CWD/maelstrom_addon_package.pl $PKG/usr/games
+DOC=/usr/doc/$PRGNAM-$VERSION
+PKGDOC=$PKG$DOC
+mkdir -p $PKG/usr/doc
+mv $PKG/opt/$PRGNAM/Docs $PKGDOC
+ln -s ../../$DOC $PKG/opt/$PRGNAM/Docs
 
 mkdir -p $PKG/usr/share/applications
-cp $CWD/$PRGNAM.desktop $PKG/usr/share/applications
+cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
 
 # upstream's icon is 48x48, resize
 for i in 16 32 48 64; do
@@ -111,11 +123,11 @@ for i in 16 32 48 64; do
   size=${px}x${px}
   dir=$PKG/usr/share/icons/hicolor/$size/apps
   mkdir -p $dir
-  convert -resize $size icon.xpm $dir/$PRGNAM.png
+  ln -s ../../../../../../opt/maelstrom/Data/Icons/icon-$i.png $dir/$PRGNAM.png
 done
 
 mkdir -p $PKG/usr/share/pixmaps
-( cd $PKG/usr/share/pixmaps ; ln -s ../games/$SRCNAM/icon.xpm $PRGNAM.xpm )
+( cd $PKG/usr/share/pixmaps ; ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PRGNAM.png )
 
 mkdir -p $PKG/usr/man/man6
 gzip -9c $CWD/$SRCNAM.6 > $PKG/usr/man/man6/$SRCNAM.6.gz
@@ -123,10 +135,7 @@ gzip -9c $CWD/$SRCNAM.6 > $PKG/usr/man/man6/$SRCNAM.6.gz
   ln -s $SRCNAM.6.gz $PRGNAM.6.gz
   ln -s $SRCNAM.6.gz $SRCNAM-netd.6.gz )
 
-PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
-mkdir -p $PKGDOC
-cp -a Changelog *.txt Docs $PKGDOC
-rm -f $PKGDOC/Docs/Makefile*
+cp -a CREDITS $PKGDOC
 cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
