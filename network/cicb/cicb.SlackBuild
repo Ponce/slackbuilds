@@ -6,6 +6,8 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20260731 bkw: update for v5.1.3b4+git20251030.
+
 # 20180623 bkw:
 # There's a new upstream, and development is happening
 # again, using 5.1.1b3 as a basis. Sourceforge project is gone, moved
@@ -25,7 +27,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=cicb
-VERSION=${VERSION:-5.1.2b1+git20191209}
+VERSION=${VERSION:-5.1.3b4+git20251030}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -49,17 +51,14 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
 fi
+SLKCFLAGS+=" -DNDEBUG"
 
 set -e
 
@@ -70,55 +69,48 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+find . ! -type l    -a \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \)
+
+# 20260731 bkw: SSL/TLS support is a mess...
+patch -p1 < $CWD/cmake.openssl.diff
+sed -i 's,HAVE_LIBSSL,HAVE_OPENSSL,' icb/externs.h
+SLKCFLAGS+=" -DDEFAULT_SSL_PORT=7327"
 
 # Need this for recent tcl, to allow deprecated features. Someday this will
 # probably stop working and upstream will have to fix it.
-SLKCFLAGS="$SLKCFLAGS -DUSE_INTERP_ERRORLINE -DUSE_INTERP_RESULT"
+SLKCFLAGS+=" -DUSE_INTERP_ERRORLINE -DUSE_INTERP_RESULT"
 
-# library autodetection is broken on 64-bit, hence the
-# --with-(readline|ssl)* and the LDFLAGS below. They don't do any harm
-# on 32-bit.
+mkdir -p build
+cd build
+  cmake \
+    -DENABLE_SSL=ON \
+    -DCMAKE_C_FLAGS_RELEASE="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make VERBOSE=1
+  make install/strip DESTDIR=$PKG
+cd ..
 
-# 20151117 bkw: -current needs CPPFLAGS=-P, and it does no harm on 14.1.
-
-CPPFLAGS="-P" \
-LDFLAGS="-L/usr/lib$LIBDIRSUFFIX" \
-CFLAGS="$SLKCFLAGS -fcommon" \
-./configure \
-  --with-ssl \
-  --with-ssl-lib=/usr/lib$LIBDIRSUFFIX \
-  --with-readlinelib=/usr/lib$LIBDIRSUFFIX \
-  --datarootdir=/usr/share/$PRGNAM \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --build=$ARCH-slackware-linux
-
-make
-
-# no DESTDIR support, and prefix= is broken. Manual install.
-# icbserverdb is newer than what's in the cicb tarball, it came from:
-# wget -O icbserverdb ftp://ftp.icb.net/pub/icb/servers
-
-mkdir -p $PKG/usr/bin $PKG/usr/share/$PRGNAM
 ln -s icb $PKG/usr/bin/$PRGNAM
-install -s -m0755 icb/icb $PKG/usr/bin
-cat $CWD/icbserverdb > $PKG/usr/share/$PRGNAM/icbserverdb.new
-cat system.icbrc > $PKG/usr/share/$PRGNAM/system.icbrc.new
+
+PKGSHARE=$PKG/usr/share/$PRGNAM
+mkdir -p $PKGSHARE
+cat icbserverdb > $PKGSHARE/icbserverdb.new
+cat system.icbrc > $PKGSHARE/system.icbrc.new
 
 # man page written for this SlackBuild
 mkdir -p $PKG/usr/man/man1
 gzip -9c < $CWD/icb.1 > $PKG/usr/man/man1/icb.1.gz
 ln -s icb.1.gz $PKG/usr/man/man1/$PRGNAM.1.gz
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a C* README TODO TRIGGERS contrib $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a COPYING CUTE_MESSAGES ChangeLog LICENSE \
+      README TODO TRIGGERS contrib \
+      $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
