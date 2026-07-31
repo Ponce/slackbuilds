@@ -25,10 +25,15 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=rmw
-VERSION=${VERSION:-0.9.5}
+VERSION=${VERSION:-0.10.0}
+SOURCEARCHIVE=$PRGNAM-$VERSION.tar.xz
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+
+# Run `meson test` after build when TEST=yes is exported. Results are
+# logged into the package's documentation directory.
+TEST="${TEST:-no}"
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -38,9 +43,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -66,7 +68,14 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+
+# Read the .info and make sure the md5sum matches.
+if ! echo "$(grep '^MD5SUM=' $CWD/$PRGNAM.info | cut -d'"' -f2)  $CWD/$SOURCEARCHIVE" | md5sum -c - ; then
+  echo "ERROR: MD5 checksum mismatch for $SOURCEARCHIVE" >&2
+  exit 1
+fi
+
+tar xvf $CWD/$SOURCEARCHIVE
 cd $PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
@@ -79,17 +88,22 @@ mkdir build
 cd build
   CFLAGS="$SLKCFLAGS" \
   CXXFLAGS="$SLKCFLAGS" \
-  meson .. \
+  meson setup .. \
     --buildtype=release \
     -Dstrip=true \
-    -Db_sanitize=none \
     -Db_lto=true \
     --mandir=/usr/man \
     --prefix=/usr \
     --localedir=/usr/share/locale \
     -Ddocdir=/usr/doc/$PRGNAM-$VERSION
   ninja
-  DESTDIR=$PKG ninja install
+
+  if [ "$TEST" = "yes" ]; then
+    mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+    meson test --print-errorlogs 2>&1 | tee $PKG/usr/doc/$PRGNAM-$VERSION/test_results.txt
+  fi
+
+  meson install --destdir $PKG
 cd ..
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
