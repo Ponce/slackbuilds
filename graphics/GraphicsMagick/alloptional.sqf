@@ -1,0 +1,15 @@
+x265
+svt-av1
+libde265
+highway
+dav1d
+aom
+ralcgm
+libjxl
+libheif
+libfpx
+jbigkit
+hp2xx
+graphviz
+dcraw
+GraphicsMagick
