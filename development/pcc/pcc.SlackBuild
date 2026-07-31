@@ -7,6 +7,11 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20260731 bkw: updated for 1.2.0.DEVEL+20260727_08c57ee.
+# - configure options changed.
+# - don't ship useless p++ and its man page.
+# - use symlink pcc => pcpp instead of 2 copies of the same binary.
+
 # 20230108 bkw: updated for 1.2.0.DEVEL+20230108.
 
 # 20210906 bkw:
@@ -37,21 +42,16 @@
 # - upgraded for pcc-1.1.0 release, no more beta
 # - add seddery to fix typo in cc.c (ifdef => ifndef)
 
-# Note to self: when updating to a new CVS snapshot, first download
-# the latest: http://pcc.ludd.ltu.se/ftp/pub/pcc/pcc-current.tgz Then
-# look at the file DATESTAMP inside that tarball, and use that date's
-# snapshot. This is because the CVS snap tarballs are generated
-# nightly, whether or not there actually were any code changes,
-# and we want VERSION to be the date of the last actual code change.
-# For pcc-libs, just use the same snapshot date as pcc.
-
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=pcc
-VERSION=${VERSION:-1.2.0.DEVEL+20230108}
+VERSION=${VERSION:-1.2.0.DEVEL+20260727_08c57ee}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+
+COMMIT=${COMMIT:-08c57eee81dcc6106e2ec47b63b93db62a84640a}
+LIBCOMMIT=${LIBCOMMIT:-f2155b9a3c1c930c3470afa9d896013e07d68927}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -70,12 +70,10 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-TARVER=${VERSION/*+}
-
 # non-standard stanza here: we're not going to use -march= or -mtune=
 # on 32-bit Slackware, because doing so prevents pcc from being used
 # to compile itself. I could add logic to use those flags only if
-# CC is gcc, but the extra complexity isn't worth the dubious benefit.
+# CC is clang, but the extra complexity isn't worth the dubious benefit.
 SLKCFLAGS="-O2 -fPIC"
 if [ "$ARCH" = "x86_64" ]; then
   LIBDIRSUFFIX="64"
@@ -94,7 +92,8 @@ if [ "$CC" = "" ]; then
     CC=clang
     SLKCFLAGS+=" -fcommon"
   else
-    echo "Can't find pcc or clang in \$PATH. Giving up." 1>&2
+    echo "!!! Can't find pcc or clang in \$PATH. Giving up." 1>&2
+    exit 1
   fi
 fi
 
@@ -102,7 +101,7 @@ fi
 # warn him how much it's going to hurt.
 if [ "$CC" = "gcc" ]; then
   echo
-  echo "!!! CC is gcc, this will produce a non-working pcc. You asked for it..."
+  echo "!!! CC is gcc, this will fail to build!"
   echo
   sleep 3
 fi
@@ -120,18 +119,27 @@ fi
 rm -rf $PKG $TMP/$PRGNAM
 mkdir -p $TMP/$PRGNAM $PKG $OUTPUT
 cd $TMP/$PRGNAM
-tar xvf $CWD/$PRGNAM-$TARVER.tgz
-tar xvf $CWD/$PRGNAM-libs-$TARVER.tgz
+tar xvf $CWD/$PRGNAM-$COMMIT.tar.gz
+tar xvf $CWD/$PRGNAM-libs-$LIBCOMMIT.tar.gz
 chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+find . ! -type l    -a \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \)
 
 # first, the compiler itself:
-cd $PRGNAM-$TARVER
+cd $PRGNAM-$COMMIT
 
+# 20260731 bkw: --enable-gcc-compat is required for pcc to be able to
+# build itself, since pcc-libs uses #include_next in its limits.h.
+# --enable-pcc-debug is also required as the build fails without it
+# (order.c:(.text+0x34): undefined reference to `e2print')
 CFLAGS="$SLKCFLAGS" \
 ./configure \
   $TLSOPT \
+  --disable-Werror \
+  --enable-gcc-compat \
+  --enable-native \
+  --enable-pcc-debug \
   --prefix=/usr \
   --mandir=/usr/man \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
@@ -142,21 +150,26 @@ CFLAGS="$SLKCFLAGS" \
 make
 make install DESTDIR=$PKG
 
+# 20260731 bkw: 'make install' installs the (still nonfunctional) frontend
+# for C++. Don't ship it.
+rm -f $PKG/usr/bin/p++ $PKG/usr/man/man1/p++.1
+
+# 20260731 bkw: identical binaries.
+rm -f $PKG/usr/bin/pcpp
+ln -s pcc $PKG/usr/bin/pcpp
+
 gzip -9 $PKG/usr/man/man?/*.?
 # Don't overwrite Slackware's man page.
 mv $PKG/usr/man/man1/cpp.1.gz $PKG/usr/man/man1/pcpp.1.gz
 
-# why are there no docs in the @##!$^ tarball?!
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-
-# license is BSD-style, in comments in the code.
-sed -n '/Copyright/,/^ *$/s,^...,,p' cc/cc/cc.c \
-  > $PKG/usr/doc/$PRGNAM-$VERSION/LICENSE
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a LICENSE* README* $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 # now, build the libs. we don't attempt to build them with the just-built
 # pcc (maybe possible, but not worth the effort).
-cd $TMP/$PRGNAM/$PRGNAM-libs-$TARVER
+cd $TMP/$PRGNAM/$PRGNAM-libs-$LIBCOMMIT
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
