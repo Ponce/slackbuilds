@@ -6,6 +6,7 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20260731 bkw: update for v1.10.
 # 20211021 bkw: BUILD=2
 # - actually use the WXCONFIG variable.
 # - new-style icons.
@@ -18,8 +19,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=openyahtzee
-VERSION=${VERSION:-1.9.3}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-1.10}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -53,44 +54,49 @@ else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
+SLKCFLAGS+=" -DNDEBUG"
 
 set -e
 
-# We can't trust the /usr/bin/wx-config symlink.
-# Find the correct wx-config, if it exists. User can override by setting WXVER
-# in the env, or by setting WXCONFIG to the full path.
-WXVER=${WXVER:-2.8}
-WXMAYBE="$( ls /usr/lib$LIBDIRSUFFIX/wx/config/*-$WXVER 2>/dev/null | head -1 )"
-WXCONFIG=${WXCONFIG:-$WXMAYBE}
-WXCONFIG=${WXCONFIG:-/usr/bin/wx-config}
+ULIB=/usr/lib$LIBDIRSUFFIX
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+mkdir -p $PRGNAM-$VERSION
 cd $PRGNAM-$VERSION
+# 20260731 bkw: this is extra-stupid: we have a .tar.gz file that's been
+# compressed again with xz. The .xz file is actually *larger than* the
+# "compressed" .gz it contains.
+xzcat $CWD/$PRGNAM-$VERSION.tar.xz > $PRGNAM-$VERSION.tar.gz
+tar xvf $PRGNAM-$VERSION.tar.gz --strip-components=1
 chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+find . ! -type l    -a \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \)
 
 sed -i 's,Exec=,&/usr/games/,' $PRGNAM.desktop
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --with-wx-config="$WXCONFIG" \
-  --bindir=/usr/games \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --build=$ARCH-slackware-linux
+# 20260731 bkw: cmake "helpfully" finds /usr/bin/wx-config, which we
+# can't trust (it points at whichever of wxWidgets, wxPython, wxGTK
+# was installed most recently). Fake up a wx-config and put it first
+# in $PATH.
+mkdir -p build
+cd build
+  mkdir wxconf
+  ln -s $ULIB/wx/config/gtk3-unicode-3.2 wxconf/wx-config
+  export PATH="$(pwd)/wxconf:$PATH"
+  cmake \
+    -DCMAKE_CXX_FLAGS_RELEASE="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_MANDIR=man \
+    -DCMAKE_INSTALL_BINDIR=games \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make VERBOSE=1
+  make install/strip DESTDIR=$PKG
+cd ..
 
-make
-make install-strip DESTDIR=$PKG
 gzip $PKG/usr/man/man?/*
 
 for px in 16 32 48 64 128; do
@@ -102,10 +108,10 @@ for px in 16 32 48 64 128; do
     $PKG/usr/share/icons/hicolor/$size/apps/$PRGNAM.png
 done
 
-# README and NEWS are 0-byte placeholder in 1.9.1
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS COPYING ChangeLog TODO $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a AUTHORS COPYING CHANGELOG.md README.md $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
