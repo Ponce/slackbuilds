@@ -8,6 +8,10 @@
 # MIA. Original version had no license; I'm licensing the update under the
 # terms of the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20260803: bkw:
+# - fix long-standing issue where GraphicsMagick would fail to build if
+#   an old version was already installed. At least, I *think* it's fixed.
+
 # 20260731 bkw: update for v1.3.48.
 # 20251216 bkw: update for v1.3.46.
 # 20240908 bkw: update for v1.3.45.
@@ -90,28 +94,25 @@ fi
 
 set -e
 
-DELAY="${DELAY:-5}"
-OLDVER="$(pkg-config --silence-errors --modversion $PRGNAM || true)"
-if [ "$OLDVER" != "" ]; then
-  cat <<EOF 1>&2
-************************************************************************
-*
-* $PRGNAM is already installed (version $OLDVER).
-*
-* Press Ctrl-C to abort now, or wait $DELAY seconds for the build to start.
-* If it fails, run:
-*
-* # removepkg $PRGNAM
-*
-* ...and try again.
-*
-* Don't say I didn't warn you.
-*
-************************************************************************
+complain() {
+  local rv="$?"
+  if pkg-config --silence-errors --modversion $PRGNAM; then
+cat <<EOF
+**************************************************************************
+*                                                                        *
+*  This isn't supposed to happen any more, but the build failed and you  *
+*  have an old GraphicsMagick package installed. Try removing it:        *
+*                                                                        *
+*    removepkg GraphicsMagick                                            *
+*                                                                        *
+*  ...and run this build again. If this fixes the problem, *please*      *
+*  contact the maintainer (urchlay@slackware.uk) and let him know!       *
+*                                                                        *
+**************************************************************************
 EOF
-  sleep $DELAY
-fi
-
+  fi
+  exit "$rv"
+}
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -120,9 +121,9 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
 cd $PRGNAM-$VERSION
 chown -R root:root .
-find . ! -type l    -a \
+find . ! -type l    -a \( \
   \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
-  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \)
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
 
 # libfpx isn't autodetected, so let's help it a bit:
 if [ -e /usr/include/fpxlib.h ]; then
@@ -162,7 +163,7 @@ CXXFLAGS="$SLKCFLAGS" \
   --with-fpx=$FPXOPT \
   --build=$ARCH-slackware-linux
 
-make INSTALLDIRS=vendor
+make INSTALLDIRS=vendor || complain
 make install INSTALLDIRS=vendor DESTDIR=$PKG
 
 ### Build the perl module, if not disabled.
@@ -188,7 +189,7 @@ if [ "${PERL:-yes}" = "yes" ]; then
 
   sed -i "/^LDDLFLAGS/s,\$, -L$PKG/usr/lib$LIBDIRSUFFIX -l$PRGNAM," Makefile
 
-  make
+  make || complain
 
   # 'make test' will attempt to display an image, if it thinks it's running
   # in X. Let's not do this. Also, use the shared libs in $PKG.
@@ -221,12 +222,19 @@ if [ "${TCL:-yes}" = "yes" ]; then
 
   cd TclMagick
 
-  # LIBS needed to avoid libTclMagick.so: undefined symbol: tclStubsPtr
   source /usr/lib$LIBDIRSUFFIX/tclConfig.sh
 
+  # LIBS needed to avoid libTclMagick.so: undefined symbol: tclStubsPtr
+  # 20260803 bkw: fix annoying problem where we couldn't build a new
+  # GraphicsMagick when an old version was installed. This was caused
+  # by TclMagick putting our flags on the gcc command line *after*
+  # tcl's.. which include -I/usr/include, which is what broke the build.
+  # The fix is to use CC="gcc -I$INC", to force our -I option to appear
+  # first in the gcc options (before tcl "helpfully" adds its own).
   LIBS="$TCL_STUB_LIB_FLAG -L$PKG/usr/lib$LIBDIRSUFFIX" \
-  CFLAGS="$SLKCFLAGS -I$INC" \
-  CXXFLAGS="$SLKCFLAGS -I$INC" \
+  CFLAGS="$SLKCFLAGS" \
+  CXXFLAGS="$SLKCFLAGS" \
+  CC="gcc -I$INC" \
   ../rungm.sh ./configure \
     --with-magick=$(pwd)/../wand/GraphicsMagickWand-config \
     --prefix=/usr \
@@ -237,7 +245,7 @@ if [ "${TCL:-yes}" = "yes" ]; then
     --with-tcl=/usr/lib$LIBDIRSUFFIX \
     --with-tk=/usr/lib$LIBDIRSUFFIX
 
-  ../rungm.sh make
+  ../rungm.sh make || complain
   ../rungm.sh make install INSTALL=$( which install ) DESTDIR=$PKG
 
   WITHTCL=WITH
