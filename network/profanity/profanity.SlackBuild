@@ -25,7 +25,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=profanity
-VERSION=${VERSION:-0.15.1}
+VERSION=${VERSION:-0.18.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -79,31 +79,90 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-./bootstrap.sh
-./autogen.sh
-CFLAGS="$SLKCFLAGS -fcommon" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
+LIBDIR=/usr/lib${LIBDIRSUFFIX}
+[ -f ${LIBDIR}/libpython3.so        ] && python_stat=enabled || pgp_stat=disabled
+[ -f ${LIBDIR}/libnotify.so         ] && notify_stat=enabled || notify_stat=disabled
+[ -f ${LIBDIR}/libenchant-2.so      ] && spell_stat=enabled  || spell_stat=disabled
+[ -f ${LIBDIR}/libXss.so            ] && xss_stat=enabled    || xss_stat=disabled
+[ -f ${LIBDIR}/libgtk-3.so          ] && gtk_stat=enabled    || gtk_stat=disabled
+[ -f ${LIBDIR}/libgdk_pixbuf-2.0.so ] && gdk_stat=enabled    || gdk_stat=disabled
+[ -f ${LIBDIR}/libotr.so            ] && otr_stat=enabled    || otr_stat=disabled
+[ -f ${LIBDIR}/libgpgme.so          ] && pgp_stat=enabled    || pgp_stat=disabled
+[ -f ${LIBDIR}/libqrencode.so       ] && qr_stat=enabled     || qr_stat=disabled
+
+omemo="-D omemo=disabled"
+if [ -f ${LIBDIR}/libgcrypt.so ]
+then
+  if [ -f ${LIBDIR}/libomemo-c-c.so -o -f ${LIBDIR}/libomemo-c.a ]
+  then
+    omemo="-D omemo=enabled -D omemo-backend=libomemo-c"
+  elif [ -f ${LIBDIR}/libsignal-protocol-c.so -o \
+         -f ${LIBDIR}/libsignal-protocol-c.a ]
+  then
+    omemo_stat=enabled
+    omemo_backend=libsignal
+    omemo="-D omemo=enabled -D omemo-backend=libsignal"
+  fi
+fi
+
+# qrencode is used for showing OMEMO fingerprints.
+# If there's no OMEMO support, have it disabled.
+echo "$omemo" | grep -q "disabled" && qr_stat=disabled || true
+
+# Add "Spellcheck" status to the list of features summary.
+if ! grep -q "  'Spellcheck'" meson.build
+then
+  sed -i "/  'QR Code'/s/$/\n  'Spellcheck': enchant_dep.found(),/" meson.build
+fi
+
+mkdir build
+BLD=$(pwd)/build
+export CFLAGS="$SLKCFLAGS"
+meson setup \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --includedir=/usr/include \
+  --datadir=/usr/share \
+  --mandir=/usr/man \
   --sysconfdir=/etc \
   --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --build=$ARCH-slackware-linux
+  -D c-plugins=enabled \
+  -D python-plugins=$python_stat \
+  -D otr=$otr_stat \
+  -D pgp=$pgp_stat \
+  $omemo \
+  -D omemo-qrcode=$qr_stat \
+  -D notifications=$notify_stat \
+  -D icons-and-clipboard=$gtk_stat \
+  -D gdk-pixbuf=$gdk_stat \
+  -D xscreensaver=$xss_stat \
+  -D spellcheck=$spell_stat \
+  $BLD
 
-make
-make install DESTDIR=$PKG
+meson compile -v -C $BLD
+DESTDIR=$PKG meson install -C $BLD
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
+# "profanity.1" is marked executable!!!
+find $PKG/usr/man -type f -exec chmod -x '{}' \; -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a LICENSE.txt COPYING $PKG/usr/doc/$PRGNAM-$VERSION
+mv $PKG/usr/share/doc $PKG/usr
+mv $PKG/usr/doc/$PRGNAM $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE.txt COPYING CHANGELOG $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.sw
+# Append to README.sw the features enabled during packaging.
+cat << "__EOF__" >> $PKG/usr/doc/$PRGNAM-$VERSION/README.sw
+
+The list of features enabled for your package:
+
+__EOF__
+# Print every line starting from "  Features" until the first empty line.
+sed -n '/  Features/,/^$/p' $BLD/meson-logs/meson-log.txt | \
+  sed '/^$/d' >> $PKG/usr/doc/$PRGNAM-$VERSION/README.sw
 
 rm -f $PKG/usr/lib*/*.la
 
