@@ -1,0 +1,45 @@
+From: Boyuan Yang <byang@debian.org>
+Date: Tue, 7 Jul 2026 12:30:45 -0400
+Subject: cpuid: only build VDPPHPS probe when target has SSE
+
+On i386, naming "xmm0" in the asm clobber list fails to compile when
+SSE is not part of the compiler's target ISA:
+
+  error: the register 'xmm0' cannot be clobbered in 'asm' for the
+  current target
+
+This is the case for Debian's i386 toolchain: although the post-Trixie
+runtime baseline is Pentium 4 (which has SSE2), that only raises the
+CPU features binaries may assume at runtime. The default compiler
+codegen was intentionally left at plain i686, so gcc emits no SSE and
+does not define __SSE__/__SSE2__ unless -msse2 is passed explicitly --
+and the xmm0 clobber is rejected accordingly.
+
+Guard the runtime VDPPHPS test on __SSE__ so it is emitted only where
+the xmm registers exist for the target. x86-64 (SSE always in the ABI)
+and SSE-enabled i386 keep the probe; the default SSE-less i386 codegen
+no longer FTBFS.
+
+As libyuv is part of Chromium project, and upstream Chrome/Chromium
+implicitly targets SSE3+ availability, this patch need not be forwarded
+upstream.
+
+Bug-Debian: https://bugs.debian.org/1141426
+Forwarded: not-needed
+---
+ util/cpuid.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/util/cpuid.c b/util/cpuid.c
+index a789e06..f0b42c8 100644
+--- a/util/cpuid.c
++++ b/util/cpuid.c
+@@ -217,7 +217,7 @@ int main(int argc, const char* argv[]) {
+     printf("Has AMXINT8 0x%x\n", has_amxint8);
+     printf("Has AVX512BMM 0x%x\n", has_avx512bmm);
+ 
+-#ifdef __linux__
++#if defined(__linux__) && defined(__SSE__)
+     // Test VDPPHPS instruction
+     {
+       struct sigaction act, oldact;
