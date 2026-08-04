@@ -30,4 +30,10 @@ config etc/mail/spamassassin/v312.pre.new
 config etc/mail/spamassassin/v320.pre.new
 config etc/mail/spamassassin/v330.pre.new
 config etc/mail/spamassassin/v340.pre.new
+config etc/mail/spamassassin/v341.pre.new
+config etc/mail/spamassassin/v342.pre.new
+config etc/mail/spamassassin/v343.pre.new
+config etc/mail/spamassassin/v400.pre.new
+config etc/mail/spamassassin/v401.pre.new
+config etc/mail/spamassassin/v402.pre.new
 config etc/spamassassin.conf.new
