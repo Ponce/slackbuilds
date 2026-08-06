@@ -2,6 +2,7 @@
 
 # Slackware build script for cargo-c
 
+# Copyright 2026 Vijay Marcel,India
 # Copyright 2023-2024, Alexander Verbovetsky, Moscow, Russia
 # All rights reserved.
 #
@@ -10,6 +11,10 @@
 #
 # 1. Redistributions of this script must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in
+#    the documentation and/or other materials provided with the distribution.
 #
 #  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
 #  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
@@ -25,10 +30,11 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=cargo-c
-VERSION=${VERSION:-0.10.4}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-0.10.24}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+GITVER=${GITVER:-sbo-rust-vendor-1.0}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -36,13 +42,6 @@ if [ -z "$ARCH" ]; then
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
-
-  if [ "$ARCH" = "i586" ]; then
-    if LD_LIBRARY_PATH="/opt/rust/lib" /opt/rust/bin/rustc -Vv \
-    | grep host | grep i686 > /dev/null ; then
-      ARCH=i686
-    fi
-  fi
 fi
 
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
@@ -54,25 +53,18 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+if [ "$ARCH" = "i586" -o "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-march=$ARCH -mtune=i686 -pipe -O2 -fPIC"
   LIBDIRSUFFIX=""
-  CARGOTARGET="--target i586-unknown-linux-gnu"
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-  CARGOTARGET="--target i686-unknown-linux-gnu"
 elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
+  SLKCFLAGS="-march=x86-64 -mtune=generic -pipe -O2 -fPIC"
   LIBDIRSUFFIX="64"
-  CARGOTARGET="--target x86_64-unknown-linux-gnu"
 else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
-  CARGOTARGET=""
+   echo "This SlackBuild will not run on $ARCH" && exit 1
 fi
 
 set -e
+trap 'echo "$0 FAILED at line $LINENO!" | tee $OUTPUT/error-${PRGNAM}.log' ERR
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
@@ -80,86 +72,70 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
-cp $CWD/Cargo.lock .
 
-mkdir .cargo
-cat << EOF >> .cargo/config
-[source.crates-io]
-registry = 'https://github.com/rust-lang/crates.io-index'
-replace-with = 'vendored-sources'
+tar xvf $CWD/$GITVER.tar.gz
+cd $GITVER
+mv -v cargo-c/$PRGNAM-vendored-sources-$VERSION-$BUILD.tar.xz $TMP/$PRGNAM-$VERSION
+cd $TMP/$PRGNAM-$VERSION
+tar xvf $PRGNAM-vendored-sources-$VERSION-$BUILD.tar.xz
+cd $PRGNAM-$VERSION
+mv -v .cargo $TMP/$PRGNAM-$VERSION
+mv -v vendor $TMP/$PRGNAM-$VERSION 
+cd ..
+rm -rvf $PRGNAM-$VERSION
 
-[source.vendored-sources]
-directory = '$(pwd)/vendor'
-EOF
-
-mkdir vendor
-(
-  cd vendor
-
-  grep -h -A 4 "\[\[package\]\]" \
-      $(find "../" -maxdepth 1 -mindepth 1 -name Cargo.lock | tr '\n' ' ') | \
-      sed 's/[[:space:]]*=[[:space:]]*/=/g;s/^--//;s/^\[\[/--\n[[/' | \
-      awk 'BEGIN { RS = "--\n" ; FS="\n" } { print $2, $3, $4, $5 }' | \
-      sed 's/"//g;s/name=//;s/ version=/=/' | \
-      grep " source=" | \
-      sed 's/ dependencies=.*$//' | \
-      sed 's/ source=[^ ]*//' | \
-      sed 's/ checksum=/=/' | \
-      sort -u | \
-      while read -r dep ; do
-
-    cksum="$(printf "%s\n" "$dep" | cut -d= -f3)"
-    ver="$(printf "%s\n" "$dep" | cut -d= -f2)"
-    dep="$(printf "%s\n" "$dep" | cut -d= -f1)"
-
-    tar xvf $CWD/$dep-$ver.crate
-
-    touch $dep-$ver/.cargo-ok
-
-    {
-      printf "{\n"
-      printf '    "files": {\n'
-
-      (
-        cd $dep-$ver
-        find . -type f -print0 | xargs -0 sha256sum | sed -n '/\.cargo-checksum\.json/!p' | sed 's/\.\///;s/^\([^ ]*\)[[:space:]][[:space:]]*\(.*\)$/"\2":"\1",/'
-      ) | sed '$ s/,$//'
-
-      printf "    },\n"
-      printf '    "package": "%s"'  "$cksum"
-
-      printf "}\n"
-    } > $dep-$ver/.cargo-checksum.json
-  done
-)
+# set cargo_home dir in the build dir 
+export CARGO_HOME="$TMP/$PRGNAM-$VERSION/.cargo"
 
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
-CARGO_HOME=.cargo \
-PATH="/opt/rust/bin:$PATH" \
-LD_LIBRARY_PATH="/opt/rust/lib$LIBDIRSUFFIX" \
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-cargo build --offline --release $CARGOTARGET
-PATH="/opt/rust/bin:$PATH" \
-LD_LIBRARY_PATH="/opt/rust/lib$LIBDIRSUFFIX" \
-cargo install --offline --no-track --root "${PKG}/usr" --path="."
+export CC=${CC:-gcc}
+export CXX=${CXX:-g++}
+export CFLAGS="$SLKCFLAGS"
+export CXXFLAGS="$SLKCFLAGS"
 
-rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+export m=/opt/meson/bin # meson path
+export r=/opt/rust/bin # rust path
+export rl=/opt/rust/lib${LIBDIRSUFFIX}
+
+PYVER=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+export PYTHONPATH=/opt/python$PYVER/site-packages
+export PATH=$m:$r:$PATH
+export LD_LIBRARY_PATH=$rl
+
+# Target Architecture
+TARGET="$(rustc --print host-tuple)"
+
+export RUSTUP_TOOLCHAIN='stable'
+export LIBSSH2_SYS_USE_PKG_CONFIG=1
+export LIBSQLITE3_SYS_USE_PKG_CONFIG=1
+
+# Build
+cargo build --offline --target $TARGET --release --manifest-path $TMP/$PRGNAM-$VERSION/Cargo.toml
+
+mkdir -pv $PKG/usr/bin
+
+install -Dvm755 target/$TARGET/release/cargo-{capi,cbuild,cinstall,ctest} -t $PKG/usr/bin
+
+rm -f $PKG/usr/lib${LIBDIRSUFFIX}/*.la
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+  | cut -f 1 -d : | xargs strip --strip-unneeded --remove-section=.note --remove-section=.comment 2> /dev/null || true
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a README.md  $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a README.md LICENSE $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
+
+# Cleanup CARGO_HOME and possible unnecessary artifacts in $PKG.
+rm -rf "$CARGO_HOME" "$PKG/usr/.cargo" "$PKG/usr/.crates*"
+
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
+/sbin/makepkg -l y -c n --remove-rpaths --remove-tmp-rpaths $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
