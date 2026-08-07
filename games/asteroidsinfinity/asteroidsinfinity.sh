@@ -15,4 +15,4 @@ for src in $SHAREDIR/*; do
   [ -e "$dst" ] || ln -s "$src" "$dst"
 done
 
-exec python ./AsteroidsInfinity.py "$@"
+exec python3 ./AsteroidsInfinity.py "$@"
