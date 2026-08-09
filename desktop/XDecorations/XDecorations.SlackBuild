@@ -2,6 +2,7 @@
 
 # Slackware build script for XDecorations
 
+# Copyright 2026 Vijay Marcel,India
 # Copyright 2014 Oleg A. Deordiev Ukraine
 # All rights reserved.
 #
@@ -10,6 +11,10 @@
 #
 # 1. Redistributions of this script must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in
+#    the documentation and/or other materials provided with the distribution.
 #
 #  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
 #  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
@@ -25,7 +30,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=XDecorations
-VERSION=${VERSION:-0.1.7}
+VERSION=${VERSION:-0.1.10}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -38,9 +43,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -50,49 +52,61 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+if [ "$ARCH" = "i586" -o "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-march=$ARCH -mtune=i686 -pipe -O2 -fPIC"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
+  SLKCFLAGS="-march=x86-64 -mtune=generic -pipe -O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
+   echo "This SlackBuild will not run on $ARCH" && exit 1
 fi
 
 set -e
+trap 'echo "$0 FAILED at line $LINENO!" | tee -a $OUTPUT/error-${PRGNAM}.log' ERR
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+rm -rf $PRGNAM-$PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$PRGNAM-$VERSION.tar.gz
+cd $PRGNAM-$PRGNAM-$VERSION
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
+  -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
 
-patch -p1 < $CWD/gcc.patch
-patch < $CWD/makefile.patch
+./autogen.sh
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix=/usr \
+  --includedir=/usr/include \
+  --bindir=/usr/bin \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --infodir=/usr/info \
+  --build=$ARCH-slackware-linux
 
 make
 make install DESTDIR=$PKG
 
-cp ./Changlog $PKG/usr/doc/$PRGNAM/Changlog
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" |
+  grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded --remove-section=.comment --remove-section=.note 2> /dev/null || true
 
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM/$PRGNAM.SlackBuild
-cat $CWD/README > $PKG/usr/doc/$PRGNAM/README
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+
+mkdir -pv $PKG/usr/doc/$PRGNAM-$VERSION
+cp -av COPYING README.md  $PKG/usr/doc/$PRGNAM-$VERSION
+mv -v $PKG/usr/share/XDecorations/docs/* $PKG/usr/doc/$PRGNAM-$VERSION
+rm -rvf $PKG/usr/share/XDecorations/docs
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
-
+/sbin/makepkg -l y -c n --remove-rpaths --remove-tmp-rpaths $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
