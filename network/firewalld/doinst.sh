@@ -25,7 +25,6 @@ preserve_perms() {
 config etc/default/firewalld.new
 config etc/firewall/applet.conf.new
 config etc/firewalld/firewalld.conf.new
-config etc/firewalld/lockdown-whitelist.xml.new
 config etc/logrotate.d/firewalld.new
 
 preserve_perms etc/rc.d/rc.firewalld.new
