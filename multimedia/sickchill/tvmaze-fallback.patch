@@ -1,0 +1,69 @@
+From 3fb9e2604230e663d131dbd9d0c21f137d06cf5e Mon Sep 17 00:00:00 2001
+From: Jeremy Hansen <jebrhansen+github@gmail.com>
+Date: Sun, 9 Aug 2026 18:27:22 -0700
+Subject: [PATCH] Use TVMaze as a fallback to get the TVDB ID
+
+---
+ sickchill/show/indexers/tvdb.py | 39 ++++++++++++++++++++++++++++++---
+ 1 file changed, 36 insertions(+), 3 deletions(-)
+
+diff --git a/sickchill/show/indexers/tvdb.py b/sickchill/show/indexers/tvdb.py
+index e04f14b44..3f0f848a2 100644
+--- a/sickchill/show/indexers/tvdb.py
++++ b/sickchill/show/indexers/tvdb.py
+@@ -135,16 +135,49 @@ class TVDB(Indexer):
+                         # Name with spaces and without year
+                         names.append(re.sub(r"[. -_]", " ", test.group(1)).strip())
+ 
++        for attempt in set(n for n in names if n.strip()):
++            try:
++                result = self._search(attempt, language=language)
++                if result:
++                    break
++            except (requests.exceptions.RequestException, requests.exceptions.HTTPError, Exception):
++                logger.debug(traceback.format_exc())
++
++        # TheTVDB's legacy name-search endpoint may return 404.
++        # Use TVmaze to find the corresponding TheTVDB ID, then
++        # retrieve the series directly from TheTVDB.
++        if not result:
+             for attempt in set(n for n in names if n.strip()):
+                 try:
+-                    result = self._search(attempt, language=language)
++                    response = requests.get(
++                        "https://api.tvmaze.com/search/shows",
++                        params={"q": attempt},
++                        timeout=10
++                    )
++                    response.raise_for_status()
++
++                    for item in response.json():
++                        show = item.get("show") or {}
++                        externals = show.get("externals") or {}
++                        tvdb_id = externals.get("thetvdb")
++
++                        if not tvdb_id:
++                            continue
++
++                        try:
++                            series = self._series(tvdb_id, language=language)
++                            if series:
++                                result.append(series.info(language))
++                        except Exception:
++                            logger.debug(traceback.format_exc())
++
+                     if result:
+                         break
+-                except (requests.exceptions.RequestException, requests.exceptions.HTTPError, Exception):
++
++                except Exception:
+                     logger.debug(traceback.format_exc())
+ 
+         return result
+-
+     @property
+     def languages(self):
+         return ["cs", "da", "de", "el", "en", "es", "fi", "fr", "he", "hr", "hu", "it", "ja", "ko", "nl", "no", "pl", "pt", "ru", "sl", "sv", "tr", "zh"]
+-- 
+2.46.4
+

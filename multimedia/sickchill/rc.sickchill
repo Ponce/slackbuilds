@@ -5,7 +5,7 @@
 # Originally created for sickrage in 2016
 # Updated to sickchill in 2023
 
-# Copyright 2016-2024  Jeremy Hansen <jebrhansen+SBo@gmail.com>
+# Copyright 2016-2026  Jeremy Hansen <jebrhansen+SBo@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -32,7 +32,8 @@ PROG=${PROG:-sickchill}
 # the suffix here.
 SUFFIX=
 
-# Set the full program name for folders
+# Set this when running multiple sickchill instances. The suffix is used
+# to distinguish each instance's configuration and data files.
 if [ -n "$SUFFIX" ]; then
   FULLPROG="$PROG-$SUFFIX"
 # Just use $PROG if there isn't a suffix set
@@ -46,9 +47,9 @@ if [ -f /etc/"$FULLPROG".conf ]; then
 fi
 
 # Ensure all required variables are set in conf file
-# Edit conf file in /etc/$PROG-$SUFFIX.conf for any changes
+# Edit conf file in /etc/$FULLPROG.conf for any changes
 MISSING=0
-for var in USERNAME HOMEDIR DATADIR PIDFILE PORT; do
+for var in USERNAME DATADIR PIDFILE PORT; do
   if [ -z "${!var}" ]; then
     ((MISSING++))
     VAR="$var $VAR"
@@ -57,38 +58,129 @@ done
 if [ $MISSING -gt 0 ]; then
   echo "/etc/$FULLPROG.conf is missing some or all required variables ($VAR)."
   echo "Please check the file and try again."
+  exit 1
 fi
+
+# Check if the server is responding with a 200
+get_status()
+{
+  local SERVER_STATUS
+  SERVER_STATUS=$(curl -o /dev/null -s -w "%{http_code}" -L --max-time 5 http://localhost:"$PORT")
+  if [ "$SERVER_STATUS" == "200" ]; then
+    return 0
+  else
+    return 1
+  fi
+}
 
 # Check if the program is running and pid file exists
 check()
 {
+  # Ensure variables are reset
+  STATUS=
+  TYPE=
+  PID=
+
+  # First check if any sickchill instance is running. The PID file
+  # and port checks below determine whether this instance is running.
   if pgrep "$PROG" > /dev/null; then
-    # Check if the pidfile matches the running pid
-    if [ -e "$PIDFILE" ] && pgrep -f "$PIDFILE" > /dev/null; then
-      STATUS=running
+
+    # If it's running, check if the PID file exists
+    if [ -e "$PIDFILE" ]; then
+      PID=$(cat "$PIDFILE" 2> /dev/null)
+
+      # Check that the PID in the file is a running process
+      if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+        # Now check that the PID is actually for the correct sickchill instance
+        if grep -aq "$PROG.*--pidfile=$PIDFILE" "/proc/$PID/cmdline"; then
+          # Finally see if the server responds correctly
+          if get_status; then
+            STATUS=running
+          # Otherwise sickchill is running and the pid exists, but the server
+          # isn't responding properly, so something is broken.
+          else
+            STATUS=broken
+            TYPE=server
+          fi
+        # The PID belongs to a different process. This can happen if sickchill
+        # was stopped and the PID was later reused by another process.
+        else
+          STATUS=broken
+          TYPE=process
+        fi
+      # The PID in PIDFILE is not a running process anymore
+      else
+        STATUS=broken
+        TYPE=pid-stale
+      fi
+    # Any running sickchill instances do not match the expected PID. Let's see
+    # if one matches the expected port, which would mean it is running without
+    # the expected pid file.
     else
       # Check if the program is running without the pid file matching
-      if pgrep -f "$FULLPROG.*$PORT" > /dev/null; then
+      if pgrep -f "$PROG.*--port=$PORT" > /dev/null; then
         STATUS=broken
-        echo "WARNING: $FULLPROG is running without the correct pid file."
-        echo "Did you start it without using the rc.$FULLPROG?"
+        TYPE=pid-missing
+      # If no running instance matches the expected port, then we can safely
+      # assume this instance is not running.
       else
         STATUS=stopped
       fi
     fi
+  # If a pid file exists without any sickchill running, it's broken
   else
-    STATUS=stopped
+    if [ -e "$PIDFILE" ]; then
+      STATUS=broken
+      TYPE=pid-stale
+    else
+      STATUS=stopped
+    fi
   fi
+
+}
+
+broken()
+{
+
+    if [ "$TYPE" == "pid-stale" ]; then
+      echo "ERROR: $FULLPROG has a stale PID file."
+      echo "The PID file exists, but the process it references is not running:"
+      echo "  - $PIDFILE"
+      echo "The stale PID file can be safely removed."
+      echo "Try: $0 force-start"
+    elif [ "$TYPE" == "pid-missing" ]; then
+      echo "ERROR: $FULLPROG is running without its expected PID file."
+      echo "The $FULLPROG process appears to be running, but:"
+      echo "  - $PIDFILE"
+      echo "was not found."
+      echo "Did you start $FULLPROG without using $0?"
+      echo "Do not start another instance until the existing process is stopped."
+    elif [ "$TYPE" == "process" ]; then
+      echo "ERROR: $PIDFILE points to a different process."
+      echo "The PID stored in the PID file belongs to a process other than $FULLPROG."
+      echo "PID: $PID"
+      echo "PID file: $PIDFILE"
+      echo "Please investigate the process before removing the PID file."
+    elif [ "$TYPE" == "server" ]; then
+      echo "ERROR: $FULLPROG is running, but its web server is not responding correctly."
+      echo "The expected process is running, but port $PORT did not return HTTP status 200."
+      echo "PID: $PID"
+      echo "Port: $PORT"
+      echo "Check the sickchill logs before attempting to restart the service."
+    else
+      echo "ERROR: $FULLPROG is in an unknown broken state."
+    fi
+
 }
 
 status()
 {
-  if [ $STATUS == "running" ]; then
+  if [ "$STATUS" == "running" ]; then
     echo "$FULLPROG currently running."
-  elif [ $STATUS == "stopped" ]; then
+  elif [ "$STATUS" == "stopped" ]; then
     echo "$FULLPROG not running."
-  elif [ $STATUS == "broken" ]; then
-    echo "Please fix the issue before attempting to run $(basename "$0") again."
+  elif [ "$STATUS" == "broken" ]; then
+    broken
   else
     echo "Status unknown."
   fi
@@ -96,15 +188,68 @@ status()
 
 start()
 {
-  if [ $STATUS == "stopped" ]; then
+  local OUTPUT RETVAL ATTEMPTS STARTCMD COUNT FAILED=
+
+  if [ "$STATUS" == "stopped" ]; then
+
+    # Set the start command
+    STARTCMD="/usr/bin/${PROG} --daemon --pidfile=${PIDFILE} --datadir=${DATADIR} --port=${PORT}"
+
     echo -n "Starting $PROG: "
-    if su "$USERNAME" -s /bin/sh -c "/usr/bin/${PROG} --daemon --pidfile=${PIDFILE} --datadir=${DATADIR} --port=${PORT} &> /dev/null"; then
-      echo "Startup Successful"
+    # Store the output to display later if launch failed.
+    OUTPUT=$(su "$USERNAME" -s /bin/sh -c "$STARTCMD" 2>&1)
+    RETVAL=$?
+
+    # If the startup command succeeds, check over 5 attempts to see if the
+    # server responds correctly.
+    if [ "$RETVAL" -eq 0 ]; then
+      ATTEMPTS=5
+      for (( COUNT=0; COUNT < ATTEMPTS; COUNT++ )); do
+        if get_status; then
+          echo "Startup Successful"
+          return 0
+        fi
+        # If the PID isn't actually there, we can skip the rest of the attempts.
+        if [ -f "$PIDFILE" ]; then
+          PID=$(cat "$PIDFILE" 2>/dev/null)
+          if [ -n "$PID" ] && ! kill -0 "$PID" 2>/dev/null; then
+              break
+          fi
+        fi
+        sleep 1
+      done
+      FAILED="sickchill did not respond on port $PORT within $ATTEMPTS attempts."
     else
-      su "$USERNAME" -s /bin/sh -c "/usr/bin/${PROG} --daemon --pidfile=${PIDFILE} --datadir=${DATADIR} --port=${PORT}"
-      echo "Startup Failed. The following command is what produced the failure:"
-      echo "su $USERNAME -s /bin/sh -c \"/usr/bin/${PROG} --daemon --pidfile=${PIDFILE} --datadir=${DATADIR} --port=${PORT}\""
+      FAILED="The sickchill startup command returned an error."
     fi
+  # If we aren't in stopped status, don't try and start
+  else
+    status
+  fi
+
+  # If startup failed, display error messages and exit
+  if [ -n "$FAILED" ]; then
+    echo "Startup Failed. $FAILED"
+    echo "The command used for launching it was:"
+    echo "su $USERNAME -s /bin/sh -c \"$STARTCMD\""
+    echo "The following was the output from the startup command:"
+    echo "$OUTPUT"
+    return 1
+  fi
+
+}
+
+forcestart()
+{
+  # Allow starting a server with a stale pid file
+  if [ "$STATUS" == "broken" ] && [ "$TYPE" == "pid-stale" ]; then
+    rm -f "$PIDFILE"
+    check
+    start
+  elif [ "$STATUS" == "stopped" ]; then
+    start
+  elif [ "$STATUS" == "broken" ]; then
+    broken
   else
     status
   fi
@@ -112,35 +257,54 @@ start()
 
 stop()
 {
-  if [ $STATUS == "stopped" ]; then
+  local TIMEOUT COUNT SHUTDOWN=
+
+  if [ "$STATUS" == "stopped" ]; then
     echo "$PROG doesn't seem to be running. Please try running"
     echo "$0 start"
-  elif [ $STATUS == "broken" ]; then
-    echo "Cannot stop. Please correct issue and try again."
+  # If it isn't a broken server, attempt a proper shutdown before
+  # going right to the force kill.
+  elif [ "$STATUS" == "broken" ] && [ "$TYPE" != "server" ]; then
+    broken
   else
     if [ "$EUID" -ne 0 ];then
       echo "Please run as root"
       exit 1
     fi
-    # sickchill can take some time to properly shut down.
-    # It takes more than 10 seconds on my system top properly close.
-    # If it doesn't close by the timeout, force close it.
-    TIMEOUT=15
-    echo -n $"Giving $PROG $TIMEOUT seconds to shut down: "
-    curl -s http://localhost:"$PORT"/home/shutdown/?pid="$(cat "$PIDFILE")" | grep -q "shutting down"
-    for (( COUNT=0; COUNT <= TIMEOUT; COUNT++ )); do
-      if pgrep -f "$FULLPROG.*$PORT" > /dev/null; then
-        SHUTDOWN=success
-        break
-      fi
-      sleep 1
-    done
+
+    # If it isn't a broken server, attempt a proper shutdown before
+    # going right to the force kill.
+    if [ "$TYPE" != "server" ]; then
+      # sickchill can take some time to properly shut down.
+      # It takes more than 10 seconds on my system to properly close.
+      # If it doesn't close by the timeout, force close it.
+      TIMEOUT=15
+      echo -n "Giving $PROG $TIMEOUT seconds to shut down: "
+      curl -s --max-time 5 http://localhost:"$PORT"/home/shutdown/?pid="$PID" | grep -q "shutting down"
+      SHUTDOWN=failed
+      for (( COUNT=0; COUNT < TIMEOUT; COUNT++ )); do
+        if ! kill -0 "$PID" 2> /dev/null; then
+          SHUTDOWN=success
+          break
+        fi
+        sleep 1
+      done
+    fi
     if [ "$SHUTDOWN" == "success" ]; then
       echo "Shutdown successful."
     else
-      echo "Normal Shutdown Failed - Attempting to kill the process."
-      sleep 7
-      pkill -9 -F "$PIDFILE"
+      if [ "$SHUTDOWN" == "failed" ]; then
+        echo "Normal Shutdown Failed - Attempting to kill the process."
+      else
+        echo "Server is not responding - Attempting to kill the process."
+      fi
+      kill -9 "$PID"
+      sleep 1
+
+      if kill -0 "$PID" 2>/dev/null; then
+        echo "ERROR: Failed to terminate PID $PID."
+        return 1
+      fi
     fi
   fi
 }
@@ -149,6 +313,10 @@ case "$1" in
   start)
         check
         start
+        ;;
+  force-start)
+        check
+        forcestart
         ;;
   stop)
         check
@@ -166,6 +334,6 @@ case "$1" in
         status
         ;;
   *)
-        echo "Usage: $0 {start|stop|restart|status}"
+        echo "Usage: $0 {start|force-start|stop|restart|status}"
         exit 1
 esac
