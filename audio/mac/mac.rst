@@ -1,8 +1,7 @@
 .. RST source for mac(1) man page. Convert with:
 ..   rst2man.py mac.rst > mac.1
-.. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 3.99_u4_b5_s7
+.. |version| replace:: 13.25
 .. |date| date::
 
 ===
@@ -21,9 +20,7 @@ decode/encode Monkey's Audio codec files
 SYNOPSIS
 ========
 
-**mac** [*input-file*] [*output-file*] [ [**-c** | **-n** ] *level* ]
-
-**mac** [*input-file*] [ **-d** | **-v** | **-q** ]
+**mac** *input-file* [*output-file*] [*options*]
 
 DESCRIPTION
 ===========
@@ -40,12 +37,32 @@ header will not be preserved).
 OPTIONS
 =======
 
-Note: Only one of the options below can be given, and it must occur
-last on the command line (after the filename(s)). Spaces are not
-allowed between the **-c** or **-n** option and its *level* argument.
+**--help**
+  Show built-in usage message (same as running **mac** with no arguments).
+
+**-threads=N**
+  Set the number of threads when compressing or decompressing. *N* should be
+  a number from 1 to the number of cores/thread supported by your CPU.
+
+**-readfullinput**
+  Read the entire file until the end of file if it's of unknown
+  length, so the seek table can be made perfect. Generally only needed
+  when reading from a pipe.
+
+**-t** *tag*
+  Sets an APE (or, with **-L**, ID3v3) tag. See **mac --help** for examples.
+
+**-r** *tag*
+  Removes the tag.
+
+**-L**
+  Converts the APE tag in an APE file into an ID3v1 tag.
+
+Compression Options
+-------------------
 
 **-c[level]**
-  Compress (encode). *input-file* must be a WAV file with 16-bit samples.
+  Compress (encode). *input-file* must be a WAV file.
   *output-file* will be an APE audio file. Higher *level*\s result
   in better compression, at the expense of longer encoding time. The
   supported levels are:
@@ -65,19 +82,19 @@ allowed between the **-c** or **-n** option and its *level* argument.
   Convert (recompress). As **-c**, but **input-file** must be an APE audio
   file.
 
+Decompression Options
+---------------------
+
 **-d**
   Decompress (decode). *input-file* must be an APE audio file.
   *output-file* will be a WAV file.
 
-**-v**
+**-V**
   Verify. *input-file* must be an APE audio file. It will be decoded, and
   any errors will be displayed, but the decoded audio won't be saved.
 
-**-q**
+**-v**
   Quick verify. Just checks that *input-file* has a valid APE header.
-
-**--help**
-  Show built-in usage message (same as running **mac** with no arguments).
 
 EXAMPLES
 ========
@@ -89,19 +106,19 @@ Decompress
   mac "Metallica - One.ape" "Metallica - One.wav" -d
 
 Verify
-  mac "Metallica - One.ape" -v
+  mac "Metallica - One.ape" -V
 
 Quick verify
-  mac "Metallica - One.ape" -q
+  mac "Metallica - One.ape" -v
 
 Note that filenames with spaces and punctuation should be put inside
-quote, as usual.
+quotes, as usual. Run **mac --help** for more examples.
 
 NOTES
 =====
 
-**mac** can only handle WAV files with 8- or 16-bit samples, not
-e.g. 24-bit or floating point. If needed, you can convert to 16-bit
+**mac** can only handle WAV files with 8, 16, or 24 bit samples, not
+e.g. 32-bit or floating point. If needed, you can convert to 16-bit
 with a command like:
 
   $ sox -G input.wav -b16 output.wav
@@ -124,7 +141,7 @@ to APE.
 COPYRIGHT
 =========
 
-See the file /usr/doc/mac-|version|/License.htm for license information.
+See the file /usr/doc/mac-|version|/License.txt for license information.
 
 AUTHORS
 =======
@@ -141,5 +158,5 @@ SEE ALSO
 
 **ffmpeg**\(1), **mplayer**\(1), **audacious**\(1), **flac**\(1), **shorten**\(1), **sox**\(1)
 
-The Monkey's Audio Codec homepage: http://www.monkeysaudio.com/
+The Monkey's Audio Codec homepage: https://www.monkeysaudio.com/
 
