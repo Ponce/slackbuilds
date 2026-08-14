@@ -3,6 +3,7 @@
 # Slackware build script for SystemC
 
 # Copyright 2022 William PC - Seattle, USA
+# Copyright 2026 Nick Smallbone - Gothenburg, Sweden
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,12 +26,11 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=SystemC
-VERSION=${VERSION:-2.3.3}
+SRCNAM=systemc
+VERSION=${VERSION:-3.0.2}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-
-SRCNAM=${PRGNAM,,}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -81,52 +81,39 @@ find -L . \
 
 
 if [ "${PTHREADS:-no}" == "yes" ]; then
-  OPTS="-enable-pthreads"
+  OPTS="-DENABLE_PTHREADS=ON"
 fi
-
-# fix for installing examples at /usr/share/$PRGNAM-$VERSION
-sed -i.orig 's#${rootdocdir}/examples#${prefix}/share/${PACKAGE_NAME}-${PACKAGE_VERSION}/examples#' configure
-
-# fix installation path for building examples
-sed -i 's#^\(SYSTEMC_HOME?=\).*#\1/usr#' examples/build-unix/Makefile.config
-sed -i 's#libsystemc.a#libsystemc.so#' examples/build-unix/Makefile.rules
-sed -i 's/^SYSTEMC_HOME/#&/' examples/sysc/{2.1,2.3}/*/Makefile
 
 mkdir -p build
 cd build
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-../configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --disable-static \
-  --with-arch-suffix=no \
-  $OPTS \
-  --build=$ARCH-slackware-linux
-
-make
-make install DESTDIR=$PKG
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=lib${LIBDIRSUFFIX} \
+    -DCMAKE_INSTALL_DOCDIR=/usr/doc/$PRGNAM-$VERSION \
+    -DCMAKE_BUILD_TYPE=Release \
+    $OPTS \
+    ..
+  make
+  make install/strip DESTDIR=$PKG
 cd ..
-
-# remove install doc
-rm $PKG/usr/doc/$PRGNAM-$VERSION/INSTALL
-
-
-# Don't ship .la files:
-rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 find $PKG -depth -type d -empty -delete || true
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS ChangeLog LICENSE NEWS \
-      NOTICE RELEASENOTES $PKG/usr/doc/$PRGNAM-$VERSION
+# fix installation path and more for building examples
+sed -i "s@^SYSTEMC_HOME.*@SYSTEMC_HOME=/usr@" examples/build-unix/Makefile.config
+sed -i "s@^#ARCH_SUFFIX.*@ARCH_SUFFIX=$LIBDIRSUFFIX@" examples/build-unix/Makefile.config
+sed -i 's@libsystemc.a@libsystemc.so@' examples/build-unix/Makefile.rules
+sed -i '/^SYSTEMC_HOME/d' examples/sysc/{2.1,2.3}/*/Makefile
+sed -i 's@^OBJS.*@&\nPTHREADS=1@' $(find examples -type d -name '*async*' -printf '%p/Makefile\n')
+
+# remove incompatible build scripts for the examples to leave only the Makefiles
+find examples \( -name CMakeLists.txt -or -name '*.vcxproj' -or -name Makefile.in -or -name Makefile.am \) -delete
+find examples -name build-msvc -exec rm -r '{}' '+'
+
+cp -r examples $PKG/usr/doc/$PRGNAM-$VERSION
+rm $PKG/usr/doc/$PRGNAM-$VERSION/INSTALL*
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
