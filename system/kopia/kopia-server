@@ -1,0 +1,175 @@
+#!/bin/sh
+#
+# kopia-server - start/stop the Kopia web UI server for the current user.
+#
+# No root, no /etc/rc.d. The server runs as whoever invokes this script,
+# with its password kept in a 0600 env file rather than on the command
+# line (where "ps" would show it to every user on the box).
+#
+# Usage:
+#   kopia-server setup     create the env file with a random password
+#   kopia-server start
+#   kopia-server stop
+#   kopia-server restart
+#   kopia-server status
+#   kopia-server log       tail the server log
+#
+# Environment overrides:
+#   KOPIA_ADDRESS   listen address (default 127.0.0.1:51515)
+#   KOPIA_BIN       path to the kopia binary (default: from PATH)
+
+set -e
+
+PRGNAM=kopia-server
+KOPIA_BIN="${KOPIA_BIN:-kopia}"
+ADDRESS="${KOPIA_ADDRESS:-127.0.0.1:51515}"
+
+CONFDIR="${XDG_CONFIG_HOME:-$HOME/.config}/kopia"
+ENVFILE="$CONFDIR/server.env"
+
+RUNDIR="${XDG_RUNTIME_DIR:-$HOME/.cache}/kopia"
+PIDFILE="$RUNDIR/server.pid"
+LOGFILE="$RUNDIR/server.log"
+
+die() { echo "$PRGNAM: $*" 1>&2; exit 1; }
+
+ensure_dirs() {
+  mkdir -p "$CONFDIR" "$RUNDIR"
+  chmod 700 "$CONFDIR" "$RUNDIR"
+}
+
+# True only if the pidfile points at a live process that is actually kopia.
+# The comm check matters: PIDs get reused, and killing a stranger's process
+# because a stale pidfile happened to match would be a bad day.
+running() {
+  [ -s "$PIDFILE" ] || return 1
+  pid=$(cat "$PIDFILE" 2>/dev/null) || return 1
+  case "$pid" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ -d "/proc/$pid" ] || return 1
+  read -r comm < "/proc/$pid/comm" 2>/dev/null || return 1
+  [ "$comm" = "kopia" ]
+}
+
+check_envfile() {
+  [ -f "$ENVFILE" ] || die "no $ENVFILE - run '$PRGNAM setup' first"
+  perms=$(stat -c %a "$ENVFILE")
+  case "$perms" in
+    600|400) ;;
+    *) die "$ENVFILE is mode $perms - must be 600 (chmod 600 '$ENVFILE')" ;;
+  esac
+}
+
+cmd_setup() {
+  ensure_dirs
+  if [ -e "$ENVFILE" ]; then
+    echo "$PRGNAM: $ENVFILE already exists, leaving it alone"
+    return 0
+  fi
+  pw=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')
+  ( umask 077
+    cat > "$ENVFILE" <<EOF
+# Kopia server credentials. Keep this file at mode 0600.
+KOPIA_SERVER_USERNAME=kopia
+KOPIA_SERVER_PASSWORD=$pw
+EOF
+  )
+  chmod 600 "$ENVFILE"
+  echo "$PRGNAM: wrote $ENVFILE"
+  echo "  username: kopia"
+  echo "  password: $pw"
+}
+
+cmd_start() {
+  ensure_dirs
+  check_envfile
+  command -v "$KOPIA_BIN" >/dev/null 2>&1 || die "kopia binary not found"
+
+  if running; then
+    echo "$PRGNAM: already running (pid $(cat "$PIDFILE")) on http://$ADDRESS"
+    return 0
+  fi
+
+  # shellcheck disable=SC1090
+  . "$ENVFILE"
+  export KOPIA_SERVER_USERNAME KOPIA_SERVER_PASSWORD
+
+  # --insecure is fine only because we bind to loopback. If you ever change
+  # ADDRESS to a routable interface, drop --insecure and add TLS instead:
+  #   --tls-generate-cert --tls-cert-file ... --tls-key-file ...
+  case "$ADDRESS" in
+    127.*|localhost:*|\[::1\]:*) insecure="--insecure" ;;
+    *) die "refusing --insecure on non-loopback address $ADDRESS; add TLS flags and edit this script" ;;
+  esac
+
+  nohup "$KOPIA_BIN" server start \
+    $insecure \
+    --address "$ADDRESS" \
+    --server-username "$KOPIA_SERVER_USERNAME" \
+    >> "$LOGFILE" 2>&1 &
+
+  echo $! > "$PIDFILE"
+  chmod 600 "$PIDFILE" "$LOGFILE"
+
+  # Give it a moment to either bind or die, so the exit status means something.
+  sleep 1
+  if running; then
+    echo "$PRGNAM: started (pid $(cat "$PIDFILE")) on http://$ADDRESS"
+    echo "  username: $KOPIA_SERVER_USERNAME"
+    echo "  log:      $LOGFILE"
+  else
+    : > "$PIDFILE"
+    echo "$PRGNAM: failed to start - last lines of $LOGFILE:" 1>&2
+    tail -n 20 "$LOGFILE" 1>&2
+    exit 1
+  fi
+}
+
+cmd_stop() {
+  if ! running; then
+    echo "$PRGNAM: not running"
+    [ -f "$PIDFILE" ] && : > "$PIDFILE"
+    return 0
+  fi
+  pid=$(cat "$PIDFILE")
+  kill "$pid" 2>/dev/null || true
+
+  n=0
+  while [ $n -lt 20 ]; do
+    running || break
+    sleep 0.5
+    n=$((n + 1))
+  done
+
+  if running; then
+    echo "$PRGNAM: pid $pid ignored SIGTERM, sending SIGKILL" 1>&2
+    kill -9 "$pid" 2>/dev/null || true
+    sleep 1
+  fi
+
+  : > "$PIDFILE"
+  echo "$PRGNAM: stopped"
+}
+
+cmd_status() {
+  if running; then
+    pid=$(cat "$PIDFILE")
+    echo "$PRGNAM: running (pid $pid) on http://$ADDRESS"
+    echo "  started: $(ps -o lstart= -p "$pid" 2>/dev/null)"
+    echo "  log:     $LOGFILE"
+  else
+    echo "$PRGNAM: not running"
+    return 3
+  fi
+}
+
+case "${1:-}" in
+  setup)   cmd_setup ;;
+  start)   cmd_start ;;
+  stop)    cmd_stop ;;
+  restart) cmd_stop; cmd_start ;;
+  status)  cmd_status ;;
+  log)     exec tail -n 50 -f "$LOGFILE" ;;
+  *) echo "usage: $PRGNAM {setup|start|stop|restart|status|log}" 1>&2; exit 1 ;;
+esac
