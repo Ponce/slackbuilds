@@ -1,0 +1,109 @@
+# Fix shiboken2 type lookup for bare nested enums with modern libclang.
+#
+# Symptom: QDragMoveEvent / QHoverEvent / QKeyEvent / QMouseEvent wrappers
+# generate QFlags<QOpenGLShader::ShaderTypeBit> and QOpenGLShader::DragMove
+# instead of QEvent::Type / QEvent::DragMove.
+#
+# Causes:
+# 1. libclang spells nested enum params as bare "Type" while the declaration
+#    type is "QEvent::Type" (same CXType_Enum kind), so the clang-16
+#    resolveType() helper did not upgrade the name.
+# 2. findTypeEntries() only checked direct base classes, so
+#    QDragMoveEvent -> QDropEvent never reached QEvent::Type.
+# 3. findFlagsType("Type") used endsWith("Type"), matching ShaderType.
+#
+# Apply after the Debian clang-16 patch series.
+
+--- a/sources/shiboken2/ApiExtractor/clangparser/clangutils.cpp
++++ b/sources/shiboken2/ApiExtractor/clangparser/clangutils.cpp
+@@ -135,26 +135,37 @@
+     return kind >= CXType_FirstBuiltin && kind <= CXType_LastBuiltin;
+ }
+ 
+-// Resolve elaborated types occurring with clang 16
++QString getTypeName(const CXType &type)
++{
++    CXString typeSpelling = clang_getTypeSpelling(type);
++    const QString result = QString::fromUtf8(clang_getCString(typeSpelling));
++    clang_disposeString(typeSpelling);
++    return result;
++}
++
++// Resolve elaborated types occurring with clang 16+.
++// Also prefer the declaration type when kinds match but the declaration is
++// more qualified: clang may spell nested enums used without qualification as
++// bare "Type" while the declaration type is "QEvent::Type" (same CXType_Enum).
++// Without this, type lookup falls through to findFlagsType("Type") and can
++// match unrelated flags such as QOpenGLShader::ShaderType (ends with "Type").
+ static CXType resolveType(const CXType &type)
+ {
+     if (!isBuiltinType(type.kind)) {
+         CXCursor decl = clang_getTypeDeclaration(type);
+         auto resolvedType = clang_getCursorType(decl);
+-        if (resolvedType.kind != CXType_Invalid && resolvedType.kind != type.kind)
+-            return resolvedType;
++        if (resolvedType.kind != CXType_Invalid) {
++            if (resolvedType.kind != type.kind)
++                return resolvedType;
++            const QString typeName = getTypeName(type);
++            const QString resolvedName = getTypeName(resolvedType);
++            if (typeName != resolvedName && resolvedName.contains(QLatin1String("::")))
++                return resolvedType;
++        }
+     }
+     return type;
+ }
+ 
+-QString getTypeName(const CXType &type)
+-{
+-    CXString typeSpelling = clang_getTypeSpelling(type);
+-    const QString result = QString::fromUtf8(clang_getCString(typeSpelling));
+-    clang_disposeString(typeSpelling);
+-    return result;
+-}
+-
+ // Quick check for "::Type"
+ bool hasScopeResolution(const CXType &type)
+ {
+--- a/sources/shiboken2/ApiExtractor/typedatabase.cpp
++++ b/sources/shiboken2/ApiExtractor/typedatabase.cpp
+@@ -467,9 +467,11 @@
+     if (!fte) {
+         fte = m_flagsEntries.value(name);
+         if (!fte) {
+-            //last hope, search for flag without scope  inside of flags hash
++            // Last hope: match "Scope::FlagsName" when looking up "FlagsName".
++            // Require a "::" separator so "Type" does not match "ShaderType".
++            const QString scopeSuffix = QLatin1String("::") + name;
+             for (auto it = m_flagsEntries.cbegin(), end = m_flagsEntries.cend(); it != end; ++it) {
+-                if (it.key().endsWith(name)) {
++                if (it.key() == name || it.key().endsWith(scopeSuffix)) {
+                     fte = it.value();
+                     break;
+                 }
+--- a/sources/shiboken2/ApiExtractor/abstractmetabuilder.cpp
++++ b/sources/shiboken2/ApiExtractor/abstractmetabuilder.cpp
+@@ -2089,12 +2089,20 @@
+         if (auto type = findTypeEntryUsingContext(currentClass, qualifiedName))
+             return {type};
+ 
+-        // 5.1.1 - Try using the class parents' scopes
++        // 5.1.1 - Try using the class parents' scopes (full inheritance chain).
++        // Direct bases only is not enough: QDragMoveEvent -> QDropEvent does not
++        // find QEvent::Type; the grand-base QEvent does.
+         if (d && !currentClass->baseClassNames().isEmpty()) {
+-            const AbstractMetaClassList &baseClasses = d->getBaseClasses(currentClass);
+-            for (const AbstractMetaClass *cls : baseClasses) {
++            AbstractMetaClassList toVisit = d->getBaseClasses(currentClass);
++            QSet<const AbstractMetaClass *> visited;
++            while (!toVisit.isEmpty()) {
++                const AbstractMetaClass *cls = toVisit.takeFirst();
++                if (!cls || visited.contains(cls))
++                    continue;
++                visited.insert(cls);
+                 if (auto type = findTypeEntryUsingContext(cls, qualifiedName))
+                     return {type};
++                toVisit.append(d->getBaseClasses(cls));
+             }
+         }
+     }
