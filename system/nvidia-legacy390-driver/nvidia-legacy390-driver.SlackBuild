@@ -3,7 +3,7 @@
 # Slackware build script for nvidia-legacy390-driver
 
 # Copyright 2012-2019 Edward W. Koenig, Vancouver, WA, USA
-# Copyright 2020-2023 Lenard Spencer, Orlando, FL, USA
+# Copyright 2020-2026 Lenard Spencer, Orlando, FL, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -27,7 +27,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=nvidia-legacy390-driver
 VERSION=${VERSION:-390.157}
-BUILD=${BUILD:-12}
+BUILD=${BUILD:-13}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -98,7 +98,10 @@ mkdir -p $TMP $PKG $OUTPUT $PKG/install
 mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/{drivers,extensions} \
   $PKG/etc/OpenCL/vendors/ $PKG/usr/{bin,doc,man/man1} \
   $PKG/usr/share/{applications,nvidia,pixmaps,egl/egl_external_platform.d} \
-  $PKG/etc/X11/glvnd/egl_vendor.d $PKG/var/log
+  $PKG/etc/X11/glvnd/egl_vendor.d
+if [ "${PERSISTENCED:-no}" = "yes" ]; then
+  mkdir -p $PKG/var/run
+fi
 
 if [ "$COMPAT32" = "yes" ]; then
   mkdir -p $PKG/usr/lib/tls
@@ -134,7 +137,7 @@ cd $TMP/nvidia-installer-$VERSION
 # First, patch for the removed sys/sysctl.h:
   patch -p1 < $CWD/nvidia-installer-removed-sysctl-h.patch
 
-# Let's try to remove the conflicting files and GPU detection
+# This allows building in a VM:
   patch -p0 < $CWD/skip_conflict-GPU_detect.patch
 
 # Install various files in $PKG instead of the root filesystem:
@@ -200,8 +203,8 @@ cd $TMP/$SRCNAM
 # warning message):
 rm -rf $PKG/var/lib
 
-# Let's use the correct libnvidia-tls.so
-# (MAJOR thanks to LuckyCyborg for finding this)
+# Let's use the correct libnvidia-tls.so as we're not using the
+# package tls_test (MAJOR thanks to LuckyCyborg for finding this)
 ( cd $PKG/usr/lib$LIBDIRSUFFIX
   rm -f libnvidia-tls.so.$VERSION
   mv tls/libnvidia-tls.so.$VERSION .
@@ -218,6 +221,9 @@ rm -rf $PKG/var/lib
 if [ "$ARCH" = "x86_64" -a "${COMPAT32}" != "yes" ]; then
   rm -rf $PKG/usr/lib || true
 fi
+
+# Install our 10-nvidia.conf:
+cat $CWD/10-nvidia.conf > $PKG/etc/X11/xorg.conf.d/10-nvidia.conf
 
 # Compile utilites from source, replacing the precompiled versions
 #
@@ -283,8 +289,8 @@ cd -
     install -m 644 _out/Linux_$TARGET/nvidia-modprobe.1.gz $PKG/usr/man/man1/
   cd -
 
-# Bash script to cleanly install (in doinst.sh) and uninstall the nvidia files
-# so we don't stomp on the overlapping xorg files.
+# Bash script to cleanly install (in doinst.sh) and uninstall (in douninst.sh
+# the nvidia files so we don't stomp on the overlapping xorg files.
 # Note: switching can be problematic ;-)
 mkdir -p $PKG/usr/sbin
 install -m 0755 $CWD/nvidia-switch $PKG/usr/sbin/
@@ -323,9 +329,6 @@ if [ "$ARCH" = "x86_64" -a "${COMPAT32}" = "yes" ]; then
 # so ignoring for now.
 fi
 
-# Remove xorg.conf.d folder since we handle that in nvidia-legacy390-kernel
-rm -rf $PKG/etc/X11/xorg.conf.d
-
 cd $TMP/$SRCNAM
 # put docs in the right place
 mv $PKG/usr/share/man/man1/nvidia-* $PKG/usr/man/man1
@@ -356,6 +359,7 @@ if [ "${PERSISTENCED:-no}" = "yes" ]; then
   tar -xvf $CWD/nvidia-persistenced-$VERSION.tar.bz2
 # Compiling nvidia-persistenced
   cd $TMP/nvidia-persistenced-$VERSION
+  mkdir -p $PKG/var/run
 # Patch for tirpc (backport from 470.xx):
     patch -p1 < $CWD/nvidia-persistenced-390-tirpc.patch
     chown -R root:root .

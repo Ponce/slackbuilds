@@ -10,3 +10,5 @@ fi
 
 usr/sbin/nvidia-switch --install
 
+# Run nvidia-xconfig to create /etc/X11/xorg.conf:
+usr/bin/nvidia-xconfig
