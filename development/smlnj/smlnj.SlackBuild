@@ -1,8 +1,9 @@
 #!/bin/bash
 
-# Slackware build script for smlnj
+# Slackware build script for SML/NJ
 
 # Copyright 2014 R. S. Ananda Murthy, Mysore, India
+# Copyright 2026 Kyle Guinn <elyk03@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,16 +26,16 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=smlnj
-VERSION=${VERSION:-110.79}
+VERSION=${VERSION:-110.99.9}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
-  case "$( uname -m )" in
+  case "$(uname -m)" in
     i?86) ARCH=i586 ;;
     arm*) ARCH=arm ;;
-       *) ARCH=$( uname -m ) ;;
+       *) ARCH=$(uname -m) ;;
   esac
 fi
 
@@ -47,59 +48,185 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
-fi
-
 set -e
 
 rm -rf $PKG
-mkdir -p $TMP $PKG $OUTPUT $TMP/$PRGNAM
-cd $TMP/$PRGNAM
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-$VERSION
+mkdir -p $PRGNAM-$VERSION
+cd $PRGNAM-$VERSION
 cp $CWD/*.tgz .
-rm -rf config
-tar xvf $CWD/config.tgz
+# Replace the above cp line with this to auto-download;
+# the remaining source files will be fetched on demand:
+#wget "http://smlnj.cs.uchicago.edu/dist/working/${VERSION}/config.tgz"
+tar xvf config.tgz
 
-# Confuses install.sh
-unset SMLNJ_HOME
+# Disambiguator for path variables used in SML/NJ's build system:
+#
+# $ROOT and $INSTALLDIR are the roots of the source and build trees,
+# respectively.  $ROOT should be an absolute path; its value comes from
+# $PWD or $(pwd) which means install.sh should be run from the $ROOT
+# directory.  $INSTALLDIR defaults to $ROOT if we don't specify it, but if
+# we do, the directory must already exist.
+#
+# $INSTALLDIR is also intended to be the final installation location.  The
+# $INSTALLDIR path gets "frozen into the generated heap image" and into
+# several scripts.  Furthermore, some scripts used during recompile
+# currently don't support $INSTALLDIR != $ROOT (makeml and installml both
+# assume $INSTALLDIR is $twoup) so trying to change it is futile.
+#
+# There is no $DESTDIR equivalent to install to a temporary location.
+# Instead it is expected that the build tree will be copied elsewhere.  The
+# environment variable $SMLNJ_HOME is intended to override the paths that
+# are frozen into the scripts and heap.  Those same scripts are used during
+# the build, and any pre-existing $SMLNJ_HOME will interfere with them.
+#
+# $CM_PATHCONFIG and $CM_LOCAL_PATHCONFIG are the locations of pathconfig
+# files, used by SML/NJ to find its libraries.  The default $CM_PATHCONFIG
+# is $SMLNJ_HOME/lib/pathconfig when $SMLNJ_HOME is set in the environment,
+# or /usr/lib/smlnj-pathconfig otherwise.  (The latter location is "rarely
+# used" and we will replace it below.)  Similarly, $CM_LOCAL_PATHCONFIG is
+# $HOME/.smlnj-pathconfig when $HOME is set in the environment, or is
+# unused otherwise.  This logic is in base/cm/util/stdcfg.sml.
+#
+# Un-export all of these variables to avoid surprises.
+# Some will be used as documented here, just not exported.
+export -n ROOT INSTALLDIR SMLNJ_HOME CM_PATHCONFIG CM_LOCAL_PATHCONFIG
 
-patch $TMP/$PRGNAM/config/_arch-n-opsys < $CWD/_arch-n-opsys.patch
+# Not using $LIBDIRSUFFIX, SML/NJ has its own mechanism to select 32-bit
+# vs. 64-bit.  $INSTALLDIR can contain files for multiple architectures.
+#
+# ABI compatibility of user-generated heaps created with one version vs.
+# runtime and libraries of a different version is unknown, so assume they
+# may be incompatible and place everything in a version-specific directory.
+ROOT=$TMP/$PRGNAM-$VERSION
+INSTALLDIR=/usr/lib/$PRGNAM-$VERSION
 
+# Configure it to extract all known sources so we can patch them.
+# Extraction occurs during bootstrap; some patching must wait until then.
+sed -i -e 's|#.*\(request src-smlnj\)|\1|' config/targets
+
+# If any variable mentioned in `sml -E` is exported at heap creation time,
+# its value will clobber SML/NJ's defaults.  (This is the mechanism for
+# values getting "frozen into the heap".)  The heap is generated thrice:
+#   1. config/install.sh at bootstrap (search for @SMLboot)
+#   2. base/system/makeml at recompile (search for @SMLboot)
+#   3. config/install.sh at recompile (search for @CMredump)
+#
+# This is particularly important for $CM_PATHCONFIG as all three locations
+# set it to $INSTALLDIR/lib/pathconfig (in our temporary build directory),
+# losing the default behavior described above.  Driver scripts add it back
+# (poorly) by setting $CM_PATHCONFIG to $SMLNJ_HOME/lib/pathconfig, but
+# this workaround requires $SMLNJ_HOME to be set when running the scripts.
+# When $SMLNJ_HOME is not set, then there is a dependency on the temporary
+# build directory and things will break once that directory is removed.
+#
+# Most of the patching below is to:
+#   1. Avoid having the temporary build directory hard-coded into the heap.
+#   2. Restore the default $CM_PATHCONFIG lookup behavior.
+#   3. Allow running driver scripts without the need to set $SMLNJ_HOME;
+#      those scripts should know where SML/NJ is installed.
+#
+# In config/install.sh, delay the $CM_PATHCONFIG export until building
+# libraries, where the path change is actually needed.  Fixes the 1st and
+# 3rd heap generation steps.
+sed -i \
+    -e 's|\(export CM_PATHCONFIG\)|#\1|' \
+    -e 's|\(\s*\)\(.*installer.cm.*\)|\1export CM_PATHCONFIG\n\1\2|' \
+    config/install.sh
+
+# If you were to "freeze in" a new default (for any variable), do it at the
+# 3rd heap generation step like this:
+#sed -i "s|\(\s*\)\(.*@CMredump.*\)|\1CM_PATHCONFIG=$INSTALLDIR/lib/pathconfig \2|" config/install.sh
+
+# Begin bootstrap:  Build/install driver scripts/runtime/heap/libraries.
+# Heap and some libraries are from prebuilt boot.$ARCH-$OPSYS.tgz.
 config/install.sh
+# Bootstrap complete, now let it recompile the prebuilt parts.
 
-mkdir -p "$PKG/usr/lib/smlnj"
-cp -R "$TMP/$PRGNAM/"{bin,lib} "$PKG/usr/lib/smlnj"
+# Fix the 2nd heap generation step now that sources are extracted.
+sed -i 's|\(export CM_PATHCONFIG\)|#\1|' base/system/makeml
 
-mkdir -p "$PKG/etc/profile.d"
-cp "$CWD/smlnj.sh" "$PKG/etc/profile.d/smlnj.sh"
-chmod +x $PKG/etc/profile.d/smlnj.sh
+# Replace /usr/lib/smlnj-pathconfig in the default $CM_PATHCONFIG lookup
+# with $INSTALLDIR/lib/pathconfig.  Once installed, SML/NJ will find its
+# pathconfig file without needing $SMLNJ_HOME or $CM_PATHCONFIG to be set.
+sed -i "s/usr.*lib.*smlnj-pathconfig/$(echo $INSTALLDIR/lib/pathconfig | cut -d/ -f2- | sed 's|/|", "|g')/" base/cm/util/stdcfg.sml
 
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
- -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
- -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+# Enable all available targets.  Do this after bootstrap to avoid
+# unnecessarily rebuilding anything not needed for bootstrap.
+sed -i \
+    -e 's|#.*\(request asdl\)|\1|' \
+    -e 's|#.*\(request pgraph-util\)|\1|' \
+    -e 's|#.*\(request eXene\)|\1|' \
+    -e 's|#.*\(request mlrisc-tools\)|\1|' \
+    -e 's|#.*\(request nowhere\)|\1|' \
+    -e 's|#.*\(request heap2asm\)|\1|' \
+    config/targets
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+# Begin recompile:  See https://github.com/smlnj/legacy/raw/main/README.md
+# $SMLNJ_HOME must additionally be set during cmb-make since the build
+# tree (here $ROOT) isn't yet installed to its final location, and its
+# $CM_PATHCONFIG is no longer clobbered to $INSTALLDIR/lib/pathconfig.
+# This is the proper use of $SMLNJ_HOME.
+cd base/system
+SMLNJ_HOME=$ROOT PATH=$ROOT/bin:$PATH ./cmb-make $ROOT/bin/sml
+./makeml
+#./testml  # Interactive, not a test suite.
+./installml -clean
+cd ../..
+config/install.sh
+# Recompile complete.
+
+# Fix the remaining paths frozen into the driver scripts.
+# Avoid setting $CM_PATHCONFIG in the driver scripts (no longer necessary).
+find bin -maxdepth 1 -type f -exec sed -i "s|$ROOT|$INSTALLDIR|" {} +
+find bin -maxdepth 1 -type f -exec sed -i '/CM_PATHCONFIG/{N;N;N;d}' {} +
+
+chown -R root:root bin lib doc
+chmod -R u+w,go-w,a+rX-st bin lib doc
+
+mkdir -p $PKG$INSTALLDIR
+cp -a bin lib $PKG$INSTALLDIR
+
+find $PKG -exec file {} + | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
+# Create a $PRGNAM -> $PRGNAM-$VERSION symlink.  If multiple versions are
+# installed simultaneously, users can add a particular version's directory
+# to their $PATH, or they can let the symlink choose a default version.
+# The /etc/profile.d scripts created below will handle the common case.
+INSTALLDIR=$(dirname $INSTALLDIR)/$PRGNAM
+ln -s $PRGNAM-$VERSION $PKG$INSTALLDIR
+
+mkdir -p $PKG/etc/profile.d
+cat > $PKG/etc/profile.d/$PRGNAM.sh.new <<-EOF
+	#!/bin/sh
+	if [ -d ${INSTALLDIR}/bin ]; then
+	  PATH="\${PATH}:${INSTALLDIR}/bin"
+	  export PATH
+	fi
+EOF
+chmod +x $PKG/etc/profile.d/$PRGNAM.sh.new
+cat > $PKG/etc/profile.d/$PRGNAM.csh.new <<-EOF
+	#!/bin/csh
+	if ( -d ${INSTALLDIR}/bin ) then
+	  setenv PATH \${PATH}:${INSTALLDIR}/bin
+	endif
+EOF
+chmod +x $PKG/etc/profile.d/$PRGNAM.csh.new
+
+mkdir -p $PKG/usr
+cp -a doc/man $PKG/usr
+find $PKG/usr/man -type f -exec gzip -9 {} +
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a doc/html doc/pdf $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-cat $CWD/doinst.sh > $PKG/install/doinst.sh
 cat $CWD/slack-desc > $PKG/install/slack-desc
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
