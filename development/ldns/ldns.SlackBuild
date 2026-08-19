@@ -33,6 +33,14 @@
 # URL:        http://www.nlnetlabs.nl/projects/ldns/
 # -----------------------------------------------------------------------------
 
+# 20260819 bkw: Modified by SlackBuilds.org, BUILD=2:
+# - call python2 as python2, not python (sbolint; future-proofing).
+# - fix baked-in paths in .pyv files (sbopkglint).
+# - fix insecure RPATH in perl module (sbopkglint).
+# - add missing SlackBuild to doc dir (sbopkglint).
+# - orphan. Larry Hajali is no longer active, and this only has
+#   one dependee, which is also orphaned.
+
 # 20220308 bkw: Modified by SlackBuilds.org: fix build on 15.0:
 # - parallel makes are broken, use -j1.
 # - fix code that finds the /usr/share/vim/vimXX directory (it would
@@ -45,7 +53,7 @@ PRGNAM=ldns
 VERSION=${VERSION:-1.7.1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-3}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -141,14 +149,25 @@ rm -rf $PKG/usr
 mkdir -p $PKG/usr/lib$LIBDIRSUFFIX
 mv $PKG/.keep/* $PKG/usr/lib$LIBDIRSUFFIX
 rm -rf $PKG/.keep
-python -m compileall $PKG/usr/lib*/python2*/site-packages
+# 20260819 bkw: this used to read:
+# python2 -m compileall $PKG/usr/lib*/python2*/site-packages
+# ...but doing that bakes the $PKG path into the .pyc files it produces.
+# This belongs in a HOWTO somewhere.
+( cd $PKG/usr/lib*/python2*/site-packages ; python2 -m compileall . )
 
 # 20220308 bkw: now do it over again, with python 3 and perl.
 buildit 3 --with-p5-dns-ldns
-python3 -m compileall $PKG/usr/lib*/python3*/site-packages
+# 20260819 bkw: see above comment about python2 -m compileall
+( cd $PKG/usr/lib*/python3*/site-packages ; python3 -m compileall . )
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# 20260819 bkw: makepkg said:
+# WARNING: */tmp* rpath found in ./usr/lib64/perl5/vendor_perl/auto/DNS/LDNS/LDNS.so: RPATH /tmp/SBo/ldns-1.7.1/.libs
+# ...so get rid of it. "patchelf --print-rpath" shows only this path,
+# so we can just remove it.
+patchelf --remove-rpath $PKG/usr/lib*/perl5/vendor_perl/auto/DNS/LDNS/LDNS.so
 
 find $PKG -name perllocal.pod -o -name ".packlist" -o -name "*.bs" | xargs rm -f || true
 find $PKG -depth -type d -empty -delete || true
@@ -158,8 +177,10 @@ mkdir -p $PKG/etc/$PRGNAM
 sed -n '/Zone/,$p' $CWD/root-anchors.xml | sed -e 's|<[^>]*>||g' | \
   xargs | sed 's|\.|\. IN DS|' > $PKG/etc/$PRGNAM/root.key.new
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a Changelog LICENSE README* doc/TODO $PKG/usr/doc/$PRGNAM-$VERSION
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a Changelog LICENSE README* doc/TODO $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 # 20220308 bkw: it's fully possible for there to be multiple
 # /usr/share/vim/vim<version> directories. For one thing, if vim gets
