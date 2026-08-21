@@ -6,8 +6,10 @@ fi
 if [ -x /usr/bin/update-desktop-database ]; then
   /usr/bin/update-desktop-database /usr/share/applications &> /dev/null
 fi
-if [ -x /usr/bin/gtk-update-icon-cache ]; then
-  for theme in /usr/share/icons/*; do
-    /usr/bin/gtk-update-icon-cache -q -t -f $theme &> /dev/null
-  done
+if [ -e usr/share/icons/hicolor/icon-theme.cache ]; then
+  if [ -x /usr/bin/gtk-update-icon-cache ]; then
+    for theme in /usr/share/icons/hicolor /usr/share/icons/locolor; do
+      /usr/bin/gtk-update-icon-cache -q -t -f $theme &> /dev/null
+    done
+  fi
 fi
