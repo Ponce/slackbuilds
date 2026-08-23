@@ -2,7 +2,7 @@
 #          The Exim mail transport agent         #
 ##################################################
 #
-# Copyright (c) The Exim Maintainers 2022 - 2025
+# Copyright (c) The Exim Maintainers 2022 - 2026
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 # This is the template for Exim's main build-time configuration file. It
@@ -320,8 +320,8 @@ USE_OPENSSL_PC=openssl
 # is historic).
 # You need to add -export-dynamic -rdynamic to EXTRALIBS. You may also need to
 # add -ldl to EXTRALIBS so that dlopen() is available to Exim. You need to
-# define CFLAGS_DYNAIC and LOOKUP_MODULE_DIR below so the builds are done right,
-# and so the exim binary actually loads dynamic lookup modules.
+# define CFLAGS_DYNAMIC and LOOKUP_MODULE_DIR below so the builds are done
+# right, and so the exim binary actually loads dynamic lookup modules.
 
 ROUTER_ACCEPT=yes
 ROUTER_DNSLOOKUP=yes
@@ -350,8 +350,8 @@ ROUTER_IPLOOKUP=yes
 # is historic).
 # You need to add -export-dynamic -rdynamic to EXTRALIBS. You may also need to
 # add -ldl to EXTRALIBS so that dlopen() is available to Exim. You need to
-# define CFLAGS_DYNAIC and LOOKUP_MODULE_DIR below so the builds are done right,
-# and so the exim binary actually loads dynamic lookup modules.
+# define CFLAGS_DYNAMIC and LOOKUP_MODULE_DIR below so the builds are done
+# right, and so the exim binary actually loads dynamic lookup modules.
 # The smtp transport cannot be built as a module.
 
 TRANSPORT_APPENDFILE=yes
@@ -406,11 +406,13 @@ LOOKUP_MODULE_DIR=/usr/lib${LIBDIRSUFFIX}/exim/
 # for the specialist case of using the DNS as a general database facility (not
 # common).
 # If set to "2" instead of "yes" then the corresponding lookup will be
-# built as a module and must be installed into LOOKUP_MODULE_DIR. You need to
+# built as a module and left in the "dynlibs" directory under the build
+# directory. They must be installed into LOOKUP_MODULE_DIR. You need to
 # add -export-dynamic -rdynamic to EXTRALIBS. You may also need to add -ldl to
 # EXTRALIBS so that dlopen() is available to Exim. You need to define
 # LOOKUP_MODULE_DIR above so the exim binary actually loads dynamic lookup
 # modules.
+#
 # Also, instead of adding all the libraries/includes to LOOKUP_INCLUDE and
 # LOOKUP_LIBS, add them to the respective LOOKUP_*_INCLUDE and LOOKUP_*_LIBS
 # (where * is the name as given here in this list). That ensures that only
@@ -436,7 +438,6 @@ LOOKUP_DNSDB=yes
 
 LOOKUP_CDB=yes
 LOOKUP_DSEARCH=yes
-# LOOKUP_IBASE=yes
 # LOOKUP_JSON=yes
 LOOKUP_JSON_PC=jansson
 # LOOKUP_LDAP=yes
@@ -450,6 +451,7 @@ LOOKUP_MYSQL_PC=mariadb
 LOOKUP_PASSWD=yes
 # LOOKUP_PGSQL=yes
 LOOKUP_PGSQL_PC=libpq
+LOOKUP_PSL=yes
 # LOOKUP_REDIS=yes
 LOOKUP_REDIS_PC=hiredis
 # LOOKUP_SQLITE=yes
@@ -463,9 +465,6 @@ LOOKUP_SQLITE_PC=sqlite3
 # LOOKUP_WILDLSEARCH=yes
 # LOOKUP_NWILDLSEARCH=yes
 
-
-# For IBASE you may need:
-#LIBS += -lfbclient
 
 #------------------------------------------------------------------------------
 # If you have set LOOKUP_LDAP, you should set LDAP_LIB_TYPE to indicate
@@ -519,7 +518,7 @@ SUPPORT_DANE=yes
 # the command for linking Exim itself, not on any auxiliary programs. You
 # don't need to set LOOKUP_INCLUDE if the relevant directories are already
 # specified in INCLUDE. The settings below are just examples; -lpq is for
-# PostgreSQL, -lgds is for Interbase, -lsqlite3 is for SQLite, -lhiredis
+# PostgreSQL, -lsqlite3 is for SQLite, -lhiredis
 # is for Redis, -ljansson for JSON.
 #
 # You do not need to use this for any lookup information added via pkg-config.
@@ -533,15 +532,16 @@ SUPPORT_DANE=yes
 
 # LOOKUP_INCLUDE=-I /usr/local/ldap/include -I /usr/local/mysql/include -I /usr/local/pgsql/include
 # LOOKUP_INCLUDE +=-I /usr/local/include
-# LOOKUP_LIBS=-L/usr/local/lib -lldap -llber -lmysqlclient -lpq -lgds -lsqlite3 -llmdb
+# LOOKUP_LIBS=-L/usr/local/lib -lldap -llber -lmysqlclient -lpq -lsqlite3 -llmdb
 
 # LOOKUP_LIBS=-L/usr/local/lib -lldap -llber
 # Some platforms may need this for LOOKUP_NIS:
 #LOOKUP_LIBS += -lnsl
+
+# These lookup types need appropriate libraries
 #LOOKUP_LIBS += -ljansson
 #LOOKUP_LIBS += -lhiredis
 
-#------------------------------------------------------------------------------
 # If you included LOOKUP_LMDB above you will need the library. Depending
 # on where installed you may also need an include directory
 #
@@ -549,6 +549,7 @@ SUPPORT_DANE=yes
 # LOOKUP_LIBS += -llmdb
 # For dynamic-modules builds, use instead LOOKUP_LMDB_INCLUDE & LOOKUP_LMDB_LIBS
 
+# LOOKUP_PSL will require that SUPPORT_I18N is defined (but needs no libraries)
 
 #------------------------------------------------------------------------------
 # Compiling the Exim monitor: If you want to compile the Exim monitor, a
@@ -572,9 +573,9 @@ SUPPORT_DANE=yes
 
 # SUPPORT_EXIM_FILTER=2
 
-#------------------------------------------------------------------------------
 # Compiling with support for Sieve filters is the default. To disable this
-# uncomment the line below.
+# uncomment the line below.  If you need full support for the "body" extension
+# you will need WITH_CONTENT_SCAN defined.
 
 # DISABLE_SIEVE_FILTER=yes
 
@@ -582,6 +583,10 @@ SUPPORT_DANE=yes
 # this line.
 
 # SUPPORT_SIEVE_FILTER=2
+
+#------------------------------------------------------------------------------
+# Uncomment the line to include DSCP support.  Set to 2 for a module build.
+# SUPPORT_DSCP
 
 #------------------------------------------------------------------------------
 # Compiling Exim with content scanning support: If you want to compile Exim
@@ -595,22 +600,11 @@ WITH_CONTENT_SCAN=yes
 # If you have content scanning you may wish to only include some of the scanner
 # interfaces.  Uncomment any of these lines to remove that code.
 
-# DISABLE_MAL_FFROTD=yes
-# DISABLE_MAL_FFROT6D=yes
-# DISABLE_MAL_DRWEB=yes
 # DISABLE_MAL_FSECURE=yes
-# DISABLE_MAL_SOPHIE=yes
 # DISABLE_MAL_CLAM=yes
 # DISABLE_MAL_AVAST=yes
 # DISABLE_MAL_SOCK=yes
 # DISABLE_MAL_CMDLINE=yes
-
-# These scanners are claimed to be no longer existent.
-
-DISABLE_MAL_AVE=yes
-DISABLE_MAL_KAV=yes
-DISABLE_MAL_MKS=yes
-
 
 #------------------------------------------------------------------------------
 # If built with TLS, Exim includes code to support DKIM (DomainKeys Identified
@@ -657,8 +651,8 @@ DISABLE_MAL_MKS=yes
 # Uncomment the following to remove the fast-ramp two-phase-queue-run support
 # DISABLE_QUEUE_RAMP=yes
 
-# Uncomment the following lines to add SRS (Sender Rewriting Scheme) support
-# using only native facilities.
+# Uncomment the following lines to add SRS (Sender Rewriting Scheme) support.
+# This needs no library.
 SUPPORT_SRS=yes
 
 # Uncomment the following to remove support for the ESMTP extension "WELLKNOWN"
@@ -696,19 +690,13 @@ SUPPORT_SRS=yes
 # 1.3.2-3 works.  It seems that the OpenDMARC project broke their API.
 # Use this option if you need to build with an old library (1.3.x)
 # DMARC_API=100300
+#
+# As an alternative, see EXPERIMENTAL_DMARC_NATIVE
+# in doc-txt/experimental-spec.txt
 
 # Uncomment the following line to add ARC (Authenticated Received Chain)
 # support.  You must have SPF and DKIM support enabled also.
 # EXPERIMENTAL_ARC=yes
-
-# Uncomment the following lines to add Brightmail AntiSpam support. You need
-# to have the Brightmail client SDK installed. Please check the experimental
-# documentation for implementation details. You need to edit the CFLAGS and
-# LDFLAGS lines.
-
-# EXPERIMENTAL_BRIGHTMAIL=yes
-# CFLAGS  += -I/opt/brightmail/bsdk-6.0/include
-# LDFLAGS += -lxml2_single -lbmiclient_single -L/opt/brightmail/bsdk-6.0/lib
 
 # Uncomment the following to include extra information in fail DSN message (bounces)
 # EXPERIMENTAL_DSN_INFO=yes
@@ -719,7 +707,8 @@ SUPPORT_SRS=yes
 # Uncomment the following line to add SRV smtps support
 # EXPERIMENTAL_SRV_SMTPS=yes
 #
-# Uncomment the following line to add XCLIENT support
+# Uncomment the following line to add XCLIENT support.
+# Set to 2 for a dynamic-load module.
 # EXPERIMENTAL_XCLIENT=yes
 
 ###############################################################################
@@ -759,6 +748,8 @@ SUPPORT_SRS=yes
 # sqlite
 # USE_SQLITE = yes
 # DBMLIB = -lsqlite3
+#  If using Gnu Make this is usable:
+# DBMLIB = $(shell pkg-config --libs sqlite3)
 
 
 #------------------------------------------------------------------------------
@@ -882,7 +873,7 @@ FIXED_NEVER_USERS=root
 # right and so the exim binary actually loads dynamic lookup modules.
 #
 # Libraries being built as modules should be added to respective
-# LOOKUP_*_INCLUDE and LOOKUP_*_LIBS rather than the the ones for the
+# AUTH_*_INCLUDE and AUTH_*_LIBS rather than the the ones for the
 # core exim build.  This gets them linked with the module instead.
 # The heimdal does build but we have no test coverage so it is not know to work.
 
@@ -1146,12 +1137,12 @@ EXTRALIBS += -lpam
 # Proxying.
 #
 # If you may want to use outbound (client-side) proxying, using Socks5,
-# uncomment the line below.
+# uncomment the line below.  To build as a dynamic module set it to 2.
 
 # SUPPORT_SOCKS=yes
 
 # If you may want to use inbound (server-side) proxying, using Proxy Protocol,
-# uncomment the line below.
+# uncomment the line below.  To build as a dynamic module set it to 2.
 
 # SUPPORT_PROXY=yes
 
@@ -1189,7 +1180,10 @@ SUPPORT_I18N_2008_PC=libidn2
 # SUPPORT_SPF=yes
 # CFLAGS  += -I/usr/local/include
 # LDFLAGS += -lspf2
+# SUPPORT_SPF_LIBS= -lspf2
 
+# As an alternative, see EXPERIMENTAL_SPF_PERL
+# in doc-txt/experimental-spec.txt
 
 #------------------------------------------------------------------------------
 # Support for authentication via Radius is also available. The Exim support,
@@ -1223,23 +1217,6 @@ SUPPORT_I18N_2008_PC=libidn2
 #
 # If you do not set RADIUS_LIB_TYPE, Exim assumes the radiusclient library,
 # using the original API.
-
-
-#------------------------------------------------------------------------------
-# Support for authentication via the Cyrus SASL pwcheck daemon is available.
-# Note, however, that pwcheck is now deprecated in favour of saslauthd (see
-# next item). The Exim support for pwcheck, which is intented for use in
-# conjunction with the SMTP AUTH facilities, is included only when requested by
-# setting the following parameter to the location of the pwcheck daemon's
-# socket.
-#
-# There is no need to install all of SASL on your system. You just need to run
-# ./configure --with-pwcheck, cd to the pwcheck directory within the sources,
-# make and make install. You must create the socket directory (default
-# /var/pwcheck) and chown it to Exim's user and group. Once you have installed
-# pwcheck, you should arrange for it to be started by root at boot time.
-
-# CYRUS_PWCHECK_SOCKET=/var/pwcheck/pwcheck
 
 
 #------------------------------------------------------------------------------
