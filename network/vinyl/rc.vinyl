@@ -1,0 +1,81 @@
+#!/bin/sh
+
+# vinyl rc script
+# written by Matt Schurenko <matt.schurenko@gmail.com>
+# updated by Emmanuel N. Millan
+
+USAGE="usage: $0 start|stop|restart"
+BIN='/usr/sbin/vinyld'
+CONF='/etc/vinyl/default.vcl'
+PID='/var/run/vinyl.pid'
+
+##
+# adjust the following variables accordingly
+##
+BACKING_FILE='/var/lib/vinyl-cache'
+ADMIN_IP='127.0.0.1'
+ADMIN_PORT=8001
+HTTP_IP='0.0.0.0'
+HTTP_PORT=80
+CACHE_SIZE='1g'
+# ttl assigned to objects without ttl values (default 120s)
+DEFAULT_TTL=604800 # 7 days
+FILE_DESCRIPTORS=131072
+MIN_THREADS=5
+MAX_THREADS=500
+THREAD_TIMEOUT=300
+# maximum number of http headers (default is 64)
+HTTP_HEADERS=384
+# connection timout for backend (default is 0.4s)
+CONNECT_TIMEOUT='4.0'
+
+VINYL_OPTS="-f $CONF \
+              -s file,${BACKING_FILE},$CACHE_SIZE \
+              -T $ADMIN_IP:${ADMIN_PORT} \
+              -a $HTTP_IP:${HTTP_PORT} \
+              -t $DEFAULT_TTL \
+              -P $PID"
+
+VINYL_PARAMS="-p http_max_hdr=$HTTP_HEADERS \
+              -p thread_pool_min=${MIN_THREADS} \
+              -p thread_pool_max=${MAX_THREADS} \
+              -p thread_pool_timeout=${THREAD_TIMEOUT} \
+              -p connect_timeout=$CONNECT_TIMEOUT"
+
+vinyl_start() {
+	if [ -e $PID ];then
+		if [ `pgrep vinyld|head -n1` == `cat $PID` ];then
+			echo "vinyl is already running"
+			exit 1
+		else # pid file must be stale
+			"$PID exists but pid doesn't match pid of vinyld. please investigate."
+			exit 2
+		fi
+	fi
+	ulimit -n $FILE_DESCRIPTORS
+	echo "starting vinyl..."
+  $BIN $VINYL_OPTS $VINYL_PARAMS
+}
+vinyl_stop() {
+	echo "stopping vinyl..."
+	killall `echo $BIN | awk -F'/' '{print $NF}'`
+	if [ -e $PID ];then
+		rm $PID
+	fi
+}
+
+case "$1" in
+	start)
+		vinyl_start
+	;;
+	stop)
+		vinyl_stop
+	;;
+	restart)
+		vinyl_stop
+		sleep 1
+		vinyl_start
+	;;
+	*) echo -e $USAGE
+	;;
+esac
