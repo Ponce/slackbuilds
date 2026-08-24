@@ -2,13 +2,34 @@
 
 # Slackware build script for libaosd
 
-# Written by Pablo Santamaria (pablosantamaria@gmail.com)
+# Originally written by Pablo Santamaria.
+# Modified and now maintained by B. Watson <urchlay@slackware.uk>.
+
+# Original version had no license. Modified version licensed under the
+# WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
+
+# 20260823 bkw:
+# NOTE to SBo admins: This looks like a library with no dependees,
+# but it's not. Please *don't* remove it from the repo: the aosd_cat
+# command is a useful *application* (which I actually do use). Other
+# distros split it into separate libaosd and aosd_cat packages, but
+# we include both in the same package because it's all built from the
+# same source tree with one "make".
+
+# 20260823 bkw:
+# - take over maintenance.
+# - switch to xinerama fork.
+# - update for v0.2.7+20141127_8a0d0d7 (latest git).
+# - add new options to the man page.
+# - fix project URL in man page and --help.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=libaosd
-VERSION=${VERSION:-0.2.7}
-BUILD=${BUILD:-2}
+SRCNAM=libaosd-xinerama
+VERSION=${VERSION:-0.2.7+20141127_8a0d0d7}
+COMMIT=${COMMIT:-8a0d0d702e3b61c84439ce2f3f8de43bb4dcff07}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -20,9 +41,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -51,44 +69,53 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tgz
-cd $PRGNAM-$VERSION
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 -o -perm 511 \) \
- -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
- -exec chmod 644 {} \;
+rm -rf $SRCNAM-$COMMIT
+tar xvf $CWD/$SRCNAM-$COMMIT.tar.gz --no-same-owner
+cd $SRCNAM-$COMMIT
+find . ! -type l    -a \( \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
 
+# 20260823 bkw: new options for the -xinerama fork listed in README.rst,
+# add them to the man page too.
+patch -p1 < $CWD/manpage_newopts.diff
+
+# 20260823 bkw: change the "please send bug reports to" URL to
+# the fork's github page. the original site is gone, and if
+# they weren't, they wouldn't want reports on someone else's fork.
+eval $( grep ^HOMEPAGE $CWD/$PRGNAM.info )
+sed -i "/^AC_INIT/s,http://jira\\.atheme\\.org/,$HOMEPAGE," configure.ac
+
+sh autogen.sh
+
+# 20260823 bkw: --disable-static not supported (nor needed).
+# "make install-strip" not supported, but the -Wl,-s makes it
+# build everything stripped.
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
+LDFLAGS="-Wl,-s" \
 ./configure \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
   --sysconfdir=/etc \
   --localstatedir=/var \
-  --disable-static \
   --mandir=/usr/man \
   --docdir=/usr/doc/$PRGNAM-$VERSION \
   --build=$ARCH-slackware-linux
 
+# 20260823 bkw: don't see an obvious way to show the compile commands,
+# V=1 doesn't work.
 make
 make install DESTDIR=$PKG
-
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-( cd $PKG/usr/man
-  find . -type f -exec gzip -9 {} \;
-  for i in $( find . -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-)
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a LICENSE $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-
+gzip -9 $PKG/usr/man/man*/*
 rm -f $PKG/usr/lib*/*.la
+
+# 20260823 bkw: Changelog, GIT-Access, TODO docs are just cruft,
+# do not include in the package.
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a LICENSE README* $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
