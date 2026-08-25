@@ -25,10 +25,12 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=dmd
-VERSION=${VERSION:-2.112.0}
+VERSION=${VERSION:-2.113.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+
+BOOTSTRAP_VERSION=2.112.0
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -63,15 +65,25 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM${VERSION%%.*}
-tar xvf $CWD/$PRGNAM.$VERSION.linux.tar.xz
-cd $PRGNAM${VERSION%%.*}
-chown -R root:root .
-find -L . \
+rm -rf $PRGNAM-${VERSION} phobos-$VERSION dmd2 install
+tar xvf $CWD/$PRGNAM.$BOOTSTRAP_VERSION.linux.tar.xz
+tar zxvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar zxvf $CWD/phobos-$VERSION.tar.gz
+
+chown -R root:root $PRGNAM-$VERSION phobos-$VERSION
+find -L $PRGNAM-$VERSION phobos-$VERSION \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
   -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+cd $PRGNAM-$VERSION
+make HOST_DMD=$TMP/dmd2/linux/bin${ARCHSUFFIX}/dmd ENABLE_RELEASE=1 install
+
+cd ../phobos-$VERSION
+make DMD_DIR=../dmd-$VERSION install
+
+cd $TMP/install
 
 mkdir $PKG/etc
 sed -e "s|%@P%/../../src/phobos -I%@P%/../../src/druntime/import|/usr/include/dmd|g" \
@@ -82,11 +94,10 @@ sed -e "s|%@P%/../../src/phobos -I%@P%/../../src/druntime/import|/usr/include/dm
 mkdir -p $PKG/usr/bin
 mv linux/bin${ARCHSUFFIX}/dmd $PKG/usr/bin
 
-mkdir -p $PKG/usr/lib${LIBDIRSUFFIX} $PKG/usr/include/dmd
+mkdir -p $PKG/usr/lib${LIBDIRSUFFIX} $PKG/usr/include
 
 # Runtime.
-mv src/druntime/src/{core,etc,object.d} $PKG/usr/include/dmd
-find $PKG/usr/include/dmd -name "*.S" -print0 | xargs -0 rm
+mv src/druntime/import $PKG/usr/include/dmd
 
 # Phobos.
 mv linux/lib${ARCHSUFFIX}/libphobos2.* $PKG/usr/lib${LIBDIRSUFFIX}
@@ -94,15 +105,14 @@ mv src/phobos/std $PKG/usr/include/dmd
 mv src/phobos/etc/c $PKG/usr/include/dmd/etc
 rm -r $PKG/usr/include/dmd/etc/c/zlib
 
-# DMD.
-mv src/dmd/dmd $PKG/usr/include/dmd
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-# Remove C/C++ sources.
-find $PKG/usr/include/dmd \( -name "*.c" -or -name "*.h" \) -print0 | xargs -0 rm
+mv man $PKG/usr
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-mv html/d/* $PKG/usr/doc/$PRGNAM-$VERSION
-
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
