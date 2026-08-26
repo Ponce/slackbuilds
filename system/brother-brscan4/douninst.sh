@@ -1,14 +1,3 @@
-###########################
-# Remove library symlinks #
-###########################
-case "$( uname -m )" in
-  x86_64) LIBDIRSUFFIX="64" ;;
-  *) LIBDIRSUFFIX="" ;;
-esac
-
-( cd /usr/lib${LIBDIRSUFFIX}/sane && unlink libsane-brother4.so.1 )
-( cd /usr/lib${LIBDIRSUFFIX}/sane && unlink libsane-brother4.so )
-
 ################################################
 # Remove "brother4" entry from SANE's dll.conf #
 ################################################

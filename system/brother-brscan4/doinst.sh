@@ -16,32 +16,6 @@ config() {
 
 config opt/brother/scanner/brscan4/brsanenetdevice4.cfg.new
 
-########################
-# Add library symlinks #
-########################
-case "$( uname -m )" in
-  x86_64) LIBDIRSUFFIX="64" ;;
-  *) LIBDIRSUFFIX="" ;;
-esac
-
-( cd /usr/lib${LIBDIRSUFFIX}/sane && rm -rf libsane-brother4.so.1 )
-( cd /usr/lib${LIBDIRSUFFIX}/sane && ln -sf libsane-brother4.so.1.0.7 libsane-brother4.so.1 )
-
-( cd /usr/lib${LIBDIRSUFFIX}/sane && rm -rf libsane-brother4.so )
-( cd /usr/lib${LIBDIRSUFFIX}/sane && ln -sf libsane-brother4.so.1.0.7 libsane-brother4.so )
-
-##################
-# Other symlinks #
-##################
-( cd etc/opt/brother/scanner/brscan4 ; rm -rf Brsane4.ini )
-( cd etc/opt/brother/scanner/brscan4 ; ln -sf /opt/brother/scanner/brscan4/Brsane4.ini Brsane4.ini )
-( cd etc/opt/brother/scanner/brscan4 ; rm -rf brsanenetdevice4.cfg )
-( cd etc/opt/brother/scanner/brscan4 ; ln -sf /opt/brother/scanner/brscan4/brsanenetdevice4.cfg brsanenetdevice4.cfg )
-( cd etc/opt/brother/scanner/brscan4 ; rm -rf models4 )
-( cd etc/opt/brother/scanner/brscan4 ; ln -sf /opt/brother/scanner/brscan4/models4 models4 )
-( cd usr/bin ; rm -rf brsaneconfig4 )
-( cd usr/bin ; ln -sf /opt/brother/scanner/brscan4/brsaneconfig4 brsaneconfig4 )
-
 ###########################################
 # Add "brother4" entry to SANE's dll.conf #
 ###########################################
