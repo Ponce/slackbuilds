@@ -19,15 +19,3 @@ if [ -e etc/rc.d/rc.radvd ]; then
 fi
 
 config etc/rc.d/rc.radvd.new
-
-if ! grep rc.radvd etc/rc.d/rc.local > /dev/null
-then
-cat >> etc/rc.d/rc.local <<EOF
-
-# Start radvd
-if [ -x /etc/rc.d/rc.radvd ]; then
-  . /etc/rc.d/rc.radvd start
-fi
-
-EOF
-fi
