@@ -26,7 +26,7 @@ cd "$(dirname "$0")" ; CWD=$(pwd)
 
 PRGNAM=LibreOffice
 SRCNAM=libreoffice
-VERSION=${VERSION:-26.2.5.2}
+VERSION=${VERSION:-26.8.0.3}
 SHORT_VERSION=${VERSION%.*.*}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
@@ -54,10 +54,10 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686 -msse2"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686 -msse2"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
@@ -74,43 +74,50 @@ rm -rf "$PKG"
 mkdir -p "$TMP" "$PKG" "$OUTPUT"
 cd "$TMP"
 rm -rf "$SRCNAM"-"$VERSION"
-tar xvf "$CWD"/"$SRCNAM"-"$VERSION".tar.xz
+echo -n "Unpacking source tarball ..."
+tar xf "$CWD"/"$SRCNAM"-"$VERSION".tar.xz
+echo
 cd "$SRCNAM"-"$VERSION"
 
-#if [ -x /usr/bin/gcc-11.* ];
-if [[ "$(gcc --version |head -1 |cut -d' ' -f3)" == "11."* ]];
+# Ensure gcc14 is used on 15.0.
+if [ -x /usr/bin/gcc-11.* ];
 then
-  echo Slackware-15.0
-  export CC=/usr/bin/clang
-  export CXX=/usr/bin/clang++
-  CXXCLANGFLAGS="-Wno-c++11-narrowing"
+  #echo Slackware-15.0
+  # Since 26.8.0.3, neither default gcc or clang in 15.0 is sufficient
+  # so use gcc14 from SBo
+  source /etc/profile.d/gcc14.sh
+
   # for 28.5.0.4
   sed -i -e '/errEncrypted/c printf("#ERROR:%d\\n", err);' sdext/source/pdfimport/xpdfwrapper/wrapper_gpl.cxx
   PYVER=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
   export PYTHONPATH=/opt/python$PYVER/site-packages
 else
-  echo Slackware-15.0++
+  #echo Slackware-15.0++
   export CC=/usr/bin/gcc
   export CXX=/usr/bin/g++
 fi
 
 if [ -r "$CWD"/"$SRCNAM"-"${VERSION}"-srcs.tar.xz ]; then
-  tar xvf "$CWD"/"$SRCNAM"-"${VERSION}"-srcs.tar.xz
+  echo -n "Unpacking -srcs tarball ..."
+  tar xf "$CWD"/"$SRCNAM"-"${VERSION}"-srcs.tar.xz
+  echo
   # For 7.2.0.4 these aren't found as previously so unpack them manually
   cd "$TMP"
+  echo -n "Unpacking help & translations ..."
   tar xf libreoffice-"${VERSION}"/external/tarballs/libreoffice-translations-"${VERSION}".tar.xz
   tar xf libreoffice-"${VERSION}"/external/tarballs/libreoffice-help-"${VERSION}".tar.xz
+  echo
   cd "$SRCNAM"-"$VERSION"
 else
   HAVE_SRCS_TARBALL=0
 fi
 
+echo -n "Sanitizing source tree ..."
 chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find . ! -type l    -a \( \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
+echo
 
 LOLANGS=${LOLANGS:-"de es fr id it ja nl vi zh-CN"}
 
@@ -203,11 +210,13 @@ extnlpsolver="--enable-ext-nlpsolver"; [ "${EXTNLPSOLVER:-yes}" != "yes" ]     &
 # Workaround for -current 20251114 (needs system harfbuzz)
 if pkg-config --atleast-version 12.2.0 harfbuzz ; then harfbuzz="--with-system-harfbuzz --with-system-graphite" ; else harfbuzz="" ; fi
 
+# For system box2d
+#sed -i '43157i _BOX2D_LIB=box2d' configure
 
 ./configure \
     CFLAGS="$SLKCFLAGS" \
     CXXFLAGS="$SLKCFLAGS $CXXCLANGFLAGS" \
-    LDFLAGS="-lz" \
+    LDFLAGS="-lz -lstdc++" \
     NSS_CFLAGS="$(pkg-config --cflags-only-I mozilla-nss)"\
     --prefix=/usr   \
     --mandir=/usr/man \
@@ -234,9 +243,10 @@ if pkg-config --atleast-version 12.2.0 harfbuzz ; then harfbuzz="--with-system-h
     "$parallel" \
     --with-tls="nss" \
     --with-x \
-    --without-krb5 \
+    --without-dotnet \
     --without-gssapi \
     --without-junit \
+    --without-krb5 \
     --without-system-libxml \
     --with-help \
     --with-system-bluez \
@@ -245,8 +255,10 @@ if pkg-config --atleast-version 12.2.0 harfbuzz ; then harfbuzz="--with-system-h
     --with-system-clucene \
     --with-system-curl \
     --with-system-dicts \
+    --with-system-dragonbox \
     --with-system-epoxy \
     --with-system-expat \
+    --with-system-fast_float \
     --with-system-hunspell \
     --with-system-jpeg \
     --with-system-lcms2 \
@@ -297,7 +309,6 @@ if pkg-config --atleast-version 12.2.0 harfbuzz ; then harfbuzz="--with-system-h
     $valgrind \
     $ucpp \
     $odbc \
-
 
 
 #Create a srcs tarball if we don't already have one
