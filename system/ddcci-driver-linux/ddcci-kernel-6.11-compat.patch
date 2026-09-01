@@ -1,0 +1,117 @@
+diff --git a/ddcci-backlight/ddcci-backlight.c b/ddcci-backlight/ddcci-backlight.c
+index 9439b24..99b8027 100644
+--- a/ddcci-backlight/ddcci-backlight.c
++++ b/ddcci-backlight/ddcci-backlight.c
+@@ -88,13 +88,23 @@ static int ddcci_monitor_readctrl(struct ddcci_device *device,
+ 	return -EIO;
+ }
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
++static bool ddcci_backlight_controls_device(struct backlight_device *bl,
++				   struct device *display_dev)
++{
++	struct ddcci_monitor_drv_data *drv_data = bl_get_data(bl);
++
++	return drv_data->fb_dev == NULL || drv_data->fb_dev == display_dev;
++}
++#else
+ static int ddcci_backlight_check_fb(struct backlight_device *bl,
+ 				   struct fb_info *info)
+ {
+ 	struct ddcci_monitor_drv_data *drv_data = bl_get_data(bl);
+ 
+-	return drv_data->fb_dev == NULL || drv_data->fb_dev == info->dev;
++	return drv_data->fb_dev == NULL || drv_data->fb_dev == info->device;
+ }
++#endif
+ 
+ static int ddcci_backlight_update_status(struct backlight_device *bl)
+ {
+@@ -135,7 +145,11 @@ static const struct backlight_ops ddcci_backlight_ops = {
+ 	.options	= 0,
+ 	.update_status	= ddcci_backlight_update_status,
+ 	.get_brightness = ddcci_backlight_get_brightness,
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
++	.controls_device = ddcci_backlight_controls_device,
++#else
+ 	.check_fb	= ddcci_backlight_check_fb,
++#endif
+ };
+ 
+ static const char *ddcci_monitor_vcp_name(unsigned char vcp)
+diff --git a/ddcci/ddcci.c b/ddcci/ddcci.c
+index d107f8c..6b41eab 100644
+--- a/ddcci/ddcci.c
++++ b/ddcci/ddcci.c
+@@ -1228,10 +1228,10 @@ static const struct ddcci_device_id *ddcci_match_id(const struct ddcci_device_id
+ 	return NULL;
+ }
+ 
+-static int ddcci_device_match(struct device *dev, struct device_driver *drv)
++static int ddcci_device_match(struct device *dev, DDCCI_DRV_CONST struct device_driver *drv)
+ {
+ 	struct ddcci_device	*device = ddcci_verify_device(dev);
+-	struct ddcci_driver	*driver;
++	DDCCI_DRV_CONST struct ddcci_driver	*driver;
+ 
+ 	if (!device)
+ 		return 0;
+@@ -1247,7 +1247,7 @@ static int ddcci_device_match(struct device *dev, struct device_driver *drv)
+ static int ddcci_device_probe(struct device *dev)
+ {
+ 	struct ddcci_device	*device = ddcci_verify_device(dev);
+-	struct ddcci_driver	*driver;
++	DDCCI_DRV_CONST struct ddcci_driver	*driver;
+ 	const struct ddcci_device_id *id;
+ 	int ret = 0;
+ 
+@@ -1268,7 +1268,7 @@ static int ddcci_device_probe(struct device *dev)
+ static int ddcci_device_remove(struct device *dev)
+ {
+ 	struct ddcci_device	*device = ddcci_verify_device(dev);
+-	struct ddcci_driver	*driver;
++	DDCCI_DRV_CONST struct ddcci_driver	*driver;
+ 	int ret = 0;
+ 
+ 	if (!device)
+@@ -1824,7 +1824,9 @@ static struct i2c_driver ddcci_driver = {
+ 	#else
+ 	.remove		= ddcci_remove,
+ 	#endif
+-	.class		= I2C_CLASS_SPD,
++	#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 8, 0)
++	.class		= I2C_CLASS_DDC,
++	#endif
+ 	.detect		= ddcci_detect,
+ 	.address_list	= I2C_ADDRS(
+ 		DDCCI_DEFAULT_DEVICE_ADDR>>1
+@@ -1840,6 +1842,11 @@ static int __init ddcci_module_init(void)
+ 	int ret;
+ 
+ 	pr_debug("initializing ddcci driver\n");
++
++	#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
++	pr_warn("WARNING: Auto-probing of displays is not available on kernel 6.8 and later\n");
++	#endif
++
+ 	/* Allocate a device number region for the character devices */
+ 	ret = alloc_chrdev_region(&ddcci_cdev_first, 0, 128, DEVICE_NAME);
+ 	if (ret < 0) {
+diff --git a/include/linux/ddcci.h b/include/linux/ddcci.h
+index f847c22..f2999d5 100644
+--- a/include/linux/ddcci.h
++++ b/include/linux/ddcci.h
+@@ -131,7 +131,13 @@ struct ddcci_driver {
+ 	struct device_driver driver;
+ 	struct ddcci_device_id *id_table;
+ };
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0)
++#define to_ddcci_driver(d) container_of_const(d, struct ddcci_driver, driver)
++#define DDCCI_DRV_CONST const
++#else
+ #define to_ddcci_driver(d) container_of(d, struct ddcci_driver, driver)
++#define DDCCI_DRV_CONST
++#endif
+ 
+ int ddcci_register_driver(struct module *owner, struct ddcci_driver *driver);
+ #define ddcci_add_driver(driver) \

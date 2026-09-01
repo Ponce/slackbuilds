@@ -1,0 +1,139 @@
+#!/bin/bash
+
+# Slackware build script for ddcci-driver-linux
+
+# Copyright 2026 Julian Grinblat <julian@dotcore.com>
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=ddcci-driver-linux
+VERSION=${VERSION:-0.4.5}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+# Kernel this package builds/installs modules against when DKMS isn't used.
+# Defaults to the kernel currently running on the build machine.
+KERNEL=${KERNEL:-$(uname -r)}
+
+# If DKMS is installed, use it: the module then gets rebuilt automatically
+# for every kernel installed afterwards, instead of only working with one
+# specific $KERNEL. Set USE_DKMS=no to force the plain, single-kernel build
+# even when DKMS is present.
+if [ -z "${USE_DKMS}" ] && command -v dkms > /dev/null 2>&1; then
+  USE_DKMS=yes
+fi
+USE_DKMS=${USE_DKMS:-no}
+
+if [ "$USE_DKMS" = "yes" ]; then
+  PKGVER=$VERSION
+else
+  PKGVER=${VERSION}_$(echo $KERNEL | tr - _)
+fi
+
+if [ "$USE_DKMS" = "yes" ]; then
+  # Source only, nothing compiled at packaging time -- dkms does the actual
+  # compiling later, on whatever architecture the target machine is.
+  ARCH=noarch
+elif [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$PKGVER-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$USE_DKMS" != "yes" ] && [ ! -d /lib/modules/$KERNEL/build ]; then
+  echo "Kernel build tree /lib/modules/$KERNEL/build not found."
+  echo "Install the kernel headers/source for $KERNEL (or set KERNEL= to"
+  echo "the kernel version you want to build against) and try again."
+  exit 1
+fi
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $PRGNAM-v$VERSION
+tar xvf $CWD/$PRGNAM-v$VERSION.tar.gz
+cd $PRGNAM-v$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+# Backport of upstream fixes (not yet in a tagged release) needed to build
+# against Linux 6.11+, including current Slackware kernels. Self-guarded by
+# LINUX_VERSION_CODE checks, so safe to apply unconditionally.
+patch -p1 < $CWD/ddcci-kernel-6.11-compat.patch
+cp $CWD/fix-strncpy.sh $CWD/ddcci-sysfs-emit.patch .
+chmod 755 fix-strncpy.sh
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$PKGVER
+cp -a LICENSE README.md $PKG/usr/doc/$PRGNAM-$PKGVER
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$PKGVER/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+if [ "$USE_DKMS" = "yes" ]; then
+  # Ship source only; dkms.conf's PRE_BUILD runs fix-strncpy.sh against
+  # whatever kernel DKMS is building for, each time it builds.
+  SRCDIR=$PKG/usr/src/ddcci-$VERSION
+  mkdir -p $SRCDIR
+  cp -a Makefile Makefile.dkms LICENSE README.md fix-strncpy.sh \
+    ddcci-sysfs-emit.patch ddcci ddcci-backlight include $SRCDIR
+  sed "s/@VERSION@/$VERSION/" $CWD/dkms.conf > $SRCDIR/dkms.conf
+
+  sed "s/@VERSION@/$VERSION/" $CWD/doinst-dkms.sh > $PKG/install/doinst.sh
+  sed "s/@VERSION@/$VERSION/" $CWD/douninst-dkms.sh > $PKG/install/douninst.sh
+else
+  ./fix-strncpy.sh $KERNEL
+
+  make KVER=$KERNEL
+
+  mkdir -p $PKG/lib/modules/$KERNEL/extra
+  install -m 0644 ddcci/ddcci.ko ddcci-backlight/ddcci-backlight.ko \
+    $PKG/lib/modules/$KERNEL/extra/
+
+  find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+    | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+  sed "s/@KERNEL@/$KERNEL/" $CWD/doinst.sh > $PKG/install/doinst.sh
+fi
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$PKGVER-$ARCH-$BUILD$TAG.$PKGTYPE
