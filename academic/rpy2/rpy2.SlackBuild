@@ -2,7 +2,7 @@
 #
 # SlackBuild for rpy2
 #
-# Copyright 2020-2024 Rob van Nues (sborg63@disroot.org)
+# Copyright 2020-2026 Rob van Nues (sborg63@disroot.org)
 #
 # Redistribution and use of this script, with or without modification, is
 # permitted provided that the following conditions are met:
@@ -24,9 +24,15 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=rpy2
-VERSION=${VERSION:-3.6.4}
-BUILD=${BUILD:-1}
+VERSION=${VERSION:-3.6.7}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
+SRCREF=RELEASE
+SRCDELIM="_"
+SRCNAM=${SRCNAM:-3_6_7}
+SRCVERSION=$SRCREF$SRCDELIM$SRCNAM
+MODULE1=${MODULE1:-rinterface}
+MODULE2=${MODULE2:-robjects}
 PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
@@ -47,16 +53,12 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
-  SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
 
@@ -66,8 +68,11 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
+#tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$SRCVERSION.tar.gz
+#cd $PRGNAM-$VERSION
+cd $PRGNAM-$SRCVERSION
+
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -93,32 +98,81 @@ if ! [ "$(readelf -h $RHOMLIB/lib/libR*.so | grep DYN)" ]; then
   exit 1
 fi
 
+
+# check where we build, on Slackware stable or on current (stable+)
+OSVERSION="$(cat /etc/os-release | grep "VERSION_CODENAME" | cut -c 18-)"
+PYVER=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+
+if [[ $OSVERSION == "current" ]]; then
+  echo "Installing on current, into python$PYVER/site-packages/ "
+elif [[ $OSVERSION == "stable" ]]; then
+  echo "Installing on stable, into python$PYVER/site-packages/ "
+  export PYTHONPATH=/opt/python$PYVER/site-packages/
+else 
+  echo "Stopping; $OSVERSION is not 'stable' nor 'current, sorry." 
+  exit 1
+fi
+
 ## this removes an error message from setup.py
 ## https://github.com/rpy2/rpy2/issues/675
 export LD_LIBRARY_PATH="${RHOMLIB}/lib:${LD_LIBRARY_PATH}"
 echo "LD_LIBRARY_PATH set to ${LD_LIBRARY_PATH}"
 
+cd $PRGNAM-$MODULE1
 # replace deprecated `python3 setup.py build install --root=$PKG`
 # thanks to fourtysixandtwo
-PYVER=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
-export PYTHONPATH=/opt/python$PYVER/site-packages/
-
 python3 -m build --no-isolation
 python3 -m installer -d "$PKG" dist/*.whl
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS gpl-2.0.txt NEWS README* $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cd ../$PRGNAM-$MODULE2
+python3 -m build --no-isolation
+python3 -m installer -d "$PKG" dist/*.whl
 
-## to facilitate dynamic linking with R,
-## libR.so and libRblas.so still need to be found
-## https://github.com/rpy2/rpy2/issues/675
-mkdir -p $PKG/etc/ld.so.conf.d/
-cat $CWD/Rlibs.conf > $PKG/etc/ld.so.conf.d/Rlibs.conf
+cd ..
+
+# Remove rpaths:
+for file in $(find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF | cut -f 1 -d : 2> /dev/null) ; do
+  if [ ! "$(patchelf --print-rpath $file 2> /dev/null)" = "" ]; then
+    patchelf --remove-rpath $file
+    echo "\nremoved rpath-file: $file\n"
+  fi
+done
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM-$MODULE1
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM-$MODULE2
+mkdir -p $PKG/usr/share/$PRGNAM-$VERSION/scripts
+cp -a AUTHORS gpl-2.0.txt NEWS README* $PKG/usr/doc/$PRGNAM-$VERSION
+cp  $PRGNAM-$MODULE1/README* $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM-$MODULE1
+cp  $PRGNAM-$MODULE2/README* $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM-$MODULE2
+cp -a scripts/* $PKG/usr/share/$PRGNAM-$VERSION/scripts
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-cat $CWD/doinst.sh > $PKG/install/doinst.sh
+## to facilitate dynamic linking with R,
+## libR.so and libRblas.so still need to be found
+## https://github.com/rpy2/rpy2/issues/675
+## for this, create "/etc/ld.so.conf.d/Rlibs.conf" with the line
+## "/usr/lib${LIBDIRSUFFIX}/R/lib"
+## via doinst.sh
+# thanks to cwilling
+## directly cat to package in case no w-permission on $CWD
+#cat > $CWD/doinst.sh <<EOF
+cat > $PKG/install/doinst.sh  <<EOF
+echo "/usr/lib${LIBDIRSUFFIX}/R/lib" > etc/ld.so.conf.d/Rlibs.conf
+sbin/ldconfig
+EOF
+#cat > $CWD/douninst.sh <<EOF
+cat > $PKG/install/douninst.sh <<EOF
+rm etc/ld.so.conf.d/Rlibs.conf
+sbin/ldconfig
+EOF
+#cat $CWD/doinst.sh > $PKG/install/doinst.sh
+#cat douninst.sh > $PKG/install/douninst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
