@@ -28,7 +28,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=s6
-VERSION=${VERSION:-2.14.0.1}
+VERSION=${VERSION:-2.15.1.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -64,22 +64,6 @@ else
   LIBDIRSUFFIX=""
 fi
 
-# By default, only static libraries are built. If you want to also build the
-# shared libraries, just pass BUILD_SHARED=yes to this script.
-BUILD_STATIC=${BUILD_STATIC:-yes}
-BUILD_SHARED=${BUILD_SHARED:-no}
-[ "$BUILD_STATIC" = "no" ] && LIBS_CONF="--disable-static"
-[ "$BUILD_SHARED" = "yes" ] && LIBS_CONF="--enable-shared $LIBS_CONF"
-
-# By default, all binaries are linked against the static versions of the
-# skarnet.org libraries. Pass LINK_SHARED=yes to link the binaries against the
-# shared versions of the skarnet.org libraries. If you only built the shared
-# versions of the skarnet.org libraries, the binaries will be linked against
-# shared libraries automatically, as though LINK_SHARED=yes is passed to this
-# script.
-LINK_SHARED=${LINK_SHARED:-no}
-[ "$LINK_SHARED" = "yes" ] && LIBS_CONF="--disable-allstatic $LIBS_CONF"
-
 set -e
 
 rm -rf $PKG
@@ -98,6 +82,7 @@ find -L . \
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
+  --prefix=/usr \
   --dynlibdir=/lib${LIBDIRSUFFIX} \
   --bindir=/bin \
   --libexecdir=/usr/libexec \
@@ -106,19 +91,23 @@ CXXFLAGS="$SLKCFLAGS" \
   --with-sysdeps=/usr/lib${LIBDIRSUFFIX}/skalibs/sysdeps \
   --with-lib=/usr/lib${LIBDIRSUFFIX}/skalibs \
   --with-lib=/usr/lib${LIBDIRSUFFIX}/execline \
-  $LIBS_CONF
+  --with-dynlib=/lib${LIBDIRSUFFIX} \
+  --pkgconfdir=/usr/lib${LIBDIRSUFFIX}/pkgconfig \
+  --enable-pkgconfig \
+  --enable-shared \
+  --disable-static \
+  --disable-allstatic \
+  --disable-rpath
 
 make
-make strip
-make install DESTDIR=$PKG
+# One make pass for strip + install, so make does not relink the freshly
+# stripped files and undo the stripping; -j1, so the two targets are
+# serialized, preventing install from copying unstripped files.
+make -j1 strip install DESTDIR=$PKG
 
 # Move root-only programs to /sbin
 mkdir $PKG/sbin
-mv $PKG/bin/s6-{set,apply}uidgid $PKG/sbin
-
-# Promote s6-svscanboot to /sbin for users that want to use s6 alongside
-# Slackware's default init system
-install examples/s6-svscanboot $PKG/sbin
+mv $PKG/bin/s6-{{set,apply}uidgid,svscanboot} $PKG/sbin
 
 chmod -R -t examples
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
