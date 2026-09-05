@@ -25,7 +25,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=pnpm
-VERSION=${VERSION:-11.25.0}
+VERSION=${VERSION:-12.3.4}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -36,6 +36,12 @@ if [ -z "$ARCH" ]; then
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
+
+  if [ "$ARCH" = "i586" ]; then
+    if rustc -Vv | grep host | grep i686 > /dev/null ; then
+      ARCH=i686
+    fi
+  fi
 fi
 
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
@@ -48,15 +54,25 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
+  CARGOTARGET="--target $ARCH-unknown-linux-gnu"
 elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
+  CARGOTARGET="--target $ARCH-unknown-linux-gnu"
+elif [ "$ARCH" = "x86_64" ] ; then
+  SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
+  CARGOTARGET="--target $ARCH-unknown-linux-gnu"
 elif [ "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
+  CARGOTARGET="--target $ARCH-unknown-linux-gnu"
 else
+  SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
+  CARGOTARGET=""
 fi
 
 set -e
@@ -65,9 +81,59 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-mkdir $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tgz -C $PRGNAM-$VERSION --strip-components 1
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
+
+# build offline
+# configuration tells cargo to use the configured directory
+# for dependencies instead of downloading from crates.io
+mkdir -p .cargo
+cat << EOF >> .cargo/config
+[source.crates-io]
+registry = 'https://github.com/rust-lang/crates.io-index'
+replace-with = 'vendored-sources'
+
+[source.vendored-sources]
+directory = '$(pwd)/vendor'
+EOF
+
+# deps and versions come from Cargo.lock
+mkdir vendor
+(
+  cd vendor
+
+  grep -h -A 3 "\[\[package\]\]" $(find ../ -maxdepth 1 -mindepth 1 -name Cargo.lock | tr '\n' ' ') | \
+    sed 's/[[:space:]]*=[[:space:]]*/=/g;s/^--//;s/^\[\[/--\n[[/' | \
+    awk 'BEGIN { RS = "--\n" ; FS="\n" } { print $2, $3, $4 }' | sed 's/"//g;s/name=//;s/ version=/=/' | \
+    grep crates\.io-index | sed 's/ source=.*$//' | sort -u | while read -r dep ; do
+
+    ver="$(printf "%s\n" "$dep" | cut -d= -f2)"
+    dep="$(printf "%s\n" "$dep" | cut -d= -f1)"
+
+    tar xvf $CWD/$dep-$ver.crate
+
+    touch $dep-$ver/.cargo-ok
+
+    # generate checksum
+    {
+      printf "{\n"
+      printf '    "files": {\n'
+
+      (
+        cd $dep-$ver
+        find . -type f -print0 | xargs -0 sha256sum | sed -n '/\.cargo-checksum\.json/!p' | sed 's/\.\///;s/^\([^ ]*\)[[:space:]][[:space:]]*\(.*\)$/"\2":"\1",/'
+      ) | sed '$ s/,$//'
+
+      printf "    },\n"
+      printf '    "package": "'
+
+      sha256sum "$CWD/$dep-$ver.crate" | cut -f1 -d' ' | sed 's/$/"/'
+
+      printf "}\n"
+    } > $dep-$ver/.cargo-checksum.json
+  done
+)
+
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -75,73 +141,31 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# disable self-update / update checking
-cat << 'EOF' | patch -p1
-diff -Naur package.orig/dist/pnpm.mjs package/dist/pnpm.mjs
---- package.orig/dist/pnpm.mjs	1985-10-26 17:15:00.000000000 +0900
-+++ package/dist/pnpm.mjs	2026-09-05 09:20:13.909301822 +0900
-@@ -142376,6 +142376,7 @@
- // lib/checkForUpdates.js
- import path52 from "node:path";
- async function checkForUpdates(config2) {
-+  return;
-   const stateFile = path52.join(config2.stateDir, "pnpm-state.json");
-   let state;
-   try {
-@@ -270221,6 +270222,7 @@
-   });
- }
- async function handler33(opts3, params) {
-+  throw new error_1.PnpmError("CANT_SELF_UPDATE_IN_PKGTOOLS", "You should update pnpm with the slackbuild");
-   if (isExecutedByCorepack()) {
-     throw new PnpmError("CANT_SELF_UPDATE_IN_COREPACK", "pnpm cannot update itself when it is executed by Corepack", {
-       hint: `Install pnpm with the standalone script instead: ${standaloneInstallCommand()}`
-EOF
+export PATH="/opt/rust/bin:$PATH"
+if [ -z "$LD_LIBRARY_PATH" ]; then
+  export LD_LIBRARY_PATH="/opt/rust/lib$LIBDIRSUFFIX"
+else
+  export LD_LIBRARY_PATH="/opt/rust/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
+fi
 
-rm -f dist/pnpm.mjs.orig
+CARGO_HOME=.cargo \
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+cargo build --offline --release --package $PRGNAM-cli --bin $PRGNAM $CARGOTARGET
 
-# don't need node-gyp
-rm -rf dist/node-gyp-bin/ dist/node_modules/node-gyp/
-
-# remove files for other platforms
-rm -rf dist/vendor/*.exe
-rm -rf dist/reflink*darwin*
-rm -rf dist/reflink*win32*
-find . -type f \( -name '*.cmd' -o -name '*.bat' -o -name '*.ps1' \) -delete
-
-# remove sourcemaps, not needed
-find . -type f -name '*.map' -delete
-
-# remove hidden files and directories, not needed
-find dist/node_modules -type f -name '.*' -delete
-find dist/node_modules -type d -name '.*' -print0 | xargs -0 -n1 rm -rvf
-
-# make sure we use the system node
-sed -i 's,/usr/bin/env node,/usr/bin/node,g' bin/*
-
-mkdir -p $PKG/usr/share/bash-completion/completions/
-install -Dm644 dist/templates/completion.bash $PKG/usr/share/bash-completion/completions/$PRGNAM
-
-mkdir -p $PKG/usr/share/zsh/site-functions/
-install -Dm644 dist/templates/completion.zsh $PKG/usr/share/zsh/site-functions/_$PRGNAM
-
-rm -rf dist/templates
-
-install -Dm644 package.json -t $PKG/usr/lib$LIBDIRSUFFIX/node_modules/$PRGNAM
-install -Dm755 bin/pnpm.mjs bin/pnpx.mjs -t $PKG/usr/lib$LIBDIRSUFFIX/node_modules/$PRGNAM/bin
-
-cp -r dist $PKG/usr/lib$LIBDIRSUFFIX/node_modules/$PRGNAM/dist
-
-mkdir -p $PKG/usr/bin
-ln -sf ../lib$LIBDIRSUFFIX/node_modules/$PRGNAM/bin/pnpm.mjs $PKG/usr/bin/pnpm
-ln -sf ../lib$LIBDIRSUFFIX/node_modules/$PRGNAM/bin/pnpx.mjs $PKG/usr/bin/pnpx
+mkdir -p $PKG/usr/bin/
+find target -name $PRGNAM -exec install -m 755 {} $PKG/usr/bin/$PRGNAM \;
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
+install -D -m644 <($PKG/usr/bin/$PRGNAM completion bash) $PKG/usr/share/bash-completion/completions/$PRGNAM
+install -D -m644 <($PKG/usr/bin/$PRGNAM completion fish) $PKG/usr/share/fish/vendor_completions.d/$PRGNAM.fish
+install -D -m644 <($PKG/usr/bin/$PRGNAM completion zsh) $PKG/usr/share/zsh/site-functions/_$PRGNAM
+
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  LICENSE README.md \
+  CONTRIBUTING.md LICENSE README.md SECURITY.md \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
