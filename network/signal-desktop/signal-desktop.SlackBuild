@@ -26,7 +26,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=signal-desktop
-VERSION=${VERSION:-8.1.0}
+VERSION=${VERSION:-8.26.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -67,9 +67,36 @@ find -L . \
   -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
   \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
 
-# create soft link for launcher
-mkdir -p $PKG/usr/bin
-ln -sf ../../opt/Signal/$PRGNAM $PKG/usr/bin/$PRGNAM
+GLIBC_VERSION=$(getconf GNU_LIBC_VERSION|awk '{print $2}')
+if (( $( echo "$GLIBC_VERSION < 2.34" | bc -l ) )); then
+  tar -C opt/Signal/ -xvf $CWD/aaa_glibc-solibs-2.42-x86_64-1_slack15.0.txz lib64 usr 
+  ( cd opt/Signal/lib64/incoming
+    for f in *.so; do
+      s=$(readelf -d "$f" 2>/dev/null | sed -n 's/.*SONAME.*\[\(.*\)\]/\1/p')
+      [ -n "$s" ] && [ "$s" != "$f" ] && ln -sf "$f" "$s"
+    done
+    [ -e libc.so.6 ]
+    [ -e ld-linux-x86-64.so.2 ]
+  )
+
+  # Point the Electron binary at the bundled loader.  Last thing touched before
+  # makepkg: strip rewrites the ELF and can drop the dynamic entries, so this
+  # has to come after it.  --force-rpath writes DT_RPATH instead of DT_RUNPATH,
+  # which is what makes the path apply to the dlopened *.node addons as well.
+  patchelf --set-interpreter \
+    /opt/Signal/lib64/incoming/ld-linux-x86-64.so.2 \
+    --force-rpath --set-rpath \
+    /opt/Signal/lib64/incoming:/opt/Signal \
+    $PKG/opt/Signal/$PRGNAM
+
+  mkdir -p $PKG/usr/bin
+  install -m 755 $CWD/Signal.sh $PKG/usr/bin/$PRGNAM
+  sed -i 's?opt/Signal?usr/bin?' $PKG/usr/share/applications/signal-desktop.desktop
+else
+  # create soft link for launcher
+  mkdir -p $PKG/usr/bin
+  ln -sf ../../opt/Signal/$PRGNAM $PKG/usr/bin/$PRGNAM
+fi
 
 find $PKG -print0 | xargs -0 file | grep -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs chmod a+x 2> /dev/null || true
@@ -87,4 +114,4 @@ cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
+/sbin/makepkg --remove-tmp-rpaths -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
