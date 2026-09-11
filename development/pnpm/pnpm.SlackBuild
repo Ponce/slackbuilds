@@ -25,7 +25,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=pnpm
-VERSION=${VERSION:-12.3.4}
+VERSION=${VERSION:-12.4.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -88,10 +88,14 @@ cd $PRGNAM-$VERSION
 # configuration tells cargo to use the configured directory
 # for dependencies instead of downloading from crates.io
 mkdir -p .cargo
-cat << EOF >> .cargo/config
+cat << EOF >> .cargo/config.toml
 [source.crates-io]
-registry = 'https://github.com/rust-lang/crates.io-index'
 replace-with = 'vendored-sources'
+
+[source."git+https://github.com/pnpm/node-semver-rs?rev=1ae976a0023b4dec80b1a5411ccee8343f91320e"]
+git = "https://github.com/pnpm/node-semver-rs"
+rev = "1ae976a0023b4dec80b1a5411ccee8343f91320e"
+replace-with = "vendored-sources"
 
 [source.vendored-sources]
 directory = '$(pwd)/vendor'
@@ -105,12 +109,18 @@ mkdir vendor
   grep -h -A 3 "\[\[package\]\]" $(find ../ -maxdepth 1 -mindepth 1 -name Cargo.lock | tr '\n' ' ') | \
     sed 's/[[:space:]]*=[[:space:]]*/=/g;s/^--//;s/^\[\[/--\n[[/' | \
     awk 'BEGIN { RS = "--\n" ; FS="\n" } { print $2, $3, $4 }' | sed 's/"//g;s/name=//;s/ version=/=/' | \
-    grep crates\.io-index | sed 's/ source=.*$//' | sort -u | while read -r dep ; do
+    grep -e crates\.io-index -e github.com | sed 's/ source=.*$//' | sort -u | while read -r dep ; do
 
     ver="$(printf "%s\n" "$dep" | cut -d= -f2)"
     dep="$(printf "%s\n" "$dep" | cut -d= -f1)"
 
-    tar xvf $CWD/$dep-$ver.crate
+    if [ "$dep" = "node-semver" ] ; then
+      ver=1ae976a0023b4dec80b1a5411ccee8343f91320e
+      tar -xf $CWD/node-semver-rs-$ver.tar.gz
+      mv node-semver-rs-$ver $dep-$ver
+    else
+      tar xvf $CWD/$dep-$ver.crate
+    fi
 
     touch $dep-$ver/.cargo-ok
 
@@ -127,7 +137,11 @@ mkdir vendor
       printf "    },\n"
       printf '    "package": "'
 
-      sha256sum "$CWD/$dep-$ver.crate" | cut -f1 -d' ' | sed 's/$/"/'
+      if [ "$dep" = "node-semver" ] ; then
+        sha256sum "$CWD/node-semver-rs-$ver.tar.gz" | cut -f1 -d' ' | sed 's/$/"/'
+      else
+        sha256sum "$CWD/$dep-$ver.crate" | cut -f1 -d' ' | sed 's/$/"/'
+      fi
 
       printf "}\n"
     } > $dep-$ver/.cargo-checksum.json
@@ -155,6 +169,21 @@ cargo build --offline --release --package $PRGNAM-cli --bin $PRGNAM $CARGOTARGET
 
 mkdir -p $PKG/usr/bin/
 find target -name $PRGNAM -exec install -m 755 {} $PKG/usr/bin/$PRGNAM \;
+
+# match some shell scripts from upstream
+cat << EOF >>  $PKG/usr/bin/pn
+#!/bin/sh
+exec /usr/bin/pnpm "$@"
+EOF
+
+for link in pnpx pnx ; do
+  cat << EOF >>  $PKG/usr/bin/"$link"
+#!/bin/sh
+exec /usr/bin/pnpm dlx "$@"
+EOF
+done
+
+chmod 0755 $PKG/usr/bin/*
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
