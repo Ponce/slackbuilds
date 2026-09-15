@@ -3,6 +3,7 @@
 # Slackware build script for pCloudDrive
 
 # Copyright 2020 Igor Alexandrov <igor.alexandrov@outlook.com>
+# Copyright 2026 Pablo Romano, Seville, Spain
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -11,41 +12,37 @@
 # 1. Redistributions of this script must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 #
-#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
-#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
-#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-# Modifid by slackbuilds.org
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=pCloudDrive
-VERSION=${VERSION:-1.8.2}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-2.2.1}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
 if [ -z "$ARCH" ]; then
-  ARCH=$(uname -m)
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
 fi
 
-case "$ARCH" in
-  # do nothing and pass through
-  i?86|x86_64) ;;
-  *)
-    echo "$ARCH is not supported for $PRGNAM-$VERSION"
-    exit 1
-    ;;
-esac
-
-set -e
+if [ "$ARCH" != "x86_64" ]; then
+  echo "$ARCH is not supported for $PRGNAM-$VERSION"
+  exit 1
+fi
 
 # If the variable PRINT_PACKAGE_NAME is set, then this script will report what
 # the name of the created package would be, and then exit. This information
@@ -58,37 +55,107 @@ fi
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
+SRC=pCloud.AppImage
+WORK=$TMP/$PRGNAM-$VERSION
 
-APPIMGNAM=pcloud
+set -e
 
-rm -rf $PKG
-mkdir -p $TMP $OUTPUT $PKG/{install,opt,usr/{bin,doc/$PRGNAM-$VERSION}}
-cd $PKG/opt
-chmod 755 $CWD/$APPIMGNAM
-$CWD/$APPIMGNAM --appimage-extract
-mv squashfs-root $PRGNAM
-cd $PKG
-mv $PKG/opt/$PRGNAM/usr/share $PKG/usr
-rm -rf $PKG/opt/$PRGNAM/{usr,AppRun,pcloud.png,pcloud.desktop,resources/app/.vscode}
-install -D -m 644 -t $PKG/usr/share/applications $CWD/pclouddrive.desktop
+rm -rf $PKG $WORK
+mkdir -p $TMP $PKG $OUTPUT $WORK
 
-chown -R root:root .
-find -L . \
+if [ ! -r "$CWD/$SRC" ]; then
+  echo "Missing source file: $CWD/$SRC"
+  echo "See README for download instructions."
+  exit 1
+fi
+
+cp "$CWD/$SRC" "$WORK/$SRC"
+chmod 0755 "$WORK/$SRC"
+
+cd $WORK
+./$SRC --appimage-extract >/dev/null
+
+if [ ! -x squashfs-root/pcloud ]; then
+  echo "Unable to find the pcloud executable in the AppImage."
+  exit 1
+fi
+
+mkdir -p $PKG/opt
+mv squashfs-root $PKG/opt/$PRGNAM
+
+# Desktop integration belongs in the normal system locations.  Keep any other
+# files below the AppImage's usr/ tree in place in case upstream adds runtime
+# content there in a future release.
+if [ -d $PKG/opt/$PRGNAM/usr/share ]; then
+  mkdir -p $PKG/usr
+  mv $PKG/opt/$PRGNAM/usr/share $PKG/usr/
+fi
+rmdir $PKG/opt/$PRGNAM/usr 2>/dev/null || true
+
+rm -f $PKG/opt/$PRGNAM/AppRun \
+      $PKG/opt/$PRGNAM/.DirIcon \
+      $PKG/opt/$PRGNAM/pcloud.png \
+      $PKG/opt/$PRGNAM/pcloud.desktop
+rm -rf $PKG/opt/$PRGNAM/resources/app/.vscode
+
+install -D -m 0644 $CWD/pclouddrive.desktop \
+  $PKG/usr/share/applications/pclouddrive.desktop
+
+mkdir -p $PKG/usr/bin
+
+cat > $PKG/usr/bin/$PRGNAM << EOF
+#!/bin/sh
+exec /opt/$PRGNAM/pcloud "\$@"
+EOF
+
+chmod 755 $PKG/usr/bin/$PRGNAM
+
+# Koffi bundles prebuilt modules for several operating systems and
+# architectures.  This package is x86_64-only, so keep only the native
+# Linux x86_64 module.
+KOFFI_BUILDS=$PKG/opt/$PRGNAM/resources/app.asar.unpacked/node_modules/koffi/build/koffi
+
+if [ -d "$KOFFI_BUILDS" ]; then
+  find "$KOFFI_BUILDS" -mindepth 1 -maxdepth 1 -type d \
+    ! -name linux_x64 -exec rm -rf {} +
+fi
+
+chown -R root:root $PKG
+find -L $PKG \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
   -o -perm 511 \) -exec chmod 755 {} \; -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \; -o \
  \( -perm 700 \) -exec chmod 755 {} \;
 
-find . -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-ln -s ../../opt/$PRGNAM/$APPIMGNAM usr/bin/$PRGNAM
-ln -s ../../../opt/$PRGNAM/LICENSE.electron.txt usr/doc/$PRGNAM-$VERSION
-ln -s ../../../opt/$PRGNAM/LICENSES.chromium.html usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+# AppImage extraction preserves some ELF libraries without the executable
+# bit.  Slackware packages expect ELF executables and shared objects to be
+# executable.
+find $PKG -type f -print0 | xargs -0 file | grep ELF | \
+  cut -f 1 -d : | xargs chmod 755
 
+find $PKG -type f -print0 | xargs -0 file | \
+  grep -e "executable" -e "shared object" | grep ELF | \
+  cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+if [ -f $PKG/opt/$PRGNAM/LICENSE.electron.txt ]; then
+  ln -s ../../../opt/$PRGNAM/LICENSE.electron.txt \
+    $PKG/usr/doc/$PRGNAM-$VERSION/LICENSE.electron.txt
+fi
+if [ -f $PKG/opt/$PRGNAM/LICENSES.chromium.html ]; then
+  ln -s ../../../opt/$PRGNAM/LICENSES.chromium.html \
+    $PKG/usr/doc/$PRGNAM-$VERSION/LICENSES.chromium.html
+fi
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.SBo
+cat $CWD/$PRGNAM.SlackBuild > \
+  $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
-/sbin/makepkg -p -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
+cd $PKG
+/sbin/makepkg -l y -c n \
+  $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-tgz}
