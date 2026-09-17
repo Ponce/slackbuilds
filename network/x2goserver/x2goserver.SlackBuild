@@ -58,16 +58,12 @@ PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
-  SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
 
@@ -101,13 +97,37 @@ do
 	rm $i 
 done
 
-for i in $PKG/usr/share/applications/*.desktop
-do
-	echo $i
-	chmod 644 $i
-done
+# .desktop files must not be executable
+chmod 0644 $PKG/usr/share/applications/*.desktop
+
 # xpm image corrupted in the original distribution
-cp $CWD/x2goagent.xpm  $PKG/usr/share/pixmaps/
+cp $CWD/x2goagent.xpm $PKG/usr/share/pixmaps/x2goagent.xpm
+chmod 0644 $PKG/usr/share/pixmaps/x2goagent.xpm
+
+# Perl build leftovers. .packlist in particular has $PKG baked into every
+# path it lists. The X2Go perl modules are arch independent and get installed
+# in /usr/share/perl5/vendor_perl, so /usr/lib${LIBDIRSUFFIX}/perl5 is empty
+# once .packlist is gone and can be dropped as well.
+find $PKG \( -name perllocal.pod -o -name '.packlist' -o -name '*.bs' \) \
+  -exec rm -f {} \;
+find $PKG/usr/lib${LIBDIRSUFFIX}/perl5 -depth -type d -empty -delete 2>/dev/null || true
+
+# Upstream's x2goagent symlinks are Debian-centric and end up dangling here:
+# /usr/bin/x2goagent points at /usr/lib/x2go/../nx/bin/x2goagent, which is a
+# second symlink upstream drops into nx-libs' own directory. Point straight at
+# the nx-libs binary instead (argv[0] is still x2goagent, so nxagent still
+# starts in X2Go mode) and don't ship anything under /usr/lib${LIBDIRSUFFIX}/nx,
+# which belongs to nx-libs. Same for the VERSION file.
+rm -rf $PKG/usr/lib${LIBDIRSUFFIX}/nx
+ln -sf /usr/lib${LIBDIRSUFFIX}/nx/bin/nxagent $PKG/usr/bin/x2goagent
+ln -sf /usr/share/nx/VERSION.nxagent \
+  $PKG/usr/share/x2go/versions/VERSION.x2goserver-x2goagent
+
+# /etc/x2go/Xresources is symlinked to /etc/X11/Xresources, a Debian path that
+# doesn't exist on Slackware, so the link is always dangling. Xsession only
+# merges the file when it's readable, so drop the link; an admin who wants
+# session-wide X resources can just create /etc/x2go/Xresources by hand.
+rm -f $PKG/etc/x2go/Xresources
 
 # Install init script
 install -D -m 0755 $CWD/rc.x2goserver $PKG/etc/rc.d/rc.x2goserver
