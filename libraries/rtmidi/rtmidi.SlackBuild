@@ -6,11 +6,14 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20260919 bkw, BUILD=2:
+# - add DOXYGEN=yes, based on a patch sent by Andy Goth.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=rtmidi
 VERSION=${VERSION:-6.0.0}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -47,11 +50,11 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz --no-same-owner
 cd $PRGNAM-$VERSION
-chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
+find . ! -type l    -a \( \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
 
 # Claims to need cmake-3.24, but our 3.21.4 worx fine. Upstream
 # notified, no response yet.
@@ -77,11 +80,27 @@ objdump -p build/librtmidi.so | grep -q 'NEEDED.*libjack' && WITHJACK="WITH"
 
 PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
 mkdir -p $PKGDOC
+
+# 20260919 bkw: building the docs makes the package take 5x to 6x
+# as long to build, and bloats the size from ~200KB to ~1200KB.
+# Most users are never gonna read API docs, so make it optional.
+if [ "${DOXYGEN:-no}" = "yes" ]; then
+  unset DOXYGEN # autogen trips over its dick on this one
+  ./autogen.sh
+  make -C doc
+  cp -a doc/html doc/images $PKGDOC
+  WITHDOC=includes
+else
+  WITHDOC="does not include"
+fi
+
 cp -a LICENSE README* $PKGDOC
 cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
-sed "s,@WITHJACK@,$WITHJACK," < $CWD/slack-desc > $PKG/install/slack-desc
+sed -e "s,@WITHJACK@,$WITHJACK," \
+    -e "s,@WITHDOC@,$WITHDOC," \
+       < $CWD/slack-desc > $PKG/install/slack-desc
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
