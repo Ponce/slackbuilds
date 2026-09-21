@@ -1,0 +1,50 @@
+Description: fix FTBFS with GCC-9
+Author: Joachim Reichel <joachim.reichel@posteo.de>
+Bug-Debian: https://bugs.debian.org/925782
+Last-Update: 2019-09-01
+
+--- a/texception.h
++++ b/texception.h
+@@ -38,10 +38,10 @@
+ 
+ #define TExceptionN(n) public: virtual const char *name()  const { return #n; }
+ #define TExceptionM(m) public: virtual const char *message() const { return m; }
+-#define TExceptionM1(m,a) public: virtual const char *message() const { char *buf; asprintf(&buf, m, a); return buf; }
+-#define TExceptionM2(m,a,b) public: virtual const char *message() const { char *buf; asprintf(&buf, m, a,b); return buf; }
+-#define TExceptionM3(m,a,b,c) public: virtual const char *message() const { char *buf; asprintf(&buf, m, a,b,c); return buf; }
+-#define TExceptionM4(m,a,b,c,d) public: virtual const char *message() const { char *buf; asprintf(&buf, m, a,b,c,d); return buf; }
++#define TExceptionM1(m,a) public: virtual const char *message() const { char *buf; int result = asprintf(&buf, m, a); return result != -1 ? buf : "asprintf failure"; }
++#define TExceptionM2(m,a,b) public: virtual const char *message() const { char *buf; int result = asprintf(&buf, m, a,b); return result != -1 ? buf : "asprintf failure"; }
++#define TExceptionM3(m,a,b,c) public: virtual const char *message() const { char *buf; int result = asprintf(&buf, m, a,b,c); return result != -1 ? buf : "asprintf failure"; }
++#define TExceptionM4(m,a,b,c,d) public: virtual const char *message() const { char *buf; int result = asprintf(&buf, m, a,b,c,d); return result != -1 ? buf : "asprintf failure"; }
+ 
+ // base class of all exceptions 
+ class TException {
+--- a/tstring.cc
++++ b/tstring.cc
+@@ -111,7 +111,7 @@
+ tstring::Rep *tstring::Rep::create(size_t tmem) {
+    size_t m = sizeof(Rep) << 1;
+    while((m - 1 - sizeof(Rep)) < tmem) m <<= 1;
+-   Rep *p = new (m - 1 - sizeof(Rep)) Rep;
++   Rep *p = new (/*tag*/ true, m - 1 - sizeof(Rep)) Rep;
+    p->mem = m - 1 - sizeof(Rep); p->ref = 1; p->vulnerable = false;
+    return p;
+ }
+--- a/tstring.h
++++ b/tstring.h
+@@ -71,9 +71,12 @@
+       
+       // static methods
+       // operator new for this class
+-      static void * operator new (size_t size, size_t tmem) {
++      // add a tag parameter to ensure that the signature of the delete operator does not collide with the (void*,size_t) overload
++      static void * operator new (size_t size, bool /*tag*/, size_t tmem) {
+ 	 return ::operator new (size + tmem + 1);}
+-      static void operator delete (void *p, size_t) {
++      static void operator delete (void *p, bool /*tag*/, size_t) {
++	 ::operator delete (p); }
++      static void operator delete (void *p) {
+ 	 ::operator delete (p); }
+       
+       // create a new representation

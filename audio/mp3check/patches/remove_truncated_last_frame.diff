@@ -1,0 +1,49 @@
+Description: Fix to prevent segfaults when the last audio frame is truncated.
+ When the last audio frame is truncated, "mp3check --cut-junk-end" fails to
+ detect and get rid of it.
+ .
+ In the best case scenario, when the mp3 file has no id3 tag, the corrupted
+ frame is left as is.
+ .
+ In the worst case scenario, when the frame is followed by id3 tags, the frame
+ is considered as complete and the tags are restored beyond the end of the
+ memory-mapped file, which may cause a segmentation fault.
+ .
+ This patch aims to detect and eliminate any truncated last audio frame when
+ mp3check is called with the --cut-junk-end option.
+Author: Xavier Hienne <xhienne@free.fr>
+Bug-Ubuntu: https://launchpad.net/bugs/592766
+Bug-Debian: http://bugs.debian.org/726068
+
+Index: mp3check-0.8.7/mp3check.cc
+===================================================================
+--- mp3check-0.8.7.orig/mp3check.cc
++++ mp3check-0.8.7/mp3check.cc
+@@ -1069,6 +1069,7 @@ bool cut_junk_end(const char *name, cons
+ 		  cok, (tag->isValidSpecs()?"valid":"invalid"),
+ 		  (tag->version())>>8, (tag->version())&0xff, cnor);
+ 	       have_a_tag = true;
++	       rest-=128;
+ 	    }
+ 	    else
+ 	    {
+@@ -1115,18 +1116,13 @@ bool cut_junk_end(const char *name, cons
+ 	    
+ 	    // skip to next frame
+ 	    l = frame_length(h);
++	    if (l > rest) break;
+ 	    p += l;
+ 	    rest -= l;
+ 	    start += l;
+ 	 }
+       }
+       
+-      // in case we had found a tag
+-      if((rest >= 128) && have_a_tag)
+-      {
+-      	rest-=128;
+-      }
+-      
+       // remove incomplete last frames
+       //if((rest < 0) && remove_truncated_last_frame)
+       //{
