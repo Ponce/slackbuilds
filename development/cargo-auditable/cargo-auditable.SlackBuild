@@ -3,6 +3,7 @@
 # Slackware build script for cargo-auditable
 
 # Ioannis Anagnostakis 2025
+# Updated - 2026
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,7 +26,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=cargo-auditable
-VERSION=${VERSION:-0.7.5}
+VERSION=${VERSION:-0.7.6}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -72,6 +73,12 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION-vendor.tar.gz
+# Create Cargo config for vendored sources
+mkdir -p .cargo
+cat $CWD/cargo-config.toml > .cargo/config.toml
+cat $CWD/vendor.json > vendor.json
+
 chown -R root:root .
 find . -type f \( -perm -4000 -o -perm -2000 \) -exec chmod -s {} +
 find . ! -type l -type d ! -perm 755 -exec chmod -f 755 {} +
@@ -84,62 +91,6 @@ if [ -z "$LD_LIBRARY_PATH" ]; then
 else
   export LD_LIBRARY_PATH="/opt/rust/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
 fi
-
-  # Create vendor directory and extract all crates
-mkdir -p vendor
-pushd $CWD
-mkdir -p crates
-mv *.crate crates
-for crate in ./crates/*.crate; do
-  tar xf "$crate" -C $TMP/$PRGNAM-$VERSION/vendor
-done
-popd
-# Create .cargo-ok and .cargo-checksum.json for each vendored crate
-for cratedir in vendor/*/; do
-  # Create .cargo-ok
-  touch "${cratedir}/.cargo-ok"
-
-  # Calculate checksums for all files and the original .crate
-  cratename=$(basename "$cratedir")
-
-  # Generate .cargo-checksum.json
-  python3 -c "
-import json
-import os
-from hashlib import sha256
-from pathlib import Path
-
-crate_dir = Path('${cratedir}')
-crate_file = Path('$CWD/crates/${cratename}.crate')
-
-# Calculate file checksums
-files = {}
-for file in crate_dir.rglob('*'):
-    if file.is_file() and file.name not in ['.cargo-ok', '.cargo-checksum.json']:
-        rel_path = str(file.relative_to(crate_dir))
-        with open(file, 'rb') as f:
-            files[rel_path] = sha256(f.read()).hexdigest()
-
-# Calculate package checksum
-with open(crate_file, 'rb') as f:
-    package_hash = sha256(f.read()).hexdigest()
-
-# Write checksum file
-with open(crate_dir / '.cargo-checksum.json', 'w') as f:
-    json.dump({'files': files, 'package': package_hash}, f)
-"
-done
-
-# Create Cargo config for vendored sources
-mkdir -p .cargo
-cat > .cargo/config.toml << EOF
-[source.crates-io]
-registry = 'https://github.com/rust-lang/crates.io-index'
-replace-with = 'vendored-sources'
-
-[source.vendored-sources]
-directory = 'vendor'
-EOF
 
 # Build with Cargo
 CARGO_HOME=.cargo \
