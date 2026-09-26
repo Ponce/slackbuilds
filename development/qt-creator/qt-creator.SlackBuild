@@ -23,14 +23,12 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# For building -rc or -beta releases, set VERSION to something like:
-# VERSION=4.2.0_rc1 or VERSION=4.2.0_beta1 (note the underscore).
+# 2025-11: modified by bakura_666 and SlackBuilds.org
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=qt-creator
-VERSION=${VERSION:-5.0.3}
-SRCVER=$(echo $VERSION | tr _ -)
+VERSION=${VERSION:-18.0.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -43,9 +41,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -74,23 +69,17 @@ set -e
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-
-rm -rf $PRGNAM-$SRCVER
-tar xvf $CWD/$PRGNAM-opensource-src-$SRCVER.tar.gz
-#mv $PRGNAM-opensource-src-$SRCVER $PRGNAM-$SRCVER
-cd $PRGNAM-$SRCVER
-
+rm -rf $PRGNAM-opensource-src-$VERSION
+tar xvf $CWD/$PRGNAM-opensource-src-$VERSION.tar.xz
+cd $PRGNAM-opensource-src-$VERSION
 chown -R root:root .
 chmod -R a-st,u+rwX,go-w+rX .
 
 # Adjust docs location.
-
-sed -i "s|share/doc/qtcreator|doc/$PRGNAM-$VERSION|g"  qtcreator.pri || exit 1
 sed -i "s|share/doc/qtcreator|doc/$PRGNAM-$VERSION|g"  doc/qtcreatordev/src/qtcreator-documentation.qdoc || exit 1
 sed -i "s|share/doc/\${IDE_ID}|doc/$PRGNAM-$VERSION|g" cmake/QtCreatorAPI.cmake || exit 1
 
 # LLVM/Clang can be used to extend Qt Creator functionality.
-
 if [ "${USE_LLVM:-no}" = yes ] || [ "${CODE_MODEL:-no}" = "yes" ]; then
   LLVM_INSTALL_ROOT=/usr/libexec/qtcreator/clang
   QMAKE_LFLAGS=-L${LLVM_INSTALL_ROOT}/lib
@@ -104,36 +93,33 @@ if [ "${USE_LLVM:-no}" = yes ] || [ "${CODE_MODEL:-no}" = "yes" ]; then
   fi
 fi
 
-# -Wunguarded-availability-new is not supported.
-
-patch -p0 < $CWD/remove-w-error-unguarded-availability-new.patch
-
 # Tell DEs that Qt Creator supports some more MIME types.
-
 patch -p0 < $CWD/add-mime-types.patch
 
-# Fix for https://lists.qt-project.org/pipermail/qt-creator/2019-May/008050.html
+# from ArchLinux PKGBUILD
+# https://gitlab.archlinux.org/archlinux/packaging/packages/qtcreator/-/blob/main/PKGBUILD?ref_type=heads
+mkdir build
+cd build
+  cmake \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBEXECDIR=lib$LIBDIRSUFFIX \
+    -DCMAKE_INSTALL_LIBDIR=lib$LIBDIRSUFFIX \
+    -DCMAKE_CXX_FLAGS="$SLKCFLAGS" \
+    -DCMAKE_LDFLAGS="$QMAKE_LFLAGS" \
+    -DWITH_DOCS=ON \
+    -DBUILD_DEVELOPER_DOCS=ON \
+    -DQTC_CLANG_BUILDMODE_MATCH=ON \
+    -DCLANGTOOLING_LINK_CLANG_DYLIB=ON \
+    -DQT_NO_PRIVATE_MODULE_WARNING=ON \
+    ..
 
-QMAKE_LFLAGS="$QMAKE_LFLAGS -L/usr/lib$LIBDIRSUFFIX"
+  make
+  make install/strip DESTDIR=$PKG
 
-qmake-qt5 -r qtcreator.pro                 \
-  QMAKE_CXXFLAGS="$SLKCFLAGS"              \
-  QMAKE_LFLAGS="$QMAKE_LFLAGS"             \
-  QTC_PREFIX=/usr                          \
-  IDE_LIBRARY_BASENAME=lib$LIBDIRSUFFIX    \
-  LLVM_INSTALL_DIR=$LLVM_INSTALL_ROOT      \
-  QBS_INSTALL_DIR=/usr                     \
-  DEFINES+=QBS_ENABLE_PROJECT_FILE_UPDATES
-
-make
-make install INSTALL_ROOT=$PKG
-
-if which qdoc-qt5 &>/dev/null; then
-  make docs
-  make install_docs INSTALL_ROOT=$PKG
-else
-  echo "qdoc-qt5 not found.  Docs won't be built nor installed."
-fi
+  cd doc
+    make html_docs
+  cd ..
+cd ..
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -142,7 +128,7 @@ mkdir -p $PKG/usr/share/mime/packages
 cat $CWD/qt-creator.xml > $PKG/usr/share/mime/packages/qt-creator.xml
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a HACKING LICENSE.GPL3-EXCEPT README.md $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a HACKING LICENSES README.md build/doc/html $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
