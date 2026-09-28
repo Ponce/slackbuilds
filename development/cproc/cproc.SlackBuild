@@ -6,6 +6,13 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20260928 bkw:
+# - update for v20260601_d1c53dd.
+# - build our own qbe. it's only a single binary, and this way I
+#   don't have to convince the qbe maintainer to update his build.
+#   it gets installed in /usr/libexec/cproc, so it won't conflict
+#   with the qbe build.
+
 # Note: thought about including mcpp (either in this build
 # or a separate one) so cproc wouldn't have to use gcc's
 # preprocessor. There even used to be a development/mcpp
@@ -17,7 +24,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=cproc
-VERSION=${VERSION:-20230502_0985a78}
+VERSION=${VERSION:-20260601_d1c53dd}
+QBEVER=${QBEVER:-1.3}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -49,11 +57,19 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz --no-same-owner
 cd $PRGNAM-$VERSION
-chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
+tar xvf $CWD/qbe-$QBEVER.tar.xz
+find . ! -type l    -a \( \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
+
+# cproc needs qbe, and it (currently) must be 1.3.
+make -C qbe-$QBEVER
+sed -i "/CFLAGS/s,$, $SLKCFLAGS," Makefile
+export PATH=$( pwd/ )qbe-$QBEVER:$PATH
+mkdir -p $PKG/usr/libexec/cproc
+install -s qbe-$QBEVER/qbe $PKG/usr/libexec/cproc
 
 # cproc needs to know the location of the ELF "interpreter" (the
 # runtime linker). The defaults in the configure script are OK for
@@ -71,6 +87,7 @@ ELFTERP="$( readelf -p .interp /bin/ls | sed -n '/\.so\./s,.* ,,p' )"
   --host=$ARCH-linux-gnu \
   --target=$ARCH-linux-gnu \
   --with-ldso="$ELFTERP" \
+  --with-qbe=$PKG/usr/libexec/cproc/qbe \
   --prefix=/usr
 
 make bootstrap
@@ -82,6 +99,18 @@ make bootstrap
 mkdir -p $PKG/usr/bin $PKG/usr/man/man1
 cp -a stage2/cproc{,-qbe} $PKG/usr/bin
 gzip -9c < $PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
+
+# 20260928 bkw: since we had to build with a $PKG path baked in,
+# fix it by patching the binary.
+offset="$(
+  strings -td $PKG/usr/bin/cproc | fgrep $TMP/package | awk '{ print $1 }'
+)"
+if [ "$offset" = "" ]; then
+  echo "Couldn't get offset of $TMP in binary, giving up" 1>&2
+  exit 1
+fi
+gcc -Wall $SLKCFLAGS -o patchbin $CWD/patchbin.c
+./patchbin $PKG/usr/bin/cproc "$offset" /usr/libexec/cproc/qbe
 
 PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
 mkdir -p $PKGDOC
