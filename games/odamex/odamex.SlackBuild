@@ -6,7 +6,19 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
-# 20250519 bkw: updare for v11.0.0.
+# 20260929 bkw:
+# - update for v12.3.0. *lots* of messy details...
+# - patch to disable SDL Mixer MIDI support due to unfixable segfaults.
+# - replace bundled fmt source with a version that works on 32-bit.
+# - work around cmake's desire to clone a git repo during the build.
+# - mention Chex Quest in the README.
+# - mention that the game works for single-player in the README.
+# - portmidi, eawpats, freepats, miniupnpc are no longer optional deps.
+# This thing has gotten bloated and has become a huge PITA to
+# package. 12.3.0 is likely the last version I'll do before
+# Slackware 16.0's release (whenever that happens).
+
+# 20250519 bkw: update for v11.0.0.
 # 20240814 bkw: update for v10.5.0.
 # 20231120 bkw: update for v10.4.0.
 # 20230707 bkw: FTBFS, when agar is installed. our agar is 1.7.0,
@@ -42,7 +54,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=odamex
-VERSION=${VERSION:-11.0.0}
+VERSION=${VERSION:-12.3.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -92,7 +104,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-src-$VERSION
-tar xvf $CWD/$PRGNAM-src-$VERSION.tar.xz
+tar xvf $CWD/$PRGNAM-src-$VERSION.tar.xz || unzip $CWD/$PRGNAM-src-$VERSION.zip
 cd $PRGNAM-src-$VERSION
 chown -R root:root .
 
@@ -126,10 +138,36 @@ SLKCFLAGS+=" -msse -msse2"
 # desktop-file-validate hates them.
 sed -i 's,\r,,g' installer/arch/*.desktop
 
+# 20260929 bkw: it wants to clone a git repo during the build...
+# Just putting the files in place up-front doesn't work, it *really*
+# has to be a real git clone (with complete history in the .git/ dir).
+# So make it clone from a local "url" that's just a tarred-up clone.
+DWARFGIT="https://github.com/jeremy-rifkin/libdwarf-lite.git"
+tar xvf $CWD/libdwarf-lite-git-for-odamex-$VERSION.tar.gz
+sed -i "s,$DWARFGIT,$( pwd )/libdwarf-lite," \
+       libraries/cpptrace/cmake/OptionVariables.cmake
+
+# 20260929 bkw: the bundled fmt in the odamex sources doesn't
+# build on 32-bit (it's fmt-12.2.0, which requires 64-bit due
+# to its use of int128_t). I don't see a way to make odamex
+# use a system-installed fmt, so replace the @#%!#$% bundled
+# source with fmt-12.1.0.
+rm -rf libraries/fmt/*
+tar xvfC $CWD/fmt-12.1.0.tar.gz libraries/fmt/ --strip-components=1
+
+# 20260929 bkw: -DUSE_SDL12=ON builds fail. pretty sure upstream
+# doesn't actually support SDL 1.2 any more. Unfortunately, with
+# SDL2, there's a bug in Slackware's SDL2 that causes odamex to
+# segfault if the MIDI system ever gets set to "SDL Mixer". There's
+# no obvious way to compile without SDL2_Mixer support... and it
+# isn't the default anyway (the default is ADL, which is bundled).
+# So I came up with this patch, which simply makes the SDL Mixer
+# setting identical to the ADL setting in the UI and config file.
+patch -p1 < $CWD/disable_sdl_mixer.diff
+
 # 20250519 bkw: makepkg gave us "WARNING: */tmp* rpath found in
 # ./usr/games/odamex", which really is a potential security problem,
 # so enable CMAKE_SKIP_BUILD_RPATH.
-
 rm -rf build
 mkdir -p build
 cd build
@@ -140,8 +178,10 @@ cd build
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_INSTALL_BINDIR=games \
     -DwxWidgets_CONFIG_EXECUTABLE=$WXCONFIG \
-    -DUSE_SDL12=$SDL12ARG \
+    -DUSE_SDL12=OFF \
     -DNO_AG-ODALAUNCH_TARGET=ON \
+    -DBUILD_TESTS=OFF \
+    -DODAMEX_NO_GITVER=ON \
     -DCMAKE_BUILD_TYPE=Release ..
   make VERBOSE=1
 cd ..
