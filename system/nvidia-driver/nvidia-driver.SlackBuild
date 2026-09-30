@@ -27,8 +27,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=nvidia-driver
-VERSION=${VERSION:-595.99.02}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-595.104.02}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -92,7 +92,7 @@ mkdir -p $PKG/usr/lib$LIBDIRSUFFIX/xorg/modules/{drivers,extensions} \
   $PKG/etc/X11/glvnd/egl_vendor.d $PKG/var/log
 
 if [ "$COMPAT32" = "yes" ]; then
-  mkdir -p $PKG/usr/lib/tls
+  mkdir -p $PKG/usr/lib/gbm
 fi
 
 # Extract all the sources
@@ -210,10 +210,18 @@ cat $CWD/10-nvidia.conf > $PKG/usr/share/X11/xorg.conf.d/10-nvidia.conf
 
 # Mitigate a bug in nvidia-installer that misplaces a symlink
 # (Thanks to marco70 on LQ for catching this)
+# (Also thanks to Lockywolf for the 32-bit catch)
 ( cd $PKG/usr/lib${LIBDIRSUFFIX}/gbm
-rm -f nvidia-drm_gbm.so
+  rm -f nvidia-drm_gbm.so
   ln -sf ../libnvidia-allocator.so.1 nvidia-drm_gbm.so
 )
+if [ "$COMPAT32" = "yes" ]; then
+( cd $PKG/usr/lib/gbm
+  rm -f nvidia-drm_gbm.so
+  ln -sf ../libnvidia-allocator.so.1 nvidia-drm_gbm.so
+)
+fi
+
 # Compile utilites from source, replacing the precompiled versions
 #
 # Compiling nvidia-settings
@@ -283,19 +291,22 @@ sed -i "s|__PIXMAP_PATH__|/usr/share/pixmaps|" $PKG/usr/share/applications/nvidi
 sed -i "s|__NVIDIA_SETTINGS_DESKTOP_CATEGORIES__|Settings;|" $PKG/usr/share/applications/nvidia-settings.desktop
 # Remove depcrecated entry in nvidia-settings.desktop
 sed -i '/Encoding/d' $PKG/usr/share/applications/nvidia-settings.desktop
+# Fix bad permission for nvidia-settings.png
+chmod 0644 $PKG/usr/share/icons/hicolor/128x128/apps/nvidia-settings.png
 
-# Remove xorg conf folder since we handle that in nvidia-kernel
+# Remove this folder since we installed our custom file in usr/share:
 rm -rf $PKG/etc/X11/xorg.conf.d
 
 cd $TMP/$SRCNAM
 # put docs in the right place
 mv $PKG/usr/share/man/man1/nvidia-* $PKG/usr/man/man1
 rm -rf $PKG/usr/share/man
-mv $PKG/usr/share/doc/NVIDIA_GLX-1.0 $PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION$MULTI
+mv $PKG/usr/share/doc/NVIDIA_GLX-1.0 $PKG/usr/doc/$PRGNAM-$VERSION$MULTI
 rm -rf $PKG/usr/share/doc
-cp -a LICENSE NVIDIA_Changelog README.txt $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.Slackware
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cp -a LICENSE NVIDIA_Changelog README.txt $PKG/usr/doc/$PRGNAM-$VERSION$MULTI
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION$MULTI/README.Slackware
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION$MULTI/$PRGNAM.SlackBuild
 
 sed "s/PKGVERSION/$VERSION/g" $CWD/slack-desc > $PKG/install/slack-desc
 if [ "$COMPAT32" = "yes" ]; then
@@ -333,6 +344,8 @@ fi
 # We must now remove our custom nvidia-installer as it will no longer
 # work on an installed driver:
 rm -f $PKG/usr/bin/nvidia-{installer,uninstall}
+# Also the bad installer.log
+rm $PKG/var/log/nvidia-installer.log
 
 # Flag multilib as needed and build package.
 cd $PKG
