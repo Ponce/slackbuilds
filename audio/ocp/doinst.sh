@@ -1,5 +1,13 @@
 if [ -x /usr/bin/install-info ]; then
-  chroot . /usr/bin/install-info --info-dir=/usr/info /usr/info/ocp.info.gz 2> /dev/null
+  /usr/bin/install-info --info-dir=usr/info usr/info/blah.gz 1> /dev/null 2>&1
+fi
+
+if [ -x /usr/bin/update-desktop-database ]; then
+  /usr/bin/update-desktop-database -q usr/share/applications >/dev/null 2>&1
+fi
+
+if [ -x /usr/bin/update-mime-database ]; then
+  /usr/bin/update-mime-database usr/share/mime >/dev/null 2>&1
 fi
 
 if [ -e usr/share/icons/hicolor/icon-theme.cache ]; then

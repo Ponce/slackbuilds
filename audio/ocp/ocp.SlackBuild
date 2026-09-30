@@ -22,11 +22,21 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20260930 bkw: Modified by SlackBuilds.org, BUILD=2:
+# - use private copy of gnu-unifont (remove it from REQUIRES).
+# - actually ship the .desktop and mime info.
+# - stop writing outside of $TMP.
+# - pre-emptively update to new template.
+# - mention option SDL3 in README.
+# - doinst.sh and douninst.sh: do not use chroot for install-info.
+# - update desktop and mime databases in doinst.sh.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=ocp
 VERSION=${VERSION:-3.5.0}
-BUILD=${BUILD:-1}
+FONTVER=${FONTVER:-15.0.01}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -67,14 +77,12 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz --no-same-owner
 cd $PRGNAM-$VERSION
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+tar xvf $CWD/unifont-$FONTVER.tar.gz --no-same-owner
+find . ! -type l    -a \( \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -89,29 +97,41 @@ CXXFLAGS="$SLKCFLAGS" \
   --build=$ARCH-slackware-linux \
   --with-unifontdir-otf=/usr/share/fonts/OTF/ \
   --infodir=/usr/info \
-  --without-desktop_file_install
+  --without-update-desktop-database \
+  --without-update_mime_database \
+  --with-unifont-relative
 
 make
 make install DESTDIR=$PKG
 
-rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
-
+# "make install-strip" not supported, so:
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+gzip -9 $PKG/usr/man/man*/*
 rm -rf $PKG/usr/info/dir
 gzip -9 $PKG/usr/info/*.info*
-rm -rf $PKG/usr/share/mime
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+# 20260930 bkw: Include a private copy of gnu-unifont in ocp's
+# data dir, to avoid forcing the user to have gnu-unifont installed
+# system wide (it actually causes problems for speakers of certain
+# languages).
+FONTDIR=$PKG/usr/share/ocp/data
+for ext in otf ttf; do
+  for variant in "" _csur _upper; do
+    src=unifont-$FONTVER/font/precompiled/unifont$variant-$FONTVER.$ext
+    dst=$FONTDIR/unifont$variant.$ext
+    [ -e $src ] && cp $src $dst
+  done
+done
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
 cp -a \
   AUTHORS BUGS COPYING CREDITS Changelog README.md \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-rm -rf $PKG/usr/share/applications/
+  $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
