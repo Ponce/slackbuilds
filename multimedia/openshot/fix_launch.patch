@@ -1,0 +1,104 @@
+From 7b4a76890bc11a841fe4fe59134ddc0ccafeec89 Mon Sep 17 00:00:00 2001
+From: Jonathan Thomas <jonathan@openshot.org>
+Date: Tue, 29 Sep 2026 18:40:52 -0500
+Subject: [PATCH] Fix qt_api import when launching installed package
+
+---
+ src/launch.py            | 16 ++++++------
+ src/tests/test_launch.py | 53 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 62 insertions(+), 7 deletions(-)
+ create mode 100644 src/tests/test_launch.py
+
+diff --git a/src/launch.py b/src/launch.py
+index a87116bdce..ed305b841f 100755
+--- a/src/launch.py
++++ b/src/launch.py
+@@ -83,6 +83,15 @@
+ if scale != 1.0:
+     os.environ["QT_SCALE_FACTOR"] = str(scale)
+ 
++# Make sibling modules importable when launched via the installed entry point.
++# This must happen before importing qt_api as well as the other local modules.
++try:
++    from classes import info
++except ImportError:
++    import openshot_qt
++    sys.path.append(openshot_qt.OPENSHOT_PATH)
++    from classes import info
++
+ from qt_api import QtCore, QtWidgets
+ 
+ Qt = QtCore.Qt
+@@ -106,13 +115,6 @@
+ except AttributeError:
+     pass  # Quietly fail for older Qt5 versions
+ 
+-try:
+-    from classes import info
+-except ImportError:
+-    import openshot_qt
+-    sys.path.append(openshot_qt.OPENSHOT_PATH)
+-    from classes import info
+-
+ # Global holder for QApplication instance
+ app = None
+ 
+diff --git a/src/tests/test_launch.py b/src/tests/test_launch.py
+new file mode 100644
+index 0000000000..258eceda91
+--- /dev/null
++++ b/src/tests/test_launch.py
+@@ -0,0 +1,53 @@
++"""Exercise launcher imports in fresh processes without the source on sys.path."""
++
++import os
++from pathlib import Path
++import shutil
++import subprocess  # nosec B404 - Run the local launcher in an isolated process.
++import sys
++import tempfile
++import unittest
++
++
++class LaunchTests(unittest.TestCase):
++    def check_launch(self, installed):
++        source = Path(__file__).resolve().parents[1]
++        with tempfile.TemporaryDirectory() as directory:
++            root = Path(directory)
++            package = root / ("openshot_qt" if installed else "src")
++            (package / "classes").mkdir(parents=True)
++            # Stage the real modules needed by --version, using setup.py's layout.
++            for name in ("__init__.py", "launch.py", "qt_api.py",
++                         "classes/__init__.py", "classes/info.py", "classes/log_config.py"):
++                shutil.copy2(str(source / name), str(package / name))
++
++            home = root / "home"
++            home.mkdir()
++            env = dict(os.environ, HOME=str(home), USERPROFILE=str(home),
++                       PYTHONPATH=str(root), QT_QPA_PLATFORM="offscreen")
++            if installed:
++                # Load the same entry point used by the installed openshot-qt script.
++                command = [sys.executable, "-c", (
++                    "from importlib.metadata import EntryPoint; "
++                    "EntryPoint(name='openshot-qt', "
++                    "value='openshot_qt.launch:main', group='gui_scripts').load()()"
++                ), "--version"]
++            else:
++                command = [sys.executable, str(package / "launch.py"), "--version"]
++
++            result = subprocess.run(  # nosec B603 - Fixed local Python command, no shell.
++                command, cwd=str(home), env=env, stdout=subprocess.PIPE,
++                stderr=subprocess.PIPE, universal_newlines=True, timeout=30,
++            )
++            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++            self.assertRegex(result.stdout.strip().splitlines()[-1], r"^\d+\.\d+\.\d+\S*$")
++
++    def test_installed_entry_point(self):
++        self.check_launch(installed=True)
++
++    def test_source_script(self):
++        self.check_launch(installed=False)
++
++
++if __name__ == "__main__":
++    unittest.main()
