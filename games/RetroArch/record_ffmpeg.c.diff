@@ -1,0 +1,160 @@
+*** record_ffmpeg.c.orig	2026-08-08 05:16:20.119240416 +0000
+--- record_ffmpeg.c	2026-08-08 05:17:43.888477173 +0000
+***************
+*** 74,79 ****
+--- 74,100 ----
+        (LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58, 10, 100)))
+  #endif
+  
++ #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(61, 23, 100) /* FFmpeg 7.1+ */
++ static const enum AVSampleFormat *ffmpeg_get_codec_sample_fmts(const AVCodec *codec)
++ {
++    const enum AVSampleFormat *fmts = NULL;
++    avcodec_get_supported_config(NULL, codec, AV_CODEC_CONFIG_SAMPLE_FORMAT,
++          0, (const void **)&fmts, NULL);
++    return fmts;
++ }
++ 
++ static const int *ffmpeg_get_codec_samplerates(const AVCodec *codec)
++ {
++    const int *rates = NULL;
++    avcodec_get_supported_config(NULL, codec, AV_CODEC_CONFIG_SAMPLE_RATE,
++          0, (const void **)&rates, NULL);
++    return rates;
++ }
++ #else
++ #define ffmpeg_get_codec_sample_fmts(codec)   ((codec)->sample_fmts)
++ #define ffmpeg_get_codec_samplerates(codec)   (samplerates)
++ #endif
++ 
+  #ifndef FFMPEG8
+  #define FFMPEG8 (LIBAVCODEC_VERSION_MAJOR >= 62)
+  #endif
+***************
+*** 224,253 ****
+  static void ffmpeg_audio_resolve_format(struct ff_audio_info *audio,
+        const AVCodec *codec)
+  {
+     audio->codec->sample_fmt = AV_SAMPLE_FMT_NONE;
+  
+!    if (ffmpeg_codec_has_sample_format(AV_SAMPLE_FMT_FLTP, codec->sample_fmts))
+     {
+        audio->codec->sample_fmt = AV_SAMPLE_FMT_FLTP;
+        audio->use_float         = true;
+        audio->is_planar         = true;
+        RARCH_LOG("[FFmpeg] Using sample format FLTP.\n");
+     }
+!    else if (ffmpeg_codec_has_sample_format(AV_SAMPLE_FMT_FLT, codec->sample_fmts))
+     {
+        audio->codec->sample_fmt = AV_SAMPLE_FMT_FLT;
+        audio->use_float         = true;
+        audio->is_planar         = false;
+        RARCH_LOG("[FFmpeg] Using sample format FLT.\n");
+     }
+!    else if (ffmpeg_codec_has_sample_format(AV_SAMPLE_FMT_S16P, codec->sample_fmts))
+     {
+        audio->codec->sample_fmt = AV_SAMPLE_FMT_S16P;
+        audio->use_float         = false;
+        audio->is_planar         = true;
+        RARCH_LOG("[FFmpeg] Using sample format S16P.\n");
+     }
+!    else if (ffmpeg_codec_has_sample_format(AV_SAMPLE_FMT_S16, codec->sample_fmts))
+     {
+        audio->codec->sample_fmt = AV_SAMPLE_FMT_S16;
+        audio->use_float         = false;
+--- 245,276 ----
+  static void ffmpeg_audio_resolve_format(struct ff_audio_info *audio,
+        const AVCodec *codec)
+  {
++    const enum AVSampleFormat *sample_fmts = ffmpeg_get_codec_sample_fmts(codec);
++    
+     audio->codec->sample_fmt = AV_SAMPLE_FMT_NONE;
+  
+!    if (ffmpeg_codec_has_sample_format(AV_SAMPLE_FMT_FLTP, sample_fmts))
+     {
+        audio->codec->sample_fmt = AV_SAMPLE_FMT_FLTP;
+        audio->use_float         = true;
+        audio->is_planar         = true;
+        RARCH_LOG("[FFmpeg] Using sample format FLTP.\n");
+     }
+!    else if (ffmpeg_codec_has_sample_format(AV_SAMPLE_FMT_FLT, sample_fmts))
+     {
+        audio->codec->sample_fmt = AV_SAMPLE_FMT_FLT;
+        audio->use_float         = true;
+        audio->is_planar         = false;
+        RARCH_LOG("[FFmpeg] Using sample format FLT.\n");
+     }
+!    else if (ffmpeg_codec_has_sample_format(AV_SAMPLE_FMT_S16P, sample_fmts))
+     {
+        audio->codec->sample_fmt = AV_SAMPLE_FMT_S16P;
+        audio->use_float         = false;
+        audio->is_planar         = true;
+        RARCH_LOG("[FFmpeg] Using sample format S16P.\n");
+     }
+!    else if (ffmpeg_codec_has_sample_format(AV_SAMPLE_FMT_S16, sample_fmts))
+     {
+        audio->codec->sample_fmt = AV_SAMPLE_FMT_S16;
+        audio->use_float         = false;
+***************
+*** 262,282 ****
+  {
+     struct ff_config_param *params  = &handle->config;
+     struct record_params *param     = &handle->params;
+  
+     /* We'll have to force resampling to some supported sampling rate. */
+!    if (codec->supported_samplerates && !params->sample_rate)
+     {
+        unsigned i;
+        int input_rate = (int)param->samplerate;
+  
+        /* Favor closest sampling rate, but always prefer ratio > 1.0. */
+!       int best_rate  = codec->supported_samplerates[0];
+        int best_diff  = best_rate - input_rate;
+  
+!       for (i = 1; codec->supported_samplerates[i]; i++)
+        {
+           bool better_rate = false;
+!          int diff         = codec->supported_samplerates[i] - input_rate;
+  
+           if (best_diff < 0)
+              better_rate   = (diff > best_diff);
+--- 285,306 ----
+  {
+     struct ff_config_param *params  = &handle->config;
+     struct record_params *param     = &handle->params;
++    const int *samplerates          = ffmpeg_get_codec_samplerates(codec);
+  
+     /* We'll have to force resampling to some supported sampling rate. */
+!    if (samplerates && !params->sample_rate)
+     {
+        unsigned i;
+        int input_rate = (int)param->samplerate;
+  
+        /* Favor closest sampling rate, but always prefer ratio > 1.0. */
+!       int best_rate  = samplerates[0];
+        int best_diff  = best_rate - input_rate;
+  
+!       for (i = 1; samplerates[i]; i++)
+        {
+           bool better_rate = false;
+!          int diff         = samplerates[i] - input_rate;
+  
+           if (best_diff < 0)
+              better_rate   = (diff > best_diff);
+***************
+*** 285,291 ****
+  
+           if (better_rate)
+           {
+!             best_rate = codec->supported_samplerates[i];
+              best_diff = diff;
+           }
+        }
+--- 309,315 ----
+  
+           if (better_rate)
+           {
+!             best_rate = samplerates[i];
+              best_diff = diff;
+           }
+        }
