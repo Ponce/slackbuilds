@@ -1,0 +1,614 @@
+--- ./CMakeLists.txt	2026-10-04 18:05:28.783728974 +0200
++++ ./CMakeLists.txt	2026-10-01 20:08:58.000000000 +0200
+@@ -1,3 +1,4 @@
++cmake_minimum_required(VERSION 3.5)
+ PROJECT(ossim)
+ ############################################################
+ # From https://gitlab.kitware.com/cmake/community/-/wikis/doc/cmake/RPATH-handling
+@@ -9,7 +10,7 @@
+ # (but later on when installing)
+ set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
+ 
+-set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
++set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib64;${CMAKE_INSTALL_PREFIX}/lib")
+ 
+ # add the automatically determined parts of the RPATH
+ # which point to directories outside the build tree to the install RPATH
+@@ -18,15 +19,13 @@
+ # the RPATH to be used when installing, but only if it's not a system directory
+ list(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${CMAKE_INSTALL_PREFIX}/lib" isSystemDir)
+ if("${isSystemDir}" STREQUAL "-1")
+-    set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
++    set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib64;${CMAKE_INSTALL_PREFIX}/lib")
+ endif("${isSystemDir}" STREQUAL "-1")
+ #################################################################
+ 
+-
+-
+ SET(CMAKE_MODULE_PATH "${${PROJECT_NAME}_SOURCE_DIR}/cmake/CMakeModules;${CMAKE_MODULE_PATH}")
+ 
+-set(CMAKE_CXX_STANDARD 11)
++set(CMAKE_CXX_STANDARD 17)
+ set(CMAKE_CXX_STANDARD_REQUIRED ON)
+ set(CMAKE_CXX_EXTENSIONS OFF)
+ 
+@@ -36,10 +35,7 @@
+    SET(OSSIM_BUILD_ADDITIONAL_OSSIM_DIRECTORIES "" CACHE PATH "Specify full paths separated by ; to additional OSSIM applications you wish to include into the ossim build framework.  These will have variables setup for the ossim includes" FORCE)
+ ENDIF(NOT OSSIM_BUILD_ADDITIONAL_OSSIM_DIRECTORIES)
+ 
+-cmake_minimum_required(VERSION 2.8)
+-
+-SET(CMAKE_MODULE_PATH
+-  "${CMAKE_CURRENT_SOURCE_DIR}/ossim/cmake/CMakeModules" ${CMAKE_MODULE_PATH})
++SET(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CMakeModules" ${CMAKE_MODULE_PATH})
+ 
+ include(CMakeDetermineSystem)
+ INCLUDE(OssimVersion)
+@@ -47,15 +43,20 @@
+ 
+ # Expose some build options
+ set(LIB_NAME ossim CACHE STRING "Name of ossim libray (default is ossim).")
++
++OPTION(BUILD_OSSIM_CURL_SUPPORT "Set to ON to build OSSIM with curl support.  Use OFF to turn off curl support." ON)
+ OPTION(BUILD_OSSIM_FREETYPE_SUPPORT "Set to ON to build OSSIM with freetype support.  Use OFF to turn off freetype support." ON)
+ OPTION(BUILD_OSSIM_HDF5_SUPPORT "Set to ON to build OSSIM with HDF5 support.  Use OFF to turn off HDF5 support." OFF)
+-OPTION(BUILD_OSSIM_MPI_SUPPORT "Set to ON to build OSSIM with MPI support.  Use OFF to turn off MPI support." OFF)
+ OPTION(BUILD_OSSIM_ID_SUPPORT "Set to ON to build OSSIM GIT ID support into the library.  Use OFF to turn off ID support." ON)
++OPTION(BUILD_OSSIM_MPI_SUPPORT "Set to ON to build OSSIM with MPI support.  Use OFF to turn off MPI support." OFF)
++OPTION(BUILD_OSSIM_PROJ_SUPPORT "Set to ON to build OSSIM with proj support.  Use OFF to turn off proj support." ON)
++OPTION(BUILD_OSSIM_SQLITE_SUPPORT "Set to ON to build OSSIM with sqlite support.  Use OFF to turn off sqlite support." ON)
+ 
+ OPTION(BUILD_OSSIM_APPS "Set to ON to build OSSIM applications." ON)
+ OPTION(BUILD_OSSIM_CURL_APPS "Set to ON to build ossim curl dependent apps. Use ON to enable." OFF)
+ OPTION(BUILD_OSSIM_TESTS "Set to ON to build OSSIM unit/functional tests." ON)
+ 
++
+ ###################################################################################
+ # Include the Utilities in the root make
+ ###################################################################################
+@@ -87,11 +88,94 @@
+ find_package( GEOS )
+ if( GEOS_FOUND )
+    include_directories( ${GEOS_INCLUDE_DIR} )
+-   set( ossimDependentLibs ${ossimDependentLibs} ${GEOS_LIBRARY} )
++   set( ossimDependentLibs ${ossimDependentLibs} ${GEOS_C_LIBRARY} )
+ else( GEOS_FOUND )
+    message( FATAL_ERROR "Could not find required geos package!" )
+ endif( GEOS_FOUND )
+ 
++# JPEG - Required package:
++find_package( JPEG )
++if( JPEG_FOUND )
++   include_directories( ${JPEG_INCLUDE_DIR} )
++   set( ossimDependentLibs ${ossimDependentLibs} ${JPEG_LIBRARY} )
++else( JPEG_FOUND )
++   message( FATAL_ERROR "Could not find required jpeg package!" )
++endif( JPEG_FOUND )
++
++# JSONCPP - Required:
++find_package( JsonCpp )
++if( JSONCPP_FOUND )
++   include_directories( ${JSONCPP_INCLUDE_DIR} )
++   set( ossimDependentLibs ${ossimDependentLibs} ${JSONCPP_LIBRARY} )
++else( JSONCPP_FOUND )
++   message( FATAL_ERROR "Could not find required JsonCpp package!" )
++endif( JSONCPP_FOUND )
++
++# ZLIB - Optional, but probably required by other libraries, e.g. libtiff:
++set( OSSIM_HAS_LIBZ 0 )
++find_package( ZLIB )
++if ( ZLIB_FOUND )
++   include_directories( ${ZLIB_INCLUDE_DIR} )
++   set( ossimDependentLibs ${ossimDependentLibs} ${ZLIB_LIBRARY} )
++   set( OSSIM_HAS_LIBZ 1 )
++else ( ZLIB_FOUND )
++   message( WARNING "Could not find optional zlib package!" )
++ endif ( ZLIB_FOUND )
++
++# LIBUUID - Optional
++set( OSSIM_HAS_UUID 0 ) 
++find_package( Libuuid )
++if ( LIBUUID_FOUND )
++   include_directories( ${LIBUUID_INCLUDE_DIR} )
++   set( ossimDependentLibs ${ossimDependentLibs} ${LIBUUID_LIBRARY} )
++   set( OSSIM_HAS_UUID 1 )
++else ( LIBUUID_FOUND )
++   message( WARNING "Could not find optional libuuid package!" )
++endif ( LIBUUID_FOUND )
++
++
++# TIFF - Required:
++find_package( TIFF )
++if( TIFF_FOUND )
++   include_directories( ${TIFF_INCLUDE_DIR} )
++   set( ossimDependentLibs ${ossimDependentLibs} ${TIFF_LIBRARY} )
++else( TIFF_FOUND )
++   message( FATAL_ERROR "Could not find required tiff package!" )
++endif( TIFF_FOUND )
++
++# Curl - Required by proj which is required by geotiff:
++if( BUILD_OSSIM_CURL_SUPPORT )
++   find_package( CURL )
++   if( CURL_FOUND )
++      include_directories( ${CURL_INCLUDE_DIR} )
++      set(  ossimDependentLibs ${ossimDependentLibs} ${CURL_LIBRARIES} )
++   else( CURL_FOUND )
++      message(FATAL_ERROR "Could not find curl")
++   endif( CURL_FOUND )
++endif( BUILD_OSSIM_CURL_SUPPORT )
++
++# SQLite - Required by proj which is required by geotiff:
++if ( BUILD_OSSIM_SQLITE_SUPPORT ) 
++   find_package(SQLITE)
++   if(SQLITE_FOUND)
++      include_directories( ${SQLITE_INCLUDE_DIR} )
++      set( ossimDependentLibs ${ossimDependentLibs} ${SQLITE_LIBRARY})
++   else(SQLITE_FOUND)
++      message(FATAL_ERROR "Could not find sqlite")
++   endif(SQLITE_FOUND)
++endif( BUILD_OSSIM_SQLITE_SUPPORT )
++
++# PROJ - Required by geotiff:
++if ( BUILD_OSSIM_PROJ_SUPPORT )
++   find_package( PROJ )
++   if( PROJ_FOUND )
++      include_directories( ${PROJ_INCLUDE_DIR} )
++      set( ossimDependentLibs ${ossimDependentLibs} ${PROJ_LIBRARY} )
++   else( PROJ_FOUND )
++      message( WARNING "Could not find proj package! May be needed for libgeotiff." )
++   endif( PROJ_FOUND )
++endif( BUILD_OSSIM_PROJ_SUPPORT )
++
+ # GEOFIFF - Required:
+ set( OSSIM_HAS_GEOTIFF 0 )
+ find_package( GEOTIFF )
+@@ -112,36 +196,7 @@
+ #   message( FATAL_ERROR "Could not find required geotrans package!" )
+ # endif( GEOTRANS_FOUND )
+ 
+-# JPEG - Required package:
+-find_package( JPEG )
+-if( JPEG_FOUND )
+-   include_directories( ${JPEG_INCLUDE_DIR} )
+-   set( ossimDependentLibs ${ossimDependentLibs} ${JPEG_LIBRARY} )
+-else( JPEG_FOUND )
+-   message( FATAL_ERROR "Could not find required jpeg package!" )
+-endif( JPEG_FOUND )
+ 
+-# TIFF - Required:
+-find_package( TIFF )
+-if( TIFF_FOUND )
+-   include_directories( ${TIFF_INCLUDE_DIR} )
+-   set( ossimDependentLibs ${ossimDependentLibs} ${TIFF_LIBRARY} )
+-else( TIFF_FOUND )
+-   message( FATAL_ERROR "Could not find required tiff package!" )
+-endif( TIFF_FOUND )
+-
+-# JSONCPP - Required. This will use the amalgamated form embedded in OSSIM. If an previously
+-# installed JSONCPP package is preferred, add "-DUSE_OSSIM_JSONCPP=OFF" to the cmake command
+-if(NOT USE_OSSIM_JSONCPP)
+-   find_package( JsonCpp )
+-   if(JSONCPP_FOUND )
+-      include_directories( ${JSONCPP_INCLUDE_DIR} )
+-      set( ossimDependentLibs ${ossimDependentLibs} ${JSONCPP_LIBRARY} )
+-      message("-- Found JsonCpp: ${JSONCPP_INCLUDE_DIR}" )
+-   else( JSONCPP_FOUND )
+-      message( FATAL_ERROR "Could not find required JsonCpp package!" )
+-   endif( JSONCPP_FOUND )
+-endif(NOT USE_OSSIM_JSONCPP)
+ # This caused a core dump on ossim executables running in jenins pipeline (ossim-test-dev)
+ if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+   find_library( DL_LIBRARY dl )
+@@ -193,17 +248,6 @@
+    endif ( MPI_FOUND )
+ endif( BUILD_OSSIM_MPI_SUPPORT )
+ 
+-# ZLIB - Optional:
+-set( OSSIM_HAS_LIBZ 0 )
+-find_package( ZLIB )
+-if ( ZLIB_FOUND )
+-   include_directories( ${ZLIB_INCLUDE_DIR} )
+-   set( ossimDependentLibs ${ossimDependentLibs} ${ZLIB_LIBRARY} )
+-   set( OSSIM_HAS_LIBZ 1 )
+-else ( ZLIB_FOUND )
+-   message( WARNING "Could not find optional zlib package!" )
+-endif ( ZLIB_FOUND )
+-
+ # HDF5 - Optional:
+ set( OSSIM_HAS_HDF5 0 )
+ if (BUILD_OSSIM_HDF5_SUPPORT)
+@@ -220,7 +264,6 @@
+   message( STATUS "Native HDF5 support was not requested. If you want HDF5 support, set the environment BUILD_OSSIM_HDF5_SUPPORT=ON..." )
+ endif ( BUILD_OSSIM_HDF5_SUPPORT )
+ 
+-
+ find_package( Threads )
+ set( ossimDependentLibs ${ossimDependentLibs} ${CMAKE_THREAD_LIBS_INIT} )
+ 
+@@ -228,7 +271,7 @@
+ # Call the OSSIM macros in OssimUtilities.cmake
+ #---
+ if ( NOT OSSIM_BUILD_DATE )
+-    TODAYS_DATE(OSSIM_BUILD_DATE)
++   TODAYS_DATE(OSSIM_BUILD_DATE)
+ endif( NOT OSSIM_BUILD_DATE )
+ SET(OSSIM_GIT_REVISION_NUMBER "UNKNOWN")
+ GET_GIT_REVISION()
+@@ -236,25 +279,9 @@
+    set( OSSIM_GIT_REVISION_NUMBER ${Project_WC_REVISION} )
+ endif()
+ 
+-
+-
+ #####################################################################################
+ # Call the configure files for ossimConfig and ossimVersion setup
+ #####################################################################################
+-include(CheckTypeSize)
+-check_type_size("short int" SIZE_OF_SHORT_INT)
+-check_type_size("int" SIZE_OF_INT)
+-check_type_size("long" SIZE_OF_LONG)
+-check_type_size("long long" SIZE_OF_LONG_LONG)
+-check_type_size("float" SIZE_OF_FLOAT)
+-check_type_size("double" SIZE_OF_DOUBLE)
+-check_type_size("long double" SIZE_OF_LONG_DOUBLE)
+-
+-check_type_size("unsigned short int" SIZE_OF_UNSIGNED_SHORT_INT)
+-check_type_size("unsigned int" SIZE_OF_UNSIGNED_INT)
+-check_type_size("unsigned long" SIZE_OF_UNSIGNED_LONG)
+-check_type_size("unsigned long long" SIZE_OF_UNSIGNED_LONG_LONG)
+-
+ set(OSSIM_VERSION_NUMBER "\"${OSSIM_VERSION}\"")
+ set(OSSIM_BUILD_DATE "\"${OSSIM_BUILD_DATE}\"")
+ set(OSSIM_REVISION "\"${OSSIM_GIT_REVISION_NUMBER}\"")
+@@ -273,7 +300,6 @@
+ CONFIGURE_FILE("${OSSIM_VERSION_HEADER_CONFIG}"
+                "${OSSIM_VERSION_HEADER}")
+ 
+-
+ ##################################################################################################
+ # Point to the CMakeLists.txt in the src dir. OLK: Removed unnecessary src/ossim structure and
+ # replaced with simply src.
+@@ -308,12 +334,13 @@
+ MESSAGE( STATUS "GEOTIFF_INCLUDE                 = ${GEOTIFF_INCLUDE_DIR}" )
+ MESSAGE( STATUS "GEOTRANS_LIBRARY                = ${GEOTRANS_LIBRARY}" )
+ MESSAGE( STATUS "GEOTRANS_INCLUDE                = ${GEOTRANS_INCLUDE_DIR}" )
+-MESSAGE( STATUS "GEOS_LIBRARY                    = ${GEOS_LIBRARY}" )
++MESSAGE( STATUS "GEOS_C_LIBRARY                  = ${GEOS_C_LIBRARY}" )
+ MESSAGE( STATUS "GEOS_INCLUDE                    = ${GEOS_INCLUDE_DIR}" )
+ MESSAGE( STATUS "JPEG_LIBRARY                    = ${JPEG_LIBRARIES}" )
+ MESSAGE( STATUS "JPEG_INCLUDE                    = ${JPEG_INCLUDE_DIR}" )
+ MESSAGE( STATUS "OSSIM DEPENDENT LIBRARIES       = ${ossimDependentLibs}" )
+ MESSAGE( STATUS "OSSIM_HAS_HDF5                  = ${OSSIM_HAS_HDF5}" )
++MESSAGE( STATUS "OSSIM_HAS_UUID                  = ${OSSIM_HAS_UUID}" )
+ 
+ #-----------------------------------------------------------------------------
+ # uninstall target
+
+--- ./cmake/CMakeLists.txt	2020-06-12 16:19:32.000000000 +0200
++++ ./cmake/CMakeLists.txt	2026-10-01 20:08:58.000000000 +0200
+@@ -1,7 +1,13 @@
++cmake_minimum_required(VERSION 3.16...3.26)
++
+ PROJECT(ossimlabs)
+ 
+ # Allows developer to customize compiler with their own flags (e.g., "-std=c++11")
+ 
++set(CMAKE_CXX_STANDARD 17)
++set(CMAKE_CXX_STANDARD_REQUIRED ON)
++set(CMAKE_CXX_EXTENSIONS OFF)
++
+ SET( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} $ENV{OSSIM_CXX_FLAGS}" )
+ 
+ IF ("${OSSIM_DEV_HOME}"  STREQUAL "")
+@@ -43,11 +49,7 @@
+ FILE(REMOVE ${CMAKE_INCLUDE_DIRS_FILE})
+ FILE(REMOVE ${CMAKE_FILENAMES_FILE})
+ 
+-IF(NOT APPLE)
+-  cmake_minimum_required(VERSION 2.6)
+-ELSE(NOT APPLE)
+-    cmake_minimum_required(VERSION 2.8)
+-ENDIF(NOT APPLE)
++# Do not downgrade the CMake policy/version in subtrees
+ 
+ IF(EXISTS "$ENV{OSSIM_DEPENDENCIES}")
+    SET(CMAKE_INCLUDE_PATH ${CMAKE_INCLUDE_PATH} ${OSSIM_DEPENDENCIES}/include )
+@@ -93,6 +95,13 @@
+    SET(OSSIM_INCLUDE_DIR "${OSSIM_HOME}/include" CACHE STRING "Caching" FORCE)
+ ENDIF(NOT OSSIM_INCLUDE_DIR)
+ 
++IF(BUILD_OSSIM_AUTOREGISTRATION)
++   IF(NOT OSSIM_AUTOREGISTRATION_ROOT AND EXISTS "${OSSIM_DEV_HOME}/ossim-autoreg")
++      SET(OSSIM_AUTOREGISTRATION_ROOT "${OSSIM_DEV_HOME}/ossim-autoreg"
++          CACHE PATH "ossim-autoreg source or install root")
++   ENDIF()
++ENDIF()
++
+ 
+ #IF(NOT OSSIMPLANETQT_LIBRARY)
+ #   SET(OSSIMPLANETQT_LIBRARY "ossimPlanetQt" CACHE STRING "Caching" FORCE)
+@@ -173,6 +182,12 @@
+   add_subdirectory(${OSSIM_DEV_HOME}/ossim-planet-gui ${CMAKE_CURRENT_BINARY_DIR}/ossim-planet-gui)
+ ENDIF()
+ 
++IF(BUILD_OSSIM_AUTOREGISTRATION)
++  IF(OSSIM_AUTOREGISTRATION_ROOT AND EXISTS "${OSSIM_AUTOREGISTRATION_ROOT}/CMakeLists.txt" AND NOT TARGET ossim-autoreg)
++     add_subdirectory(${OSSIM_AUTOREGISTRATION_ROOT} ${CMAKE_CURRENT_BINARY_DIR}/ossim-autoreg)
++  ENDIF()
++ENDIF()
++
+ 
+ IF(BUILD_OSSIM_GUI AND EXISTS ${OSSIM_DEV_HOME}/ossim-gui)
+      add_subdirectory(${OSSIM_DEV_HOME}/ossim-gui ${CMAKE_CURRENT_BINARY_DIR}/ossim-gui)
+@@ -287,6 +302,8 @@
+ INSTALL(FILES ${projection_files} DESTINATION share/ossim/projection COMPONENT ossim)
+ 
+ INSTALL(FILES ${OSSIM_HOME}/share/ossim/templates/ossim_preferences_template DESTINATION "share/ossim" COMPONENT ossim RENAME ossim-preferences-template)
++INSTALL(FILES ${OSSIM_HOME}/share/ossim/templates/nitfSODDXA_Template.xml DESTINATION "share/ossim" COMPONENT ossim RENAME nitfSODDXA_Template.xml)
++INSTALL(FILES ${OSSIM_HOME}/share/ossim/templates/nitfSORBXA_Template.xml DESTINATION "share/ossim" COMPONENT ossim RENAME nitfSORBXA_Template.xml)
+ 
+ ############################## Setup the packages ##############################
+ # present the packaging option only if we have the cpack command defined (effectively >= 2.6.0)
+@@ -357,7 +374,7 @@
+ MESSAGE( STATUS "CMAKE_EXE_LINKER_FLAGS          = ${CMAKE_EXE_LINKER_FLAGS}" )
+ MESSAGE( STATUS "COMPILE_DEFINITIONS_DEBUG       = ${COMPILE_DEFINITIONS_DEBUG}" )
+ MESSAGE( STATUS "COMPILE_DEFINITIONS_RELEASE     = ${COMPILE_DEFINITIONS_RELEASE}" )
+-MESSAGE( STATUS "KAKADU_ROOT_SRC                 = ${KAKADU_ROOT_SRC}")
++MESSAGE( STATUS "KAKADU_INCLUDE_DIR              = ${KAKADU_INCLUDE_DIR}")
+ MESSAGE( STATUS "KAKADU_AUX_LIBRARY              = ${KAKADU_AUX_LIBRARY}")
+ MESSAGE( STATUS "KAKADU_LIBRARY                  = ${KAKADU_LIBRARY}")
+ MESSAGE( STATUS "MPI_LIBRARY                     = ${MPI_LIBRARIES}" )
+@@ -376,11 +393,12 @@
+ MESSAGE( STATUS "BUILD_OSSIM                     = ${BUILD_OSSIM}" )
+ MESSAGE( STATUS "BUILD_OSSIM_FREETYPE_SUPPORT    = ${BUILD_OSSIM_FREETYPE_SUPPORT}" )
+ MESSAGE( STATUS "BUILD_OSSIM_GUI                 = ${BUILD_OSSIM_GUI}" )
++MESSAGE( STATUS "BUILD_OSSIM_AUTOREGISTRATION    = ${BUILD_OSSIM_AUTOREGISTRATION}" )
+ MESSAGE( STATUS "BUILD_OSSIMJNI                  = ${BUILD_OSSIMJNI}" )
+ MESSAGE( STATUS "BUILD_OSSIM_QT4                 = ${BUILD_OSSIM_QT4}" )
+ MESSAGE( STATUS "BUILD_OSSIM_MPI_SUPPORT         = ${BUILD_OSSIM_MPI_SUPPORT}" )
+ MESSAGE( STATUS "BUILD_OSSIM_PLANET              = ${BUILD_OSSIM_PLANET}" )
+-MESSAGE( STATUS "BUILD_OSSIMPLANETQT             = ${BUILD_OSSIMPLANETQT}" )
++MESSAGE( STATUS "BUILD_OSSIM_PLANET_GUI          = ${BUILD_OSSIM_PLANET_GUI}" )
+ MESSAGE( STATUS "BUILD_OSSIM_VIDEO               = ${BUILD_OSSIM_VIDEO}" )
+ MESSAGE( STATUS "BUILD_OSSIM_WMS                 = ${BUILD_OSSIM_WMS}" )
+ MESSAGE( STATUS "BUILD_LIBRARY_DIR               = ${BUILD_LIBRARY_DIR}" )
+@@ -390,5 +408,6 @@
+ MESSAGE( STATUS "BUILD_CSM_PLUGIN                = ${BUILD_CSM_PLUGIN}" )
+ MESSAGE( STATUS "BUILD_OSSIM_FPGA                = ${BUILD_OSSIM_FPGA}" )
+ MESSAGE( STATUS "BUILD_OSSIM_DEEPCORE            = ${BUILD_OSSIM_DEEPCORE}" )
++MESSAGE( STATUS "OSSIM_AUTOREGISTRATION_ROOT     = ${OSSIM_AUTOREGISTRATION_ROOT}" )
+ MESSAGE( STATUS "USE_OSSIM_JSONCPP               = ${USE_OSSIM_JSONCPP}" )
+ MESSAGE( STATUS "Use OSSIM_BUILD_ADDITIONAL_DIRECTORIES to add other cmake builds." )
+
+--- ./cmake/CMakeModules/FindGEOS.cmake	2020-06-12 16:19:32.000000000 +0200
++++ ./cmake/CMakeModules/FindGEOS.cmake	2026-10-01 20:08:58.000000000 +0200
+@@ -6,8 +6,10 @@
+ # This module defines:
+ #
+ # GEOS_INCLUDE_DIR, where to find geos.h, etc.
+-# GEOS_LIBRARY, libraries to link against to use GEOS.  Currently there are
+-# two looked for, geos and geos_c libraries.
++# GEOS_C_LIBRARY
++# GEOS_CPP_LIBRARY
++# GEOS_LIBRARIES, C and CPP libraries to link against to use GEOS.  Currently
++# there are two looked for, geos and geos_c libraries.
+ # GEOS_FOUND, True if found, false if one of the above are not found.
+ # 
+ # For ossim, typically geos will be system installed which should be found; 
+@@ -34,7 +36,7 @@
+            /usr/local/include)
+ 
+ # Find GEOS library:
+-find_library( GEOS_LIB NAMES geos_c 
++find_library( GEOS_CPP_LIBRARY NAMES geos
+               PATHS
+               $ENV{GEOS_DIR}/lib
+               ${GEOS_DIR}/lib
+@@ -42,22 +44,22 @@
+               /usr/local/lib64)
+ 
+ # Find GEOS C library:
+-find_library( GEOS_C_LIB NAMES geos_c 
++find_library( GEOS_C_LIBRARY NAMES geos_c 
+               PATHS 
+               $ENV{GEOS_DIR}/lib
+               ${GEOS_DIR}/lib)
+ 
+ # Set the GEOS_LIBRARY:
+-if( GEOS_LIB AND GEOS_C_LIB )
+-   set( GEOS_LIBRARY ${GEOS_LIB} ${GEOS_C_LIB} CACHE STRING INTERNAL )
+-endif(GEOS_LIB AND GEOS_C_LIB )
++if( GEOS_CPP_LIBRARY AND GEOS_C_LIBRARY )
++   set( GEOS_LIBRARIES ${GEOS_CPP_LIBRARY} ${GEOS_C_LIBRARY} CACHE STRING INTERNAL )
++endif( GEOS_CPP_LIBRARY AND GEOS_C_LIBRARY )
+ 
+ #---
+ # This function sets GEOS_FOUND if variables are valid.
+ #--- 
+ include(FindPackageHandleStandardArgs)
+-find_package_handle_standard_args( GEOS DEFAULT_MSG 
+-                                   GEOS_LIBRARY 
++find_package_handle_standard_args( GEOS DEFAULT_MSG
++                                   GEOS_LIBRARIES 
+                                    GEOS_INCLUDE_DIR )
+ 
+ if( GEOS_FOUND )
+@@ -72,5 +74,7 @@
+ 
+ if( NOT GEOS_FIND_QUIETLY )
+    message( STATUS "GEOS_INCLUDE_DIR=${GEOS_INCLUDE_DIR}" )
+-   message( STATUS "GEOS_LIBRARY=${GEOS_LIBRARY}" )
++   message( STATUS "GEOS_C_LIBRARY=${GEOS_C_LIBRARY}" )
++   message( STATUS "GEOS_CPP_LIBRARY=${GEOS_CPP_LIBRARY}" )     
++   message( STATUS "GEOS_LIBRARIES=${GEOS_LIBRARIES}" )
+ endif( NOT GEOS_FIND_QUIETLY )
+
+--- ./src/ossimConfig.h.in	2020-06-12 16:19:32.000000000 +0200
++++ ./src/ossimConfig.h.in	2026-10-01 20:08:58.000000000 +0200
+@@ -2,9 +2,18 @@
+ #ifndef ossimConfig_HEADER
+ #define ossimConfig_HEADER
+ 
++#ifdef __cplusplus
++#include <cstdint>
++#else
++#include <stdint.h>
++#endif
++
+ /* Define to "1" if you have libz installed, "0" if not. */
+ #define OSSIM_HAS_LIBZ @OSSIM_HAS_LIBZ@
+ 
++/* Define to "1" if you have libuuid installed, "0" if not. */
++#define OSSIM_HAS_UUID @OSSIM_HAS_UUID@
++
+ /* Define to "1" if you have MPI(lam/mpi), "0" if not. */
+ #define OSSIM_HAS_MPI @OSSIM_HAS_MPI@
+ 
+@@ -20,102 +29,33 @@
+ /* Enable cvs id strings for use with "ident" application. */
+ #define OSSIM_ID_ENABLED @OSSIM_ID_ENABLED@
+ 
+-/* The sizes of various standard integer types. */
+-@SIZE_OF_SHORT_INT_CODE@
+-@SIZE_OF_INT_CODE@
+-@SIZE_OF_LONG_CODE@
+-@SIZE_OF_LONG_LONG_CODE@
+-@SIZE_OF_UNSIGNED_SHORT_INT_CODE@
+-@SIZE_OF_UNSIGNED_INT_CODE@
+-@SIZE_OF_UNSIGNED_LONG_CODE@
+-@SIZE_OF_UNSIGNED_LONG_LONG_CODE@
+-@SIZE_OF_DOUBLE_CODE@
+-@SIZE_OF_FLOAT_CODE@
+-@SIZE_OF_LONG_DOUBLE_CODE@
+-
+-
+-
+ typedef char                   ossim_int8;
+ typedef unsigned char          ossim_uint8;
+ typedef signed char            ossim_sint8;
+ 
+-#if SIZE_OF_SHORT_INT == 2
+-typedef short ossim_int16;
+-typedef signed short ossim_sint16;
+-typedef unsigned short ossim_uint16;
+-#define OSSIM_HAVE_INT16_T
+-#define OSSIM_HAVE_UINT16_T
+-#elif SIZE_OF_INT == 2
+-typedef int ossim_int16;
+-typedef signed int ossim_sint16;
+-typedef unsigned int ossim_uint16;
+-#define OSSIM_HAVE_INT16_T
+-#endif
+-
+-#if SIZE_OF_INT == 4
+-typedef int ossim_int32;
+-typedef signed int ossim_sint32;
+-typedef unsigned int ossim_uint32;
+-#define OSSIM_HAVE_INT32_T
+-#define OSSIM_HAVE_UINT32_T
+-#elif SIZE_OF_LONG == 4
+-typedef long ossim_int32;
+-typedef signed long ossim_sint32;
+-typedef unsigned long ossim_uint32;
+-#define OSSIM_HAVE_INT32_T
+-#define OSSIM_HAVE_UINT32_T
+-
+-#endif
+-
+-#if !defined(OSSIM_HAVE_INT32_T)
+-#error No 32-bit integer type was found.
+-#endif
+-
+-#if SIZE_OF_LONG_LONG == 8
+-typedef long long ossim_int64;
+-typedef unsigned long long ossim_uint64;
+-typedef signed long long ossim_sint64;
+-#define OSSIM_HAVE_INT64_T
+-#define OSSIM_HAVE_UINT64_T
+-#elif SIZE_OF_INT == 8
+-typedef int ossim_int64;
+-typedef signed int ossim_sint64;
+-typedef unsigned int ossim_uint64;
+-#define OSSIM_HAVE_INT64_T
+-#define OSSIM_HAVE_UINT64_T
+-#elif SIZE_OF_LONG == 8
+-typedef long ossim_int64;
+-typedef unsigned long ossim_uint64;
+-typedef signed long ossim_sint64;
+-#define OSSIM_HAVE_INT64_T
+-#define OSSIM_HAVE_UINT64_T
+-#endif
+-
+-#if !defined(OSSIM_HAVE_INT64_T)
+-#error No 64-bit integer type was found.
+-#endif
+-
+-#if SIZE_OF_DOUBLE == 8
+-typedef double ossim_float64;
+-#define OSSIM_HAVE_FLOAT64_T
+-#endif
+-
+-#if !defined(OSSIM_HAVE_FLOAT64_T)
+-#error No 64-bit integer type was found.
+-#endif
+-
+-#if SIZE_OF_FLOAT == 4
+-typedef float ossim_float32;
+-#define OSSIM_HAVE_FLOAT32_T
+-#endif
+-
+-#if !defined(OSSIM_HAVE_FLOAT32_T)
+-#error No 64-bit integer type was found.
++#ifdef __cplusplus
++typedef std::int16_t  ossim_int16;
++typedef std::int16_t  ossim_sint16;
++typedef std::uint16_t ossim_uint16;
++typedef std::int32_t  ossim_int32;
++typedef std::int32_t  ossim_sint32;
++typedef std::uint32_t ossim_uint32;
++typedef std::int64_t  ossim_int64;
++typedef std::int64_t  ossim_sint64;
++typedef std::uint64_t ossim_uint64;
++#else
++typedef int16_t       ossim_int16;
++typedef int16_t       ossim_sint16;
++typedef uint16_t      ossim_uint16;
++typedef int32_t       ossim_int32;
++typedef int32_t       ossim_sint32;
++typedef uint32_t      ossim_uint32;
++typedef int64_t       ossim_int64;
++typedef int64_t       ossim_sint64;
++typedef uint64_t      ossim_uint64;
+ #endif
+ 
+-#if SIZE_OF_LONG_DOUBLE == 16
+-typedef float ossim_float128;
+-#define OSSIM_HAVE_FLOAT128_T
+-#endif
++typedef double        ossim_float64;
++typedef float         ossim_float32;
+ 
+ #endif /* End of "#ifndef ossimConfig_HEADER" */
+
+--- ./src/vpfutil/vpftidx.c	2020-06-12 16:19:32.000000000 +0200
++++ ./src/vpfutil/vpftidx.c	2026-10-01 20:08:58.000000000 +0200
+@@ -605,7 +605,8 @@
+   ossim_int32 			i , ival = 0, Match = -1;
+   short int			sval = 0;
+   float				fval = 0.0 ;
+-  double			dval = 0.0 , atof () ;
++  /* double			dval = 0.0 , atof () ; */
++  double			dval = 0.0;  
+   FILE				*ifp ;
+   char				hack[80] , *buf = (char *) NULL, bufalloc=0 ;
+   ThematicIndexHeader		h ;
+@@ -885,7 +886,8 @@
+   ossim_int32 			i , ival = 0, Match = -1;
+   short int			sval = 0;
+   float				fval = 0.0 ;
+-  double			dval = 0.0 , atof () ;
++  /* double			dval = 0.0 , atof () ; */
++  double			dval = 0.0;
+   char				*buf = (char *) NULL, bufalloc=0 ;
+   ThematicIndexDirectory	d ;
+   set_type			s ;
