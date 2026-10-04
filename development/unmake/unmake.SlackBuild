@@ -2,7 +2,8 @@
 
 # Slackware build script for unmake
 
-# Ioannis Anagnostakis 2025 GR
+# Copyright Ioannis Anagnostakis, 2025.
+# Modified and now maintained by B. Watson <urchlay@slackware.uk>.
 #
 # Redistribution and use of this script, with or without modification, is
 # permitted provided that the following conditions are met:
@@ -21,17 +22,30 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20261003 bkw:
+# - take over maintenance
+# - update for v0.0.27.
+# - build from source rather than repacking a binary.
+# - include docs in package.
+# - expand the README.
+
+# 20261003 bkw: unlike most Rust builds, upstream was kind enough to
+# include full vendored sources. Unfortunately, the build fails when
+# I try to use them. *Many* thanks to fourtysixandtwo for creating the
+# unmake-vendored-sources tarball that made this build actually work.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=unmake
-VERSION=${VERSION:-0.0.25}
+VERSION=${VERSION:-0.0.27}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+VSBUILD=${VSBUILD:-1}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i586 ;;
+    i?86) ARCH=i686 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
@@ -46,41 +60,34 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SRCNAM=i586-unknown-linux-gnu
-elif [ "$ARCH" = "i686" ]; then
-  SRCNAM=i686-unknown-linux-gnu
-elif [ "$ARCH" = "x86_64" ]; then
-  SRCNAM=x86_64-unknown-linux-gnu
-elif [ "$ARCH" = "aarch64" ]; then
-  SRCNAM=aarch64-unknown-linux-gnu
-else
-  echo "Please pick up your $ARCH files from $CWD/$PRGNAM-$VERSION.tgz"
-  echo "...and build manually"
-  exit 1
-fi
-
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar -xvzf $CWD/$PRGNAM-$VERSION.tgz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz --no-same-owner
+rm -rf $PRGNAM-$VERSION/vendor
+rm -rf $PRGNAM-$VERSION/.cargo
+tar xvf $CWD/$PRGNAM-vendored-sources-$VERSION-$VSBUILD.tar.xz
 cd $PRGNAM-$VERSION
-chown -R root:root .
-find . -type f \( -perm -4000 -o -perm -2000 \) -exec chmod -s {} +
-find . ! -type l -type d ! -perm 755 -exec chmod -f 755 {} +
-find . ! -type l -type f -perm /111 ! -perm 755 -exec chmod -f 755 {} +
-find . ! -type l -type f ! -perm /111 ! -perm 644 -exec chmod -f 644 {} +
+find . ! -type l    -a \( \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
 
-install -Dm755 $SRCNAM/$PRGNAM "$PKG"/usr/bin/$PRGNAM
+export CARGO_NET_OFFLINE=true
+export CARGO_HOME=$(pwd)/.cargo
+export PATH="/opt/rust/bin:$PATH"
+export LD_LIBRARY_PATH="/opt/rust/lib"
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+cargo build --offline --release
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+install -Dm755 target/release/unmake $PKG/usr/bin/unmake
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a LICENSE.md README.md SYNTAX.md WARNINGS.md $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
