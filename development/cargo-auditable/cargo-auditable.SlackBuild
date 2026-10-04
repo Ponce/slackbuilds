@@ -2,8 +2,7 @@
 
 # Slackware build script for cargo-auditable
 
-# Ioannis Anagnostakis 2025
-# Updated - 2026
+# Copyright 2025-2026 Ioannis Anagnostakis, Crete, Greece
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -26,14 +25,15 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=cargo-auditable
-VERSION=${VERSION:-0.7.6}
+VERSION=${VERSION:-0.7.7}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
+VSBUILD=${VSBUILD:-1}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
-    i?86) ARCH=i586 ;;
+    i?86) ARCH=i686 ;;
     arm*) ARCH=arm ;;
        *) ARCH=$( uname -m ) ;;
   esac
@@ -48,21 +48,22 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
+if [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
   LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-elif [ "$ARCH" = "aarch64" ]; then
+elif [ "$ARCH" = "x86_64" -o "$ARCH" = "aarch64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
+fi
+
+# Set cargo target
+if [ "$ARCH" = "arm" ]; then
+  TRIPLET="$ARCH-unknown-linux-gnueabihf"
+else
+  TRIPLET="$ARCH-unknown-linux-gnu"
 fi
 
 set -e
@@ -71,19 +72,15 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.?z --no-same-owner
+tar xvf $CWD/$PRGNAM-vendored-sources-$VERSION-$VSBUILD.tar.?z --no-same-owner
 cd $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION-vendor.tar.gz
-# Create Cargo config for vendored sources
-mkdir -p .cargo
-cat $CWD/cargo-config.toml > .cargo/config.toml
-cat $CWD/vendor.json > vendor.json
+find . ! -type l    -a \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \)
 
-chown -R root:root .
-find . -type f \( -perm -4000 -o -perm -2000 \) -exec chmod -s {} +
-find . ! -type l -type d ! -perm 755 -exec chmod -f 755 {} +
-find . ! -type l -type f -perm /111 ! -perm 755 -exec chmod -f 755 {} +
-find . ! -type l -type f ! -perm /111 ! -perm 644 -exec chmod -f 644 {} +
+export CARGO_NET_OFFLINE=true
+export CARGO_HOME=$(pwd)/.cargo
 
 export PATH="/opt/rust/bin:$PATH"
 if [ -z "$LD_LIBRARY_PATH" ]; then
@@ -92,36 +89,35 @@ else
   export LD_LIBRARY_PATH="/opt/rust/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
 fi
 
-# Build with Cargo
-CARGO_HOME=.cargo \
-    cargo build --release --frozen --offline
-echo ""
-echo "=== Rebuilding now with cargo-auditable itself ==="
-echo ""
-PATH="$PATH:./target/release" \
-CARGO_HOME=.cargo \
-    cargo auditable build --release --frozen --offline
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+cargo build \
+  --frozen \
+  --release \
+  --target $TRIPLET
 
-# Install the binary
-mkdir -p $PKG/usr/bin
-install -m 0755 target/release/cargo-auditable $PKG/usr/bin/
-install -Dm644 cargo-auditable/cargo-auditable.1 -t "$PKG"/usr/man/man1/
+# Rebuild cargo-auditable with itself, so the packaged binary carries
+# its own dependency audit data like everything else it produces.
+PATH="$(pwd)/target/$TRIPLET/release:$PATH" \
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+cargo auditable build \
+  --frozen \
+  --release \
+  --target $TRIPLET
 
-# Strip binaries and libraries
+install -Dm755 target/$TRIPLET/release/$PRGNAM -t $PKG/usr/bin/
+install -Dm644 $PRGNAM/$PRGNAM.1 -t $PKG/usr/man/man1/
+
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
+find $PKG/usr/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-  # Compress man pages if they exist
-if [ -d $PKG/usr/man ]; then
-  find $PKG/usr/man -type f -exec gzip -9 {} \;
-  for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
-fi
-
-# Documentation
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  LICENSE* *.md "$PRGNAM"/*.md \
+  LICENSE* *.md $PRGNAM/*.md \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
