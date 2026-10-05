@@ -3,6 +3,7 @@
 # Slackware build script for srcML
 
 # Copyright 2017 Marcel Steinbeck Germany
+# Copyright 2026 xaizek <xaizek@posteo.net>
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,12 +26,10 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=srcML
-VERSION=${VERSION:-0.9.5}
+VERSION=${VERSION:-1.1.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-BOOST=boost_1_59_0
-DEPDIR=deps
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -40,9 +39,6 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 
-# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
-# the name of the created package would be, and then exit. This information
-# could be useful to other scripts.
 if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
   exit 0
@@ -52,19 +48,17 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+if [ "$ARCH" = "i586" -o "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=$ARCH -mtune=i686"
   LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
+elif [ "$ARCH" = "x86_64" -o "$ARCH" = "aarch64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
+SLKCFLAGS+=" -DNDEBUG"
 
 set -e
 
@@ -72,63 +66,56 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-src.tar.gz
-mv $PRGNAM-src $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz --no-same-owner
 cd $PRGNAM-$VERSION
-tar xvf $CWD/$BOOST.tar.bz2
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Contains all compile time dependencies of srcML
-DEPPATH=$TMP/$PRGNAM-$VERSION/$DEPDIR
-mkdir -p $DEPPATH
+# Devs did some weird shit in v1.1.0 with downloading and patching third-party
+# sources.  So patch the build system to not download anything and use installed
+# CLI11.  The rest of the dependencies is pulled as package sources and placed
+# where they can be found.  This is also why antlr2 is no longer a dependency,
+# it's built in place.
+patch -p1 < $CWD/no-network-build.patch
+# Set up https://www.antlr2.org/.
+tar xvf $CWD/antlr-2.7.7.tar.gz
+# Set up https://github.com/vit-vit/CTPL.
+mkdir ctpl
+cp $CWD/ctpl_stl.h ctpl/
+# Set up https://github.com/mohaps/TinySHA1.
+cp $CWD/TinySHA1.hpp src/parser
 
-cd $BOOST
-  ./bootstrap.sh \
-    --prefix=$DEPPATH \
-    --without-libraries=atomic,chrono,context,coroutine,exception,graph,\
-graph_parallel,iostreams,locale,log,math,mpi,python,random,serialization,\
-signals,test,timer,wave
-  ./b2 \
-    link=static \
-    cxxflags="-fPIC -static -Wl,--whole-archive" \
-    threading=multi \
-    install
-cd ..
+find . ! -type l    -a \( \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
 
-# Fix a compilation error caused by an invalid check of a boost optional
-patch -Np1 -i $CWD/srcML-0.9.5-boost-optional.patch
-
-# Fix library installation directory for 64 bit systems
-patch -Np1 -i $CWD/srcML-0.9.5-lib-install-dir.patch
-
-# CMAKE_INSTALL_PREFIX is ignored
-sed -i -e 's#usr/local#usr#' CMake/install.cmake
+# If cmake-opt is present, assume /usr/bin/cmake < v3.28 (i.e., running 15.0).
+if [ -f /etc/profile.d/cmake-opt.sh ]; then
+  . /etc/profile.d/cmake-opt.sh
+fi
 
 mkdir -p build
 cd build
   cmake \
-    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
-    -DBOOST_ROOT=$DEPPATH \
+    -DCMAKE_C_FLAGS_RELEASE="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS_RELEASE="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=lib$LIBDIRSUFFIX \
+    -DCMAKE_INSTALL_MANDIR=man \
+    -DCMAKE_INSTALL_DOCDIR=doc/$PRGNAM-$VERSION \
+    -DBUILD_CLIENT_DOC=ON \
     -DCMAKE_BUILD_TYPE=Release ..
   make
-  make install DESTDIR=$PKG
+  make install/strip DESTDIR=$PKG
 cd ..
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# See no option to disable building or installing this one.
+rm $PKG/usr/lib${LIBDIRSUFFIX}/libsrcml.a
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
 cp -a \
-  BUILD.md COPYING.txt README.md \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+  CHANGES.md COPYING.txt README.md \
+  $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
