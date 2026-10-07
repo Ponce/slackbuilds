@@ -1,0 +1,121 @@
+#!/bin/bash
+
+# Slackware build script for kew
+# Copyright (c) 2026 Moletastic
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included
+# in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+# CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=kew
+VERSION=${VERSION:-4.3.8}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+if [ -z "$ARCH" ]; then
+  case "$(uname -m)" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$(uname -m) ;;
+  esac
+fi
+
+if [ -n "$PRINT_PACKAGE_NAME" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+if [ "$ARCH" = "i586" ]; then
+  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+elif [ "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+elif [ "$ARCH" = "x86_64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+else
+  SLKCFLAGS="-O2"
+fi
+
+case "${FAAD:-no}" in
+  yes) USE_FAAD=1 ;;
+   no) USE_FAAD=0 ;;
+    *) echo "FAAD must be yes or no" >&2 ; exit 1 ;;
+esac
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -e
+
+rm -rf "$PKG"
+mkdir -p "$TMP" "$PKG" "$OUTPUT"
+
+cd "$TMP"
+rm -rf "$PRGNAM-$VERSION"
+tar xvf "$CWD/$PRGNAM-$VERSION.tar.gz"
+cd "$PRGNAM-$VERSION"
+
+patch -p1 < "$CWD/slackware-compat.patch"
+
+chown -R root:root .
+find . \
+  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+     -o -perm 511 \) -exec chmod 755 {} \+ -o \
+  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+     -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
+
+# Retain upstream's include paths and hardening flags.
+sed -i "s|-O2 -fstack|$SLKCFLAGS -fstack|g" Makefile
+# GLib 2.70 keeps Unix socket headers outside gio-2.0's include paths.
+sed -i 's/PKG_LIBS = gio-2.0 /PKG_LIBS = gio-unix-2.0 /' Makefile
+
+make KEW_VERSION="$VERSION" PREFIX=/usr \
+  MAN_DIR=/usr/man USE_FAAD="$USE_FAAD"
+make install DESTDIR="$PKG" KEW_VERSION="$VERSION" PREFIX=/usr \
+  MAN_DIR=/usr/man USE_FAAD="$USE_FAAD" ENABLE_CAP_SYS_NICE=0
+
+# Upstream installs a non-square image in the 512x512 icon directory.
+convert shortcut/kew.png -resize 512x512 -background none \
+  -gravity center -extent 512x512 \
+  "$PKG/usr/share/icons/hicolor/512x512/apps/kew.png"
+
+strip --strip-unneeded "$PKG/usr/bin/kew"
+find "$PKG/usr/man" -type f -exec gzip -9 {} \+
+
+mkdir -p "$PKG/usr/doc/$PRGNAM-$VERSION/licenses"
+cp -a LICENSE README.md PRIVACY_POLICY.md \
+  "$PKG/usr/doc/$PRGNAM-$VERSION/"
+find include -type f \
+  \( -iname 'license*' -o -iname 'copying*' -o -iname 'notice*' \) \
+  -exec cp --parents -t "$PKG/usr/doc/$PRGNAM-$VERSION/licenses/" {} \+
+# These bundled libraries keep their license notices in source headers.
+sed -n '1,/^[[:space:]]*\*\//p' include/alac/alac.h \
+  > "$PKG/usr/doc/$PRGNAM-$VERSION/licenses/alac.txt"
+sed -n '1,/^[[:space:]]*\*\//p' include/libmp4/include/libmp4.h \
+  > "$PKG/usr/doc/$PRGNAM-$VERSION/licenses/libmp4.txt"
+cat "$CWD/$PRGNAM.SlackBuild" \
+  > "$PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild"
+
+mkdir -p "$PKG/install"
+cat "$CWD/slack-desc" > "$PKG/install/slack-desc"
+cat "$CWD/doinst.sh" > "$PKG/install/doinst.sh"
+
+cd "$PKG"
+/sbin/makepkg -l y -c n "$OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
