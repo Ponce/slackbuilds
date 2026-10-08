@@ -26,7 +26,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=zig
-VERSION=${VERSION:-0.16.0}
+VERSION=${VERSION:-0.17.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -47,22 +47,18 @@ if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   exit 0
 fi
 
+if [ "$ARCH" != "x86_64" ]; then
+  echo "This package only supports x86_64." >&2
+  exit 1
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  TARGET="x86-linux-gnu"
-elif [ "$ARCH" = "i686" ]; then
-  TARGET="x86-linux-gnu"
-elif [ "$ARCH" = "x86_64" ]; then
-  TARGET="x86_64-linux-gnu"
-else
-  TARGET="x86_64-linux-gnu"
-fi
-
 SRCNAM=zig-$VERSION
 BOOTSTRAPNAM=zig-bootstrap-$VERSION
+TARGET="x86_64-linux-gnu"
 MCPU=${MCPU:-baseline}
 
 set -e
@@ -87,6 +83,18 @@ case ${NUMJOBS:-} in
   ''|*[!0-9]*) ;;
   *) export CMAKE_BUILD_PARALLEL_LEVEL=$NUMJOBS ;;
 esac
+# Use GCC for the host bootstrap.  Older GCC versions do not understand
+# Clang's -Oz optimization flag, which may be supplied by the build
+# environment, so translate it to GCC's supported size optimization.
+export CC=${CC:-gcc}
+export CXX=${CXX:-g++}
+export CFLAGS="${CFLAGS//-Oz/-Os}"
+export CXXFLAGS="${CXXFLAGS//-Oz/-Os}"
+
+# Zig's CMake file uses Clang's -Oz for the C bootstrap stages.  GCC 11
+# supports -Os, but treats -Oz as an invalid -O argument.
+sed -i 's/\(-std=c99\) -Oz /\1 -Os /g' zig/CMakeLists.txt
+
 ./build $TARGET $MCPU
 
 install -Dm 755 out/zig-$TARGET-$MCPU/zig $PKG/usr/bin/zig
