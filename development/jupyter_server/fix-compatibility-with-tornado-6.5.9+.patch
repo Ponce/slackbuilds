@@ -1,0 +1,135 @@
+--- a/jupyter_server/base/handlers.py
++++ b/jupyter_server/base/handlers.py
+@@ -992,6 +992,8 @@
+     # cache search results, don't search for files more than once
+     _static_paths: dict[str, str] = {}
+     root: tuple[str]  # type:ignore[assignment]
++    # default on the class, so a subclass with its own initialize() still has it
++    follow_dir_symlinks: bool = False
+ 
+     def set_headers(self) -> None:
+         """Set the headers."""
+@@ -1009,14 +1011,23 @@
+         ):
+             self.set_header("Cache-Control", "no-cache")
+ 
+-    def initialize(
++    # tornado 6.5.9 took argument 3 of StaticFileHandler.initialize for
++    # allowed_symlink_directory; this handler has had no_cache_paths there since the
++    # notebook days. Harmless in practice: tornado binds these by name from the route
++    # kwargs (self.initialize(**kwargs)), so neither is ever passed positionally, and
++    # validate_absolute_path below sets allowed_symlink_directory itself, per request,
++    # to the root that matched.
++    def initialize(  # type: ignore[override]
+         self,
+         path: str | list[str],
+         default_filename: str | None = None,
+         no_cache_paths: list[str] | None = None,
++        *,
++        follow_dir_symlinks: bool = False,
+     ) -> None:
+         """Initialize the file find handler."""
+         self.no_cache_paths = no_cache_paths or []
++        self.follow_dir_symlinks = follow_dir_symlinks
+ 
+         if isinstance(path, str):
+             path = [path]
+@@ -1066,8 +1077,29 @@
+             if (absolute_path + os.sep).startswith(root):
+                 break
+ 
++        # tornado >= 6.5.9 checks symlink targets against this attribute, which its
++        # own initialize() sets. The search path means the root that matched is only
++        # known here. Older tornado never reads it.
++        self.allowed_symlink_directory = self._symlink_directory(root, absolute_path)
++
+         return super().validate_absolute_path(root, absolute_path)
+ 
++    def _symlink_directory(self, root: str, absolute_path: str) -> str:
++        """Directory that symlink targets are validated against.
++        The root the file was found under, unless ``follow_dir_symlinks`` is set and
++        a directory below it is a link, in which case that link's target is used and
++        anything below stays confined to it. The file name is never considered, so a
++        linked file cannot widen the check.
++        """
++        if not self.follow_dir_symlinks:
++            return root
++        current = root.rstrip(os.sep)
++        for part in absolute_path[len(root) :].split(os.sep)[:-1]:
++            current = os.path.join(current, part)
++            if os.path.islink(current):
++                return os.path.realpath(current) + os.sep
++        return root
++
+ 
+ class APIVersionHandler(APIHandler):
+     """An API handler for the server version."""
+--- a/jupyter_server/kernelspecs/handlers.py
++++ b/jupyter_server/kernelspecs/handlers.py
+@@ -51,6 +51,9 @@
+         try:
+             kspec = await ensure_async(ksm.get_kernel_spec(kernel_name))
+             self.root = kspec.resource_dir
++            # initialize() ran with an empty path, so tornado >= 6.5.9 would check
++            # symlink targets against the working directory. Older tornado ignores it.
++            self.allowed_symlink_directory = self.root
+         except KeyError as e:
+             raise web.HTTPError(404, "Kernel spec %s not found" % kernel_name) from e
+         self.log.debug("Serving kernel resource from: %s", self.root)
+--- a/tests/base/test_handlers.py
++++ b/tests/base/test_handlers.py
+@@ -5,6 +5,7 @@
+ from unittest.mock import MagicMock, patch
+ 
+ import pytest
++import tornado
+ from tornado.httpclient import HTTPClientError
+ from tornado.httpserver import HTTPRequest
+ from tornado.httputil import HTTPHeaders
+@@ -391,3 +392,46 @@
+     handler.settings["static_immutable_cache"] = [str(tmpdir)]
+     await handler.get("foo")
+     assert handler._headers["Cache-Control"] == "public, max-age=31536000, immutable"
++
++
++@pytest.mark.skipif(os.name == "nt", reason="symlinks need extra permissions on Windows")
++@pytest.mark.skipif(
++    tornado.version_info < (6, 5, 9),
++    reason="tornado only validates symlink targets from 6.5.9",
++)
++async def test_static_handler_follow_dir_symlinks(jp_serverapp, tmp_path):
++    """A linked directory is served only when the handler opts in."""
++
++    async def async_magic():
++        pass
++
++    MagicMock.__await__ = lambda x: async_magic().__await__()
++
++    root = tmp_path / "root"
++    outside = tmp_path / "outside"
++    root.mkdir()
++    (outside / "ext").mkdir(parents=True)
++    (outside / "ext" / "index.js").write_text("hello")
++    (outside / "secret.txt").write_text("secret")
++    (root / "ext").symlink_to(outside / "ext")
++    (outside / "ext" / "escape.txt").symlink_to(outside / "secret.txt")
++
++    app: ServerApp = jp_serverapp
++
++    def handler(**kwargs):
++        request = HTTPRequest("GET", "/")
++        request.connection = MagicMock()
++        found = FileFindHandler(app.web_app, request, path=str(root), **kwargs)
++        found._transforms = []
++        return found
++
++    with pytest.raises(HTTPError) as excinfo:
++        await handler().get("ext/index.js")
++    assert excinfo.value.status_code == 403
++
++    await handler(follow_dir_symlinks=True).get("ext/index.js")
++
++    # a link below the linked directory still cannot leave it
++    with pytest.raises(HTTPError) as excinfo:
++        await handler(follow_dir_symlinks=True).get("ext/escape.txt")
++    assert excinfo.value.status_code == 403
