@@ -2,7 +2,7 @@
 
 # Slackware build script for virtualbox
 
-# Copyright 2008-2024 Heinz Wiesinger, Amsterdam, The Netherlands
+# Copyright 2008-2026 Heinz Wiesinger, Amsterdam, The Netherlands
 # Copyright 2008 Mauro Giachero <mauro.giachero@gmail.com>
 # All rights reserved.
 #
@@ -27,7 +27,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=virtualbox
 SRCNAM=VirtualBox
-VERSION=${VERSION:-6.1.50}
+VERSION=${VERSION:-7.2.4}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -35,7 +35,7 @@ PKGTYPE=${PKGTYPE:-tgz}
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
     i?86) ARCH=i586 ;;
-    arm*) ARCH=arm ;;
+    arm*) readelf /usr/bin/file -A | egrep -q "Tag_CPU.*[4,5]" && ARCH=arm || ARCH=armv7hl ;;
        *) ARCH=$( uname -m ) ;;
   esac
 fi
@@ -100,6 +100,14 @@ elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
   BUILDDIR="amd64"
+elif [ "$ARCH" = "armv7hl" ]; then
+  SLKCFLAGS="-O3 -march=armv7-a -mfpu=vfpv3-d16"
+  LIBDIRSUFFIX=""
+  BUILDDIR=""
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+  BUILDDIR=""
 fi
 
 set -e
@@ -120,21 +128,21 @@ find -L . \
 GROUP="vboxusers"
 MODE="755"
 
-# Fix for curl >= 8.16.0
-patch -p1 < $CWD/new-curl.patch
-
 # We don't want an init-script building kernel modules.
 # Use virtualbox-kernel.SlackBuild for this.
 patch -d src/VBox/Installer/linux -i $CWD/vboxdrv.sh-setup.diff
 
-# Fix wrong path to rdesktop-vrdp-keymaps
-patch -p1 -i $CWD/006-rdesktop-vrdp-keymap-path.patch
+# Fix curl error
+patch -p1 < $CWD/021-curl_proxytype-to-long.patch
 
 # Skip python2 detection and cheat about python-3.10 support
-sed -i 's|python2.7 python2.6 |python3.10 |' ./configure
+sed -i 's|python2.7 python2.6 ||' ./configure
 
 # Use our CFLAGS
 sed -i "s|CXX_FLAGS=\"\"|CXX_FLAGS=\"$SLKCFLAGS -std=c++11\"|" ./configure
+
+# Missing file
+sed -i '/security-of-remote-vms.dita/d' doc/manual/en_US/dita/UserManual.ditamap
 
 ./configure \
   --disable-kmods \
@@ -150,7 +158,7 @@ sed -i "s|CXX_FLAGS=\"\"|CXX_FLAGS=\"$SLKCFLAGS -std=c++11\"|" ./configure
 
 cp $CWD/LocalConfig.kmk .
 sed -i "s|LIBDIR|lib$LIBDIRSUFFIX|" ./LocalConfig.kmk
-sed -i "s|CXXFLAGS|$SLKCFLAGS -std=c++11|" ./LocalConfig.kmk
+sed -i "s|CXXFLAGS|$SLKCFLAGS -std=c++11 -fpermissive|" ./LocalConfig.kmk
 
 kmk -j ${JOBS} LOCALCFG=./LocalConfig.kmk
 
@@ -197,7 +205,7 @@ cd out/linux.$BUILDDIR/release/bin/
   mv virtualbox.xml $PKG/usr/share/mime/packages
 
   export VBOX_INSTALL_PATH=/usr/lib$LIBDIRSUFFIX/virtualbox
-  cd sdk/installer
+  cd sdk/installer/python
     python3 ./vboxapisetup.py install --prefix "/usr" --root $PKG
   cd -
   rm -rf sdk/installer
@@ -205,8 +213,7 @@ cd out/linux.$BUILDDIR/release/bin/
   mv sdk $PKG/usr/share/virtualbox/
   install -m $MODE -g $GROUP VBoxSysInfo.sh $PKG/usr/share/virtualbox/
   install -m $MODE -g $GROUP VBoxCreateUSBNode.sh $PKG/usr/share/virtualbox/
-  install -m $MODE -g $GROUP VBoxTunctl $PKG/usr/bin/
-  rm -f VBoxSysInfo.sh VBoxCreateUSBNode.sh VBoxTunctl
+  rm -f VBoxSysInfo.sh VBoxCreateUSBNode.sh
   mv * $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/
   chown -R root:$GROUP $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/
   chmod -R $MODE $PKG/usr/lib$LIBDIRSUFFIX/virtualbox/

@@ -1,0 +1,57 @@
+--- a/nm-openconnect-service.name.in
++++ b/nm-openconnect-service.name.in
+@@ -3,6 +3,7 @@
+ service=org.freedesktop.NetworkManager.openconnect
+ program=@LIBEXECDIR@/nm-openconnect-service
+ supports-multiple-connections=true
++supports-safe-private-file-access=true
+ 
+ [libnm]
+ plugin=@PLUGINDIR@/libnm-vpn-plugin-openconnect.so
+--- a/src/nm-openconnect-service.c
++++ b/src/nm-openconnect-service.c
+@@ -394,7 +394,7 @@
+ 	GSource *openconnect_watch;
+ 	gint stdin_fd;
+ 	char csd_user_arg[60];
+-	const char *props_vpn_gw, *props_cookie, *props_cacert, *props_mtu, *props_gwcert, *props_proxy;
++	const char *props_vpn_gw, *props_cookie, *props_mtu, *props_gwcert, *props_proxy;
+ 	const char *props_csd_enable, *props_csd_wrapper;
+ 	const char *protocol;
+ 
+@@ -437,8 +437,15 @@
+ 		return -1;
+ 	}
+ 	props_gwcert = nm_setting_vpn_get_secret (s_vpn, NM_OPENCONNECT_KEY_GWCERT);
++	if (!props_gwcert || !strlen (props_gwcert)) {
++		g_set_error (error,
++		             NM_VPN_PLUGIN_ERROR,
++		             NM_VPN_PLUGIN_ERROR_LAUNCH_FAILED,
++		             "%s",
++		             _("No VPN gateway certificate provided."));
++		return -1;
++	}
+ 
+-	props_cacert = nm_setting_vpn_get_data_item (s_vpn, NM_OPENCONNECT_KEY_CACERT);
+ 	props_mtu = nm_setting_vpn_get_data_item (s_vpn, NM_OPENCONNECT_KEY_MTU);
+ 
+ 	props_proxy = nm_setting_vpn_get_data_item (s_vpn, NM_OPENCONNECT_KEY_PROXY);
+@@ -457,13 +464,11 @@
+ 		}
+ 	}
+ 
+-	if (props_gwcert && strlen(props_gwcert)) {
+-		g_ptr_array_add (openconnect_argv, (gpointer) "--servercert");
+-		g_ptr_array_add (openconnect_argv, (gpointer) props_gwcert);
+-	} else if (props_cacert && strlen(props_cacert)) {
+-		g_ptr_array_add (openconnect_argv, (gpointer) "--cafile");
+-		g_ptr_array_add (openconnect_argv, (gpointer) props_cacert);
+-	}
++	/* The authentication dialog verifies certificates in the user's context
++	 * and returns the connected peer certificate hash. Never pass the
++	 * user-supplied CA path to this privileged service. */
++	g_ptr_array_add (openconnect_argv, (gpointer) "--servercert");
++	g_ptr_array_add (openconnect_argv, (gpointer) props_gwcert);
+ 
+ 	if (props_mtu && strlen(props_mtu)) {
+ 		g_ptr_array_add (openconnect_argv, (gpointer) "--mtu");
