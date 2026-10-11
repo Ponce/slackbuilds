@@ -24,6 +24,16 @@
 
 # Now maintained by B. Watson <urchlay@slackware.uk>
 
+# Note: on version update, run: find_conflicts.sh > conflicts.pages
+
+# 20261010 bkw: update for v3.70_8 from Rosa 13, which seems to be the
+# newest version. Since it's a noarch package, I don't feel bad about
+# repacking it. The RPM contains man pages from more sources than just
+# the ones at free.fr. The man pages are .xz, not .gz, but Slackware's
+# man-db supports .xz man pages already. I had to modify sbopkglint
+# to allow .xz man pages, so make sure you use the latest version of
+# sbo-maintainer-tools to lint this!
+
 # 20260830 bkw: BUILD=5, fix conflicts with Slackware's procps-ng.
 # 20230109 bkw: BUILD=4
 # - get rid of empty /usr/doc/man-pages-fr/ dir.
@@ -42,8 +52,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=man-pages-fr
-VERSION=${VERSION:-3.03.0}
-BUILD=${BUILD:-5}
+VERSION=${VERSION:-3.70_8}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -64,70 +74,35 @@ XTRAVER=${XTRAVER:-0.8.1}
 
 set -e
 
-fix_perms() {
-  chown -R root:root .
-  find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-          \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
-}
+RPMVER=${VERSION/_/-}
+RPM=$CWD/$PRGNAM-$RPMVER-rosa13.noarch.rpm
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
 
 rm -rf $PKG
-mkdir -p $TMP $PKG $OUTPUT
+mkdir -p $TMP $PKG $OUTPUT $PKGDOC
+cd $PKG
 
-# First, the "extras".
-# Cribbed from man-pages-extras-fr.SlackBuild
-cd $TMP
-rm -rf $XTRANAM-$XTRAVER
-tar xvf $CWD/$XTRANAM-$XTRAVER.tar.bz2
-cd $XTRANAM-$XTRAVER
-fix_perms
-make DESTDIR=$PKG MANDIR=/usr/man/fr install
+# The .rpm file already has correct perms and owners root:root.
+# It ships an etc/cron.weekly script and empty cache dirs in
+# var/cache, which we don't need. As usual, the docs are in the
+# wrong place for Slackware.
+rpm2cpio $RPM | cpio -i -m -d
 
-if [ "${UTF8:-yes}" != "yes" ]; then
-  ENC="--encoding=latin1"
-  echo "Converting to latin-1..."
-  cd $PKG/usr/man/fr
-  for MANPAGE in man*/* ; do
-    iconv -c -t LATIN1 -f UTF8 < $MANPAGE > tmp
-    mv tmp $MANPAGE
-  done
-  cd -
-fi
+mv usr/share/doc/$PRGNAM/* $PKGDOC
+mv usr/share/man usr/man
+rm -rf usr/share etc var usr/man/fr/{cat*,index.db}
 
-echo "Compressing..."
-find $PKG/usr/man/fr -type f -print0 | xargs -0 gzip -9
+# Get rid of man pages that conflict with Slackware's... except for a
+# few where the Slackware one isn't fully translated into French, and
+# still has sections in English.
+# See the find_conflicts.sh script for details.
+( cd $PKG/usr/man/fr ; rm -f $( cat $CWD/conflicts.pages ) )
 
-# 20260830 bkw: These are included in Slackware:
-rm $PKG/usr/man/fr/man1/{free,pgrep,pmap,pwdx,tload,uptime,w,chsh}.1.gz
-rm $PKG/usr/man/fr/man5/sysctl.conf.5.gz
-rm $PKG/usr/man/fr/man8/{sysctl,vmstat}.8.gz
-
-mkdir -p $PKG/usr/doc/$XTRANAM-$XTRAVER
-cp -a AFAIRE Lisez_moi $PKG/usr/doc/$XTRANAM-$XTRAVER
-
-# Now, the main package.
-cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
-cd $PRGNAM-$VERSION
-fix_perms
-
-./configure \
-  --prefix=$PKG/usr \
-  $ENC \
-  --gzip
-
-make
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-mv $PKG/usr/doc/$PRGNAM/* $PKG/usr/doc/$XTRANAM-$XTRAVER $PKG/usr/doc/$PRGNAM-$VERSION
-rmdir $PKG/usr/doc/$PRGNAM
-
-# These two are included in Slackware.
-rm $PKG/usr/man/fr/man5/passwd.5.gz
-rm $PKG/usr/man/fr/man3/getspnam.3.gz
-
-# 20230109 bkw: These aren't even in French.
-rm -f $PKG/usr/man/fr/man8/ld-linux.*
+# Slackware's got English ld-linux and ld-linux.so pages, which just
+# source the ld.so one. Do the same here.
+for i in ld-linux ld-linux.so; do
+  ln -s ld.so.8.xz $PKG/usr/man/fr/man8/$i.8.xz
+done
 
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
