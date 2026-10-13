@@ -1,0 +1,159 @@
+#!/bin/bash
+
+# Slackware build script for llama.cpp
+
+# Copyright 2026, Lockywolf
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+cd $(dirname $0) ; CWD=$(pwd)
+
+PRGNAM=llama.cpp
+VERSION=${VERSION:-0.6.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+PKGTYPE=${PKGTYPE:-tgz}
+
+OPENSSL_VERSION=4.0.3
+
+if [ -z "$ARCH" ]; then
+  case "$( uname -m )" in
+    i?86) ARCH=i586 ;;
+    arm*) ARCH=arm ;;
+       *) ARCH=$( uname -m ) ;;
+  esac
+fi
+
+# If the variable PRINT_PACKAGE_NAME is set, then this script will report what
+# the name of the created package would be, and then exit. This information
+# could be useful to other scripts.
+if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
+  echo "$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
+  exit 0
+fi
+
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$ARCH" = "i586" -o "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=$ARCH -mtune=i686"
+  LIBDIRSUFFIX=""
+elif [ "$ARCH" = "x86_64" -o "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
+  LIBDIRSUFFIX="64"
+else
+  SLKCFLAGS="-O2"
+  LIBDIRSUFFIX=""
+fi
+# Since we're going to override the release flags below, we need this:
+SLKCFLAGS+=" -DNDEBUG"
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+
+(
+rm -rf openssl-$OPENSSL_VERSION
+tar xvf $CWD/openssl-$OPENSSL_VERSION.tar.gz --no-same-owner
+cd openssl-$OPENSSL_VERSION
+find . ! -type l    -a \( \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
+
+CC='ccache gcc' LDFLAGS=-static CFLAGS='-static -fPIC' ./Configure linux-x86_64
+make
+)
+
+source /etc/profile.d/cuda-13.4.sh
+
+rm -rf $PRGNAM-$VERSION
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz --no-same-owner
+cd $PRGNAM-$VERSION
+
+find . ! -type l    -a \( \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
+
+
+
+
+sed -i 's/find_package(OpenSSL)/find_package(OpenSSL REQUIRED)/g' vendor/cpp-httplib/CMakeLists.txt
+
+SSL_DIR=$(readlink -f ../openssl-4.0.3)
+
+#tput reset
+
+mkdir -p build
+cd build
+set -x
+  LD_LIBRARY_PATH="/opt/cuda-13.2/targets/x86_64-linux/lib/:$LD_LIBRARY_PATH" \
+  cmake \
+    -DCMAKE_C_FLAGS_RELEASE="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS_RELEASE="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=lib$LIBDIRSUFFIX \
+    -DCMAKE_INSTALL_MANDIR=man \
+    -DCMAKE_INSTALL_DOCDIR=doc/$PRGNAM-$VERSION \
+    -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+    -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+    -DLLAMA_OPENSSL=ON \
+    -DGGML_BLAS=ON \
+    -DDGGML_BLAS_VENDOR=OpenBLAS \
+    -DGGML_BACKEND_DL=ON \
+    -DGGML_NATIVE=OFF \
+    -DGGML_CUDA=ON \
+    -DGGML_CUDA_FORCE_CUBLAS=ON \
+    -DGGML_CUDA_ENABLE_UNIFIED_MEMORY=1 \
+    -DLLAMA_BUILD_TESTS=OFF \
+    -DOpenSSL_DIR="$SSL_DIR" \
+    -DCMAKE_PREFIX_PATH="$SSL_DIR" \
+    -DLIBRARY_PATH="/opt/cuda-13.2/targets/x86_64-linux/lib" \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make VERBOSE=1
+  make install/strip DESTDIR=$PKG
+cd ..
+
+#    -DGGML_VULKAN=ON \
+#    -DGGML_OPENCL=ON \
+
+
+rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
+
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a \
+  README.md docs \
+  $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+chmod 644 $PKG/usr/doc/llama.cpp-0.6.0/docs/backend/CANN.md
+chmod 644 $PKG/usr/doc/llama.cpp-0.6.0/docs/development/llama-star/idea-arch.key
+
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
