@@ -31,7 +31,7 @@
 
 
 PRGNAM=cargo-c
-VERSION=0.10.24
+VERSION=0.10.26
 BUILD=1
 sys_arch=${sys_arch:-$(uname -m)}
 CWD=$(pwd)
