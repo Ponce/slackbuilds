@@ -4,7 +4,7 @@
 
 # Copyright 2011 David Spencer, Baildon, West Yorkshire, U.K.
 # Copyright 2013-2021 Benjamin Trigona-Harany
-# Copyright 2023-2025 Giancarlo Dessi, Cagliari, IT
+# Copyright 2023-2026 Giancarlo Dessi, Cagliari, IT
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -27,7 +27,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=qgis
-VERSION=${VERSION:-3.44.1}
+VERSION=${VERSION:-3.44.15}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -65,29 +65,34 @@ else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
+SLKCFLAGS+=" -DNDEBUG"
 
 set -e
 
-# We have to disable WITH_QTWEBKIT in current
-# because it is not more available
-if [ -d "/usr/include/qt5/QtWebKit" ]; then
-   QTWEBKIT=""
-else 
-   QTWEBKIT="-DWITH_QTWEBKIT=OFF "
+if [ $(/usr/bin/cmake --version |head -1 |cut -f3 -d' ') == "3.21.4" ]; then
+    echo "export PATH for cmake-opt"
+    export PATH="/opt/cmake-opt/bin/:$PATH"
+else
+    echo "******************** WARNING ********************"
+    echo "*                                               *"
+    echo "*       This slackbuild works only on           *"
+    echo "*      Slackware 15.0 Stable and cannot         *"
+    echo "* be used on -current because the build fails   *"
+    echo "*         The script will be stopped.           *"
+    echo "*                                               *"
+    echo "*************************************************"
+    exit 1;
 fi
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
+tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2 --no-same-owner
 cd $PRGNAM-$VERSION
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find . ! -type l    -a \( \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
 
 if pkg-config --exists OpenCL; then
   OCL="-DUSE_OPENCL=OFF " ; [ "${OPENCL:-no}" = "yes" ] && OCL="-DUSE_OPENCL=ON "
@@ -113,10 +118,6 @@ else
   WITHGRASS=""
 fi
 
-if [ $(cmake --version |head -1 |cut -f3 -d' ') == "3.21.4" ]; then
-    echo "export PATH for cmake-opt"
-    export PATH="/opt/cmake-opt/bin/:$PATH"
-fi
 
 if [ $(ccache --version |head -1 |cut -f3 -d' ') == "4.5.1" ]; then
     ccache --set-config sloppiness=pch_defines,time_macros
@@ -126,7 +127,7 @@ sed -i '43 i IF (NOT PROJ_INCLUDE_DIR)\nFIND_PATH(PROJ_INCLUDE_DIR proj.h\n"$ENV
 
 mkdir -p build
 cd build
-  cmake .. \
+  /opt/cmake-opt/bin/cmake .. \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS -pthread" \
     -DCMAKE_BUILD_TYPE="Release" \
@@ -146,10 +147,10 @@ cd build
     $WITHPDAL \
     $WITHDRACO \
     $WITHGRASS \
-    $QTWEBKIT
+    ..
 
-  make
-  make install DESTDIR=$PKG
+  make VERBOSE=1
+  make install/strip DESTDIR=$PKG
 cd -
 
 find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
@@ -161,17 +162,18 @@ for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; r
 mkdir -p $PKG/usr/share/mime/packages
 cp debian/qgis.xml $PKG/usr/share/mime/packages
 
-mkdir -p $PKG/usr/doc
-mv $PKG/usr/share/$PRGNAM/doc $PKG/usr/doc/$PRGNAM-$VERSION
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+mv $PKG/usr/share/$PRGNAM/doc $PKGDOC
 rm -f $PKG/usr/doc/$PRGNAM-$VERSION/INSTALL.md
 cp -a \
   COPYING ChangeLog Exception_to_GPL_for_Qt.txt NEWS.md \
-  $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+  $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-cat $CWD/doinst.sh  > $PKG/install/doinst.sh
+cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
