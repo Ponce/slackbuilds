@@ -23,6 +23,12 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20261017 bkw:
+# - update for v4.4.0.
+# - upstream moved to github.
+# - upstream switched to cmake.
+# - install .nl and .ru man pages.
+
 # 20260806 bkw:
 # - take over maintenance.
 # - use v1.4.4. this was originally for v2.4, which has vanished from
@@ -31,7 +37,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=httping
-VERSION=${VERSION:-1.4.4}
+SRCNAM=HTTPing
+VERSION=${VERSION:-4.4.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -53,25 +60,23 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-elif [ "$ARCH" = "x86_64" ]; then
+if [ "$ARCH" = "i586" -o "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=$ARCH -mtune=i686"
+elif [ "$ARCH" = "x86_64" -o "$ARCH" = "aarch64" ]; then
   SLKCFLAGS="-O2 -fPIC"
 else
   SLKCFLAGS="-O2"
 fi
+SLKCFLAGS+=" -DNDEBUG"
 
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar vxzf $CWD/${PRGNAM}-$VERSION.tgz
-cd $PRGNAM-$VERSION
-chown -R root:root .
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz --no-same-owner
+cd $SRCNAM-$VERSION
 find . ! -type l    -a \( \
   \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
   \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
@@ -79,13 +84,41 @@ find . ! -type l    -a \( \
 DOC=/usr/doc/$PRGNAM-$VERSION
 PKGDOC=$PKG$DOC
 
-make install \
-  OFLAGS="$SLKCFLAGS" \
-  MANDIR=/usr/man \
-  DOCDIR=$DOC \
-  DESTDIR=$PKG
+# 20261017 bkw: upstream switched to cmake. N.B. nonstandard use
+# of DCMAKE_INSTALL_MANDIR: it normally is the path to the "man/"
+# dir, not "man/man1" like it is here. Also, upstream unconditionally
+# sets CMAKE_BUILD_TYPE to Debug. The -D_GNU_SOURCE is to pull in
+# a prototype for strcasestr(), to kill some warnings... but it
+# causes new warnings (less scary ones: "_GNU_SOURCE" redefined).
+sed -i '/CMAKE_BUILD_TYPE/s,Debug,Release,' CMakeLists.txt
 
+# 20261017 bkw:
+# USE_SSL=ON because almost every web server requires it.
+# USE_TUI=ON to enable the -K option.
+# USE_GETTEXT=ON to enable 18n (for what it's worth).
+mkdir -p build
+cd build
+  cmake \
+    -DUSE_TUI=ON \
+    -DUSE_SSL=ON \
+    -DUSE_GETTEXT=ON \
+    -DCMAKE_C_FLAGS_RELEASE="$SLKCFLAGS -D_GNU_SOURCE" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=lib$LIBDIRSUFFIX \
+    -DCMAKE_INSTALL_MANDIR=man/man1 \
+    -DCMAKE_INSTALL_DOCDIR=doc/$PRGNAM-$VERSION \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make VERBOSE=1
+  make install/strip DESTDIR=$PKG
+cd ..
 gzip -9 $PKG/usr/man/man*/*
+
+# 20261017 bkw:
+# Dutch and Russian man pages aren't installed by 'make install'.
+for i in nl ru; do
+  mkdir -p $PKG/usr/man/$i/man1
+  gzip -9c < $PRGNAM-$i.1 > $PKG/usr/man/$i/man1/$PRGNAM.1.gz
+done
 
 cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
