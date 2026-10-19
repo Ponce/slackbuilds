@@ -6,6 +6,7 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20261018 bkw: update for v0.3.0.
 # 20240122 bkw: switch to roblillack's fork, v0.2.6+20220428_38b38a6.
 # Get rid of old patches (no longer needed), and add a new patch to
 # give the window a working close button.
@@ -17,7 +18,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=fsviewer
-VERSION=${VERSION:-0.2.6+20220428_38b38a6}
+VERSION=${VERSION:-0.3.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -39,19 +40,17 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+if [ "$ARCH" = "i586" -o "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=$ARCH -mtune=i686"
   LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
+elif [ "$ARCH" = "x86_64" -o "$ARCH" = "aarch64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
+SLKCFLAGS+=" -DNDEBUG"
 
 set -e
 
@@ -59,45 +58,46 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz --no-same-owner
 cd $PRGNAM-$VERSION
-chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
+find . ! -type l    -a \( \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
 
 # 20240123 bkw: add a close button to the top-level window.
 patch -p1 < $CWD/close_button.diff
+
+# 20261018 bkw: /usr/GNUstep is hardcoded and there's no cmake option
+# to change it. However, Slackware's windowmaker uses /usr/lib(64?)/GNUstep.
+sed -i "s,/GNUstep,/lib$LIBDIRSUFFIX/GNUstep,g" CMakeLists.txt
+
+# 20261018 bkw: 0.3.0 uses BSD style limited string operations. I tried
+# building with libbsd, but it failed, and this works fine.
+SLKCFLAGS+=" -Dstrlcpy=strncpy -Dstrlcat=strncat"
 
 # 20240122 bkw: install to /usr/lib(64), then mv the bin dir.
 mkdir -p build
 cd build
   cmake \
-    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_INSTALL_PREFIX=/usr/lib$LIBDIRSUFFIX \
+    -DCMAKE_C_FLAGS_RELEASE="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS_RELEASE="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
     -DLIB_SUFFIX=${LIBDIRSUFFIX} \
     -DMAN_INSTALL_DIR=/usr/man \
     -DCMAKE_BUILD_TYPE=Release ..
-  make
+  make VERBOSE=1
   make install/strip DESTDIR=$PKG
 cd ..
 
-mv $PKG/usr/lib*/bin $PKG/usr/bin
+# 20261018 bkw: diddling CMakeLists.txt above didn't cause it to intall
+# the icons to the right place.
+mkdir -p $PKG/usr/lib$LIBDIRSUFFIX
+mv $PKG/usr/GNUstep $PKG/usr/lib$LIBDIRSUFFIX
 
 # 20240123 bkw: symlink to the binary, same as the package name.
 ln -s FSViewer $PKG/usr/bin/$PRGNAM
 
-# 20240123 bkw: cmake doesn't build this, it was in the old package,
-# fortunately it's easy enough to include in the new one. I have no
-# idea what it's good for...
-sed -i '/config\.h/d' defs/chdef.c
-make -C defs chdef LDFLAGS="-lWINGs -lWUtil"
-install -s -m0755 defs/chdef $PKG/usr/bin
-
-mkdir -p $PKG/usr/man/man1
-for i in man/*.1x; do
-  gzip -9 < $i > $PKG/usr/man/man1/$( basename $i ).gz
-done
+gzip -9 $PKG/usr/man/man*/*
 
 # .desktop file comes from the Polish Linux Distro, and has been modified
 # to add the icon and to pass desktop-file-validate.
@@ -112,7 +112,7 @@ ln -s ../../lib$LIBDIRSUFFIX/GNUstep/Apps/FSViewer.app/xpm/FSViewer2.xpm \
 
 PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
 mkdir -p $PKGDOC
-cp -a AUTHORS COPYING ChangeLog NEWS README* docs/* $PKGDOC
+cp -a AUTHORS COPYING ChangeLog README* docs/* $PKGDOC
 cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
