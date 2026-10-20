@@ -6,12 +6,13 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20261020 bkw: switch to a maintained upstream, update for v3.0.
 # 20170302 bkw: use long-format githhub URL
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=fsv
-VERSION=${VERSION:-0.9_1}
+VERSION=${VERSION:-3.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -33,13 +34,10 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+if [ "$ARCH" = "i586" -o "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=$ARCH -mtune=i686"
   LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
+elif [ "$ARCH" = "x86_64" -o "$ARCH" = "aarch64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
@@ -55,48 +53,41 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$PRGNAM-$SRCVER
-tar xvf $CWD/$PRGNAM-$PRGNAM-$SRCVER.tar.gz
+tar xvf $CWD/$PRGNAM-$PRGNAM-$SRCVER.tar.gz --no-same-owner
 cd $PRGNAM-$PRGNAM-$SRCVER
-chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
-
-# dirty hack: avoid segfaults on exit. This works on Linux because the
-# kernel cleans up any allocated memory at process exit, but it will
-# anger your CS professors. Also, the exit status will be garbage,
-# not the usual 0 for success (doubt anyone will ever care).
-sed -i 's,gtk_main_quit,exit,' src/window.c
-
-# the Help menu item tries to launch netscape, which was the browser
-# of choice in the 90s when fsv was new. These days, it makes more
-# sense to do this:
-sed -i \
-  -e 's/netscape -nor.* > /xdg-open %s > /' \
-  -e 's/netscape -no-.* > /firefox %s > /' \
-  src/dialog.c
-
-# thanks AUR!
-sed -i 's/@DATADIRNAME@/share/' po/Makefile.in.in
-./autogen.sh
+find . ! -type l    -a \( \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
+meson setup \
+  --buildtype=release \
+  --infodir=/usr/info \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
   --localstatedir=/var \
   --mandir=/usr/man \
-  --with-doc-dir=/usr/doc/$PRGNAM-$VERSION/html \
-  --build=$ARCH-slackware-linux
+  --prefix=/usr \
+  --sysconfdir=/etc \
+  -Dstrip=true \
+  build/
+"${NINJA:=ninja}" -vC build/
 
-make
-make install-strip DESTDIR=$PKG
+# 20261020 bkw: never seen this before, but "ninja install" doesn't
+# do anything. That's OK, it's a single file.
+install -s -m0755 -D build/src/$PRGNAM $PKG/usr/bin/$PRGNAM
 
-# use the 'eagle eye' icon as the app icon
+# 20261020 bkw: new-style icons, made from doc/beyeview.png
+HICOLOR=$PKG/usr/share/icons/hicolor
+for i in $CWD/icons/*.png; do
+  px="$( basename $i .png )"
+  sz=${px}x${px}
+  dir=$HICOLOR/$sz/apps
+  install -D -oroot -groot -m0644 $i $dir/$PRGNAM.png
+done
+
 mkdir -p $PKG/usr/share/pixmaps
-ln -s ../../doc/$PRGNAM-$VERSION/html/beyeview.png \
-  $PKG/usr/share/pixmaps/$PRGNAM.png
+ln -s ../icons/hicolor/48x48/apps/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
 
 # .desktop file written for this SlackBuild
 mkdir -p $PKG/usr/share/applications
@@ -106,9 +97,11 @@ cat $CWD/$PRGNAM.desktop > $PKG/usr/share/applications/$PRGNAM.desktop
 mkdir -p $PKG/usr/man/man1
 gzip -9c < $CWD/$PRGNAM.1 > $PKG/usr/man/man1/$PRGNAM.1.gz
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/html
-cp -a AUTHORS COPYING ChangeLog NOTES TODO $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC/html
+cp -a README* LICENSE* AUTHORS COPYING ChangeLog NOTES TODO $PKGDOC
+cp -a doc/*.{html,png} $PKGDOC/html
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
