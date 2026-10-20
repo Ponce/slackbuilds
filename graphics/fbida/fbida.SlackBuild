@@ -25,6 +25,12 @@
 # Modified by Luis Henrique <email removed>
 # Modified and currently maintained by B. Watson <urchlay@slackware.uk>
 
+# 20261019 bkw:
+# - update for v2.15_1
+# - new homepage, since the old one doesn't mention the new version.
+# - lots of script changes (upstream now uses meson), can't build
+#   old versions.
+
 # 20170921 bkw:
 # - update for v2.14
 # - remove old maintainers' email addresses
@@ -53,7 +59,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=fbida
-VERSION=${VERSION:-2.14}
+VERSION=${VERSION:-2.15_1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -75,90 +81,104 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-DOCS="COPYING Changes README TODO"
-
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
+if [ "$ARCH" = "i586" -o "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=$ARCH -mtune=i686"
+elif [ "$ARCH" = "x86_64" -o "$ARCH" = "aarch64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
 fi
 
 set -e
 
+TARNAM=$PRGNAM-$PRGNAM-${VERSION/_/-}
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
-rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
-cd $PRGNAM-$VERSION
-chown -R root:root .
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
+rm -rf $TARNAM
+tar xvf $CWD/$TARNAM.tar.gz --no-same-owner
+cd $TARNAM
+find . ! -type l    -a \( \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
 
-# https://gitlab.com/kraxel/fbida/-/commit/1bb8a8aa.patch
-patch -p1 < $CWD/gcc10.patch
+# 20261019 bkw: app-defaults belongs in /etc/X11/app-defaults on
+# Slackware, not /usr/lib(64)/X11/app-defaults, even though the latter
+# is a symlink to the former.
+sed -i "/^x11resdir/s,=.*,= '/etc/X11/app-defaults/'," meson.build
 
-MOTIF_OPT="HAVE_MOTIF=${MOTIF:-yes}"
-sed -i "/^CFLAGS/s,-g *-O2,$SLKCFLAGS," mk/Variables.mk
-make $MOTIF_OPT prefix=/usr verbose=1
-strip fbpdf # not stripped for some reason
-make install prefix=/usr DESTDIR=$PKG mandir=$PKG/usr/man $MOTIF_OPT
+# 20261020 bkw: fix typo and help message.
+sed -i -e 's,\<pfd\>,pdf,' -e 's,"fbpdf ,"fbipdf ,' fbpdf.c
 
-gzip -9 $PKG/usr/man/man1/*
-FR_MAN="exiftran fbgs fbi"
+MOTIF_OPT="enabled"
+[ "${MOTIF:-yes}" != "yes" ] && MOTIF_OPT="disabled"
+
+# 20261020 bkw: gif and webp weren't working in ida, which is why
+# all the stuff is force-enabled below.
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+meson setup \
+  --buildtype=release \
+  --infodir=/usr/info \
+  --libdir=/usr/lib${LIBDIRSUFFIX} \
+  --localstatedir=/var \
+  --mandir=/usr/man \
+  --prefix=/usr \
+  --sysconfdir=/etc \
+  -Dstrip=true \
+  -Dpng=enabled \
+  -Dtiff=enabled \
+  -Dgif=enabled \
+  -Dwebp=enabled \
+  -Dmotif=$MOTIF_OPT \
+  build/
+"${NINJA:=ninja}" -vC build/
+DESTDIR=$PKG $NINJA -vC build/ install
+
+PKGBIN=$PKG/usr/bin
+PKGMAN1=$PKG/usr/man/man1
+PKGMANFR1=$PKG/usr/man/fr/man1
+mkdir -p $PKGMAN1 $PKGMANFR1
+
+# 20261019 bkw: these man pages don't get installed.
+cp -a man/fbgs.1 $PKGMAN1
+[ -e $PKGBIN/ida ] || rm -f man/fr/ida.1
+cp -a man/fr/*.1 $PKGMANFR1
+
+# 20261019 bkw: and this man page is local
+cat $CWD/fbipdf.1 > $PKGMAN1/fbipdf.1
+
+gzip $PKGMAN1/*.1 $PKGMANFR1/*.1
+
+# 20261019 bkw: this gets installed with wrong permissions:
+chmod 755 $PKGBIN/fbgs
+
+# 20261019 bkw: avoid conflict with fbpdf package.
+mv $PKGBIN/fbpdf $PKGBIN/fbipdf
 
 # upstream's .desktop file doesn't validate, we ship a corrected one,
 # but only include it if motif support was built in. PNG icon was
 # converted from mallard_48.xpm in the src.
-if [ "${MOTIF:-yes}" = "yes" ]; then
-  mkdir -p $PKG/usr/share/applications $PKG/usr/share/pixmaps
-  cat $CWD/ida.desktop > $PKG/usr/share/applications/ida.desktop
-  cat $CWD/ida.png > $PKG/usr/share/pixmaps/ida.png
-  FR_MAN="$FR_MAN ida"
+if [ -e $PKGBIN/ida ]; then
+  ICONDIR=$PKG/usr/share/icons/hicolor/48x48/apps
+  APPDIR=$PKG/usr/share/applications
+  PIXDIR=$PKG/usr/share/pixmaps
+  mkdir -p $APPDIR $ICONDIR $PIXDIR
+  cat $CWD/ida.desktop > $APPDIR/ida.desktop
+  cat $CWD/ida.png > $ICONDIR/ida.png
+  ln -s ../icons/hicolor/48x48/apps/ida.png $PIXDIR/ida.png
 fi
 
-# /usr/bin/fbpdf conflicts with office/fbpdf, so rename it
-mv $PKG/usr/bin/fbpdf $PKG/usr/bin/fbipdf
-
-# French man pages. I don't see a way to get make to install these. Hope
-# they're useful, I can't actually read French. They're UTF-8, and display
-# poorly with Slackware's old man command... so I convert them to 8859-1
-# and hope for the best. They look OK with LANG set to either fr_FR
-# or fr_FR.UTF-8. They also look OK with the man command from man-db.
-# iconv chokes on the unicode ellipsis character (U+2026), the sed stuff
-# converts it back to three periods as Bemer intended!
-mkdir -p $PKG/usr/man/fr/man1
-for i in $FR_MAN; do
-  if [ -e $i.man.fr ]; then
-    M=$i.man.fr    # v2.13 and older
-  else
-    M=man/fr/$i.1  # v2.14 and up
-  fi
-  LANG=C sed 's,\xe2\x80\xa6,...,g' < $M | \
-    iconv -c -f UTF-8 -t ISO-8859-1 | \
-    gzip -9c > $PKG/usr/man/fr/man1/$i.1.gz
-done
-
-# fbpdf (fbipdf) doesn't have a man page, so I wrote one. English only,
-# sorry, I no hablo Franco.
-gzip -9c < $CWD/fbipdf.1 > $PKG/usr/man/man1/fbipdf.1.gz
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-chmod 644 $PKG/usr/doc/$PRGNAM-$VERSION/*
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a README* Changes COPYING TODO $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
+chmod 644 $PKGDOC/*
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-[ "${MOTIF:-yes}" = "yes" ] && cat $CWD/doinst.sh > $PKG/install/doinst.sh
+[ -e $PKGBIN/ida ] && cat $CWD/doinst.sh > $PKG/install/doinst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

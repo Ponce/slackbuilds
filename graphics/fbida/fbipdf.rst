@@ -1,8 +1,7 @@
 .. RST source for fbipdf(1) man page. Convert with:
 ..   rst2man.py fbipdf.rst > fbipdf.1
-.. rst2man.py comes from the SBo development/docutils package.
 
-.. |version| replace:: 2.14
+.. |version| replace:: 2.15_1
 .. |date| date::
 
 ======
@@ -49,7 +48,8 @@ OPTIONS
   Print device info and exit.
 
 **-store**
-  Write command line arguments to config file.
+  Write command line arguments to config file. *NOTE*: this option
+  doesn't seem to actually work.
 
 **-w**, **-fitwidth**
   Fit page width to screen [default: on].
@@ -69,30 +69,31 @@ OPTIONS
 **-nopageflip**
   Don't use pageflip (drm only).
 
-**-g**, **-opengl**
-  Use OpenGL (drm only).
-
-**-noopengl**
-  Don't use OpenGL (drm only).
-
 **-m**, **-mode** *<arg>*
   Use video mode *<arg>* (from /etc/fb.modes).
+
+**-libinput**
+  Use libinput (experimental; default off).
+
+**-nolibinput**
+  Don't use libinput.
 
 FILES
 =====
 
 **~/.fbpdf.rc**
-    Config file created by **-info** option.
+    Config file created by **-store** option. *NOTE*: this doesn't
+    seem to actually work.
 
 COPYRIGHT
 =========
 
-See the file /usr/doc/fbipdf-|version|/COPYING for license information.
+See the file /usr/doc/fbida-|version|/COPYING for license information.
 
 AUTHORS
 =======
 
-fbipdf was written by Gerd Knorr <kraxel@bytesex.org>.
+fbipdf was written by Gerd Knorr <gerd@kraxel.org>.
 
 This man page written for the SlackBuilds.org project
 by B. Watson, and is licensed under the WTFPL.
@@ -102,4 +103,4 @@ SEE ALSO
 
 fbi(1), ida(1), exiftran(1), fbgs(1)
 
-The fbida homepage: https://www.kraxel.org/blog/linux/fbida/
+The fbida homepage: https://gitlab.com/kraxel/fbida/
