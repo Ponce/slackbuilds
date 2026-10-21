@@ -30,7 +30,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=wps-office
-VERSION=${VERSION:-11.1.0.11733.XA}
+VERSION=${VERSION:-12.1.2.29182}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -65,8 +65,21 @@ cd $TMP
 rm -rf $PRGNAM
 mkdir -p $PRGNAM
 cd $PRGNAM
-ar -x $CWD/${PRGNAM}_${VERSION}_amd64.deb
+ar -x $CWD/${PRGNAM}.deb
 tar xvf data.tar.xz
+
+# Temporarily remove lib link
+rm opt/kingsoft/wps-office/office6/qt/lib
+
+# Remove dangling links
+rm opt/kingsoft/wps-office/office6/libbz2.so
+
+# Place fonts.conf
+(
+    cd etc/fonts/conf.d/
+    rm 40-wps-office.conf
+    cp ../conf.avail/40-wps-office.conf .
+)
 
 chown -R root:root .
 find -L . \
@@ -82,21 +95,27 @@ mkdir -p $PKG/usr
 cp -a usr/bin $PKG/usr
 
 # use our desktop files
-mkdir -p $PKG/usr/share/{applications,pixmaps}
-cp --no-preserve=mode,ownership $CWD/desktop/*.desktop $PKG/usr/share/applications
-cp -a usr/share/icons/hicolor/48x48/mimetypes/wps-office2019-* $PKG/usr/share/pixmaps
+mkdir -p $PKG/usr/share/applications
+cp --no-preserve=mode,ownership usr/share/applications/*.desktop $PKG/usr/share/applications
+cp -a usr/share/icons $PKG/usr/share/
 
-chmod 0644 $PKG/usr/share/pixmaps/wps-office2019-*
-
-find $PKG -print0 | xargs -0 file -m /etc/file/magic/elf \
-  | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : > .tmpfind.$$
-xargs strip --strip-unneeded < .tmpfind.$$ 2> /dev/null || true
-xargs chmod 755 < .tmpfind.$$ 2> /dev/null || true
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 # Thanks to NixOS (https://github.com/NixOS/nixpkgs/blob/master/pkgs/applications/office/wpsoffice/default.nix)
 # distribution is missing libkappessframework.so, so remove the following dead libraries
 rm -r $PKG/opt/kingsoft/wps-office/office6/addons/pdfbatchcompression
+
+# Remake lib link
+(
+    cd opt/kingsoft/wps-office/office6/qt
+    ln -s .. lib
+)
+
+# make elf libs executable
+while IFS= read -r elf; do
+    chmod +x $PKG/$elf
+done < $CWD/elf.txt
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
