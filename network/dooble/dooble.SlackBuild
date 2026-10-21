@@ -24,9 +24,9 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=dooble
-VERSION=${VERSION:-2026.08.21}
+VERSION=${VERSION:-2026.10.17}
 DIC_VERSION="dooble-dictionaries-0f1e715b85a47f930deb004fc44fa9e234941604"
-BUILD=${BUILD:-2}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -64,20 +64,18 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz --no-same-owner
 cd $PRGNAM-$VERSION
-tar xvf $CWD/$DIC_VERSION.tar.gz
+tar xvf $CWD/$DIC_VERSION.tar.gz --no-same-owner
 
 if [ "$ARCH" = "i586" ] || [ "$ARCH" = "i686" ]; then
   # https://dev.gnupg.org/T5871
   zcat $CWD/fix_32bit.diff.gz | patch -p1
 fi
 
-chown -R root:root .
-find . -type f \( -perm -4000 -o -perm -2000 \) -exec chmod -s {} +
-find . ! -type l -type d ! -perm 755 -exec chmod -f 755 {} +
-find . ! -type l -type f -perm /111 ! -perm 755 -exec chmod -f 755 {} +
-find . ! -type l -type f ! -perm /111 ! -perm 644 -exec chmod -f 644 {} +
+find . ! -type l    -a \( \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
 
 export DOOBLE_DICTIONARIES_DIRECTORY="$DIC_VERSION"/Dictionaries
 
@@ -98,7 +96,17 @@ for c in qmake6 /usr/lib${LIBDIRSUFFIX}/qt6/bin/qmake \
 done
 [ -n "$QMAKE" ] || { echo "No qmake with Qt WebEngine found (need qt6, or qt5+qt5-webengine)"; exit 1; }
 echo "Using qmake: $QMAKE ($("$QMAKE" -query QT_VERSION))"
-"$QMAKE" dooble.pro
+
+# GCC 16 trips on Qt6 headers with -Wsfinae-incomplete under upstream's -Werror
+EXTRA_CXXFLAGS=""
+case "$("$QMAKE" -query QT_VERSION)" in
+  6.*)
+    if echo | g++ -Wsfinae-incomplete -fsyntax-only -x c++ - 2>/dev/null; then
+      EXTRA_CXXFLAGS="-Wno-error=sfinae-incomplete"
+    fi
+    ;;
+esac
+"$QMAKE" "QMAKE_CXXFLAGS += $EXTRA_CXXFLAGS" dooble.pro
 make
 
     mkdir -p "$PKG/usr/bin"
