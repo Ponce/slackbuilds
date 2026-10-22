@@ -46,9 +46,16 @@ if [ -f /etc/"$FULLPROG".conf ]; then
         . /etc/"$FULLPROG".conf
 fi
 
+# Exit when run as non-root unless just checking the status
+if [ "$EUID" -ne 0 ] && [ "$1" != "status" ]; then
+  echo "This script must be run as root."
+  exit 1
+fi
+
 # Ensure all required variables are set in conf file
 # Edit conf file in /etc/$FULLPROG.conf for any changes
 MISSING=0
+VAR=
 for var in USERNAME DATADIR PIDFILE PORT; do
   if [ -z "${!var}" ]; then
     ((MISSING++))
@@ -66,11 +73,15 @@ get_status()
 {
   local SERVER_STATUS
   SERVER_STATUS=$(curl -o /dev/null -s -w "%{http_code}" -L --max-time 5 http://localhost:"$PORT")
-  if [ "$SERVER_STATUS" == "200" ]; then
-    return 0
-  else
-    return 1
-  fi
+  # It should return 200 on a normal system, but:
+  # - 301/302: Redirection (e.g. forced HTTPS, a custom web root like /sickchill, or bounced to /login)
+  # - 401: Built-in HTTP basic/digest authentication is turned on
+  # - 403: Forbidden (subnet whitelisting or reverse proxy rules blocking access)
+  # Any of these should mean sickchill is up and running.
+  case "$SERVER_STATUS" in
+    200|301|302|401|403) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 # Check if the program is running and pid file exists
@@ -146,8 +157,7 @@ broken()
       echo "ERROR: $FULLPROG has a stale PID file."
       echo "The PID file exists, but the process it references is not running:"
       echo "  - $PIDFILE"
-      echo "The stale PID file can be safely removed."
-      echo "Try: $0 force-start"
+      echo "Running '$0 start' will automatically remove it and launch the service."
     elif [ "$TYPE" == "pid-missing" ]; then
       echo "ERROR: $FULLPROG is running without its expected PID file."
       echo "The $FULLPROG process appears to be running, but:"
@@ -190,6 +200,13 @@ start()
 {
   local OUTPUT RETVAL ATTEMPTS STARTCMD COUNT FAILED=
 
+  # Let's not stop startup just because of a stale pid file
+  if [ "$STATUS" == "broken" ] && [ "$TYPE" == "pid-stale" ]; then
+    echo "Removing stale PID file: $PIDFILE"
+    rm -f "$PIDFILE"
+    STATUS=stopped
+  fi
+
   if [ "$STATUS" == "stopped" ]; then
 
     # Set the start command
@@ -229,6 +246,7 @@ start()
 
   # If startup failed, display error messages and exit
   if [ -n "$FAILED" ]; then
+    echo "FAILED"
     echo "Startup Failed. $FAILED"
     echo "The command used for launching it was:"
     echo "su $USERNAME -s /bin/sh -c \"$STARTCMD\""
@@ -237,22 +255,6 @@ start()
     return 1
   fi
 
-}
-
-forcestart()
-{
-  # Allow starting a server with a stale pid file
-  if [ "$STATUS" == "broken" ] && [ "$TYPE" == "pid-stale" ]; then
-    rm -f "$PIDFILE"
-    check
-    start
-  elif [ "$STATUS" == "stopped" ]; then
-    start
-  elif [ "$STATUS" == "broken" ]; then
-    broken
-  else
-    status
-  fi
 }
 
 stop()
@@ -267,10 +269,6 @@ stop()
   elif [ "$STATUS" == "broken" ] && [ "$TYPE" != "server" ]; then
     broken
   else
-    if [ "$EUID" -ne 0 ];then
-      echo "Please run as root"
-      exit 1
-    fi
 
     # If it isn't a broken server, attempt a proper shutdown before
     # going right to the force kill.
@@ -290,20 +288,42 @@ stop()
         sleep 1
       done
     fi
+
+    # Try sigterm first
+    if [ "$SHUTDOWN" != "success" ]; then
+      if [ "$SHUTDOWN" == "failed" ]; then
+        echo "Normal Shutdown Failed - Requesting safe system shutdown (SIGTERM)."
+      else
+        echo "Server is not responding - Requesting safe system shutdown (SIGTERM)."
+      fi
+      kill -15 "$PID" 2>/dev/null
+
+      # Quick 5-second wait to see if the polite request works
+      for (( COUNT=0; COUNT < 5; COUNT++ )); do
+        if ! kill -0 "$PID" 2>/dev/null; then
+          SHUTDOWN=success
+          break
+        fi
+        sleep 1
+      done
+    fi
+
     if [ "$SHUTDOWN" == "success" ]; then
       echo "Shutdown successful."
+      # Ensure the PID file is removed
+      rm -f "$PIDFILE"
     else
-      if [ "$SHUTDOWN" == "failed" ]; then
-        echo "Normal Shutdown Failed - Attempting to kill the process."
-      else
-        echo "Server is not responding - Attempting to kill the process."
-      fi
+      # If even SIGTERM fails, we resort to your original forced kill
+      echo "Safe shutdown failed - Forcing process to stop immediately (SIGKILL)."
       kill -9 "$PID"
       sleep 1
 
       if kill -0 "$PID" 2>/dev/null; then
         echo "ERROR: Failed to terminate PID $PID."
         return 1
+      else
+        # Remove the PID file so it can start normally
+        rm -f "$PIDFILE"
       fi
     fi
   fi
@@ -312,28 +332,24 @@ stop()
 case "$1" in
   start)
         check
-        start
-        ;;
-  force-start)
-        check
-        forcestart
+        start || exit 1
         ;;
   stop)
         check
-        stop
+        stop || exit 1
         ;;
   restart)
         check
-        stop
+        stop || exit 1
         sleep 1
         check
-        start
+        start || exit 1
         ;;
   status)
         check
         status
         ;;
   *)
-        echo "Usage: $0 {start|force-start|stop|restart|status}"
+        echo "Usage: $0 {start|stop|restart|status}"
         exit 1
 esac
