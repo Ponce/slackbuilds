@@ -2,12 +2,6 @@
 
 # Create source tarball from git repo, with generated version number.
 
-# This is not a generic git2tarxz script, it's specific to tnfsd.
-# Upstream doesn't use tags for version bumps, so the version number
-# is extracted from main.c. Also, the repo contains a bunch of
-# other stuff unrelated to tnfs, which we don't include in our
-# tarball.
-
 # Takes one optional argument, which is the commit or tag to create a
 # tarball of. With no arg, HEAD is used.
 
