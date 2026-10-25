@@ -24,12 +24,12 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=rpy2
-VERSION=${VERSION:-3.6.7}
-BUILD=${BUILD:-2}
+VERSION=${VERSION:-3.6.9}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 SRCREF=RELEASE
 SRCDELIM="_"
-SRCNAM=${SRCNAM:-3_6_7}
+SRCNAM=${SRCNAM:-3_6_9}
 SRCVERSION=$SRCREF$SRCDELIM$SRCNAM
 MODULE1=${MODULE1:-rinterface}
 MODULE2=${MODULE2:-robjects}
@@ -72,34 +72,31 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$SRCVERSION.tar.gz
 #cd $PRGNAM-$VERSION
 cd $PRGNAM-$SRCVERSION
+find . ! -type l    -a \( \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
 
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
-
-## make sure there is R
+# Make sure there is R
 if ! [ -x "$(command -v R)" ]; then
   echo 'Error: R is not installed.' >&2
   exit 1
 fi
 
-## make sure that R has been compiled with
-## --enable-R-shlib
-## --enable-BLAS-shlib
-RHOMLIB=$(R RHOME)
-echo Found R libs:
-echo $RHOMLIB/lib/*
-
-if ! [ "$(readelf -h $RHOMLIB/lib/libR*.so | grep DYN)" ]; then
+echo -e "\n# rpy2_SlackBuild messages:"
+# R should have been compiled with
+# --enable-R-shlib
+# --enable-BLAS-shlib
+# check for these libraries
+RHOMLIB="$(R RHOME)/lib"
+echo "Found R home: ${RHOMLIB%/lib} with shared libraries:"
+for i in $RHOMLIB/*; do echo "  ${i#RHOMLIB}"; done
+if ! [ "$(readelf -h $RHOMLIB/libR*.so | grep DYN)" ]; then
   echo "Error: R is not compiled with shared libraries." >&2
   exit 1
 fi
 
-
 # check where we build, on Slackware stable or on current (stable+)
+# support for python-3.9 will be dropped https://github.com/rpy2/rpy2/pull/1257
 OSVERSION="$(cat /etc/os-release | grep "VERSION_CODENAME" | cut -c 18-)"
 PYVER=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
 
@@ -109,18 +106,17 @@ elif [[ $OSVERSION == "stable" ]]; then
   echo "Installing on stable, into python$PYVER/site-packages/ "
   export PYTHONPATH=/opt/python$PYVER/site-packages/
 else 
-  echo "Stopping; $OSVERSION is not 'stable' nor 'current, sorry." 
+  echo "Stopping; $OSVERSION is not recognized as 'stable' or 'current', sorry." 
   exit 1
 fi
 
-## this removes an error message from setup.py
-## https://github.com/rpy2/rpy2/issues/675
-export LD_LIBRARY_PATH="${RHOMLIB}/lib:${LD_LIBRARY_PATH}"
+# this removes an error message from setup.py
+# https://github.com/rpy2/rpy2/issues/675
+export LD_LIBRARY_PATH="${RHOMLIB}:${LD_LIBRARY_PATH}"
 echo "LD_LIBRARY_PATH set to ${LD_LIBRARY_PATH}"
+echo -e "\n# Python build messages:"
 
 cd $PRGNAM-$MODULE1
-# replace deprecated `python3 setup.py build install --root=$PKG`
-# thanks to fourtysixandtwo
 python3 -m build --no-isolation
 python3 -m installer -d "$PKG" dist/*.whl
 
@@ -130,49 +126,58 @@ python3 -m installer -d "$PKG" dist/*.whl
 
 cd ..
 
-# Remove rpaths:
+# Indicate change from python build to slackbuild output for debugging purposes
+echo -e "\n# rpy2.SlackBuild messages:"
+
+# Strip debug symbols from ELF binaries
 for file in $(find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF | cut -f 1 -d : 2> /dev/null) ; do
+  if [ -e $file ]; then
+  echo "ELF binary: ${file#$PKG}"
+    strip --strip-unneeded $file 2> /dev/null || true ;
+    echo "  '--strip-unneeded'"
+  fi
+#  and remove (hardcoded) rpaths ('ld.so' will resolve paths to linked binaries instead):
   if [ ! "$(patchelf --print-rpath $file 2> /dev/null)" = "" ]; then
     patchelf --remove-rpath $file
-    echo "\nremoved rpath-file: $file\n"
+    echo "  '--remove-rpath'"
   fi
 done
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+mkdir -p $PKGDOC/$PRGNAM-$MODULE1
+mkdir -p $PKGDOC/$PRGNAM-$MODULE2
+cp -a \
+  AUTHORS gpl-2.0.txt NEWS README* \
+  $PKGDOC
+cp  $PRGNAM-$MODULE1/README* $PKGDOC/$PRGNAM-$MODULE1
+cp  $PRGNAM-$MODULE2/README* $PKGDOC/$PRGNAM-$MODULE2
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM-$MODULE1
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM-$MODULE2
-mkdir -p $PKG/usr/share/$PRGNAM-$VERSION/scripts
-cp -a AUTHORS gpl-2.0.txt NEWS README* $PKG/usr/doc/$PRGNAM-$VERSION
-cp  $PRGNAM-$MODULE1/README* $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM-$MODULE1
-cp  $PRGNAM-$MODULE2/README* $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM-$MODULE2
-cp -a scripts/* $PKG/usr/share/$PRGNAM-$VERSION/scripts
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGSHR=$$PKG/usr/share/$PRGNAM-$VERSION/scripts
+mkdir -p $PKGSHR
+cp -a scripts/* $PKGSHR
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
-## to facilitate dynamic linking with R,
-## libR.so and libRblas.so still need to be found
-## https://github.com/rpy2/rpy2/issues/675
-## for this, create "/etc/ld.so.conf.d/Rlibs.conf" with the line
-## "/usr/lib${LIBDIRSUFFIX}/R/lib"
-## via doinst.sh
-# thanks to cwilling
-## directly cat to package in case no w-permission on $CWD
-#cat > $CWD/doinst.sh <<EOF
+
+# To facilitate dynamic linking with R,
+# libR.so and libRblas.so still need to be found
+# https://github.com/rpy2/rpy2/issues/675
+#
+# For this, create "/etc/ld.so.conf.d/Rlibs.conf" with the line
+# "/usr/lib${LIBDIRSUFFIX}/R/lib" via doinst.sh.
+#
+# Directly cat to package to bypass no-write permission on $CWD
+# (thanks to cwilling).
 cat > $PKG/install/doinst.sh  <<EOF
 echo "/usr/lib${LIBDIRSUFFIX}/R/lib" > etc/ld.so.conf.d/Rlibs.conf
 sbin/ldconfig
 EOF
-#cat > $CWD/douninst.sh <<EOF
 cat > $PKG/install/douninst.sh <<EOF
 rm etc/ld.so.conf.d/Rlibs.conf
 sbin/ldconfig
 EOF
-#cat $CWD/doinst.sh > $PKG/install/doinst.sh
-#cat douninst.sh > $PKG/install/douninst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
