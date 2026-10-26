@@ -1,0 +1,237 @@
+From b9dd70c4c8d61c93d7a70645e0bd18fa76e6834e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marcin=20P=C4=85czkowski?= <dyfeer@gmail.com>
+Date: Mon, 18 Apr 2022 13:51:53 -0700
+Subject: [PATCH 1/2] libsndfile: use a macro instead of redefining the struct
+
+Co-Authored-By: Christof Ressi <info@christofressi.com>
+---
+ include/plugin_interface/SC_SndBuf.h        |  4 +--
+ server/plugins/DiskIO_UGens.cpp             | 29 +++++++++++----------
+ server/scsynth/SC_HiddenWorld.h             |  4 +++
+ server/scsynth/SC_SequencedCommand.cpp      | 10 +++----
+ server/scsynth/SC_World.cpp                 |  4 +--
+ server/supernova/sc/sc_plugin_interface.cpp |  4 +--
+ 6 files changed, 30 insertions(+), 25 deletions(-)
+
+diff --git a/include/plugin_interface/SC_SndBuf.h b/include/plugin_interface/SC_SndBuf.h
+index daccfef8438..2cc129edbf9 100644
+--- a/include/plugin_interface/SC_SndBuf.h
++++ b/include/plugin_interface/SC_SndBuf.h
+@@ -22,7 +22,7 @@
+ 
+ #include <stdint.h>
+ 
+-typedef struct SNDFILE_tag SNDFILE;
++#define GETSNDFILE(x) ((SNDFILE*)x->sndfile)
+ 
+ #ifdef SUPERNOVA
+ 
+@@ -145,7 +145,7 @@ struct SndBuf {
+     int mask; // for delay lines
+     int mask1; // for interpolating oscillators.
+     int coord; // used by fft ugens
+-    SNDFILE* sndfile; // used by disk i/o
++    void* sndfile; // used by disk i/o
+     // SF_INFO fileinfo; // used by disk i/o
+ #ifdef SUPERNOVA
+     bool isLocal;
+diff --git a/server/plugins/DiskIO_UGens.cpp b/server/plugins/DiskIO_UGens.cpp
+index 825d2d52ab3..3ace3ca8ffe 100644
+--- a/server/plugins/DiskIO_UGens.cpp
++++ b/server/plugins/DiskIO_UGens.cpp
+@@ -111,7 +111,7 @@ void DiskIOMsg::Perform() {
+     sf_count_t count;
+     switch (mCommand) {
+     case kDiskCmd_Read:
+-        count = buf->sndfile ? sf_readf_float(buf->sndfile, buf->data + mPos * buf->channels, mFrames) : 0;
++        count = buf->sndfile ? sf_readf_float(GETSNDFILE(buf), buf->data + mPos * buf->channels, mFrames) : 0;
+         if (count < mFrames) {
+             memset(buf->data + (mPos + count) * buf->channels, 0, (mFrames - count) * buf->channels * sizeof(float));
+             World_GetBuf(mWorld, mBufNum)->mask = mPos + count;
+@@ -126,17 +126,17 @@ void DiskIOMsg::Perform() {
+             memset(buf->data + mPos * buf->channels, 0, mFrames * buf->channels * sizeof(float));
+             goto leave;
+         }
+-        count = sf_readf_float(buf->sndfile, buf->data + mPos * buf->channels, mFrames);
++        count = sf_readf_float(GETSNDFILE(buf), buf->data + mPos * buf->channels, mFrames);
+         while (mFrames -= count) {
+-            sf_seek(buf->sndfile, 0, SEEK_SET);
+-            count = sf_readf_float(buf->sndfile, buf->data + (mPos + count) * buf->channels, mFrames);
++            sf_seek(GETSNDFILE(buf), 0, SEEK_SET);
++            count = sf_readf_float(GETSNDFILE(buf), buf->data + (mPos + count) * buf->channels, mFrames);
+         }
+         break;
+     case kDiskCmd_Write:
+         // printf("kDiskCmd_Write %d %p\n", mBufNum, buf->sndfile);
+         if (!buf->sndfile)
+             goto leave;
+-        count = sf_writef_float(buf->sndfile, buf->data + mPos * buf->channels, mFrames);
++        count = sf_writef_float(GETSNDFILE(buf), buf->data + mPos * buf->channels, mFrames);
+         break;
+     }
+ 
+@@ -287,14 +287,14 @@ void DiskIn_next(DiskIn* unit, int inNumSamples) {
+             if ((int)ZIN0(1)) { // loop
+                 if (!bufr->sndfile)
+                     memset(bufr->data + mPos * bufr->channels, 0, bufFrames2 * bufr->channels * sizeof(float));
+-                count = sf_readf_float(bufr->sndfile, bufr->data + mPos * bufr->channels, bufFrames2);
++                count = sf_readf_float(GETSNDFILE(bufr), bufr->data + mPos * bufr->channels, bufFrames2);
+                 while (bufFrames2 -= count) {
+-                    sf_seek(bufr->sndfile, 0, SEEK_SET);
+-                    count = sf_readf_float(bufr->sndfile, bufr->data + (mPos + count) * bufr->channels, bufFrames2);
++                    sf_seek(GETSNDFILE(bufr), 0, SEEK_SET);
++                    count = sf_readf_float(GETSNDFILE(bufr), bufr->data + (mPos + count) * bufr->channels, bufFrames2);
+                 }
+             } else { // non-loop
+-                count =
+-                    bufr->sndfile ? sf_readf_float(bufr->sndfile, bufr->data + mPos * bufr->channels, bufFrames2) : 0;
++                count = bufr->sndfile ? sf_readf_float(GETSNDFILE(bufr), bufr->data + mPos * bufr->channels, bufFrames2)
++                                      : 0;
+                 if (count < bufFrames2) {
+                     memset(bufr->data + (mPos + count) * bufr->channels, 0,
+                            (bufFrames2 - count) * bufr->channels * sizeof(float));
+@@ -469,13 +469,14 @@ static void VDiskIn_request_buffer(VDiskIn* unit, float fbufnum, uint32 bufFrame
+         if ((int)ZIN0(2)) { // loop
+             if (!bufr->sndfile)
+                 memset(bufr->data + mPos * bufr->channels, 0, bufFrames2 * bufr->channels * sizeof(float));
+-            count = sf_readf_float(bufr->sndfile, bufr->data + mPos * bufr->channels, bufFrames2);
++            count = sf_readf_float(GETSNDFILE(bufr), bufr->data + mPos * bufr->channels, bufFrames2);
+             while (bufFrames2 -= count) {
+-                sf_seek(bufr->sndfile, 0, SEEK_SET);
+-                count = sf_readf_float(bufr->sndfile, bufr->data + (mPos + count) * bufr->channels, bufFrames2);
++                sf_seek(GETSNDFILE(bufr), 0, SEEK_SET);
++                count = sf_readf_float(GETSNDFILE(bufr), bufr->data + (mPos + count) * bufr->channels, bufFrames2);
+             }
+         } else { // non-loop
+-            count = bufr->sndfile ? sf_readf_float(bufr->sndfile, bufr->data + mPos * bufr->channels, bufFrames2) : 0;
++            count =
++                bufr->sndfile ? sf_readf_float(GETSNDFILE(bufr), bufr->data + mPos * bufr->channels, bufFrames2) : 0;
+             if (count < bufFrames2) {
+                 memset(bufr->data + (mPos + count) * bufr->channels, 0,
+                        (bufFrames2 - count) * bufr->channels * sizeof(float));
+diff --git a/server/scsynth/SC_HiddenWorld.h b/server/scsynth/SC_HiddenWorld.h
+index 1782ae8e5c4..1f1d924e83d 100644
+--- a/server/scsynth/SC_HiddenWorld.h
++++ b/server/scsynth/SC_HiddenWorld.h
+@@ -37,6 +37,10 @@
+ 
+ #include "../../common/server_shm.hpp"
+ 
++#ifndef NO_LIBSNDFILE
++#    include <sndfile.h>
++#endif
++
+ extern HashTable<struct UnitDef, Malloc>* gUnitDefLib;
+ 
+ 
+diff --git a/server/scsynth/SC_SequencedCommand.cpp b/server/scsynth/SC_SequencedCommand.cpp
+index 4227355f3e9..6f54e87a5e4 100644
+--- a/server/scsynth/SC_SequencedCommand.cpp
++++ b/server/scsynth/SC_SequencedCommand.cpp
+@@ -375,7 +375,7 @@ bool BufFreeCmd::Stage2() {
+     mFreeData = buf->data;
+ #ifndef NO_LIBSNDFILE
+     if (buf->sndfile)
+-        sf_close(buf->sndfile);
++        sf_close(GETSNDFILE(buf));
+ #endif
+     SndBuf_Init(buf);
+     return true;
+@@ -600,7 +600,7 @@ bool BufReadCmd::Stage2() {
+     }
+ 
+     if (buf->sndfile)
+-        sf_close(buf->sndfile);
++        sf_close(GETSNDFILE(buf));
+ 
+     if (mLeaveFileOpen) {
+         buf->sndfile = sf;
+@@ -903,7 +903,7 @@ bool BufReadChannelCmd::Stage2() {
+ 
+ leave:
+     if (buf->sndfile)
+-        sf_close(buf->sndfile);
++        sf_close(GETSNDFILE(buf));
+ 
+     if (mLeaveFileOpen) {
+         buf->sndfile = sf;
+@@ -1014,7 +1014,7 @@ bool BufWriteCmd::Stage2() {
+     }
+ 
+     if (buf->sndfile)
+-        sf_close(buf->sndfile);
++        sf_close(GETSNDFILE(buf));
+ 
+     if (mLeaveFileOpen) {
+         buf->sndfile = sf;
+@@ -1057,7 +1057,7 @@ bool BufCloseCmd::Stage2() {
+ #else
+     SndBuf* buf = World_GetNRTBuf(mWorld, mBufIndex);
+     if (buf->sndfile) {
+-        sf_close(buf->sndfile);
++        sf_close(GETSNDFILE(buf));
+         buf->sndfile = nullptr;
+     }
+     return true;
+diff --git a/server/scsynth/SC_World.cpp b/server/scsynth/SC_World.cpp
+index e6ee49023b2..e3de39e4ce2 100644
+--- a/server/scsynth/SC_World.cpp
++++ b/server/scsynth/SC_World.cpp
+@@ -968,9 +968,9 @@ void World_Cleanup(World* world, bool unload_plugins) {
+ 
+ #ifndef NO_LIBSNDFILE
+         if (nrtbuf->sndfile)
+-            sf_close(nrtbuf->sndfile);
++            sf_close(GETSNDFILE(nrtbuf));
+         if (rtbuf->sndfile && rtbuf->sndfile != nrtbuf->sndfile)
+-            sf_close(rtbuf->sndfile);
++            sf_close(GETSNDFILE(rtbuf));
+ #endif
+     }
+ 
+diff --git a/server/supernova/sc/sc_plugin_interface.cpp b/server/supernova/sc/sc_plugin_interface.cpp
+index 0ca778730b4..2a938600a4d 100644
+--- a/server/supernova/sc/sc_plugin_interface.cpp
++++ b/server/supernova/sc/sc_plugin_interface.cpp
+@@ -1041,7 +1041,7 @@ void sc_plugin_interface::buffer_close(uint32_t index) {
+ 
+     if (buf->sndfile == nullptr)
+         return;
+-    sf_close(buf->sndfile);
++    sf_close(GETSNDFILE(buf));
+     buf->sndfile = nullptr;
+ }
+ 
+@@ -1070,7 +1070,7 @@ void sc_plugin_interface::buffer_sync(uint32_t index) noexcept {
+ void sc_plugin_interface::free_buffer(uint32_t index) {
+     SndBuf* buf = world.mSndBufsNonRealTimeMirror + index;
+     if (buf->sndfile)
+-        sf_close(buf->sndfile);
++        sf_close(GETSNDFILE(buf));
+ 
+     sndbuf_init(buf);
+ }
+
+From e93a0c81ca7afdeb69f1aaf5d6167be7e8097f39 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marcin=20P=C4=85czkowski?= <dyfeer@gmail.com>
+Date: Mon, 18 Apr 2022 16:07:18 -0700
+Subject: [PATCH 2/2] libsndfile: add windows prototypes on additional sndfile
+ include
+
+---
+ server/scsynth/SC_HiddenWorld.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/server/scsynth/SC_HiddenWorld.h b/server/scsynth/SC_HiddenWorld.h
+index 1f1d924e83d..57a26147eb3 100644
+--- a/server/scsynth/SC_HiddenWorld.h
++++ b/server/scsynth/SC_HiddenWorld.h
+@@ -38,7 +38,7 @@
+ #include "../../common/server_shm.hpp"
+ 
+ #ifndef NO_LIBSNDFILE
+-#    include <sndfile.h>
++#    include <SC_SndFileHelpers.hpp> // includes sndfile.h with appropriate configuration
+ #endif
+ 
+ extern HashTable<struct UnitDef, Malloc>* gUnitDefLib;
