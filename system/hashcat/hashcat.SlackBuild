@@ -7,6 +7,17 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20261026 bkw:
+# - update for v8.0.0.
+# Note: rust-opt would be an optional dependency for 8.0.0, except
+# it insists on doing network access during the build, and I can't
+# be bothered to create and host a vendored sources tarball for it.
+# Contact me if you *need* the stuff that's left out of the build
+# because of this.
+# Also, build with clang rather than gcc, because gcc doesn't
+# support _FORTIFY_SOURCE levels above 2. Upstream *really* wants
+# us to build with 3.
+
 # 20251010 bkw:
 # - get rid of USE_SYSTEM_ZLIB=1. what it actually controls is use of
 #   system libminizip, which is *not the same thing* as zlib, and would
@@ -27,7 +38,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=hashcat
-VERSION=${VERSION:-7.1.2}
+VERSION=${VERSION:-8.0.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -49,11 +60,8 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
+if [ "$ARCH" = "i586" -o "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=$ARCH -mtune=i686"
   LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" -o "$ARCH" = "aarch64" ]; then
   SLKCFLAGS="-O2 -fPIC"
@@ -69,10 +77,11 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz --no-same-owner
 cd $PRGNAM-$VERSION
-find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} + -o \
-        \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} +
+find . ! -type l    -a \( \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
 
 ULIB=/usr/lib$LIBDIRSUFFIX
 DOC=/usr/doc/$PRGNAM-$VERSION
@@ -82,18 +91,27 @@ PKGDOC=$PKG/$DOC
 sed -i '/__x86_64__/s,$, || defined(__i386__),' include/cpu_features.h
 
 # 20220211 bkw: build stripped.
-SLKCFLAGS+=" -Wl,-s"
+SLKCFLAGS+=" -Wl,-s -Wno-unused-command-line-argument"
 
 # 20220211 bkw: lots of make arguments, deduplicate.
+# CARGO_PRESENT=false RUSTUP_PRESENT=false prevents it trying to
+# build the optional Rust stuff.
+# RUST_RED="" RUST_RESET="" prevents it colorizing the output
+# from the Makefile. Without this, it turns the output red, and
+# never changes it back (makes it hard for me to read).
 runmake() {
   make "$@" \
-    CC="gcc $SLKCFLAGS" \
-    CXX="g++ $SLKCFLAGS" \
+    CC="clang $SLKCFLAGS" \
+    CXX="clang++ $SLKCFLAGS" \
     PREFIX=/usr \
     LIBRARY_FOLDER=$ULIB \
     SHARED_FOLDER=$ULIB/$PRGNAM \
     DOCUMENT_FOLDER=$DOC \
     USE_SYSTEM_ZLIB=0 \
+    CARGO_PRESENT=false \
+    RUSTUP_PRESENT=false \
+    RUST_RED="" \
+    RUST_RESET="" \
     DESTDIR=$PKG
 }
 
@@ -101,7 +119,7 @@ runmake
 runmake install
 
 # 20250930 bkw: make sbopkglint happy
-chmod +x $PKG/$ULIB/$PRGNAM/*/*.so
+chmod +x $PKG/$ULIB/$PRGNAM/*/*.so $PKG/$ULIB/$PRGNAM/extra/fpga/*/*.elf
 
 # 20250930 bkw: include the bash completion correctly, not in the doc dir.
 install -D -m0644 extra/tab_completion/hashcat.sh \
@@ -109,7 +127,7 @@ install -D -m0644 extra/tab_completion/hashcat.sh \
 rm -rf $PKGDOC/extra
 
 # 20250930 bkw: don't include this cruft:
-rm -f $PKG/$ULIB/hashcat/*/.gitkeep
+rm -f $PKG/$ULIB/hashcat/*/{*/,}.gitkeep
 
 # 20250930 bkw: or this:
 rmdir $PKG/usr/share || true
