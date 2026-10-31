@@ -1,0 +1,110 @@
+diff -Naupr a/src/extension/internal/pdfinput/pdf-parser.cpp b/src/extension/internal/pdfinput/pdf-parser.cpp
+--- a/src/extension/internal/pdfinput/pdf-parser.cpp	2026-04-24 00:59:59.000000000 +0200
++++ b/src/extension/internal/pdfinput/pdf-parser.cpp	2026-07-04 13:50:43.417907854 +0200
+@@ -292,9 +292,10 @@ PdfParser::PdfParser(std::shared_ptr<PDF
+     if (page) {
+         // Increment the page building here and set page label
+         Catalog *catalog = pdf_doc->getCatalog();
+-        GooString *label = new GooString("");
+-        catalog->indexToLabel(page->getNum() - 1, label);
+-        builder->pushPage(getString(label), state);
++        std::string label;
++        catalog->indexToLabel(page->getNum() - 1, &label);
++        GooString labelStr(label);
++        builder->pushPage(getString(&labelStr), state);
+     }
+ 
+     // Must come after pushPage!
+@@ -817,7 +818,7 @@ void PdfParser::opSetExtGState(Object ar
+             }
+             _POPPLER_FREE(obj3);
+             if (_POPPLER_CALL_ARGS_DEREF(obj3, obj2.dictLookup, "G").isStream()) {
+-                if (_POPPLER_CALL_ARGS_DEREF(obj4, obj3.streamGetDict()->lookup, "Group").isDict()) {
++                if (_POPPLER_CALL_ARGS_DEREF(obj4, obj3.getStream()->getDict()->lookup, "Group").isDict()) {
+                     std::unique_ptr<GfxColorSpace> blendingColorSpace;
+                     GBool isolated = gFalse;
+                     GBool knockout = gFalse;
+@@ -880,7 +881,7 @@ void PdfParser::doSoftMask(Object *str,
+   }
+ 
+   // get stream dict
+-  dict = str->streamGetDict();
++  dict = str->getStream()->getDict();
+ 
+   // check form type
+   _POPPLER_CALL_ARGS(obj1, dict->lookup, "FormType");
+@@ -2377,7 +2378,7 @@ void PdfParser::opXObject(Object args[],
+     }
+ 
+ //add layer at root if xObject has type OCG
+-    _POPPLER_CALL_ARGS(obj2, obj1.streamGetDict()->lookup, "OC");
++    _POPPLER_CALL_ARGS(obj2, obj1.getStream()->getDict()->lookup, "OC");
+     if(obj2.isDict()){
+         auto type_dict = obj2.getDict();
+         if (type_dict->lookup("Type").isName("OCG")) {
+@@ -2395,7 +2396,7 @@ void PdfParser::opXObject(Object args[],
+         }
+     }
+ 
+-    _POPPLER_CALL_ARGS(obj2, obj1.streamGetDict()->lookup, "Subtype");
++    _POPPLER_CALL_ARGS(obj2, obj1.getStream()->getDict()->lookup, "Subtype");
+     if (obj2.isName(const_cast<char*>("Image"))) {
+         _POPPLER_CALL_ARGS(refObj, res->lookupXObjectNF, name);
+         doImage(&refObj, obj1.getStream(), gFalse);
+@@ -2403,7 +2404,7 @@ void PdfParser::opXObject(Object args[],
+     } else if (obj2.isName(const_cast<char*>("Form"))) {
+         doForm(&obj1);
+     } else if (obj2.isName(const_cast<char*>("PS"))) {
+-        _POPPLER_CALL_ARGS(obj3, obj1.streamGetDict()->lookup, "Level1");
++        _POPPLER_CALL_ARGS(obj3, obj1.getStream()->getDict()->lookup, "Level1");
+     } else if (obj2.isName()) {
+         error(errSyntaxError, getPos(), "Unknown XObject subtype '{0:s}'", obj2.getName());
+     } else {
+@@ -2596,7 +2597,7 @@ void PdfParser::doImage(Object * /*ref*/
+ 	            goto err1;
+             }
+             maskStr = smaskObj.getStream();
+-            maskDict = smaskObj.streamGetDict();
++            maskDict = smaskObj.getStream()->getDict();
+             _POPPLER_CALL_ARGS(obj1, maskDict->lookup, "Width");
+             if (obj1.isNull()) {
+                     _POPPLER_FREE(obj1);
+@@ -2674,7 +2675,7 @@ void PdfParser::doImage(Object * /*ref*/
+                 goto err1;
+             }
+             maskStr = maskObj.getStream();
+-            maskDict = maskObj.streamGetDict();
++            maskDict = maskObj.getStream()->getDict();
+             _POPPLER_CALL_ARGS(obj1, maskDict->lookup, "Width");
+             if (obj1.isNull()) {
+                 _POPPLER_FREE(obj1);
+@@ -2774,7 +2775,7 @@ void PdfParser::doForm(Object *str, doub
+     }
+ 
+     // get stream dict
+-    dict = str->streamGetDict();
++    dict = str->getStream()->getDict();
+ 
+     // check form type
+     _POPPLER_CALL_ARGS(obj1, dict->lookup, "FormType");
+diff -Naupr a/src/extension/internal/pdfinput/poppler-utils.cpp b/src/extension/internal/pdfinput/poppler-utils.cpp
+--- a/src/extension/internal/pdfinput/poppler-utils.cpp	2026-04-24 00:59:59.000000000 +0200
++++ b/src/extension/internal/pdfinput/poppler-utils.cpp	2026-07-04 14:10:10.932322179 +0200
+@@ -191,7 +191,7 @@ void InkFontDict::hashFontObject1(const
+             n = obj->arrayGetLength();
+             h->hash((char *)&n, sizeof(int));
+             for (i = 0; i < n; ++i) {
+-                const Object &obj2 = obj->arrayGetNF(i);
++                const Object &obj2 = obj->getArray()->getNF(i);
+                 hashFontObject1(&obj2, h);
+             }
+             break;
+@@ -543,7 +543,7 @@ void _getFontsRecursive(std::shared_ptr<
+                 continue;
+ 
+             Ref resourcesRef;
+-            const Object resObj = obj2.streamGetDict()->lookup("Resources", &resourcesRef);
++            const Object resObj = obj2.getStream()->getDict()->lookup("Resources", &resourcesRef);
+             if (resourcesRef != Ref::INVALID() && !visitedObjects.insert(resourcesRef.num).second)
+                 continue;
+ 

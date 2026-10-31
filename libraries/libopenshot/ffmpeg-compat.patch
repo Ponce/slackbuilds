@@ -1,0 +1,207 @@
+From 60634a7b7d9a998501131c093d8716bd8b3005fe Mon Sep 17 00:00:00 2001
+From: Chzrz89 <308380384+Chzrz89@users.noreply.github.com>
+Date: Wed, 26 Aug 2026 02:45:43 +0200
+Subject: [PATCH] FFmpegWriter: use avcodec_get_supported_config for FFmpeg 7+
+ (libavcodec 61+)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+FFmpeg 7 removed the codec capability lists (pix_fmts,
+supported_samplerates, sample_fmts, ch_layouts, channel_layouts) from
+the public AVCodec struct. Accessing them no longer compiles against
+current FFmpeg releases (e.g. 8.x/9.x as shipped by MSYS2 and newer
+distros), breaking the build entirely.
+
+Add wrapper helpers in FFmpegUtilities.h:
+
+  ffmpeg_codec_pix_fmts()      -> AV_CODEC_CONFIG_PIX_FORMAT
+  ffmpeg_codec_sample_rates()  -> AV_CODEC_CONFIG_SAMPLE_RATE
+  ffmpeg_codec_sample_fmts()   -> AV_CODEC_CONFIG_SAMPLE_FORMAT
+  ffmpeg_codec_ch_layouts()    -> AV_CODEC_CONFIG_CHANNEL_LAYOUT
+
+For LIBAVCODEC_VERSION_MAJOR >= 61 they call
+avcodec_get_supported_config(); for older FFmpeg they return the
+existing struct fields directly. All call sites in FFmpegWriter.cpp
+now go through these helpers, so behavior is identical on FFmpeg <= 6.
+
+Also fix a pre-existing bug visible on the new path: the channel-layout
+loop used 'if (av_channel_layout_compare(...))' — treating NON-matching
+layouts as valid — instead of comparing == 0. On FFmpeg 7 this would
+have accepted the first non-matching layout; now it matches upstream
+intent (accept only an equal layout).
+
+And add the missing #include "Exceptions.h" to tests/BeatSync.cpp,
+which uses openshot::InvalidJSON but previously got it transitively.
+
+Verified on Windows/MSYS2 with FFmpeg 9.0.1 (libavcodec 63) + GCC 16:
+full build passes and a Timeline render + libx264/AAC export via
+FFmpegWriter produces a valid MP4.
+---
+ src/FFmpegUtilities.h | 43 +++++++++++++++++++++++++++++++++++
+ src/FFmpegWriter.cpp  | 52 +++++++++++++++++--------------------------
+ tests/BeatSync.cpp    |  1 +
+ 3 files changed, 65 insertions(+), 31 deletions(-)
+
+diff --git a/src/FFmpegUtilities.h b/src/FFmpegUtilities.h
+index 09a2f7c25..db607d372 100644
+--- a/src/FFmpegUtilities.h
++++ b/src/FFmpegUtilities.h
+@@ -406,6 +406,49 @@ inline static int ffmpeg_stream_add_side_data(
+ #include <malloc.h>
+ #endif
+ 
++// FFmpeg 7+ (libavcodec 61+): codec capability lists moved from AVCodec struct
++// fields (pix_fmts, supported_samplerates, ch_layouts, sample_fmts) to
++// avcodec_get_supported_config(). Provide unified helpers.
++#if LIBAVCODEC_VERSION_MAJOR >= 61
++inline static const AVPixelFormat* ffmpeg_codec_pix_fmts(const AVCodec* codec) {
++    const void* out = nullptr;
++    if (avcodec_get_supported_config(nullptr, codec, AV_CODEC_CONFIG_PIX_FORMAT, 0, &out, nullptr) == 0)
++        return reinterpret_cast<const AVPixelFormat*>(out);
++    return nullptr;
++}
++inline static const int* ffmpeg_codec_sample_rates(const AVCodec* codec) {
++    const void* out = nullptr;
++    if (avcodec_get_supported_config(nullptr, codec, AV_CODEC_CONFIG_SAMPLE_RATE, 0, &out, nullptr) == 0)
++        return reinterpret_cast<const int*>(out);
++    return nullptr;
++}
++inline static const AVSampleFormat* ffmpeg_codec_sample_fmts(const AVCodec* codec) {
++    const void* out = nullptr;
++    if (avcodec_get_supported_config(nullptr, codec, AV_CODEC_CONFIG_SAMPLE_FORMAT, 0, &out, nullptr) == 0)
++        return reinterpret_cast<const AVSampleFormat*>(out);
++    return nullptr;
++}
++inline static const AVChannelLayout* ffmpeg_codec_ch_layouts(const AVCodec* codec) {
++    const void* out = nullptr;
++    if (avcodec_get_supported_config(nullptr, codec, AV_CODEC_CONFIG_CHANNEL_LAYOUT, 0, &out, nullptr) == 0)
++        return reinterpret_cast<const AVChannelLayout*>(out);
++    return nullptr;
++}
++#define OPENSHOT_HAS_NEW_CODEC_CONFIG 1
++#else
++inline static const AVPixelFormat* ffmpeg_codec_pix_fmts(const AVCodec* codec) { return codec->pix_fmts; }
++inline static const int* ffmpeg_codec_sample_rates(const AVCodec* codec) { return codec->supported_samplerates; }
++inline static const AVSampleFormat* ffmpeg_codec_sample_fmts(const AVCodec* codec) { return codec->sample_fmts; }
++inline static const AVChannelLayout* ffmpeg_codec_ch_layouts(const AVCodec* codec) {
++#if HAVE_CH_LAYOUT
++    return codec->ch_layouts;
++#else
++    (void)codec; return nullptr;
++#endif
++}
++#define OPENSHOT_HAS_NEW_CODEC_CONFIG 0
++#endif
++
+ inline static void* aligned_malloc(size_t size, size_t alignment = 32)
+ {
+ #if defined(_WIN32)
+diff --git a/src/FFmpegWriter.cpp b/src/FFmpegWriter.cpp
+index 4ae40ec50..2c09eef2a 100644
+--- a/src/FFmpegWriter.cpp
++++ b/src/FFmpegWriter.cpp
+@@ -1142,15 +1142,15 @@ AVStream *FFmpegWriter::add_audio_stream() {
+ #endif
+ 
+ 	// Set valid sample rate (or throw error)
+-	if (codec->supported_samplerates) {
++	if (const int* supported_rates = ffmpeg_codec_sample_rates(codec)) {
+ 		int i;
+-		for (i = 0; codec->supported_samplerates[i] != 0; i++)
+-			if (info.sample_rate == codec->supported_samplerates[i]) {
++		for (i = 0; supported_rates[i] != 0; i++)
++			if (info.sample_rate == supported_rates[i]) {
+ 				// Set the valid sample rate
+ 				c->sample_rate = info.sample_rate;
+ 				break;
+ 			}
+-		if (codec->supported_samplerates[i] == 0)
++		if (supported_rates[i] == 0)
+ 			throw InvalidSampleRate("An invalid sample rate was detected for this codec.", path);
+ 	} else
+ 		// Set sample rate
+@@ -1164,41 +1164,30 @@ AVStream *FFmpegWriter::add_audio_stream() {
+ 	// Set a valid number of channels (or throw error)
+ 	AVChannelLayout ch_layout;
+ 	av_channel_layout_from_mask(&ch_layout, info.channel_layout);
+-	if (codec->ch_layouts) {
++	if (const AVChannelLayout* codec_layouts = ffmpeg_codec_ch_layouts(codec)) {
+ 		int i;
+-		for (i = 0; av_channel_layout_check(&codec->ch_layouts[i]); i++)
+-			if (av_channel_layout_compare(&ch_layout, &codec->ch_layouts[i])) {
++		for (i = 0; av_channel_layout_check(&codec_layouts[i]); i++)
++			if (av_channel_layout_compare(&ch_layout, &codec_layouts[i]) == 0) {
+ 				// Set valid channel layout
+ 				av_channel_layout_copy(&c->ch_layout, &ch_layout);
+ 				break;
+ 			}
+-		if (!av_channel_layout_check(&codec->ch_layouts[i]))
++		if (!av_channel_layout_check(&codec_layouts[i]))
+ 			throw InvalidChannels("An invalid channel layout was detected (i.e. MONO / STEREO).", path);
+-	} else
++	} else {
+ 		// Set valid channel layout
+ 		av_channel_layout_copy(&c->ch_layout, &ch_layout);
++	}
+ #else
+ 	// Set a valid number of channels (or throw error)
+-	if (codec->channel_layouts) {
+-		int i;
+-		for (i = 0; codec->channel_layouts[i] != 0; i++)
+-			if (channel_layout == codec->channel_layouts[i]) {
+-				// Set valid channel layout
+-				c->channel_layout = channel_layout;
+-				break;
+-			}
+-		if (codec->channel_layouts[i] == 0)
+-			throw InvalidChannels("An invalid channel layout was detected (i.e. MONO / STEREO).", path);
+-		} else
+-			// Set valid channel layout
+-			c->channel_layout = channel_layout;
++	c->channel_layout = channel_layout;
+ #endif
+ 
+ 	// Choose a valid sample_fmt
+-	if (codec->sample_fmts) {
+-		for (int i = 0; codec->sample_fmts[i] != AV_SAMPLE_FMT_NONE; i++) {
++	if (const AVSampleFormat* codec_fmts = ffmpeg_codec_sample_fmts(codec)) {
++		for (int i = 0; codec_fmts[i] != AV_SAMPLE_FMT_NONE; i++) {
+ 			// Set sample format to 1st valid format (and then exit loop)
+-			c->sample_fmt = codec->sample_fmts[i];
++			c->sample_fmt = codec_fmts[i];
+ 			break;
+ 		}
+ 	}
+@@ -1401,12 +1390,13 @@ AVStream *FFmpegWriter::add_video_stream() {
+ #endif
+ 
+ 	// Find all supported pixel formats for this codec
+-	const PixelFormat *supported_pixel_formats = codec->pix_fmts;
+-	while (supported_pixel_formats != NULL && *supported_pixel_formats != PIX_FMT_NONE) {
+-		// Assign the 1st valid pixel format (if one is missing)
+-		if (c->pix_fmt == PIX_FMT_NONE)
+-			c->pix_fmt = *supported_pixel_formats;
+-		++supported_pixel_formats;
++	if (const PixelFormat* supported_pixel_formats = ffmpeg_codec_pix_fmts(codec)) {
++		while (*supported_pixel_formats != PIX_FMT_NONE) {
++			// Assign the 1st valid pixel format (if one is missing)
++			if (c->pix_fmt == PIX_FMT_NONE)
++				c->pix_fmt = *supported_pixel_formats;
++			++supported_pixel_formats;
++		}
+ 	}
+ 
+ 	// Codec doesn't have any pix formats?
+diff --git a/tests/BeatSync.cpp b/tests/BeatSync.cpp
+index a17f717fb..0a92a7b46 100644
+--- a/tests/BeatSync.cpp
++++ b/tests/BeatSync.cpp
+@@ -18,6 +18,7 @@
+ #include <QImage>
+ 
+ #include "EffectInfo.h"
++#include "Exceptions.h"
+ #include "Frame.h"
+ #include "Timeline.h"
+ #include "effects/BeatSync.h"

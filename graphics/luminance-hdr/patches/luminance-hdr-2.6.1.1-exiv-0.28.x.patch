@@ -1,0 +1,191 @@
+Description: Fix build with >=exiv2-0.28.0, raise minimum to 0.27.0
+ - enables use of EXIV2_TEST_VERSION macro
+ - add compatibility for exiv2-0.28
+Author: Robert-André Mauchin <zebob.m@gmail.com>
+Origin: upstream, https://github.com/LuminanceHDR/LuminanceHDR/commit/e5ebd48fac2de33f4990f530c68dd4c9d8fc3829
+Last-Update: 2024-02-25
+
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -180,7 +180,7 @@ ENDIF()
+ FIND_PACKAGE(Boost REQUIRED COMPONENTS program_options thread chrono system date_time)
+ INCLUDE_DIRECTORIES(${Boost_INCLUDE_DIR})
+ 
+-FIND_PACKAGE(Exiv2 REQUIRED)
++FIND_PACKAGE(Exiv2 REQUIRED 0.27.0)
+ INCLUDE_DIRECTORIES(${EXIV2_INCLUDE_DIR} "${EXIV2_INCLUDE_DIR}/exiv2")
+ 
+ FIND_PACKAGE(TIFF REQUIRED)
+--- a/src/Exif/ExifOperations.cpp
++++ b/src/Exif/ExifOperations.cpp
+@@ -42,6 +42,14 @@
+ #include "ExifOperations.h"
+ #include "arch/math.h"
+ 
++#if EXIV2_TEST_VERSION(0,28,0)
++typedef Exiv2::Error Exiv2Error;
++typedef Exiv2::Image::UniquePtr ImagePtr;
++#else
++typedef Exiv2::AnyError Exiv2Error;
++typedef Exiv2::Image::AutoPtr ImagePtr;
++#endif
++
+ using namespace boost;
+ using namespace boost::assign;
+ 
+@@ -108,7 +116,7 @@ void copyExifData(const std::string &fro
+ #endif
+ 
+     try {
+-        Exiv2::Image::AutoPtr sourceImage;
++        ImagePtr sourceImage;
+         Exiv2::ExifData srcExifData;
+ 
+         if (!from.empty()) {
+@@ -128,7 +136,7 @@ void copyExifData(const std::string &fro
+         }
+ 
+         // get destination exif data
+-        Exiv2::Image::AutoPtr destinationImage = Exiv2::ImageFactory::open(to);
++        ImagePtr destinationImage = Exiv2::ImageFactory::open(to);
+ 
+         if (dontOverwrite) {
+             // doesn't throw anything if it is empty
+@@ -212,7 +220,7 @@ void copyExifData(const std::string &fro
+             destinationImage->setExifData(srcExifData);
+         }
+         destinationImage->writeMetadata();
+-    } catch (Exiv2::AnyError &e) {
++    } catch (Exiv2Error &e) {
+ #ifndef NDEBUG
+         qDebug() << e.what();
+ #endif
+@@ -250,7 +258,7 @@ float obtain_avg_lum(const std::string&
+ {
+     try
+     {
+-        Exiv2::Image::AutoPtr image = Exiv2::ImageFactory::open(filename);
++        ImagePtr image = Exiv2::ImageFactory::open(filename);
+         image->readMetadata();
+         Exiv2::ExifData &exifData = image->exifData();
+         if (exifData.empty())
+@@ -329,7 +337,7 @@ allowed for ev computation purposes.
+             return -1;
+         }
+     }
+-    catch (Exiv2::AnyError& e)
++    catch (Exiv2Error& e)
+     {
+         return -1;
+     }
+@@ -338,7 +346,7 @@ allowed for ev computation purposes.
+ 
+ float getExposureTime(const std::string &filename) {
+     try {
+-        Exiv2::Image::AutoPtr image = Exiv2::ImageFactory::open(filename);
++        ImagePtr image = Exiv2::ImageFactory::open(filename);
+         image->readMetadata();
+         Exiv2::ExifData &exifData = image->exifData();
+         if (exifData.empty()) return -1;
+@@ -374,14 +382,14 @@ float getExposureTime(const std::string
+         } else {
+             return -1;
+         }
+-    } catch (Exiv2::AnyError &e) {
++    } catch (Exiv2Error &e) {
+         return -1;
+     }
+ }
+ 
+ float getAverageLuminance(const std::string &filename) {
+     try {
+-        Exiv2::Image::AutoPtr image = Exiv2::ImageFactory::open(filename);
++        ImagePtr image = Exiv2::ImageFactory::open(filename);
+         image->readMetadata();
+         Exiv2::ExifData &exifData = image->exifData();
+ 
+@@ -403,7 +411,7 @@ float getAverageLuminance(const std::str
+                   << std::endl;
+ 
+         return -1.0;
+-    } catch (Exiv2::AnyError &e) {
++    } catch (Exiv2Error &e) {
+         return -1.0;
+     }
+ }
+--- a/src/Libpfs/exif/exifdata.cpp
++++ b/src/Libpfs/exif/exifdata.cpp
+@@ -25,6 +25,16 @@
+ #include <exiv2/exiv2.hpp>
+ #include <iostream>
+ 
++#if EXIV2_TEST_VERSION(0,28,0)
++typedef Exiv2::Error Exiv2Error;
++typedef Exiv2::Image::UniquePtr ImagePtr;
++#define EXIV2_TO_INT toInt64
++#else
++typedef Exiv2::AnyError Exiv2Error;
++typedef Exiv2::Image::AutoPtr ImagePtr;
++#define EXIV2_TO_INT toLong
++#endif
++
+ namespace pfs {
+ namespace exif {
+ 
+@@ -52,7 +62,7 @@ ExifData::ExifData(const std::string &fi
+ void ExifData::fromFile(const std::string &filename) {
+     reset();
+     try {
+-        ::Exiv2::Image::AutoPtr image = Exiv2::ImageFactory::open(filename);
++        ::ImagePtr image = Exiv2::ImageFactory::open(filename);
+         image->readMetadata();
+         ::Exiv2::ExifData &exifData = image->exifData();
+ 
+@@ -121,7 +131,7 @@ void ExifData::fromFile(const std::strin
+          */
+         if ((it = exifData.findKey(Exiv2::ExifKey("Exif.Image.Orientation"))) !=
+             exifData.end()) {
+-            long rotation = it->toLong();
++            long rotation = it->EXIV2_TO_INT();
+             switch (rotation) {
+                 case 3:
+                     m_orientation = 180;
+@@ -134,7 +144,7 @@ void ExifData::fromFile(const std::strin
+                     break;
+             }
+         }
+-    } catch (Exiv2::AnyError &e) {
++    } catch (Exiv2Error &e) {
+         return;
+     }
+ }
+--- a/src/TransplantExif/TransplantExifDialog.cpp
++++ b/src/TransplantExif/TransplantExifDialog.cpp
+@@ -27,14 +27,11 @@
+ #include <exif.hpp>
+ #include <image.hpp>
+ #include <exiv2/exiv2.hpp>
+-// Make sure an EXIV2_TEST_VERSION macro exists:
+-#ifdef EXIV2_VERSION
+-# ifndef EXIV2_TEST_VERSION
+-# define EXIV2_TEST_VERSION(major,minor,patch) \
+-    ( EXIV2_VERSION >= EXIV2_MAKE_VERSION(major,minor,patch) )
+-# endif
++
++#if EXIV2_TEST_VERSION(0,28,0)
++typedef Exiv2::Error Exiv2Error;
+ #else
+-# define EXIV2_TEST_VERSION(major,minor,patch) (false)
++typedef Exiv2::AnyError Exiv2Error;
+ #endif
+ 
+ #include "Common/config.h"
+@@ -347,7 +344,7 @@ void TransplantExifDialog::transplant_re
+                 QFile::encodeName((*i_dest)).constData(),
+                 m_Ui->checkBox_dont_overwrite->isChecked());
+             m_Ui->rightlist->item(index)->setBackground(QBrush("#a0ff87"));
+-        } catch (Exiv2::AnyError &e) {
++        } catch (Exiv2Error &e) {
+             add_log_message("ERROR:" + QString::fromStdString(e.what()));
+             m_Ui->rightlist->item(index)->setBackground(QBrush("#ff743d"));
+         }
