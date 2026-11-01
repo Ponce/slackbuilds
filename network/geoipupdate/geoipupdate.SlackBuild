@@ -2,6 +2,9 @@
 
 # Slackware build script for geoipupdate
 
+# Copyright (C) 2026 Zhu, Qun-Ying
+# Modified for Go rewrite (v8+)
+#
 # Copyright 2014 Oleg A. Deordiev Ukraine
 # All rights reserved.
 #
@@ -27,7 +30,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=geoipupdate
-VERSION=${VERSION:-2.5.0}
+VERSION=${VERSION:-8.0.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -54,16 +57,12 @@ OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "i686" ]; then
   SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
 elif [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
 fi
 
 set -e
@@ -74,6 +73,58 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
+
+# Vendor pre-downloaded dependencies for offline build
+mkdir -p vendor/github.com/cenkalti/backoff vendor/github.com/gofrs vendor/github.com/spf13 vendor/golang.org/x
+
+tar xf "$CWD/backoff-5.0.3.tar.gz"
+mv backoff-5.0.3 vendor/github.com/cenkalti/backoff/v5
+
+tar xf "$CWD/flock-0.13.0.tar.gz"
+mv flock-0.13.0 vendor/github.com/gofrs/flock
+
+tar xf "$CWD/pflag-1.0.10.tar.gz"
+mv pflag-1.0.10 vendor/github.com/spf13/pflag
+
+tar xf "$CWD/sync-0.22.0.tar.gz"
+mv sync-0.22.0 vendor/golang.org/x/sync
+
+tar xf "$CWD/sys-0.46.0.tar.gz"
+mv sys-0.46.0 vendor/golang.org/x/sys
+
+cat << 'EOF' > vendor/modules.txt
+# github.com/cenkalti/backoff/v5 v5.0.3
+## explicit; go 1.23
+github.com/cenkalti/backoff/v5
+# github.com/gofrs/flock v0.13.0
+## explicit; go 1.24.0
+github.com/gofrs/flock
+# github.com/spf13/pflag v1.0.10
+## explicit; go 1.12
+github.com/spf13/pflag
+# golang.org/x/sync v0.22.0
+## explicit; go 1.25.0
+golang.org/x/sync/errgroup
+# golang.org/x/sys v0.46.0
+## explicit; go 1.25.0
+golang.org/x/sys/unix
+golang.org/x/sys/windows
+EOF
+
+cat << 'EOF' > go.mod
+module github.com/maxmind/geoipupdate/v8
+
+go 1.25.0
+
+require (
+	github.com/cenkalti/backoff/v5 v5.0.3
+	github.com/gofrs/flock v0.13.0
+	github.com/spf13/pflag v1.0.10
+	golang.org/x/sync v0.22.0
+	golang.org/x/sys v0.46.0
+)
+EOF
+
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -81,28 +132,52 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-CFLAGS="$SLKCFLAGS" \
-CXXFLAGS="$SLKCFLAGS" \
-./configure \
-  --prefix=/usr \
-  --libdir=/usr/lib${LIBDIRSUFFIX} \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --docdir=/usr/doc/$PRGNAM-$VERSION \
-  --build=$ARCH-slackware-linux
+# Compile from source using standard system libraries (CGO enabled with glibc, completely offline)
+export GOPROXY=off
+export CGO_ENABLED=1
+export CGO_CFLAGS="$SLKCFLAGS"
+export CGO_CXXFLAGS="$SLKCFLAGS"
+export GOPATH="$TMP/go"
+mkdir -p "$GOPATH"
 
-make
-make install DESTDIR=$PKG
+go build \
+  -mod=vendor \
+  -ldflags "-s -w -X main.version=$VERSION -X main.defaultConfigFile=/etc/GeoIP.conf -X main.defaultDatabaseDirectory=/usr/share/GeoIP" \
+  -o build/geoipupdate \
+  ./cmd/geoipupdate
 
-find $PKG/usr/man -type f -exec gzip -9 {} \;
-for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+# Install binary
+mkdir -p $PKG/usr/bin
+install -m 0755 build/geoipupdate $PKG/usr/bin/$PRGNAM
 
-mv $PKG/etc/GeoIP.conf $PKG/etc/GeoIP.conf.new
+# Strip binary
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
+# Install configuration template as /etc/GeoIP.conf.new
+mkdir -p $PKG/etc
+sed \
+  -e 's|CONFFILE|/etc/GeoIP.conf|g' \
+  -e 's|DATADIR|/usr/share/GeoIP|g' \
+  conf/GeoIP.conf.default > $PKG/etc/GeoIP.conf.new
+chmod 0640 $PKG/etc/GeoIP.conf.new
+
+# Create directory for GeoIP database files
+mkdir -p $PKG/usr/share/GeoIP
+chmod 0755 $PKG/usr/share/GeoIP
+
+# Install man pages
+mkdir -p $PKG/usr/man/man1 $PKG/usr/man/man5
+install -m 0644 $CWD/geoipupdate.1.gz $PKG/usr/man/man1/
+install -m 0644 $CWD/GeoIP.conf.5.gz $PKG/usr/man/man5/
+
+# Documentation
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a \
+  CHANGELOG.md LICENSE* README* doc/GeoIP.conf.md doc/geoipupdate.md \
+  $PKG/usr/doc/$PRGNAM-$VERSION/
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-cp $CWD/README ChangeLog.md LICENSE README.md $PKG/usr/doc/$PRGNAM-$VERSION/
+cat $CWD/$PRGNAM.info> $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.info
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
