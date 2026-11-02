@@ -2,21 +2,60 @@
 
 # Startup script for munin-node
 
-function munin_start {
+CONF=/etc/munin/munin-node.conf
+
+# The PID file is wherever munin-node.conf says.
+PIDFILE=$(awk '$1 == "pid_file" { print $2 }' "$CONF" 2>/dev/null)
+PIDFILE=${PIDFILE:-/var/run/munin-node.pid}
+
+munin_running() {
+	[ -r "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+}
+
+munin_start() {
+	if munin_running; then
+		echo "munin-node is already running."
+		return 0
+	fi
+	echo "Starting munin-node:  /usr/sbin/munin-node"
 	/usr/sbin/munin-node
 }
 
-function munin_stop {
-	killall munin-node
+munin_stop() {
+	if [ -r "$PIDFILE" ]; then
+		kill "$(cat "$PIDFILE")" 2>/dev/null
+	else
+		killall munin-node 2>/dev/null
+	fi
+	# Wait for it to exit, so a restart can bind the port again.
+	i=0
+	while munin_running && [ $i -lt 10 ]; do
+		sleep 1
+		i=$((i + 1))
+	done
 }
 
-if [ "$1" == 'start' ]; then
-	munin_start
-elif [ "$1" == 'stop' ]; then
-	munin_stop
-elif [ "$1" == 'restart' ]; then
-	munin_stop
-	munin_start
-else
-	echo "usage: rc.munin-node start|stop|restart"
-fi
+case "$1" in
+	start)
+		munin_start
+		;;
+	stop)
+		munin_stop
+		;;
+	restart)
+		munin_stop
+		munin_start
+		;;
+	status)
+		if munin_running; then
+			echo "munin-node is running (PID $(cat "$PIDFILE"))."
+		else
+			echo "munin-node is not running."
+			exit 1
+		fi
+		;;
+	*)
+		echo "usage: rc.munin-node start|stop|restart|status"
+		exit 1
+		;;
+esac

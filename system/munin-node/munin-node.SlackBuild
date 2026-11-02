@@ -11,6 +11,16 @@
 # glitch@glitchwrks.com
 # All rights reserved.
 
+# 20261101 glitch@glitchwrks.com, BUILD=2:
+# - install to /usr/lib/munin rather than straight into /usr/lib.
+# - Java is optional: the JMX plugins are only built with JMX=yes, so
+#   zulu-openjdk8 is no longer required. Without JMX=yes, Java plugins
+#   aren't built even if a JDK is installed.
+# - PID file in /var/run, not /var/run/munin: /var/run doesn't survive a
+#   reboot, so the package's /var/run/munin was gone after the first one.
+#   The package no longer ships anything under /var/run.
+# - Perl modules go to Perl's vendor_perl, not core Perl's /usr/share/perl5.
+
 # 20251008 glitch@glitchwrks.com
 # - updated for Munin 2.0.76
 
@@ -29,7 +39,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=munin-node
 VERSION=${VERSION:-2.0.76}
-BUILD=${BUILD:-1}
+BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 ARCH="noarch"
@@ -64,18 +74,40 @@ find -L . \
 # Patch Makefile.config for Slackware-esque install locations
 patch Makefile.config < $CWD/patches/Makefile.config.patch
 
-# 20220212 bkw: Note: plugins are in /usr/lib/plugins, regardless of
+# 20220212 bkw: Note: plugins are in /usr/lib/munin/plugins, regardless of
 # build architecture, because this is noarch.
 export PERL5LIB=.
-make -j1 LIBDIR=/usr/lib
+
+# Perl modules go in vendor_perl. Makefile.config's default is site_perl,
+# which on Slackware is under /usr/local.
+VENDORLIB=$(perl -MConfig -e 'print $Config{vendorlib}')
+
+# The JMX plugins need a JDK to build and a JRE to run. Munin builds them
+# whenever javac is found, so turn that off explicitly unless JMX=yes.
+# Munin compiles them for Java 7, which javac 20 and later reject; Java 8
+# works with zulu-openjdk8 and newer JDKs alike.
+if [ "${JMX:-no}" = "yes" ]; then
+  JAVA_OPTS=("JAVARUN=${JAVARUN:-/usr/bin/java}" "JFLAGS=-g -source 1.8 -target 1.8 -Xlint")
+  JAVA_INSTALL="install-plugins-java"
+else
+  JAVA_OPTS=("JCVALID=no")
+  JAVA_INSTALL=""
+fi
+
+make -j1 PERLLIB=$VENDORLIB "${JAVA_OPTS[@]}"
 make -j1 install-common-prime install-node-prime \
-	install-plugins-prime LIBDIR=$PKG/usr/lib DESTDIR=$PKG
+	install-plugins-prime $JAVA_INSTALL \
+	PERLLIB=$PKG$VENDORLIB "${JAVA_OPTS[@]}" DESTDIR=$PKG
 
 find $PKG/usr/man -type f -exec gzip -9 {} \;
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-mv $PKG/usr/local/share/ $PKG/usr/
+# Nothing belongs under /usr/local in a package.
 rm -rf $PKG/usr/local
+
+# install-pre creates and chowns STATEDIR (/var/run) to munin. Don't ship it:
+# /var/run exists already, and munin-node writes its PID file there as root.
+rm -rf $PKG/var/run
 
 # 20220426 bkw: docs, please.
 # TODO: maintainer, you should figure out to build the HTML docs using
