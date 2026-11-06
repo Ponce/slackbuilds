@@ -3,6 +3,7 @@
 # Slackware build script for rabbitmq-c
 
 # Copyright 2017 Konrad J. Hambrick, Round Rock, Texas, USA
+# Copyright 2026  Eugene Wissner, Mannheim, Germany
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -23,23 +24,16 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 cd $(dirname $0) ; CWD=$(pwd)
- 
+
 PRGNAM=rabbitmq-c
-VERSION=${VERSION:-0.11.0}
+VERSION=${VERSION:-0.18.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
 # these are rabbitmq-c CMake default options that are incompatible 
-# with a SlackBuild. When turned on executables will be in the 
-# /usr/doc/$PRGNAM-$VERSION/{examples,tests}/bin/ directories
-BUILD_EXAMPLES=${BUILD_EXAMPLES:-OFF}
-BUILD_TESTS=${BUILD_TESTS:-OFF}
-BUILD_TOOLS_DOCS=${BUILD_TOOLS_DOCS:-ON}
-
-# from CMakeLists.txt: tests and examples require the static library
-[  "$BUILD_TESTS"    = "ON" \
--o "$BUILD_EXAMPLES" = "ON" ] && BUILD_STATIC_LIBS=ON
+# with a SlackBuild.
+BUILD_TOOLS=${BUILD_TOOLS:-ON}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -61,13 +55,10 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+if [ "$ARCH" = "i586" -o "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=$ARCH -mtune=i686"
   LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
+elif [ "$ARCH" = "x86_64" -o "$ARCH" = "aarch64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
@@ -83,79 +74,40 @@ cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar -xvf $CWD/$PRGNAM-$VERSION.tar.gz
 cd $PRGNAM-$VERSION
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+find . ! -type l    -a \( \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
 
 mkdir -p build
 cd build
+. /etc/profile.d/cmake-opt.sh || true
+
   cmake \
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DLIB_SUFFIX=${LIBDIRSUFFIX} \
-    -DMAN_INSTALL_DIR=/usr/man \
+    -DCMAKE_INSTALL_LIBDIR=lib${LIBDIRSUFFIX} \
+    -DBUILD_SHARED_LIBS=ON \
+    -DBUILD_STATIC_LIBS=OFF \
+    -DBUILD_TESTING=OFF \
+    -DBUILD_EXAMPLES=OFF \
+    -DBUILD_TOOLS=$BUILD_TOOLS \
+    -DBUILD_TOOLS_DOCS=OFF \
     -DCMAKE_BUILD_TYPE=Release ..
   make
-  [ "$BUILD_API_DOCS" = "ON" ] && BUILD_API_DOCS=ON make docs
-  make install DESTDIR=$PKG
+  make install/strip DESTDIR=$PKG
 cd ..
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS CONTRIBUTING.md ChangeLog.md LICENSE-MIT \
-      THANKS TODO README* \
-      $PKG/usr/doc/$PRGNAM-$VERSION/
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
-
-if [ "$BUILD_API_DOCS" = "ON" ]; then
-  cp -a build/docs/html $PKG/usr/doc/$PRGNAM-$VERSION/
-fi
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a \
+  AUTHORS CONTRIBUTING.md ChangeLog.md LICENSE THANKS README.md \
+  $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 for d in examples tests; do
-  mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/$d/src
-  cp -a $d/* $PKG/usr/doc/$PRGNAM-$VERSION/$d/src/ || true
+  mkdir -p $PKGDOC/$d/src
+  cp -a $d/* $PKGDOC/$d/src/ || true
 done
-
-if [ "$BUILD_EXAMPLES" = "ON" ] ; then
-  mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/examples/bin
-  cp -a build/examples/* $PKG/usr/doc/$PRGNAM-$VERSION/examples/bin/ || true
-fi
-if [ "$BUILD_TESTS"    = "ON" ] ; then
-  mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION/tests/bin
-  cp -a build/tests/* $PKG/usr/doc/$PRGNAM-$VERSION/tests/bin/ || true
-fi
-
-# maybe make man entries in /usr/man/man1 and /usr/man/man7
-if [ -x /usr/bin/xmlto ] ; then
-  if [ "$BUILD_TOOLS" != "OFF" -a "$BUILD_TOOLS_DOCS" != "OFF" ] ;
-  then
-    mkdir -p $PKG/usr/man || true
-    cd $TMP/$PRGNAM-$VERSION/tools/doc
-    touch man-date.ent
-  
-    for x in *.xml ; do
-      xmlto man $x
-    done
-  
-    for m in *.[1-9] ; do
-       s="$(echo $m |awk -F'.' '{ print $NF }')"
-  
-       [ "$s" = "" ] && continue
-       
-       d="$PKG/usr/man/man${s}"
-  
-       [ ! -d "$d" ] && mkdir -p "$d"
-  
-       gzip < $m > $d/$m.gz
-    done
-  fi
-fi
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
