@@ -1,0 +1,53 @@
+diff -ruN a/src/framework/audio/driver/platform/lin/pwaudiodriver.cpp b/src/framework/audio/driver/platform/lin/pwaudiodriver.cpp
+--- a/src/framework/audio/driver/platform/lin/pwaudiodriver.cpp	2026-11-05 22:48:21.745460035 +0000
++++ b/src/framework/audio/driver/platform/lin/pwaudiodriver.cpp	2026-11-05 22:48:21.763460036 +0000
+@@ -511,7 +511,13 @@
+     }
+ 
+     const auto maxFrames = buf->datas[0].maxsize / m_stride;
++#if PW_CHECK_VERSION(0, 3, 49)
+     const auto numFrames = b->requested ? SPA_MIN(b->requested, maxFrames) : maxFrames;
++#else
++    // pw_buffer::requested only exists since PipeWire 0.3.49 (Slackware 15.0 ships 0.3.44):
++    // fall back to the period we asked for via node.latency, bounded by the buffer size.
++    const auto numFrames = SPA_MIN(static_cast<decltype(maxFrames)>(m_spec.output.samplesPerChannel), maxFrames);
++#endif
+     const auto len = numFrames * m_stride;
+ 
+     m_spec.callback(dst, len);
+diff -ruN a/src/framework/audio/main/internal/audioconfiguration.cpp b/src/framework/audio/main/internal/audioconfiguration.cpp
+--- a/src/framework/audio/main/internal/audioconfiguration.cpp	2026-11-05 22:49:03.124461992 +0000
++++ b/src/framework/audio/main/internal/audioconfiguration.cpp	2026-11-05 22:49:03.142461993 +0000
+@@ -23,6 +23,9 @@
+ 
+ //TODO: remove with global clearing of Q_OS_*** defines
+ #include <QtGlobal>
++#include <QFileInfo>
++
++#include "muse_framework_config.h"
+ 
+ #include "global/settings.h"
+ 
+@@ -62,7 +65,21 @@
+ #if defined(Q_OS_WIN)
+     settings()->setDefaultValue(AUDIO_API_KEY, Val("WASAPI"));
+ #elif defined(Q_OS_LINUX) || defined(Q_OS_FREEBSD)
+-    settings()->setDefaultValue(AUDIO_API_KEY, Val("ALSA"));
++    {
++        // The ALSA driver hangs the GUI thread when ALSA "default" is routed through
++        // pipewire-alsa (close() joins an audio thread stuck in snd_pcm_writei/drain).
++        // Prefer the native PipeWire driver when it is built in and a server is running.
++        std::string defaultApi = "ALSA";
++#ifdef MUSE_MODULE_AUDIO_PIPEWIRE
++        const QString runtimeDir = qEnvironmentVariable("PIPEWIRE_RUNTIME_DIR", qEnvironmentVariable("XDG_RUNTIME_DIR"));
++        const QString remote = qEnvironmentVariable("PIPEWIRE_REMOTE", QStringLiteral("pipewire-0"));
++        if (!qEnvironmentVariableIsSet("MUSESCORE_FORCE_ALSA") && !runtimeDir.isEmpty()
++            && QFileInfo::exists(runtimeDir + QLatin1Char('/') + remote)) {
++            defaultApi = "PipeWire";
++        }
++#endif
++        settings()->setDefaultValue(AUDIO_API_KEY, Val(defaultApi));
++    }
+ #elif defined(Q_OS_MACOS)
+     settings()->setDefaultValue(AUDIO_API_KEY, Val("CoreAudio"));
+ #endif
