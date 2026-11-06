@@ -27,7 +27,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=openmsx
-VERSION=${VERSION:-20.0}
+VERSION=${VERSION:-22.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -64,6 +64,27 @@ fi
 
 set -e
 
+# openMSX needs g++ 13 or newer (C++23). Slackware 15.0 ships gcc 11,
+# so use the gcc14 package from SlackBuilds.org when it is installed.
+if [ -f /etc/profile.d/gcc14.sh ]; then
+  . /etc/profile.d/gcc14.sh
+fi
+CXX=${CXX:-g++}
+if [ "$($CXX -dumpversion | cut -d. -f1)" -lt 13 ]; then
+  echo "ERROR: openMSX $VERSION needs g++ 13 or newer, found $($CXX -dumpversion)."
+  echo "Install gcc14 from SlackBuilds.org and try again."
+  exit 1
+fi
+# If that g++ has its own libstdc++ (e.g. gcc14 in /opt), link against it and
+# set a RUNPATH so the binary finds it at runtime: the probed libraries add
+# -L/usr/lib64 and an rpath to /usr/lib64, where the older libstdc++ lives.
+GXXLIBDIR=$(dirname $(readlink -f $($CXX -print-file-name=libstdc++.so)))
+case "$GXXLIBDIR" in
+  /usr/lib|/usr/lib64) ;;
+  *) CXX="$CXX -L$GXXLIBDIR -Wl,-rpath,$GXXLIBDIR" ;;
+esac
+export CXX
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
@@ -85,14 +106,14 @@ echo "INSTALL_BINARY_DIR:=/usr/bin" >> build/custom.mk
 
 ./configure
 
-make
-make install DESTDIR=$PKG
+make CXX="$CXX"
+make install CXX="$CXX" DESTDIR=$PKG
 
 # Build DMK tools
 cd Contrib/dmk
 for DMKTOOL in analyze-dmk combine-dmk der2dmk dsk2dmk empty-dmk svi2dmk svicpm2dmk; do
 	echo "Building $DMKTOOL"
-	g++ -std=c++20 $SLKCFLAGS -o $DMKTOOL $DMKTOOL.cc
+	$CXX -std=c++23 $SLKCFLAGS -o $DMKTOOL $DMKTOOL.cc
 	cp $DMKTOOL $PKG/usr/bin
 	chmod 755 $PKG/usr/bin/$DMKTOOL
 done
