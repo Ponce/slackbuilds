@@ -11,3 +11,12 @@ config() {
   # Otherwise, we leave the .new copy for the admin to consider...
 }
 
+if [ -x /sbin/setcap ]
+then
+  /bin/chmod -c 750 \
+    usr/bin/kismet_cap_linux_wifi \
+    usr/bin/kismet_cap_linux_bluetooth
+  /sbin/setcap \
+    cap_net_raw,cap_net_admin=eip usr/bin/kismet_cap_linux_wifi \
+    cap_net_raw,cap_net_admin=eip usr/bin/kismet_cap_linux_bluetooth
+fi
