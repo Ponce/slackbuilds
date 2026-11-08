@@ -1,0 +1,304 @@
+From 70a65268beea7ace1f53c9676dccbc219f894277 Mon Sep 17 00:00:00 2001
+From: Manuel Moos <z-man@users.sf.net>
+Date: Sat, 1 Mar 2025 21:10:01 +0100
+Subject: [PATCH] First draft of impelementing downloading using curl
+
+---
+ src/network/nKrawall.h          |   2 +-
+ src/network/nKrawallPrivate.cpp |  31 ++-----
+ src/tools/tResourceManager.cpp  | 160 +++++++++++++++++++++++++-------
+ src/tools/tResourceManager.h    |  12 +++
+ 4 files changed, 149 insertions(+), 56 deletions(-)
+
+diff --git a/src/network/nKrawall.h b/src/network/nKrawall.h
+index a73328ddd..363bee0c0 100644
+--- a/src/network/nKrawall.h
++++ b/src/network/nKrawall.h
+@@ -262,7 +262,7 @@ public:
+                                         nPasswordCheckData const & data );
+ 
+     // fetches an URL content, return http return code (-1 if total failure), fill result stream.
+-    static int FetchURL( tString const & authority, char const * query, std::ostream & target, int maxlen = 10000 );
++    static int FetchURL(tString const& authority, char const* query, std::ostream& target);
+ 
+ #ifdef KRAWALL_SERVER_LEAGUE
+     // secret key to encrypt server->master server league transfer
+diff --git a/src/network/nKrawallPrivate.cpp b/src/network/nKrawallPrivate.cpp
+index bfaabeee8..a0d6a37e8 100644
+--- a/src/network/nKrawallPrivate.cpp
++++ b/src/network/nKrawallPrivate.cpp
+@@ -37,6 +37,7 @@ the executable is not distributed).
+ #include "tConsole.h"
+ #include "nNetwork.h"
+ #include "tConfiguration.h"
++#include "tResourceManager.h"
+ #include "tArray.h"
+ 
+ #include <string>
+@@ -447,7 +448,7 @@ void nKrawall::CheckScrambledPassword( nCheckResultBase & result,
+     }
+ }
+ 
+-int nKrawall::FetchURL( tString const & authority, char const * query, std::ostream & target, int maxlen )
++int nKrawall::FetchURL(tString const& authority, char const* query, std::ostream& target)
+ {
+     // compose real URL
+     std::ostringstream fullURL;
+@@ -458,31 +459,15 @@ int nKrawall::FetchURL( tString const & authority, char const * query, std::ostr
+     // con << "Fetching authentication URL " << fullURL.str() << "\n";
+ 
+     // fetch URL
+-    void * ctxt = xmlNanoHTTPOpen( fullURL.str().c_str(), NULL);
+-    if (ctxt == NULL)
+-    {
+-        return -1;
+-    }
+-
+-    int rc = xmlNanoHTTPReturnCode(ctxt);
++    tResourceManager::Result ret = tResourceManager::FetchURI(fullURL.str().c_str(), target);
+ 
+-    // read content
+-    char buf[1000];
+-    buf[0] = 0;
+-    unsigned int len = 1;
+-    while ( len > 0 && maxlen > 0 )
++    switch (ret)
+     {
+-        int max = sizeof(buf);
+-        if ( max > maxlen )
+-            max = maxlen;
+-        len = xmlNanoHTTPRead( ctxt, &buf, max );
+-        target.write( buf, len );
+-        maxlen -= len;
++    case tResourceManager::Result::OK:
++        return 200;
++    default:
++        return -1;
+     }
+-
+-    xmlNanoHTTPClose(ctxt);
+-
+-    return rc;
+ }
+ 
+ #ifdef KRAWALL_SERVER_LEAGUE
+diff --git a/src/tools/tResourceManager.cpp b/src/tools/tResourceManager.cpp
+index 60d9a92e4..6f689a0a5 100644
+--- a/src/tools/tResourceManager.cpp
++++ b/src/tools/tResourceManager.cpp
+@@ -5,6 +5,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <sys/stat.h>
++#include <fstream>
+ #include <sys/types.h>
+ 
+ #include <libxml/nanohttp.h>
+@@ -14,6 +15,50 @@
+ #include "tResourceManager.h"
+ #include "tString.h"
+ 
++#ifndef LIBXML_HTTP_ENABLED
++#ifdef LIBCURL_PROTOCOL_HTTP
++#include <curl/curl.h>
++
++class tCurlGlobal
++{
++public:
++    tCurlGlobal()
++    {
++        curl_global_init(CURL_GLOBAL_DEFAULT);
++    };
++
++    ~tCurlGlobal()
++    {
++        curl_global_cleanup();
++    }
++};
++
++class tCurlLocal
++{
++private:
++    CURL* _handle;
++
++public:
++    tCurlLocal()
++    {
++        static tCurlGlobal curlGlobal;
++        _handle = curl_easy_init();
++    };
++
++    ~tCurlLocal()
++    {
++        curl_easy_cleanup(_handle);
++    }
++
++    operator CURL*()
++    {
++        return _handle;
++    }
++};
++
++#endif
++#endif
++
+ // server determined resource repository
+ tString tResourceManager::resRepoServer("http://resource.armagetronad.net/resource/");
+ // the nSettingItem is in gStuff.cpp
+@@ -22,47 +67,98 @@ tString tResourceManager::resRepoServer("http://resource.armagetronad.net/resour
+ tString tResourceManager::resRepoClient("http://resource.armagetronad.net/resource/");
+ static tSettingItem<tString> conf_res_repo("RESOURCE_REPOSITORY_CLIENT", tResourceManager::resRepoClient);
+ 
+-static int myHTTPFetch(const char *URI, const char *filename, const char *savepath)
++tResourceManager::Result tResourceManager::FetchURI(const char* URI, std::ostream& o, int maxLen)
+ {
+-    void *ctxt = NULL;
+-    char *buf = NULL;
+-    FILE* fd;
+-    int len, rc;
+-
+-    con << tOutput( "$resource_downloading", URI );
+-    // con << "Downloading " << URI << "...\n";
++#ifdef LIBXML_HTTP_ENABLED
++    {
++        void* ctxt = NULL;
++        int len, rc;
++
++        ctxt = xmlNanoHTTPOpen(URI, NULL);
++        if (ctxt == NULL)
++        {
++            con << tOutput("$resource_fetcherror_noconnect", URI);
++            return ERROR_URI;
++        }
+ 
+-    ctxt = xmlNanoHTTPOpen(URI, NULL);
+-    if (ctxt == NULL) {
+-        con << tOutput( "$resource_fetcherror_noconnect", URI );
+-        return 1;
+-    }
++        if ((rc = xmlNanoHTTPReturnCode(ctxt)) != 200)
++        {
++            con << tOutput(rc == 404 ? "$resource_fetcherror_404" : "$resource_fetcherror", rc);
++            return rc == 404 ? ERROR_NOACCESS : ERROR_NOTFOUND;
++        }
+ 
+-    if ( (rc = xmlNanoHTTPReturnCode(ctxt)) != 200 ) {
+-        con << tOutput( rc == 404 ? "$resource_fetcherror_404" : "$resource_fetcherror", rc );
+-        return 2;
+-    }
++        // xmlNanoHTTPFetchContent( ctxt, &buf, &len );
++        char buf[10000];
++        while ((len = xmlNanoHTTPRead(ctxt, buf, sizeof(buf))) > 0)
++        {
++            if (maxLen >= 0)
++            {
++                if (maxLen == 0)
++                    break;
++                len = std::min(len, maxLen);
++                maxLen -= len;
++            }
++            o.write(buf, len);
++        }
+ 
+-    fd = fopen(savepath, "w");
+-    if (fd == NULL) {
+         xmlNanoHTTPClose(ctxt);
+-        con << tOutput( "$resource_no_write", savepath );
+-        return 3;
+     }
+-
+-    //xmlNanoHTTPFetchContent( ctxt, &buf, &len );
+-    int maxlen = 10000;
+-    buf = (char*)malloc(maxlen);
+-    while( (len = xmlNanoHTTPRead(ctxt, buf, maxlen)) > 0 ) {
+-        Ignore( fwrite(buf, len, 1, fd) );
++#else
++#ifdef LIBCURL_PROTOCOL_HTTP
++    {
++        tCurlLocal handle;
++
++        // Set the URL to request
++        curl_easy_setopt(handle, CURLOPT_URL, "https://www.example.com");
++        // Set the callback function to handle the response
++        curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, [](char* data, size_t size, size_t nmemb, void* userp) {
++            // Cast the user pointer to an ostream and write the data to it
++            static_cast<std::ostream*>(userp)->write(data, size);
++            // Return the number of bytes processed
++            return size * nmemb;
++        });
++        // Set the user pointer to be an ostream to which the response will be written
++        std::ostringstream response;
++        curl_easy_setopt(handle, CURLOPT_WRITEDATA, &response);
++        // Perform the request
++        CURLcode result = curl_easy_perform(handle);
++        // Check the result
++        if (result != CURLE_OK)
++        {
++            // If the request failed, print an error message
++            std::cerr << "curl_easy_perform() failed: " << curl_easy_strerror(result) << std::endl;
++        }
++        else
++        {
++            // If the request was successful, print the response
++            std::cout << response.str() << std::endl;
++        }
++        // Clean up
++        curl_easy_cleanup(handle);
+     }
+-    free(buf);
+-
+-    xmlNanoHTTPClose(ctxt);
+-    fclose(fd);
++#else
++    con << "FAILED libcurl or libxml's nanohttp required";
++    return ERROR_UNKNOWN;
++#endif
++#endif
++    con << "OK\n";
++    return Result::OK;
++}
+ 
++static int myHTTPFetch(const char* URI, const char* filename, const char* savepath)
++{
++    con << tOutput("$resource_downloading", URI);
++    // con << "Downloading " << URI << "...\n";
+ 
+-    con << "OK\n";
++    try
++    {
++        std::ofstream o{savepath};
++        return tResourceManager::FetchURI(URI, o);
++    }
++    catch (...)
++    {
++        return 4;
++    }
+ 
+     return 0;
+ }
+diff --git a/src/tools/tResourceManager.h b/src/tools/tResourceManager.h
+index 192c37581..0421bff60 100644
+--- a/src/tools/tResourceManager.h
++++ b/src/tools/tResourceManager.h
+@@ -6,6 +6,18 @@
+ //! resource manager: fetches and caches resources from repositories or arbitrary URIs
+ class tResourceManager {
+ public:
++    enum Result
++    {
++        OK = 0,
++        ERROR_UNKNOWN = 1,
++        ERROR_URI = 2,      // URI not well formed
++        ERROR_NOTFOUND = 3, // URI not found
++        ERROR_NOACCESS = 4  // Access denied
++    };
++
++    // fetches an URI and stores it in the provided stream, up to maxLen bytes
++    static Result FetchURI(const char* URI, std::ostream& o, int maxLen = -1);
++
+     //! Return the position of the resource in the cache
+     static tString locateResource(const char *uri, const char *file);
+     //! opens a resource
+-- 
+GitLab
+
