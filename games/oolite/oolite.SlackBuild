@@ -25,10 +25,13 @@
 
 # Modified by the SlackBuilds.org project.
 
+# NOTE: the source zip is self-contained (all git submodules, including the
+# SpiderMonkey JS engine, are bundled). Nothing is downloaded during the build.
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=oolite
-VERSION=${VERSION:-1.90}
+VERSION=${VERSION:-1.92.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -50,18 +53,14 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
+# Upstream only ships a prebuilt static SpiderMonkey for x86_64
+# (deps/Linux-deps/x86_64/mozilla/libjs_static.a), and GNUmakefile
+# hardcodes that path.
+if [ "$ARCH" = "x86_64" ]; then
   SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
 else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
+  echo "$PRGNAM: ARCH $ARCH is not supported, only x86_64." >&2
+  exit 1
 fi
 
 set -e
@@ -70,8 +69,10 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-source-$VERSION
-tar vxf $CWD/$PRGNAM-source-$VERSION.tar.bz2
+# the zip has no top-level directory
+mkdir $PRGNAM-source-$VERSION
 cd $PRGNAM-source-$VERSION
+unzip -q $CWD/$PRGNAM-source-$VERSION.zip
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -79,27 +80,38 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-# Make sure only system libs will be used
-cd $PRGNAM-source-$VERSION
-rm deps/Linux-deps/x86*/lib/*
+# Make sure only system libs will be used (the bundled static
+# SpiderMonkey in deps/Linux-deps/x86_64/mozilla is still required)
+rm -f deps/Linux-deps/x86*/lib/*
 rm -rf deps/Linux-deps/include/*
 
-chmod +x tools/mkmanifest.sh
+chmod +x tools/mkmanifest.sh ShellScripts/common/*.sh
 source /usr/share/GNUstep/Makefiles/GNUstep.sh
 export GNUSTEP_MAKEFILES=/usr/share/GNUstep/Makefiles
 sed -i \
-  -e "/ADDITIONAL_OBJCFLAGS/s/=/= ${SLKCFLAGS}/" \
-  -e "s/-mtune=generic//g" \
-  -e "/ADDITIONAL_OBJC_LIBS/s/+= -lespeak/+= -lespeak-ng/" \
+  -e "/ADDITIONAL_OBJCFLAGS.*-DLINUX -DXP_UNIX/s/+=/+= ${SLKCFLAGS}/" \
+  -e "/ADDITIONAL_CFLAGS.*-DLINUX/s/+=/+= ${SLKCFLAGS}/" \
   GNUmakefile
 
-#make -f Makefile ESPEAK=yes use_deps=no debug=no release
-make -f Makefile release
+# VER_FULL is normally derived from git metadata, which the release zip
+# does not contain, so set it explicitly.
+make -f Makefile release-deployment VER_FULL=$VERSION
 
-mkdir -p $PKG/usr/share/{oolite,pixmaps,applications}
-cp -a oolite.app/* $PKG/usr/share/oolite/
-cp installers/FreeDesktop/oolite-icon.png $PKG/usr/share/pixmaps
-cp installers/FreeDesktop/oolite.desktop $PKG/usr/share/applications
+mkdir -p $PKG/usr/share/oolite
+cp -a oolite.app/. $PKG/usr/share/oolite/
+# We use our own launcher; drop upstream's wrapper and its prebuilt
+# splash-screen binary.
+rm -f $PKG/usr/share/oolite/{run_oolite.sh,splash-launcher}
+
+mkdir -p $PKG/usr/share/applications
+sed -e 's/\r$//' -e 's/^Exec=.*/Exec=oolite/' \
+  installers/FreeDesktop/space.oolite.Oolite.desktop \
+  > $PKG/usr/share/applications/space.oolite.Oolite.desktop
+install -D -m 644 Resources/Binary/Textures/oolite-logo1.png \
+  $PKG/usr/share/icons/hicolor/256x256/apps/space.oolite.Oolite.png
+mkdir -p $PKG/usr/share/pixmaps
+ln -s ../icons/hicolor/256x256/apps/space.oolite.Oolite.png \
+  $PKG/usr/share/pixmaps/space.oolite.Oolite.png
 
 find $PKG -type f -exec file {} + | grep -e "executable" -e "shared object" | grep ELF \
   | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
@@ -111,7 +123,7 @@ source /usr/share/GNUstep/Makefiles/GNUstep.sh
 [ ! -d ~/.Oolite/AddOns ] && mkdir -p ~/.Oolite/AddOns
 [ ! -d ~/GNUstep/Library/ApplicationSupport/Oolite/ManagedAddOns ] && \
   mkdir -p ~/GNUstep/Library/ApplicationSupport/Oolite/ManagedAddOns
-/usr/share/oolite/oolite "$@"
+exec /usr/share/oolite/oolite "$@"
 EOF
 chmod 755 $PKG/usr/games/oolite
 
@@ -122,7 +134,7 @@ for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; r
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  Doc/{*.txt,*.TXT,*.pdf} \
+  README.md LICENSE.md Doc/{*.txt,*.TXT,*.pdf} \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
