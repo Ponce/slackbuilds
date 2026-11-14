@@ -27,7 +27,7 @@ cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=hipSYCL
 SRCNAM=AdaptiveCpp
-VERSION=${VERSION:-0.9.3}
+VERSION=${VERSION:-25.10.0}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -81,6 +81,16 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
+# force llvm 22.x with -DACPP_EXPERIMENTAL_LLVM=ON or enable below
+# to use this with llvm-opt
+if [ "${LLVM_OPT:-ON}" = "ON" ]; then
+  export PATH="/opt/llvm-opt/bin:$PATH"
+  if [ -z "$LD_LIBRARY_PATH" ]; then
+    export LD_LIBRARY_PATH="/opt/llvm-opt/lib$LIBDIRSUFFIX"
+  else
+    export LD_LIBRARY_PATH="/opt/llvm-opt/lib$LIBDIRSUFFIX:$LD_LIBRARY_PATH"
+  fi
+fi
 
 # enable CUDA
 if [ "${CUDA:-no}" == "yes" ];then
@@ -92,13 +102,17 @@ if [ "${ROCM:-no}" == "yes" ];then
   OPTS="-DWITH_ROCM_BACKEND=ON"
 fi
 
+# enable OPENCL
+if [ "${OPENCL:-no}" == "yes" ];then
+  OPTS="-DWITH_OPENCL_BACKEND=ON"
+fi
+
 # fix lib installation
 sed -i 's/LIBRARY DESTINATION lib/&'${LIBDIRSUFFIX}'/' \
-	src/runtime/CMakeLists.txt
+  src/{common,compiler,compiler/llvm-to-backend,runtime}/CMakeLists.txt
 sed -i 's/ARCHIVE DESTINATION lib/&'${LIBDIRSUFFIX}'/' \
-	src/runtime/CMakeLists.txt
-
-# NOTE: fails to build with ACCELERATED_CPU=ON
+  src/{common,compiler,compiler/llvm-to-backend,runtime}/CMakeLists.txt
+sed -i 's/} DESTINATION lib/&'${LIBDIRSUFFIX}'/' src/libkernel/sscp/CMakeLists.txt
 
 mkdir -p build
 cd build
@@ -109,20 +123,20 @@ cd build
     -DCMAKE_INSTALL_LIBDIR=lib${LIBDIRSUFFIX} \
     -DCMAKE_INSTALL_MANDIR=/usr/man \
     $OPTS \
-    -DSYCLCC_CONFIG_FILE_GLOBAL_INSTALLATION=ON \
-    -DWITH_ACCELERATED_CPU=OFF \
     -DCMAKE_BUILD_TYPE=Release ..
   make
   make install/strip DESTDIR=$PKG
 cd ..
 
 # fix for cmake files at wrong place.
-# Don't found another way to do it let's manually move them
+# Didn't find another way to do this, it let's manually move them
 if [ -n "$LIBDIRSUFFIX" ] ; then
-  mv $PKG/usr/lib/* $PKG/usr/lib${LIBDIRSUFFIX}
+  mv $PKG/usr/lib/cmake $PKG/usr/lib${LIBDIRSUFFIX}/
+  mv $PKG/usr/lib/hipSYCL/* $PKG/usr/lib${LIBDIRSUFFIX}/hipSYCL/
   # fix for the cmake files configured to use /lib/cmake path 
   sed -i 's#/lib/cmake#/lib'${LIBDIRSUFFIX}'/cmake#g' \
     $PKG/usr/lib${LIBDIRSUFFIX}/cmake/hipSYCL/hipsycl-config.cmake
+  rmdir $PKG/usr/lib/hipSYCL $PKG/usr/lib
 fi
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
