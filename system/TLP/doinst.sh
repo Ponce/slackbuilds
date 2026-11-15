@@ -24,3 +24,4 @@ preserve_perms() {
 
 config etc/tlp.conf.new
 preserve_perms etc/rc.d/rc.tlp.new
+preserve_perms etc/rc.d/rc.tlp-pd.new
