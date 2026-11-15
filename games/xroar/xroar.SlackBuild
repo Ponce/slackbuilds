@@ -6,6 +6,7 @@
 
 # Licensed under the WTFPL. See http://www.wtfpl.net/txt/copying/ for details.
 
+# 20261115 bkw: update for 1.13, add SDL3 variable.
 # 20260801 bkw: update for 1.12.1.
 # 20251216 bkw: update for 1.10.
 # 20250612 bkw: update for 1.8.2
@@ -39,7 +40,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=xroar
-VERSION=${VERSION:-1.12.1}
+VERSION=${VERSION:-1.13}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -61,13 +62,10 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+if [ "$ARCH" = "i586" -o "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=$ARCH -mtune=i686"
   LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
+elif [ "$ARCH" = "x86_64" -o "$ARCH" = "aarch64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
@@ -81,11 +79,20 @@ set -e
 # Lots of these. Check them immediately (don't bother to extract the
 # source if there's a problem).
 
-PKGS="sdl2 gtk+-3.0"
+PKGS="gtk+-3.0"
 
 # Most users will want to leave OSS and PULSE alone.
 [ "${OSS:-no}"    = "yes" ] ||   OSSOPT="--without-oss"
 [ "${PULSE:-yes}" = "yes" ] || PULSEOPT="--without-pulse"
+
+# 20261115 bkw: SDL3 is supported these days.
+if [ "${SDL3:-no}" = "yes" ]; then
+  SDLOPT="--without-sdl2"
+  PKGS+=" sdl3"
+else
+  SDLOPT="--without-sdl3"
+  PKGS+=" sdl2"
+fi
 
 # Not sure why anyone would need this, but it's easy to support.
 JACKOPT="--without-jack"
@@ -103,12 +110,11 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.gz --no-same-owner
 cd $PRGNAM-$VERSION
-chown -R root:root .
-find . ! -type l    -a \
+find . ! -type l    -a \( \
   \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
-  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \)
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
 
 # 20241123 bkw: the old gtk2 + sdl1 + gtkglext UI can still be built,
 # but gtk3 and sdl2 have been part of core Slackware for years. From
@@ -125,7 +131,7 @@ LDFLAGS="-lm" \
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
 ./configure \
-  $OSSOPT $PULSEOPT $JACKOPT \
+  $OSSOPT $PULSEOPT $JACKOPT $SDLOPT \
   --bindir=/usr/games \
   --prefix=/usr \
   --libdir=/usr/lib${LIBDIRSUFFIX} \
@@ -144,7 +150,7 @@ make install DESTDIR=$PKG
 strip $PKG/usr/games/$PRGNAM
 
 # reset these for use in the slack-desc
-JACK=no; PULSE=no; OSS=no; ALSA=no
+JACK=no; PULSE=no; OSS=no; ALSA=no; SDL3=no
 
 # actually examine the binary to figure out build options. this may
 # seem like overkill, but it's very handy when updating to new xroar
@@ -153,10 +159,11 @@ JACK=no; PULSE=no; OSS=no; ALSA=no
 # 20241123 bkw: go ahead and include ALSA: yes|no in the slack-desc. This
 # will always be yes for a regular Slackware install, but it might be
 # no if someone's e.g. using OSSv4.
-objdump -p $PKG/usr/games/$PRGNAM | grep NEEDED | awk '{ print $2 }' > ldd.tmp
-grep -q libjack   ldd.tmp && JACK=yes
+patchelf --print-needed $PKG/usr/games/$PRGNAM > ldd.tmp
+grep -q libjack   ldd.tmp &&  JACK=yes
 grep -q libpulse  ldd.tmp && PULSE=yes
-grep -q libasound ldd.tmp && ALSA=yes
+grep -q libasound ldd.tmp &&  ALSA=yes
+grep -q libSDL3   ldd.tmp &&  SDL3=yes
 strings $PKG/usr/games/$PRGNAM | grep -q /dev/dsp && OSS=yes
 
 # man page needs to be in section 6, since this is in games/
@@ -209,6 +216,7 @@ sed -e "s,@JACK@,$JACK," \
     -e "s,@PULSE@,$PULSE," \
     -e "s,@OSS@,$OSS," \
     -e "s,@ALSA@,$ALSA," \
+    -e "s,@SDL3@,$SDL3," \
     -e "s,: no,& ,g" \
     $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh

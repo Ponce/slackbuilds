@@ -1,16 +1,20 @@
 xroar supports multiple audio systems and has support for both Gtk+2
-and Gtk+3, as well as SDL 1.x and SDL 2.x.
+and Gtk+3, as well as SDL 2 and SDL 3.
 
-This SlackBuild only builds the Gtk+3 and SDL 2 user interfaces. There
-are no longer any options to build with Gtk+2 or SDL 1.
+This SlackBuild only builds the Gtk+3 and SDL 2 or 3 user
+interfaces. There are no longer any options to build with Gtk+2, and
+SDL 1 support was dropped by upstream.
 
-By default, support for PulseAudio and plain ALSA audio are built. For
-most users, these defaults are just fine. If you have different needs,
-read on.
+By default, support for SDL 2, PulseAudio, and plain ALSA audio are
+built. For most users, these defaults are just fine. If you have
+different needs, read on.
 
 
 Optional Dependencies
 =====================
+
+SDL3 - If you want to use SDL 3, install SDL3 and set SDL3=yes
+  in the environment before building xroar.
 
 jack - If you want to use JACK for audio output, install jack and set
   JACK=yes in the environment before building xroar. If JACK audio has
@@ -25,6 +29,8 @@ jack - If you want to use JACK for audio output, install jack and set
 Environment Variables
 =====================
 
+SDL3 - see above. Default: no. Most users won't need this.
+
 JACK - see above. Default: no. Most users won't need this.
 
 OSS - use OSS for audio? Default is "no", export OSS="yes" to enable.
@@ -33,4 +39,4 @@ OSS - use OSS for audio? Default is "no", export OSS="yes" to enable.
 PULSE - use PulseAudio? Default is "yes", export PULSE="no" to disable.
   Most users won't need this.
 
-ALSA audio is always enabled.
+There is no environment variable for ALSA audio. It's is always enabled.
