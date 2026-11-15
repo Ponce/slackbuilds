@@ -29,7 +29,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=apache-activemq
-VERSION=${VERSION:-5.14.5}
+VERSION=${VERSION:-6.4.0}
 BUILD=${BUILD:-2}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -92,7 +92,7 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION-bin.tar.gz
+tar xvf $CWD/$PRGNAM-$VERSION-bin.tar.gz --no-same-owner
 cd $PRGNAM-$VERSION
 
 chown -R root:root .
@@ -111,13 +111,12 @@ mkdir -p $PKG/etc/activemq \
   $PKG/usr/share/activemq/data \
   $PKG/var/{run,lib,log}/activemq
 
-cp -f conf/* $PKG/etc/activemq/
+cp -rf conf/* $PKG/etc/activemq/
 rm -rf bin/macosx bin/$wrongbindir
 
-# 20220408 bkw: the binaries should be stripped, unless that breaks
-# something. I don't know how to tell, so this is commented out.
-# Maintainer of this build, please uncomment and check?
-#strip bin/linux-x86*/{wrapper,libwrapper.so}
+if [ "$ARCH" = "x86_64" ]; then
+  strip bin/linux-x86*/{wrapper,libwrapper.so}
+fi
 
 cp -rf bin lib $PKG/usr/share/activemq/
 cp -rf webapps $PKG/var/lib/activemq/
@@ -127,9 +126,14 @@ chown -R $ACTIVEMQ_USER:$ACTIVEMQ_GROUP $PKG/var/{run,lib,log}/activemq
 
 # LOTS of stuff, some of them are just sample config files though.
 # First I fix log4j properties, then I rename the files.
+
+sed -i 's/127\.0\.0\.1/0\.0\.0\.0\/0/g' $PKG/etc/activemq/jetty/jetty-security.xml
+sed -i 's/127\.0\.0\.1/0\.0\.0\.0/g' $PKG/etc/activemq/jolokia-access.xml
+sed -i 's/127\.0\.0\.1/0\.0\.0\.0/g' $PKG/etc/activemq/jetty-spring.properties
+sed -i -e '97d;119d' $PKG/etc/activemq/activemq.xml
+
 ( cd $PKG/etc/activemq
-  sed -i -e 's:data/activemq.log:log/activemq.log:g' *
-  sed -i -e 's:data/audit.log:log/audit.log:g' *
+  sed -i -e 's/\${sys\:activemq\.data}/\/var\/log\/activemq/g' *properties
   for F in $( find . -type f ); do mv $F $F.new; done
 )
 
@@ -139,7 +143,10 @@ chown -R $ACTIVEMQ_USER:$ACTIVEMQ_GROUP $PKG/var/{run,lib,log}/activemq
 ln -sf ../../../etc/activemq $PKG/usr/share/activemq/conf
 ln -sf ../../../var/lib/activemq/webapps $PKG/usr/share/activemq/webapps
 ln -sf ../../../var/log/activemq $PKG/usr/share/activemq/log
-ln -sf ../../../tmp/activemq $PKG/usr/share/activemq/tmp
+
+# 20261116 ckw: Do this in doinst.sh and undo in douninst.sh
+#mkdir -p /tmp/activemq
+#ln -sf /tmp/activemq $PKG/usr/share/activemq/tmp
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a $DOCS $PKG/usr/doc/$PRGNAM-$VERSION
@@ -154,6 +161,7 @@ cat $CWD/rc.activemq > $PKG/etc/rc.d/rc.activemq.new
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
 cat $CWD/doinst.sh > $PKG/install/doinst.sh
+cat $CWD/douninst.sh > $PKG/install/douninst.sh
 
 cd $PKG
 /sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE

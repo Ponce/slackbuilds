@@ -23,3 +23,8 @@ for F in `find etc/activemq -name '*.new'`; do
   config $F
 done
 
+mkdir -p tmp/activemq
+# We assume /usr/share/activemq/tmp exists but check for it - just in case
+if [ -d usr/share/activemq/tmp ]; then
+  ln -sf tmp/activemq usr/share/activemq/tmp
+fi
