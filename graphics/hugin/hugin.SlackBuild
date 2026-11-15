@@ -24,6 +24,9 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20261114: added -DCMAKE_CXX_STANDARD=14 to build
+# with newer vigra
+
 # 20230630 bkw: Modified by SlackBuilds.org, BUILD=3:
 # - fix permissions of files in /usr/doc (they were 770).
 
@@ -34,8 +37,8 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=hugin
-VERSION=${VERSION:-2023.0.0}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-2024.0.1}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 
@@ -79,7 +82,10 @@ rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/$PRGNAM-$VERSION.tar.bz2
 cd $PRGNAM-$VERSION
 
-zcat $CWD/boost-1.85.0-patch | patch -p0
+# necessary for 2024.0.0, newer versions shouldn't need it
+# vigra is else not found since it changed the version numbering
+# in the include file
+sh $CWD/create-new-cmake-for-vigra
 
 chown -R root:root .
 find -L . \
@@ -87,6 +93,22 @@ find -L . \
   -o -perm 511 \) -exec chmod 755 {} \+ -o \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \+
+
+# following block only necessary for hugin 2024.0.0 with wxGTK 3.0
+# another solution would be to build against wxWidgets 3.2 and fix
+# the build errors that occur there
+# patch incompabililties with wxGTK 3.0, hugin 2024.0.0 expects 3.1
+# wxOVERRIDE is introduced in wxGTK 3.1, but gcc knows the keyword override natively
+# else compilation will abort at 62 %
+find src/hugin1 -type f -exec sed -i 's/\bwxOVERRIDE\b/override/g' {} +
+# under wxGTK 3.0 wxBusyInfoFlags is not available, and wxBusyInfo just takes 
+# the text string. wxImageList::GetSize() is also not available without parameters
+# GetSize and wxSize for Thumbnails are available instead.
+# 1. wxBusyInfoFlags().Icon(...).Label(...) -> direkt den String an wxBusyInfo übergeben (Zeile 541 & 1037)
+sed -i 's/wxBusyInfoFlags()\.Icon(MainFrame::Get()->GetIcon())\.Label(\(.*\));/\1;/g' src/hugin1/hugin/BrowseDialog.cpp
+# 2. m_thumbnails.GetSize() -> wxSize(256, 256) (Standard-Thumbnailgröße in BrowseDialog)
+sed -i 's/m_thumbnails\.GetSize()/wxSize(256, 256)/g' src/hugin1/hugin/BrowseDialog.cpp
+
 
 mkdir -p build
 cd build
@@ -96,6 +118,7 @@ cmake \
   -DCMAKE_C_FLAGS="$SLKCFLAGS" \
   -DCMAKE_CXX_FLAGS="$SLKCFLAGS" \
   -DCMAKE_VERBOSE_MAKEFILE:BOOL=ON \
+  -DCMAKE_CXX_STANDARD=14 \
   -DCMAKE_EXE_LINKER_FLAGS="-lpthread" \
   -DLIB_SUFFIX="$LIBDIRSUFFIX" \
   -DCMAKE_INSTALL_PREFIX=/usr \
