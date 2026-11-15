@@ -4,7 +4,7 @@
 
 # Copyright 2013  Chess Griffin Raleigh, NC
 # Copyright 2014-2021  Willy Sudiarto Raharjo
-# Copyright 2023-2024  Johannes Schoepfer, Germany
+# Copyright 2023-2026  Johannes Schoepfer, Germany
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -27,7 +27,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=mate-utils
-VERSION=${VERSION:-1.28.0}
+VERSION=${VERSION:-1.28.3}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -49,21 +49,12 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+if [ "$ARCH" = "i586" -o "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=$ARCH -mtune=i686"
   LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "aarch64" ]; then
+elif [ "$ARCH" = "x86_64" -o "$ARCH" = "aarch64" ]; then
   SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-elif [ "$ARCH" = "arm" ]; then
-  SLKCFLAGS="-O2 -march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard"
-  LIBDIRSUFFIX=""
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
@@ -75,14 +66,20 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
-tar xvf $CWD/$PRGNAM-$VERSION.tar.xz
+tar xvf $CWD/$PRGNAM-$VERSION.tar.xz --no-same-owner
 cd $PRGNAM-$VERSION
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} + -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} +
+find . ! -type l    -a \( \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
+
+# If yelp is not present remove HelpContens-menu
+if ! command -v yelp; then
+   sed -i "/help_item/,+7d" logview/data/logview-toolbar.xml
+   sed -i "/id=\"help_button\"/,+14d" mate-screenshot/data/mate-screenshot.ui
+   sed -i "/help_button/d" mate-screenshot/data/mate-screenshot.ui
+   sed -i "/action=\"helpcontents\"/d" baobab/data/baobab-main-window.ui
+   sed -i "/DictionaryHelp/d" mate-dictionary/data/dictionary-applet-menu.xml
+fi
 
 CFLAGS="$SLKCFLAGS" \
 CXXFLAGS="$SLKCFLAGS" \
@@ -98,20 +95,27 @@ CXXFLAGS="$SLKCFLAGS" \
   --enable-debug=no \
   --build=$ARCH-slackware-linux
 
-make
-make install DESTDIR=$PKG
+# If yelp is not present don't build Help-files
+if ! command -v yelp; then
+  sed -i "s/ help/ /" baobab/Makefile
+  sed -i "s/ help/ /" mate-dictionary/Makefile
+  sed -i "s/ help/ /" gsearchtool/Makefile
+  sed -i "s/ help/ /" logview/Makefile
+fi
+make V=1
+make install-strip DESTDIR=$PKG
 
 rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 find $PKG/usr/man -type f -exec gzip -9 {} +
 for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a AUTHORS COPYING* ChangeLog NEWS README.md THANKS $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
+cp -a \
+  AUTHORS COPYING* ChangeLog NEWS README.md THANKS \
+  $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
