@@ -25,15 +25,13 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=lammps
-VERSION=${VERSION:-2025.07.22_update2}
-BUILD=${BUILD:-3}
+VERSION=${VERSION:-2026.09.30_update1}
+BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
 SRCNAM=lammps-stable
-SRCVERSION=${SRCVERSION:-22Jul2025_update2}
-PACEVERSION=v.2023.11.25.fix2
-MDIVERSION=1.4.26
-N2P2VERSION=2.2.0
+SRCVERSION=${SRCVERSION:-30Sep2026_update1}
+PACEVERSION=v.2025.12.4.p1
 OCLLVERSION=2022.01.04
 
 if [ -z "$ARCH" ]; then
@@ -49,51 +47,26 @@ if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   exit 0
 fi
 
-# First detect if openmpi or mpich are installed, so we can build LAMMPS with the 
-# parallel computing and enable some packages
-MP=""
-mpi=""
-if pkg-config --exists ompi;  then 
- MP="openmpi"; 
- mpi="-DBUILD_OMP=yes "
-fi
-if pkg-config --exists mpich;  then 
- MP="mpich"; 
- mpi="-DBUILD_MPI=yes "
-fi
-
-# Detect if some dependencies are installed or extrafile download. 
-# These are needed conditions to prevent the download of extrafiles 
-# during the build
-scafacos=""
-mdi=""
-mlpace=""
-# External ScaFaCos must be installed in the system
-if pkg-config --exists scafacos;  then 
- scafacos="-DPKG_SCAFACOS=yes -DDOWNLOAD_SCAFACOS=OFF "
-fi
-# lammps-user-pace must be downloaded in $CWD
-PACETARBALL=$CWD/lammps-user-pace-$PACEVERSION.tar.gz
-if [ -f $PACETARBALL ]; then
-  mlpace="" ; [ "${MLPACE:-yes}" = "yes" ] && mlpace="-DPKG_ML-PACE=yes "
-fi
-# MDI_Library must be downloaded in $CWD. Installation of this library
-# in the system does not work
-MDITARBALL=$CWD/MDI_Library-$MDIVERSION.tar.gz
-if [ -f $MDITARBALL ]; then
- mdi="" ; [ "${MDI:-yes}" = "yes" ] && mdi="-DPKG_MDI=yes -DDOWNLOAD_MDI=ON "
-fi
-# N2P2 must be downloaded in $CWD
-N2P2=$CWD/n2p2-$N2P2VERSION.tar.gz
-if [ -f $MDITARBALL ]; then
- mlhdnnp="" ; [ "${MLHDNNP:-yes}" = "yes" ] && mlhdnnp="-DPKG_ML-HDNNP=yes "
+# Detect if the system is -current or 15.0 Stable.
+# Since the system Eigen3 in -current is not supported
+# Eigen3 v. 3.4.0 must be downloaded as extrasource
+# and compiled as bundle third part module
+if [ $(/usr/bin/cmake --version |head -1 |cut -f3 -d' ') == "3.21.4" ]; then
+ CURRENT=NO
+ echo "export PATH for cmake-opt"
+ export PATH="/opt/cmake-opt/bin/:$PATH"
+else 
+ CURRENT=YES
+ # if found in -current SCAFACOS causes an unsolved failure at the end of
+ # LAMMPS build so we have to disable this module
+ SCAFACOS=no
 fi
 
 
-# These internal packages are enabled by default.
+# These internal modules are enabled by default.
 # If you do not require some of them you have to edit the conditions in this block 
 # otherwise pass the respective environment variables set to "no" to the script
-# for each package not desired
+# for each module not desired
 # (for example: AMOEBA=no ASPHERE=no ./lammps.SlackBuild)
 
 amoeba="" [ "${AMOEBA:-yes}" = "yes" ] && amoeba="-DPKG_AMOEBA=yes "
@@ -137,7 +110,6 @@ manifold="" ; [ "${MANIFOLD:-yes}" = "yes" ] && manifold="-DPKG_MANIFOLD=yes "
 manybody="" ; [ "${MANYBODY:-yes}" = "yes" ] && manybody="-DPKG_MANYBODY=yes "
 mc="" ; [ "${MC:-yes}" = "yes" ] && mc="-DPKG_MC=yes "
 meam="" ; [ "${MEAM:-yes}" = "yes" ] && meam="-DPKG_MEAM=yes "
-mesont="" ; [ "${MESONT:-yes}" = "yes" ] && mesont="-DPKG_MESONT=yes "
 mgpt="" ; [ "${MGPT:-yes}" = "yes" ] && mgpt="-DPKG_MGPT=yes "
 misc="" ; [ "${MISC:-yes}" = "yes" ] && misc="-DPKG_MISC=yes "
 mlpod="" ; [ "${MLPOD:-yes}" = "yes" ] && mlpod="-DPKG_ML-POD=yes "
@@ -188,14 +160,14 @@ else
   mliap=""
 fi
 
-# The GPU package requires some basic settings that may be customized through environment
+# The GPU module requires some basic settings that may be customized through environment
 # variables. For advanced options requiring specific hardware configurations (GPU) see the
 # documentation in lammps.org
-# This package causes many issues depending on the hardware/software configuration (build 
+# This module causes many issues depending on the hardware/software configuration (build 
 # failure or segmentation fault) that require additional settings to be solved, so it is
 # disabled by default. 
 if [ "${GPU:-no}" = "yes" ]; then
-  # by default the GPU package is enabled using bundled OpenCL ICD loader library/headers
+  # by default the GPU module is enabled using bundled OpenCL ICD loader library/headers
   # but users may prefer the local opencl installed in the system
   opencl_loader="yes" ; [ "${STATIC_OCL:-no}" = "no" ] && opencl_loader="no"
   gpu="-DPKG_GPU=yes -DGPU_API=opencl -DUSE_STATIC_OPENCL_LOADER=${opencl_loader} "
@@ -204,74 +176,30 @@ else
   gpu=""
 fi     
 
-# Following conditions enable by default all packages that require dependencies if these
-# are installed in the system 
-
-latboltz=""
-openmp=""
-if [ "$MP" = "openmpi" ]; then 
- latboltz="" ; [ "${LATBOLTZ:-yes}" = "yes" ] && latboltz="-DPKG_LATBOLTZ=yes "
- openmp="" ; [ "${OPENMP:-yes}" = "yes" ] && openmp="-DPKG_OPENMP=yes "
-fi
-
-if [ "$MP" = "mpich" ]; then
- latboltz="" ; [ "${LATBOLTZ:-yes}" = "yes" ] && latboltz="-DPKG_LATBOLTZ=yes "
-fi
-
-if pkg-config --exists plumed; then
-  plumed="" ; [ "${PLUMED:-yes}" = "yes" ] && plumed="-DPKG_PLUMED=yes -DDOWNLOAD_PLUMED=no "
-else
-  plumed=""
-fi
-
-netcdf=""
-if pkg-config --exists netcdf;  then 
- netcdf="" ; [ "${NETCDF:-yes}" = "yes" ] && netcdf="-DPKG_NETCDF=yes "
-fi
-
-h5md=""
-if [ -f /usr/bin/h5cc ]; then
- h5md="" ; [ "${H5MD:-yes}" = "yes" ] && h5md="-DPKG_H5MD=yes "
-fi
-
-# This shouldn't need in 32-bit architectures, however it significantly extends the build times 
-# and absorbs many resources. Openmpi is strictly required.
-kokkos=""
-if [ "$ARCH" = "x86_64" ]; then
- if [ "${KOKKOS:-yes}" = "yes" ] ; then
-   kokkos="-DPKG_KOKKOS=yes -DKokkos_ARCH_NATIVE=yes -DKokkos_ENABLE_OPENMP=yes "
- fi
- if [ "$MP" != "openmpi" ]; then 
-   kokkos="" 
- fi
-fi
-
-# All required cmake flags related to packages are included in a single global variable
-packages=$amoeba$asphere$atc$awpmd$bocs$body$bpm$brownian$cgdna$cgspica$class2$colloid\
+# All required cmake flags related to modules are included in a single global variable
+modules=$amoeba$asphere$atc$awpmd$bocs$body$bpm$brownian$cgdna$cgspica$class2$colloid\
 $colvars$compress$coreshell$dielectric$diffraction$dipole$dpdbasic$dpdmeso$dpdreact\
 $dpdsmooth$drude$eff$electrode$extracompute$extradump$extrafix$extramolecule$extrapair\
-$fep$gpu$granular$h5md$intel$interlayer$kokkos$kspace$latboltz$lepton$machdyn$manifold\
-$manybody$mc$mdi$meam$mesont$mgpt$misc$mlhdnnp$mliap$mlpod$mlrann$mlsnap$mofff$molecule\
-$netcdf$openmp$opt$orient$peri$phonon$plugin$plumed$poems$ptm$qeq$qtb$reaction\
-$reaxff$replica$rigid$shock$smtbq$sph$spin$srd$tally$uef$yaff
+$fep$gpu$granular$intel$interlayer$kspace$lepton$machdyn$manifold\
+$manybody$mc$meam$mgpt$misc$mliap$mlpod$mlrann$mlsnap$mofff\
+$molecule$opt$orient$peri$phonon$plugin$poems$ptm$python$qeq$qtb\
+$reaction$reaxff$replica$rigid$shock$smtbq$sph$spin$srd$tally$uef$yaff
 
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
+if [ "$ARCH" = "i586" -o "$ARCH" = "i686" ]; then
+  SLKCFLAGS="-O2 -march=$ARCH -mtune=i686"
   LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2"
+elif [ "$ARCH" = "x86_64" -o "$ARCH" = "aarch64" ]; then
+  SLKCFLAGS="-O2 -fPIC"
   LIBDIRSUFFIX="64"
 else
   SLKCFLAGS="-O2"
   LIBDIRSUFFIX=""
 fi
+SLKCFLAGS+=" -DNDEBUG"
 
 set -e
 
@@ -279,75 +207,184 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf ${SRCNAM}_${SRCVERSION}
-tar xvf $CWD/${SRCNAM}_${SRCVERSION}.tar.gz
+tar xvf $CWD/${SRCNAM}_${SRCVERSION}.tar.gz --no-same-owner
 cd ${SRCNAM}_${SRCVERSION}
 
-if [ "$mesont" != "" ]; then
-   install -m 0644 $CWD/C_10_10.mesocnt ./potentials
-   if [ "$molecule" = "" ]; then
-    echo -e "\n\033[33mYou have enabled the package MESONT. Since this package requires also "
-	 echo -e "the package MOLECULE, the build of MOLECULE will be automatically enabled\033[0m\n"
-	 packages=$packages" -DPKG_MOLECULE=yes "
-	fi
+# Detect if some dependencies are installed or extrafiles downloaded. 
+scafacos=""
+mdi=""
+mlpace=""
+mlhdnnp=""
+mesont=""
+latboltz=""
+openmp=""
+kokkos=""
+plumed=""
+netcdf=""
+h5md=""
+scafacoswarn=""
+# External ScaFaCos must be installed in the system
+if pkg-config --exists scafacos;  then 
+ scafacos="" ; [ "${SCAFACOS:-yes}" = "yes" ] \
+               && scafacos="-DPKG_SCAFACOS=yes -DDOWNLOAD_SCAFACOS=OFF "
+ if [ "$CURRENT" = "YES" ]; then
+   scafacoswarn=YES 
+ fi
+else
+ echo "Package scafacos not installed"
+ echo "     > Module SCAFACOS will be disabled"
+fi
+# External MDI_Library must be installed in the system
+if [ -f /usr/include/mdi.h ]; then
+ mdi="" ; [ "${MDI:-yes}" = "yes" ] && mdi="-DPKG_MDI=yes -DDOWNLOAD_MDI=OFF "
+else
+ echo "Package MDI_Library not installed"
+ echo "     > Module MDI will be disabled"
+fi
+# lammps-user-pace must be downloaded in $CWD
+PACETARBALL=$CWD/lammps-user-pace-$PACEVERSION.tar.gz
+if [ -f $PACETARBALL ]; then
+  mlpace="" ; [ "${MLPACE:-yes}" = "yes" ] && mlpace="-DPKG_ML-PACE=yes "
+else
+ echo "Extra source lammps-user-pace not downloaded"
+ echo "     > Module ML-PACE will be disabled"
+fi
+# N2P2 must be must be installed in the system
+if [ -f /usr/bin/nnp-atomenv ]; then
+ mlhdnnp="" ; [ "${MLHDNNP:-yes}" = "yes" ] && \
+    mlhdnnp="-DPKG_ML-HDNNP=yes -DN2P2_DIR=/usr -DN2P2_INCLUDE_DIR=/usr/include/n2p2 \
+             -DN2P2_CMAKE_EXTRA=/usr/share/lib/hdnnp/n2p2/lammps-extra.cmake -DDOWNLOAD_N2P2=OFF "
+else
+ echo "Package n2p2 not installed"
+ echo "     > Module ML-HNDNNP will be disabled"
+fi
+# C_10_10.mesocnt extrafile data must be downloaded in $CWD
+MESOCNT=$CWD/C_10_10.mesocnt
+if [ -f $MESOCNT ]; then
+ mesont="" ; [ "${MESONT:-yes}" = "yes" ] && mesont="-DPKG_MESONT=yes "
+ cp -a $CWD/C_10_10.mesocnt ./potentials
+ if [ "$molecule" = "" ]; then
+   echo -e "\n\033[33mModule MESONT enabled. Since it requires also "
+	echo -e "the module MOLECULE, the build of MOLECULE will be automatically enabled\033[0m\n"
+	modules=$modules" -DPKG_MOLECULE=yes "
+ fi
+else
+ echo "Extra source C_10_10.mesocnt not downloaded"
+ echo "     > Module MESONT will be disabled"
+fi
+# External PLUMED must be installed in the system
+if pkg-config --exists plumed; then
+  plumed="" ; [ "${PLUMED:-yes}" = "yes" ] && plumed="-DPKG_PLUMED=yes -DDOWNLOAD_PLUMED=no "
+else
+ echo "Package PLUMED not installed"
+ echo "     > Module PLUMED will be disabled"
+fi
+# External netcdf must be installed in the system
+if pkg-config --exists netcdf;  then 
+ netcdf="" ; [ "${NETCDF:-yes}" = "yes" ] && netcdf="-DPKG_NETCDF=yes "
+else
+ echo "Package netcdf not installed"
+ echo "     > Module NETCDF will be disabled"
+fi
+# External hdf5 must be installed in the system
+if [ -f /usr/bin/h5cc ]; then
+ h5md="" ; [ "${H5MD:-yes}" = "yes" ] && h5md="-DPKG_H5MD=yes "
+else
+ echo "Package hdf5 not installed"
+ echo "     > Module H5MD will be disabled"
+fi
+
+# Detect if openmpi or mpich are installed, so we can build LAMMPS with the 
+# parallel computing and enable some modules
+MP=""
+mpi=""
+if pkg-config --exists ompi;  then 
+ MP="openmpi"; 
+ mpi="-DBUILD_OMP=yes "
+fi
+if pkg-config --exists mpich;  then 
+ MP="mpich"; 
+ mpi="-DBUILD_MPI=yes "
+fi
+if [ "$MP" = "openmpi" ]; then 
+ latboltz="" ; [ "${LATBOLTZ:-yes}" = "yes" ] && latboltz="-DPKG_LATBOLTZ=yes "
+ openmp="" ; [ "${OPENMP:-yes}" = "yes" ] && openmp="-DPKG_OPENMP=yes "
+ # Build of KOKKOS significantly extends the build times and absorbs many
+ # resources so it can be enabled only in 64-bit architectures
+ if [ "$ARCH" = "x86_64" ]; then
+   kokkos="" ; [ "${KOKKOS:-yes}" = "yes" ] \
+       && kokkos="-DPKG_KOKKOS=yes -DKokkos_ARCH_NATIVE=yes -DKokkos_ENABLE_OPENMP=yes "
+ else 
+   echo "Architecture 64-bit not detected"
+   echo "     > Module KOKKOS will be disabled"
+ fi
+fi
+
+if [ "$MP" = "mpich" ]; then
+ latboltz="" ; [ "${LATBOLTZ:-yes}" = "yes" ] && latboltz="-DPKG_LATBOLTZ=yes "
+ echo "Package openmpi or openmpi4 not installed"
+ echo "      > Modules OPENMP and KOKKOS will be disabled"
 fi
 
 if [ "$MP" = "" ]; then
-  echo -e "\n\033[33m******************** WARNING ********************\n"
-  echo " no API supporting MPI (mpich or openmpi) are   "
-  echo " installed on your system. This does not affect "
-  echo " the build and installation of LAMMPS, but some "
-  echo " packages cannot be enabled and other may work  "
-  echo " not optimally.                                 "
-  echo -e "\n*************************************************\n\033[0m" 
+  echo "No API supporting MPI (mpich or openmpi) installed"
+  echo "     > Modules OPENMP LABOLTZ and KOKKOS will be disabled"
+  echo "       Other modules may work not optimally"
 fi
 
-# Prepare directories to move the extrafiles needed to build some packages
+modules=$modules$scafacos$mdi$mlpace$mlhdnnp$latboltz$kokkos$openmp$mpi\
+$plumed$netcdf$h5md
+
+# Prepare directories to move the extrafiles needed to build some modules
 mkdir -p cmake/build
 
 if [ "$opencl_loader" = "yes" ]; then
-   mkdir -p cmake/build/_deps
-   cp -a $CWD/opencl-loader-$OCLLVERSION.tar.gz cmake/build/_deps
-fi
-
-if [ "$mdi" != "" ]; then
-   mkdir -p cmake/build/mdi_build_ext/src/
-   cp -a $CWD/MDI_Library-$MDIVERSION.tar.gz cmake/build/mdi_build_ext/src/v$MDIVERSION.tar.gz
-fi
-
-
-if [ "$mlhdnnp" != "" ]; then
-   mkdir -p cmake/build/n2p2_build-prefix/src/
-   cp -a $CWD/n2p2-$N2P2VERSION.tar.gz cmake/build/n2p2_build-prefix/src/v$N2P2VERSION.tar.gz
+   if [ -f $CWD/opencl-loader-$OCLLVERSION.tar.gz ]; then
+     mkdir -p cmake/build/_deps
+     cp -a $CWD/opencl-loader-$OCLLVERSION.tar.gz cmake/build/_deps
+   else
+     echo "WARNING! Extra source opencl-loader not downloaded"
+     echo "Please download it before launch the script with these settings"
+     echo "The script will be stopped"
+     exit 1
+   fi     
 fi
 
 if [ "$mlpace" != "" ]; then
    cp -a $CWD/lammps-user-pace-$PACEVERSION.tar.gz cmake/build/libpace.tar.gz
 fi
 
-echo -e "\nFLAGS FOR PACKAGES ENABLED:\n "$packages"\n"
+if [ "$CURRENT" = "YES" ]; then
+ if [ -f $CWD/eigen-3.4.0.tar.gz ]; then
+   mkdir -p cmake/build/Eigen3_build-prefix/src/
+   cp -a $CWD/eigen-3.4.0.tar.gz cmake/build/Eigen3_build-prefix/src/eigen-3.4.0.tar.gz
+   cmake_policy="-DCMAKE_POLICY_DEFAULT_CMP0218=OLD "
+   echo "Slackware -current detected"
+   echo "     > LAMMPS will use a bundle Eigen3 (v. 3.4.0)"
+   if [ "$scafacoswarn" = "YES" ]; then
+       echo "Package scafacos installed in the system but the build"
+       echo "of LAMMPS against this dependency will fail in -current"
+       echo "     > Module SCAFACOS will be disabled"
+   fi
+ else
+   echo "WARNING! Extra source eigen-3.4.0 not downloaded"
+   echo "Build of LAMMPS does not work with the Eigen3 of -current"
+   echo "Please download eigen-3.4.0 before launch the script"
+   echo "The script will be stopped"
+   exit 1
+ fi 
+fi
 
-echo -e "FLAGS FOR PYTHON:\n "$python
+echo -e "\nFLAGS FOR MODULES ENABLED:\n "$modules"\n"
 
-echo -e "\nFLAGS FOR MPI:\n "$mpi
+find . ! -type l    -a \( \
+  \(     -perm /111 -a ! -perm 755 -a -exec chmod -f 755 {} + \) -o \
+  \(   ! -perm /111 -a ! -perm 644 -a -exec chmod -f 644 {} + \) \)
 
-echo -e "\nFLAGS FOR SCAFACOS:\n "$scafacos
-
-echo -e "\nFLAGS FOR ML-PACE:\n "$mlpace
-
-echo ""
-
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
-  
 sed -i cmake/CMakeLists.txt -e "s:SET CMP0109 OLD:SET CMP0109 NEW:g"  
-sed -i cmake/CMakeLists.txt -e "s:SET CMP0135 OLD:SET CMP0135 NEW:g"  
-sed -i cmake/Modules/Packages/PLUMED.cmake -e "s:SET CMP0135 OLD:SET CMP0135 NEW:g"  
-sed -i cmake/Modules/Packages/ML-PACE.cmake -e "s:SET CMP0135 OLD:SET CMP0135 NEW:g"  
+sed -i cmake/CMakeLists.txt -e "s:MPI QUIET COMPONENTS CXX:MPI COMPONENTS CXX:g"
 
+echo $LIBDIRSUFFIX
 # The Source has not a CMakeLists.txt file in the root directory we 
 # need to change in the cmake directory
 cd cmake
@@ -356,23 +393,15 @@ cd build
     -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
     -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=/usr/lib$LIBDIRSUFFIX \
     -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_SHARED_LIBS=ON \
-    $mpi \
-    $scafacos \
-    $mdi \
-    $python \
-    $mlpace \
-    $packages \
+    $cmake_policy \
+    $modules \
     ..
-  make
-  make install DESTDIR=$PKG
+  make VERBOSE=1 $NUMJOBS
+  make install/strip  DESTDIR=$PKG
 cd ..
-
-rm -f $PKG/{,usr/}lib${LIBDIRSUFFIX}/*.la
-
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
 #Since the build installs man in /usr/share we move the directory in /usr
 mv -v $PKG/usr/share/man $PKG/usr
@@ -382,10 +411,13 @@ for i in $( find $PKG/usr/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; r
 #Since the build installs etc as subfolder of /usr (?), we move it in the root directory
 mv -v $PKG/usr/etc $PKG
 
+PKGDOC=$PKG/usr/doc/$PRGNAM-$VERSION
+mkdir -p $PKGDOC
 cd $TMP/${SRCNAM}_${SRCVERSION}
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a LICENSE README $PKG/usr/doc/$PRGNAM-$VERSION
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cp -a \
+  LICENSE README \
+  $PKGDOC
+cat $CWD/$PRGNAM.SlackBuild > $PKGDOC/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
