@@ -3,6 +3,7 @@
 # Slackware build script for mpd
 
 # Copyright 2013-2017 Dhaby Xiloj <slack.dhabyx@gmail.com>
+# Copyright 2026 Isaac Yu <isaacyu@protonmail.com>
 # Based on SlackBuild of Andrew Brouwers <abrouwers@gmail.com>
 # All rights reserved.
 #
@@ -23,6 +24,9 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# 20261116 bkw: Update mpd to 0.24.x. Requires gcc14 as new dependency.
+# Undisable libmikmod and libupnp.
+
 # 20220305 bkw: Modified by SlackBuilds.org:
 # - add fmt to REQUIRES. without this, it was dowloading the fmt source.
 
@@ -42,7 +46,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=mpd
-VERSION=${VERSION:-0.23.17}
+VERSION=${VERSION:-0.24.15}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -87,6 +91,26 @@ else
     PULSE="disabled"
 fi
 
+# mpd needs g++ 12 or newer (C++20). Slackware 15.0 ships gcc 11,
+# so use the gcc14 package from SlackBuilds.org when it is installed.
+if [ -f /etc/profile.d/gcc14.sh ]; then
+  . /etc/profile.d/gcc14.sh
+fi
+if [ "$(g++ -dumpversion | cut -d. -f1)" -lt 12 ]; then
+  echo "ERROR: mpd $VERSION needs g++ 12 or newer, found $(g++ -dumpversion)."
+  echo "Install gcc14 from SlackBuilds.org and try again."
+  exit 1
+fi
+# If that g++ has its own libstdc++ (e.g. gcc14 in /opt), link against it and
+# set a RUNPATH so the binary finds it at runtime: the probed libraries add
+# -L/usr/lib64 and an rpath to /usr/lib64, where the older libstdc++ lives.
+GXXLIBDIR=$(dirname $(readlink -f $(g++ -print-file-name=libstdc++.so)))
+case "$GXXLIBDIR" in
+  /usr/lib|/usr/lib64) MPD_LDFLAGS="-L$GXXLIBDIR -lnsl" ;;
+  *) MPD_LDFLAGS="-L$GXXLIBDIR -lnsl -Wl,-rpath,$GXXLIBDIR" ;;
+esac
+export MPD_LDFLAGS
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
@@ -97,16 +121,15 @@ chown -R root:root .
 find -L .  -perm /111 -a \! -perm 755 -a -exec chmod 755 {} \+ -o \
         \! -perm /111 -a \! -perm 644 -a -exec chmod 644 {} \+
 
+# liburing support is broken: https://github.com/MusicPlayerDaemon/MPD/issues/2241 
 cd build
   CFLAGS="$SLKCFLAGS" \
   CXXFLAGS="$SLKCFLAGS" \
-  LDFLAGS="-L/usr/lib${LIBDIRSUFFIX} -lnsl" \
+  LDFLAGS="$MPD_LDFLAGS" \
   meson .. \
     -Dsystemd=disabled \
     -Dpulse=$PULSE \
-    -Dupnp=disabled \
-    -Dmikmod=disabled \
-    -Dyajl=disabled \
+    -Dio_uring=disabled \
     --buildtype=release \
     --infodir=/usr/info \
     --libdir=/usr/lib${LIBDIRSUFFIX} \
