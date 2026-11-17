@@ -1,0 +1,1 @@
+export PLUMED_KERNEL=/usr/lib/libplumedKernel.so
