@@ -1,4 +1,4 @@
-VERSION="2.1.3"
+VERSION="2.1.7"
 MODULE="v4l2loopback-dc"
 
 if [ -x /usr/bin/update-desktop-database ]; then
@@ -11,12 +11,16 @@ fi
 
 _installModule(){
 
-    cp -r /tmp/SBo/$MODULE-$VERSION /usr/src/
+if [ -d usr/share/droidcam/$MODULE ]; then
+    cp usr/share/droidcam/$MODULE/* usr/src/$MODULE-$VERSION
     dkms add -m $MODULE -v $VERSION
     dkms build -m $MODULE -v $VERSION
     dkms install -m $MODULE -v $VERSION
     /sbin/modprobe $MODULE
     /sbin/modprobe snd-aloop
+else
+    echo "Can't copy usr/share/droidcam/v4l2loopback"
+fi
 }
 
 if [ "lsmod | grep v4l2loopback_dc" ]; then

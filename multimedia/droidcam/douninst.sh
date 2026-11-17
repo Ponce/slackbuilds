@@ -1,4 +1,4 @@
-VERSION="2.1.3"
+VERSION="2.1.7"
 MODULE="v4l2loopback-dc"
 
 dkms remove -m $MODULE/$VERSION --all >/dev/null 2>&1
