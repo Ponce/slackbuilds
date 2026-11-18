@@ -2,7 +2,7 @@
 
 # Slackware build script for duckstation
 
-# Copyright 2022-2023 Steven Voges <Oregon, USA>
+# Copyright 2026 Matt Dinslage, Springfield MO
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -25,11 +25,7 @@
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=duckstation
-VERSION=${VERSION:-0.1.6217}
-SRCDATE=${SRCDATE:-20230901}
-SRCVER=${SRCVER:-d690732c7d553ab1dc1a8e59889c788d7397ec9d}
-COMMIT=$(echo $SRCVER | cut -c -7)
-DISCORD=${DISCORD:-OFF}
+VERSION=${VERSION:-0.1_5624}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
@@ -47,84 +43,62 @@ if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   exit 0
 fi
 
+if [ "$ARCH" != "x86_64" ]; then
+  echo "$PRGNAM is only available as an x86_64 AppImage."
+  exit 1
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
-
-if [ "$ARCH" = "i586" ]; then
-  SLKCFLAGS="-O2 -march=i586 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "i686" ]; then
-  SLKCFLAGS="-O2 -march=i686 -mtune=i686"
-  LIBDIRSUFFIX=""
-elif [ "$ARCH" = "x86_64" ]; then
-  SLKCFLAGS="-O2 -fPIC"
-  LIBDIRSUFFIX="64"
-else
-  SLKCFLAGS="-O2"
-  LIBDIRSUFFIX=""
-fi
 
 set -e
 
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
-cd $TMP
-rm -rf $PRGNAM-$SRCVER
-tar xvf $CWD/$PRGNAM-$SRCVER.tar.gz
-cd $PRGNAM-$SRCVER
 
-# Fix version since we are not using a git repo.
-sed -i "s/HASH=\$(git rev-parse HEAD)/HASH=${SRCVER}/g" \
-  src/scmversion/gen_scmversion.sh
-sed -i "s/BRANCH=\$(git rev-parse --abbrev-ref HEAD | tr -d '\\\r\\\n')/BRANCH=master/g" \
-  src/scmversion/gen_scmversion.sh
-sed -i "s/TAG=\$(git describe --tags --dirty --exclude latest --exclude preview --exclude legacy --exclude previous-latest | tr -d '\\\r\\\n')/TAG=${VERSION}-${COMMIT}/g" \
-  src/scmversion/gen_scmversion.sh
-sed -i "s/DATE=\$(git log -1 --date=iso8601-strict --format=%cd)/DATE=${SRCDATE}/g" \
-  src/scmversion/gen_scmversion.sh
-# Fix broken compile when discord is disabled
-if [ $DISCORD = "OFF" ]; then
-  sed -i "3726d;3727d;3728d;3729d;3730d;3731d;3732d;3733d" src/core/system.cpp
-fi
-# Fix compilation on Current/GCC13
-sed -i "8i #include <cstdint>" dep/reshadefx/include/effect_token.hpp
+# Install AppImage
+mkdir -p $PKG/opt/$PRGNAM
+install -m 0755 $CWD/DuckStation-x64.AppImage \
+  $PKG/opt/$PRGNAM/DuckStation-x64.AppImage
 
-chown -R root:root .
-find -L . \
- \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
-  -o -perm 511 \) -exec chmod 755 {} \; -o \
- \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
-  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+# Create launcher
+mkdir -p $PKG/usr/bin
+cat << 'EOF' > $PKG/usr/bin/duckstation
+#!/bin/sh
+export FUSERMOUNT_PROG="${FUSERMOUNT_PROG:-/usr/bin/fusermount3}"
+exec /opt/duckstation/DuckStation-x64.AppImage "$@"
+EOF
+chmod 0755 $PKG/usr/bin/duckstation
 
-mkdir -p build
-cd build
-  cmake \
-    -Wno-dev \
-    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
-    -DCMAKE_INSTALL_LIBDIR=./lib${LIBDIRSUFFIX} \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DENABLE_DISCORD_PRESENCE=$DISCORD \
-    -DUSE_WAYLAND=ON \
-    -DCMAKE_BUILD_TYPE=Release ..
-  make
-  make install/strip DESTDIR=$PKG
-cd ..
+# Install desktop entry
+mkdir -p $PKG/usr/share/applications
+cat << 'EOF' > $PKG/usr/share/applications/duckstation.desktop
+[Desktop Entry]
+Type=Application
+Name=DuckStation
+Comment=PlayStation 1 emulator
+Exec=duckstation
+Icon=duckstation
+Terminal=false
+Categories=Game;Emulator;
+EOF
 
-mkdir -p $PKG/opt/$PRGNAM $PKG/usr/bin $PKG/usr/share/applications $PKG/usr/share/pixmaps
-cp -r $TMP/$PRGNAM-$SRCVER/build/bin/* $PKG/opt/$PRGNAM/
-ln -s ../../opt/$PRGNAM/$PRGNAM-qt $PKG/usr/bin/$PRGNAM-qt
-cp $CWD/$PRGNAM.desktop $PKG/usr/share/applications/
-ln -s ../../../opt/$PRGNAM/resources/images/duck.png $PKG/usr/share/pixmaps/$PRGNAM.png
+# Install icons
+mkdir -p $PKG/usr/share/icons/hicolor/scalable/apps
+install -m 0644 $CWD/Logo_Duckstation.svg \
+  $PKG/usr/share/icons/hicolor/scalable/apps/duckstation.svg
 
-find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+for i in 16 24 32 48 64 96 128 256; do
+  mkdir -p $PKG/usr/share/icons/hicolor/${i}x${i}/apps
+  rsvg-convert \
+    -w $i -h $i \
+    $PKG/usr/share/icons/hicolor/scalable/apps/duckstation.svg \
+    -o $PKG/usr/share/icons/hicolor/${i}x${i}/apps/duckstation.png
+done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a \
-  *.md LICENSE \
-  $PKG/usr/doc/$PRGNAM-$VERSION
+cp $CWD/{README.md,LICENSE} $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
