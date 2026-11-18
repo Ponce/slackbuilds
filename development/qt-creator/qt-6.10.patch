@@ -1,0 +1,177 @@
+From 5a4c700ccefc76c7c531c834734e6fefa14b5364 Mon Sep 17 00:00:00 2001
+From: Miikka Heikkinen <miikka.heikkinen@qt.io>
+Date: Tue, 29 Jul 2025 17:20:41 +0300
+Subject: [PATCH] QmlDesigner: Compile fixes for Qt 6.10 private API changes
+
+Fixes: QDS-15681
+Change-Id: Ie2f56a31e7323a6c4eb9a306c63e0b87b4480c41
+Reviewed-by: Mahmoud Badri <mahmoud.badri@qt.io>
+(cherry picked from commit c901f9e3e9f28aa651448e05d3cac531193de3fc)
+---
+ .../qmlpuppet/editor3d/camerageometry.cpp     |  2 +-
+ .../qmlpuppet/editor3d/generalhelper.cpp      | 12 +++++++-
+ .../qmlpuppet/editor3d/mousearea3d.cpp        | 15 +++++++---
+ .../qmlpuppet/editor3d/mousearea3d.h          |  1 +
+ .../editor3d/selectionboxgeometry.cpp         |  7 ++---
+ .../qt5bakelightsnodeinstanceserver.cpp       | 28 +++++++++++++++++++
+ 6 files changed, 54 insertions(+), 11 deletions(-)
+
+diff --git a/src/tools/qmlpuppet/qmlpuppet/editor3d/camerageometry.cpp b/src/tools/qmlpuppet/qmlpuppet/editor3d/camerageometry.cpp
+index 2c5987e04457..d8361f930664 100644
+--- a/src/tools/qmlpuppet/qmlpuppet/editor3d/camerageometry.cpp
++++ b/src/tools/qmlpuppet/qmlpuppet/editor3d/camerageometry.cpp
+@@ -154,7 +154,7 @@ void CameraGeometry::fillVertexData(QByteArray &vertexData, QByteArray &indexDat
+         QRectF rect = m_viewPortRect;
+         if (rect.isNull())
+              rect = QRectF(0, 0, 1000, 1000); // Let's have some visualization for null viewports
+-        camera->calculateGlobalVariables(rect);
++        camera->calculateProjection(rect);
+         m = camera->projection.inverted();
+     }
+ 
+diff --git a/src/tools/qmlpuppet/qmlpuppet/editor3d/generalhelper.cpp b/src/tools/qmlpuppet/qmlpuppet/editor3d/generalhelper.cpp
+index 647d170383b0..eb246b6b704a 100644
+--- a/src/tools/qmlpuppet/qmlpuppet/editor3d/generalhelper.cpp
++++ b/src/tools/qmlpuppet/qmlpuppet/editor3d/generalhelper.cpp
+@@ -357,12 +357,22 @@ QVector4D GeneralHelper::focusNodesToCamera(QQuick3DCamera *camera, float defaul
+                         auto geometry = qobject_cast<SelectionBoxGeometry *>(model->geometry());
+                         if (geometry) {
+                             bounds = geometry->bounds();
++
++                            // Selection boxes manipulate render node parent's transform directly,
++                            // so we can't just use sceneTransform() of the model.
++                            // However, they are always at top level, so we can use local transform
++                            // from the render node's parent.
++                            QMatrix4x4 m;
++                            if (renderModel->parent)
++                                m = renderModel->parent->localTransform;
++                            m *= renderModel->localTransform;
++                            center = m.map(bounds.center());
+                         } else {
+                             const auto &bufferManager(context->bufferManager());
+                             bounds = bufferManager->getModelBounds(renderModel);
++                            center = model->sceneTransform().map(bounds.center());
+                         }
+ 
+-                        center = renderModel->globalTransform.map(bounds.center());
+                         const QVector3D e = bounds.extents();
+                         const QVector3D s = model->sceneScale();
+                         qreal maxScale = qSqrt(qreal(s.x() * s.x() + s.y() * s.y() + s.z() * s.z()));
+diff --git a/src/tools/qmlpuppet/qmlpuppet/editor3d/mousearea3d.cpp b/src/tools/qmlpuppet/qmlpuppet/editor3d/mousearea3d.cpp
+index de6737c39dbb..8506fb1a4547 100644
+--- a/src/tools/qmlpuppet/qmlpuppet/editor3d/mousearea3d.cpp
++++ b/src/tools/qmlpuppet/qmlpuppet/editor3d/mousearea3d.cpp
+@@ -808,8 +808,7 @@ QVector3D MouseArea3D::getMousePosInPlane(const MouseArea3D *helper,
+     const DoubleVec3D rayPos0 = m_view3D->mapTo3DScene(mousePos1.toVec3());
+     DoubleVec3D rayPos1;
+     if (qobject_cast<QQuick3DOrthographicCamera *>(m_view3D->camera())) {
+-        if (auto cameraNode = static_cast<QSSGRenderCamera *>(QQuick3DObjectPrivate::get(m_view3D->camera())->spatialNode))
+-            rayPos1 = rayPos0 - rayPos0.length() * DoubleVec3D(cameraNode->getDirection());
++        rayPos1 = rayPos0 - rayPos0.length() * DoubleVec3D(getDirection(m_view3D->camera()));
+     } else {
+         DoubleVec3D dir;
+         DoubleVec3D camPos = m_view3D->camera()->scenePosition();
+@@ -1030,6 +1029,15 @@ QVector3D MouseArea3D::getNormal() const
+     return QVector3D(dataPtr[8], dataPtr[9], dataPtr[10]).normalized();
+ }
+ 
++QVector3D MouseArea3D::getDirection(const QQuick3DNode *node) const
++{
++    const QMatrix4x4 m = node->sceneTransform();
++    const float *dataPtr(m.data());
++    QVector3D retval(dataPtr[8], dataPtr[9], dataPtr[10]);
++    retval.normalize();
++    return retval;
++}
++
+ QVector3D MouseArea3D::getCameraToNodeDir(QQuick3DNode *node) const
+ {
+     QVector3D dir;
+@@ -1037,8 +1045,7 @@ QVector3D MouseArea3D::getCameraToNodeDir(QQuick3DNode *node) const
+         // We need to do a cast here to be compatible with Qt 5.x.
+         // From Qt 6.2 the type can be read from the node directly.
+         if (qobject_cast<QQuick3DOrthographicCamera *>(m_view3D->camera())) {
+-            if (auto renderCamera = QQuick3DObjectPrivate::get(m_view3D->camera())->spatialNode)
+-                dir -= static_cast<QSSGRenderCamera *>(renderCamera)->getDirection();
++            dir -= getDirection(m_view3D->camera());
+         } else {
+             QVector3D camPos = m_view3D->camera()->scenePosition();
+             QVector3D nodePos = pivotScenePosition(node);
+diff --git a/src/tools/qmlpuppet/qmlpuppet/editor3d/mousearea3d.h b/src/tools/qmlpuppet/qmlpuppet/editor3d/mousearea3d.h
+index 8d705c6eb0b9..49a61bdfa091 100644
+--- a/src/tools/qmlpuppet/qmlpuppet/editor3d/mousearea3d.h
++++ b/src/tools/qmlpuppet/qmlpuppet/editor3d/mousearea3d.h
+@@ -135,6 +135,7 @@ public slots:
+     void setDragging(bool enable);
+     void setHovering(bool enable);
+     QVector3D getNormal() const;
++    QVector3D getDirection(const QQuick3DNode *node) const;
+     QVector3D getCameraToNodeDir(QQuick3DNode *node) const;
+ 
+     Q_DISABLE_COPY(MouseArea3D)
+diff --git a/src/tools/qmlpuppet/qmlpuppet/editor3d/selectionboxgeometry.cpp b/src/tools/qmlpuppet/qmlpuppet/editor3d/selectionboxgeometry.cpp
+index 48e0f9f23dfe..ea453d738198 100644
+--- a/src/tools/qmlpuppet/qmlpuppet/editor3d/selectionboxgeometry.cpp
++++ b/src/tools/qmlpuppet/qmlpuppet/editor3d/selectionboxgeometry.cpp
+@@ -195,13 +195,10 @@ void SelectionBoxGeometry::doUpdateGeometry()
+             // to avoid having to reparent the selection box. This has to be done directly on render
+             // nodes.
+             QMatrix4x4 m;
+-            if (targetRN->parent) {
+-                targetRN->parent->calculateGlobalVariables();
+-                m = targetRN->parent->globalTransform;
+-            }
++            if (m_targetNode->parentNode())
++                m = m_targetNode->parentNode()->sceneTransform();
+             rootRN->localTransform = m;
+             rootRN->markDirty(QSSGRenderNode::DirtyFlag::TransformDirty);
+-            rootRN->calculateGlobalVariables();
+         } else if (!m_spatialNodeUpdatePending) {
+             // Necessary spatial nodes do not yet exist. Defer selection box creation one frame.
+             m_spatialNodeUpdatePending = true;
+diff --git a/src/tools/qmlpuppet/qmlpuppet/instances/qt5bakelightsnodeinstanceserver.cpp b/src/tools/qmlpuppet/qmlpuppet/instances/qt5bakelightsnodeinstanceserver.cpp
+index 770eabdaa8de..f0a108a274e0 100644
+--- a/src/tools/qmlpuppet/qmlpuppet/instances/qt5bakelightsnodeinstanceserver.cpp
++++ b/src/tools/qmlpuppet/qmlpuppet/instances/qt5bakelightsnodeinstanceserver.cpp
+@@ -96,6 +96,7 @@ void Qt5BakeLightsNodeInstanceServer::bakeLights()
+         return;
+     }
+ 
++#if QT_VERSION < QT_VERSION_CHECK(6, 10, 0)
+     QQuick3DLightmapBaker::Callback callback = [this](QQuick3DLightmapBaker::BakingStatus status,
+             std::optional<QString> msg, QQuick3DLightmapBaker::BakingControl *) {
+         m_callbackReceived = true;
+@@ -119,6 +120,33 @@ void Qt5BakeLightsNodeInstanceServer::bakeLights()
+             break;
+         }
+     };
++#else
++    QQuick3DLightmapBaker::Callback callback = [this](const QVariantMap &data,
++                                                      QQuick3DLightmapBaker::BakingControl *) {
++        m_callbackReceived = true;
++        const QQuick3DLightmapBaker::BakingStatus status
++            = static_cast<QQuick3DLightmapBaker::BakingStatus>(data[QStringLiteral("status")].toInt());
++        QString msg = data.value("message").toString();
++        switch (status) {
++        case QQuick3DLightmapBaker::BakingStatus::Warning:
++        case QQuick3DLightmapBaker::BakingStatus::Error: {
++            nodeInstanceClient()->handlePuppetToCreatorCommand(
++                {PuppetToCreatorCommand::BakeLightsProgress, msg});
++            nodeInstanceClient()->flush();
++        } break;
++        case QQuick3DLightmapBaker::BakingStatus::Cancelled:
++            abort(tr("Baking cancelled."));
++            break;
++        case QQuick3DLightmapBaker::BakingStatus::Complete:
++            runDenoiser();
++            break;
++        default:
++            qWarning() << __FUNCTION__ << "Unexpected light baking status received:"
++                       << int(status) << msg;
++            break;
++        }
++    };
++#endif
+ 
+     QQuick3DLightmapBaker *baker = m_view3D->lightmapBaker();
+     baker->bake(callback);
