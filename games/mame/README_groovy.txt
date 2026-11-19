@@ -1,9 +1,9 @@
-GroovyMAME, also known as GroovyUME, is a fork of MAME/UME with
-greater emphasis on CRT monitor support, in order to provide smoother
-gameplay with less input lag than using regular MAME on an LCD screen.
+GroovyMAME, also known as GroovyUME, is a fork of MAME with greater
+emphasis on CRT monitor support, in order to provide smoother gameplay
+with less input lag than using regular MAME on an LCD screen.
 
-GroovyMAME has a discussion forum:
-http://forum.arcadecontrols.com/index.php?board=52.0
+GroovyMAME has a github repo:
+https://github.com/antonioginer/GroovyMAME/
 
 GroovyMAME used to be provided as a patch against the standard MAME
 sources, until its author made it a proper fork on github. This
@@ -29,8 +29,9 @@ If there *is* a new release, you have two choices:
 
 1. Wait until I update the GroovyMAME patch. I can't guarantee that
    I'll always do this in a timely manner. Please don't email and
-   bug me about this: I maintain over 700 SlackBuilds, and I try to
-   have a life outside of that, too.
+   bug me about this: I maintain over 1000 SlackBuilds, and I try to
+   have a life outside of that, too. Also, remember, SBo only updates
+   once a week (usually late Friday or early Saturday).
 
 2. Run mame.SlackBuild with GROOVY=update in the environment. This
    will attempt to create a GroovyMAME patch for the MAME version
@@ -41,16 +42,20 @@ If there *is* a new release, you have two choices:
    in my mkgroovy.sh script (in which case, please do contact me by
    email, so I can fix it).
 
+NOTE: As of 20261119, I am no longer including old groovy .diff.xz
+files in the SBo repo. Only the latest one will be present. If you
+want to build an old GroovyMAME, use option (2), above.
+
 Note that GROOVY=update requires the SlackBuild to access the Internet
 (which SlackBuilds normally don't do). Specifically, it runs "curl"
 as the root user, and downloads a JSON file and the actual diff (if
 found) from https://api.github.com. If you don't trust this, you can
 instead run the mkgroovy.sh script (found in the same directory as the
-SlackBuild) as a non-root user, and copy the resulting .diff to the
+SlackBuild) as a non-root user, and copy the resulting .diff.xz to the
 SlackBuild directory.
 
-If you have multiple gm*.diff files that match the MAME version, the
-script will try to use the one with the highest GroovyMAME version
+If you have multiple gm*.diff.xz files that match the MAME version,
+the script will try to use the one with the highest GroovyMAME version
 number. If it picks the wrong one, remove the ones you don't want
 to use.
 
