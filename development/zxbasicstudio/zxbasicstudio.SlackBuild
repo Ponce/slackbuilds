@@ -22,15 +22,19 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# Builds ZX Basic Studio from source with the .NET SDK. Every NuGet package
+# the build needs is listed in the .info file and must sit next to this
+# script; the restore is done offline from those files only.
 
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=zxbasicstudio
-VERSION=${VERSION:-1.8.0_beta2}
+VERSION=${VERSION:-1.8.0_beta7}
+SRCVERSION=${SRCVERSION:-1.8.0-beta7}
+SKIAVERSION=${SKIAVERSION:-3.116.1}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 PKGTYPE=${PKGTYPE:-tgz}
-TARBALL=ZXBasicStudio-Linux-x64.v1.8.0-beta2.zip
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
@@ -45,20 +49,30 @@ if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
   exit 0
 fi
 
+# The NuGet package set in the .info file is for linux-x64 only
+if [ "$ARCH" != "x86_64" ]; then
+  echo "$PRGNAM is only supported on x86_64 (ARCH=$ARCH)"
+  exit 1
+fi
+
+if ! command -v dotnet >/dev/null 2>&1; then
+  echo "dotnet not found, please install dotnet-sdk-10.0 first"
+  exit 1
+fi
+
 TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
 set -e
+
 rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
 mkdir $PRGNAM-$VERSION
 cd $PRGNAM-$VERSION
-unzip $CWD/*.zip
-
-
+tar xvf $CWD/ZXBasicStudio-$SRCVERSION.tar.gz --strip-components=1
 chown -R root:root .
 find -L . \
  \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
@@ -66,19 +80,72 @@ find -L . \
  \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
   -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
 
-mkdir -p $PKG/opt/zxbasicstudio
-cp -avxu * $PKG/opt/zxbasicstudio
-chmod +x $PKG/opt/zxbasicstudio/*.so
+# Upstream's dependencies pull the managed SkiaSharp up to 3.x while the
+# Linux native library stays at 2.88, and the program aborts at startup
+# ("native libSkiaSharp library (88.1) is incompatible"). Pin the native
+# assets to the managed version.
+if ! grep -q 'SkiaSharp.NativeAssets.Linux' ZXBStudio/ZXBasicStudio.csproj; then
+  sed -i "s|^</Project>|  <ItemGroup>\n    <PackageReference Include=\"SkiaSharp.NativeAssets.Linux\" Version=\"$SKIAVERSION\" />\n  </ItemGroup>\n</Project>|" \
+    ZXBStudio/ZXBasicStudio.csproj
+fi
+
+# Offline NuGet feed made of the .nupkg files downloaded with the sources
+mkdir -p nuget-feed
+ln -sf $CWD/*.nupkg nuget-feed/
+cat > nuget.config <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="local" value="$(pwd)/nuget-feed" />
+  </packageSources>
+</configuration>
+EOF
+
+# Keep dotnet/NuGet state inside the build dir and turn off telemetry
+export DOTNET_CLI_HOME=$(pwd)/.dotnet-home
+export NUGET_PACKAGES=$(pwd)/.nuget/packages
+export NUGET_HTTP_CACHE_PATH=$(pwd)/.nuget/http-cache
+export DOTNET_CLI_TELEMETRY_OPTOUT=1
+export DOTNET_NOLOGO=1
+export DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
+export DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE=1
+export AVALONIA_TELEMETRY_OPTOUT=1
+
+# Framework-dependent build: uses the system .NET runtime
+dotnet publish ZXBStudio/ZXBasicStudio.csproj \
+  -c Release \
+  -r linux-x64 \
+  --self-contained false \
+  --disable-build-servers \
+  -o $(pwd)/publish
+
+mkdir -p $PKG/opt/$PRGNAM
+cp -a publish/* $PKG/opt/$PRGNAM/
+find $PKG/opt/$PRGNAM -type f -exec chmod 644 {} \;
+# ELF files (the apphost and native libraries such as libSkiaSharp.so and
+# libSkiaSharp.so.116.0.0) must be executable
+find $PKG/opt/$PRGNAM -type f -print0 | xargs -0 file | grep ELF \
+  | cut -f 1 -d : | xargs chmod 755
+
+# The program extracts its bundled libportaudio.so into the current
+# directory unless the file already exists there; use the system one.
+ln -sf /usr/lib64/libportaudio.so.2 $PKG/opt/$PRGNAM/libportaudio.so
+
+# Launcher: the program looks up Resources/ and libportaudio.so relative
+# to the current directory, so it has to run from /opt/zxbasicstudio.
+mkdir -p $PKG/usr/bin
+install -m 0755 $CWD/$PRGNAM.sh $PKG/usr/bin/$PRGNAM
 
 mkdir -p $PKG/usr/share/applications $PKG/usr/share/pixmaps
-cp $CWD/zxbasicstudio.png $PKG/usr/share/pixmaps/zxbasicstudio.png
-cp $CWD/zxbasicstudio.desktop $PKG/usr/share/applications/zxbasicstudio.desktop
+cp $CWD/$PRGNAM.png $PKG/usr/share/pixmaps/$PRGNAM.png
+cp $CWD/$PRGNAM.desktop $PKG/usr/share/applications/$PRGNAM.desktop
 
-# For the moment must comment these
-#find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
-#  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+# Do not strip: these are .NET assemblies plus prebuilt native libraries.
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cp -a LICENSE.txt README.md $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README.SlackBuild
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
