@@ -1,0 +1,105 @@
+From: Pivy build fix
+Subject: [PATCH] Restore SWIG 4.5.0+ compatibility
+
+SWIG 4.5.0 dropped Python 2 support and removed the Python 2 compatibility
+macros (PyInt_*, PyString_*, PyClass_Check, ...) that Lib/python/pyhead.swg
+used to emit into every generated wrapper.  Pivy's typemaps and %extend
+blocks still use those legacy spellings in ~40 places, so with SWIG >= 4.5
+the generated wrappers no longer compile:
+
+  soqtPYTHON_wrap.cxx:4967:15: error: 'PyInt_AsLong' was not declared in
+      this scope; did you mean 'PyLong_AsLong'?
+
+This restores the macros from interfaces/pivy_common_typemaps.i, which every
+module interface already includes.  The block is emitted into the wrapper's
+%runtime section: that is after SWIG_VERSION is #defined but before any
+header section contributed by an %include'd .i file, so the ordering is
+correct no matter where a module includes the file.  The definitions are
+byte-for-byte the ones SWIG used to provide, so behaviour is unchanged.
+
+Two related SWIG 4.4+/4.5+ issues are fixed at the same time:
+
+ * interfaces/soqt.i's %init block still did "return NULL" on failure.  Since
+   SWIG 4.4 the module initialiser is "int SWIG_mod_exec(PyObject *)", so this
+   both warns (-Wconversion-null) and silently reports success when the _io
+   import fails.  interfaces/coin.i already had the version guard; soqt.i did
+   not.
+
+ * -py3 has been a no-op since SWIG 4.2 and prints "Deprecated command line
+   option: -py3. Ignored, this option is no longer supported." from 4.5
+   onwards.  Only pass it to SWIG versions that still accept it.
+
+Tested against SWIG 4.4.1 / GCC 15.3 (coin + soqt build clean and import
+correctly) and against a wrapper doctored to emulate SWIG 4.5 (40 errors in
+the coin wrapper -> 0 in Pivy-contributed code).
+
+--- a/interfaces/pivy_common_typemaps.i
++++ b/interfaces/pivy_common_typemaps.i
+@@ -14,6 +14,38 @@
+  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+  */
+ 
++/*
++ * SWIG 4.5.0 dropped Python 2 support and removed the Python 2
++ * compatibility macros that Lib/python/pyhead.swg used to emit into every
++ * generated wrapper.  Pivy's typemaps and %extend blocks still use the
++ * legacy spellings in a number of places, which makes the generated
++ * wrappers fail to compile with:
++ *
++ *   error: 'PyInt_AsLong' was not declared in this scope
++ *
++ * Re-create the macros here, with exactly the definitions SWIG used to
++ * provide, so behaviour is unchanged.  They go into the wrapper's %runtime
++ * section, which is emitted after SWIG_VERSION is defined but before every
++ * header section contributed by an %include'd .i file - so the ordering is
++ * correct no matter where a module includes this file.
++ */
++%runtime %{
++#if SWIG_VERSION >= 0x040500
++#define PyClass_Check(obj) PyObject_IsInstance(obj, (PyObject *)&PyType_Type)
++#define PyInt_Check(x) PyLong_Check(x)
++#define PyInt_AsLong(x) PyLong_AsLong(x)
++#define PyInt_FromLong(x) PyLong_FromLong(x)
++#define PyInt_FromSize_t(x) PyLong_FromSize_t(x)
++#define PyString_Check(name) PyBytes_Check(name)
++#define PyString_FromString(x) PyUnicode_FromString(x)
++#define PyString_Format(fmt, args) PyUnicode_Format(fmt, args)
++#define PyString_AsString(str) PyBytes_AsString(str)
++#define PyString_Size(str) PyBytes_Size(str)
++#define PyString_InternFromString(key) PyUnicode_InternFromString(key)
++#define Py_TPFLAGS_HAVE_CLASS Py_TPFLAGS_BASETYPE
++#endif
++%}
++
+ /* header include needed to let nodekit extensions find the SbTime header */
+ %{
+ #include <Inventor/SbTime.h>
+--- a/interfaces/soqt.i
++++ b/interfaces/soqt.i
+@@ -52,7 +52,11 @@
+ %init %{
+ #if PY_MAJOR_VERSION >= 3
+ if (init_file_emulator() < 0) {
++  #if (SWIG_VERSION < 0x040400)
+     return NULL;
++  #else
++    return 0;
++  #endif
+ }
+ #endif
+ %}
+--- a/interfaces/CMakeLists.txt
++++ b/interfaces/CMakeLists.txt
+@@ -1,7 +1,11 @@
+ function(set_swig_properties NAME)
+     set_property(SOURCE ${NAME} PROPERTY CPLUSPLUS ON)
+     set_property(SOURCE ${NAME} PROPERTY SWIG_FLAGS "-includeall")
+-    set_property(SOURCE ${NAME} APPEND PROPERTY SWIG_FLAGS "-py3")
++    # -py3 is a no-op since SWIG 4.2 and prints a deprecation notice from
++    # SWIG 4.5 onwards; only pass it to the SWIG versions that still want it.
++    if(SWIG_VERSION VERSION_LESS 4.2)
++        set_property(SOURCE ${NAME} APPEND PROPERTY SWIG_FLAGS "-py3")
++    endif()
+     set_property(SOURCE ${NAME} APPEND PROPERTY SWIG_FLAGS "-D__PIVY__")
+     if(DISABLE_SWIG_WARNINGS)
+         set_property(SOURCE ${NAME} APPEND PROPERTY SWIG_FLAGS
