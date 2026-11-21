@@ -1,0 +1,214 @@
+diff -Naur JDSP4Linux.orig/libjamesdsp/JdspImpResToolbox.c JDSP4Linux/libjamesdsp/JdspImpResToolbox.c
+--- JDSP4Linux.orig/libjamesdsp/JdspImpResToolbox.c	2024-01-09 15:44:55.000000000 +0100
++++ JDSP4Linux/libjamesdsp/JdspImpResToolbox.c	2026-02-07 15:32:41.974163539 +0100
+@@ -252,10 +252,26 @@
+         yi[k] = xloc * (xloc * (xloc * coefs[low_i] + coefs[low_i + 700]) + coefs[low_i + 1400]) + coefs[low_i + 2100];
+     }
+ }
+-
++void jds_reverse(float *arr, int32_t start, int32_t end)                                                                    {
++        while (start < end)
++        {
++                float tmp = arr[start];
++                arr[start] = arr[end];
++                arr[end] = tmp;
++                start++;
++                end--;
++        }
++}
++void jds_shift(float *arr, int32_t k, int32_t n)
++{
++        k = k % n;
++        jds_reverse(arr, 0, n - 1);
++        jds_reverse(arr, 0, n - k - 1);
++        jds_reverse(arr, n - k, n - 1);
++}
+ void circshift(float *x, int n, int k)
+ {
+-    k < 0 ? shift(x, -k, n) : shift(x, n - k, n);
++    k < 0 ? jds_shift(x, -k, n) : jds_shift(x, n - k, n);
+ }
+ #define NUMPTS 15
+ #define NUMPTS_DRS (7)
+@@ -303,10 +319,11 @@
+     unsigned int fs = 1;
+     const char *ext = get_filename_ext(filename);
+     float *pSampleData = 0;
++    drflac_uintptr *totalPCMFrameFlac = (drflac_uintptr *) totalPCMFrameCount;
+     if (!strncmp(ext, "wav", 5) || !strncmp(ext, "irs", 5))
+         pSampleData = drwav_open_file_and_read_pcm_frames_f32(filename, channels, &fs, totalPCMFrameCount, 0);
+     if (!strncmp(ext, "flac", 5))
+-        pSampleData = drflac_open_file_and_read_pcm_frames_f32(filename, channels, &fs, totalPCMFrameCount, 0);
++        pSampleData = drflac_open_file_and_read_pcm_frames_f32(filename, channels, &fs, totalPCMFrameFlac, 0);
+     /*if (!strncmp(ext, "mp3", 5))
+     {
+         drmp3_config mp3Conf;
+diff -Naur JDSP4Linux.orig/libjamesdsp/JdspImpResToolbox.h JDSP4Linux/libjamesdsp/JdspImpResToolbox.h
+--- JDSP4Linux.orig/libjamesdsp/JdspImpResToolbox.h	2024-01-09 15:44:55.000000000 +0100
++++ JDSP4Linux/libjamesdsp/JdspImpResToolbox.h	2026-02-07 15:32:41.974244922 +0100
+@@ -1,6 +1,5 @@
+ #ifndef JDSPIMPRESTOOLBOX_H
+ #define JDSPIMPRESTOOLBOX_H
+-
+ extern float* ReadImpulseResponseToFloat(const char* mIRFileName, int targetSampleRate, int* jImpInfo, int convMode, int* javaAdvSetPtr);
+ extern int ComputeEqResponse(const double* jfreq, double* jgain, int interpolationMode, int queryPts, double* dispFreq, float* response);
+ extern int ComputeCompResponse(int n, const double* jfreq, const double* jgain, int queryPts, const double* dispFreq, float* response);
+diff -Naur JDSP4Linux.orig/libjamesdsp/PrintfStdOutExtension.c JDSP4Linux/libjamesdsp/PrintfStdOutExtension.c
+--- JDSP4Linux.orig/libjamesdsp/PrintfStdOutExtension.c	2024-01-09 15:44:55.000000000 +0100
++++ JDSP4Linux/libjamesdsp/PrintfStdOutExtension.c	2026-02-07 15:32:41.974279106 +0100
+@@ -1,5 +1,7 @@
+ #include "PrintfStdOutExtension.h"
+ #include <stdarg.h>
++#include <stdio.h>
++#include <stdlib.h>
+ 
+ static stdOutHandler _printfStdOutHandlerPtr = 0;
+ static void* _printfStdOutHandlerUserPtr = 0;
+@@ -23,7 +25,7 @@
+     return result;
+ }
+ 
+-void __android_log_print(int severity, const char* tag, const char* msg) {
++void __android_log_print(int severity, const char* tag, const char* msg, ...) {
+     char *s;
+     if (asprintf(&s, "%s: %s", tag, msg) > 0 && s != 0)
+     {
+diff -Naur JDSP4Linux.orig/libjamesdsp/PrintfStdOutExtension.h JDSP4Linux/libjamesdsp/PrintfStdOutExtension.h
+--- JDSP4Linux.orig/libjamesdsp/PrintfStdOutExtension.h	2024-01-09 15:44:55.000000000 +0100
++++ JDSP4Linux/libjamesdsp/PrintfStdOutExtension.h	2026-02-07 15:32:41.974303903 +0100
+@@ -6,5 +6,10 @@
+ 
+ extern void setPrintfStdOutHandler(stdOutHandler funcPtr, void* userData);
+ extern int isPrintfStdOutHandlerSet();
++extern void __android_log_print(int severity, const char* tag, const char* msg, ...)
++#if defined(__GNUC__)
++    __attribute__ ((format(printf, 3, 4)))
++#endif
++    ;
+ 
+ #endif // EELSTDOUTEXTENSION_H
+diff -Naur JDSP4Linux.orig/libjamesdsp/subtree/Main/libjamesdsp/jni/jamesdsp/jdsp/Effects/eel2/nseel-compiler.c JDSP4Linux/libjamesdsp/subtree/Main/libjamesdsp/jni/jamesdsp/jdsp/Effects/eel2/nseel-compiler.c
+--- JDSP4Linux.orig/libjamesdsp/subtree/Main/libjamesdsp/jni/jamesdsp/jdsp/Effects/eel2/nseel-compiler.c	2024-01-09 15:44:55.000000000 +0100
++++ JDSP4Linux/libjamesdsp/subtree/Main/libjamesdsp/jni/jamesdsp/jdsp/Effects/eel2/nseel-compiler.c	2026-02-07 15:33:11.042595430 +0100
+@@ -1378,21 +1378,21 @@
+ }
+ void reverse(float *arr, int32_t start, int32_t end)
+ {
+-	while (start < end)
+-	{
+-		float tmp = arr[start];
+-		arr[start] = arr[end];
+-		arr[end] = tmp;
+-		start++;
+-		end--;
+-	}
++        while (start < end)
++        {
++                float tmp = arr[start];
++                arr[start] = arr[end];
++                arr[end] = tmp;
++                start++;
++                end--;
++        }
+ }
+ void shift(float *arr, int32_t k, int32_t n)
+ {
+-	k = k % n;
+-	reverse(arr, 0, n - 1);
+-	reverse(arr, 0, n - k - 1);
+-	reverse(arr, n - k, n - 1);
++        k = k % n;
++        reverse(arr, 0, n - 1);
++        reverse(arr, 0, n - k - 1);
++        reverse(arr, n - k, n - 1);
+ }
+ float * NSEEL_CGEN_CALL __NSEEL_circshift(float *blocks, float *offptr, float *shiftptr, float *lenptr)
+ {
+@@ -1646,7 +1646,7 @@
+  ---------------------------------------------------------------------------*/
+ float kth_smallest(float a[], int n, int k)
+ {
+-	register i, j, l, m;
++	register int i, j, l, m;
+ 	register float x;
+ 
+ 	l = 0; m = n - 1;
+@@ -3855,7 +3855,7 @@
+ 	float *blocks = c->ram_state;
+ 	const char *filename = (const char*)GetStringForIndex(c->region_context, *parms[0], 0);
+ 	uint32_t channels, fs;
+-	uint64_t frameCount;
++	drflac_uintptr frameCount;
+ 	float *signal = drflac_open_file_and_read_pcm_frames_f32(filename, &channels, &fs, &frameCount, 0);
+ 	float targetFs = *parms[2];
+ 	if (targetFs > FLT_EPSILON)
+@@ -3917,7 +3917,7 @@
+ 	size_t actualSize;
+ 	unsigned char *memoryBlk = base64_decode((const unsigned char*)base64String, strlen(base64String), &actualSize);
+ 	uint32_t channels, fs;
+-	uint64_t frameCount;
++	drflac_uintptr frameCount;
+ 	float *signal = drflac_open_memory_and_read_pcm_frames_f32(memoryBlk, actualSize, &channels, &fs, &frameCount, 0);
+ 	float targetFs = *parms[2];
+ 	if (targetFs > FLT_EPSILON)
+@@ -8185,4 +8185,4 @@
+ 		return nseel_createCompiledValue(ctx, (float)rv);
+ 	}
+ 	return nseel_createCompiledValue(ctx, (float)atof(tmp));
+-}
+\ No newline at end of file
++}
+diff -Naur JDSP4Linux.orig/libjamesdsp/subtree/Main/libjamesdsp/jni/jamesdsp/jdsp/Effects/liveprogWrapper.c JDSP4Linux/libjamesdsp/subtree/Main/libjamesdsp/jni/jamesdsp/jdsp/Effects/liveprogWrapper.c
+--- JDSP4Linux.orig/libjamesdsp/subtree/Main/libjamesdsp/jni/jamesdsp/jdsp/Effects/liveprogWrapper.c	2024-01-09 15:44:55.000000000 +0100
++++ JDSP4Linux/libjamesdsp/subtree/Main/libjamesdsp/jni/jamesdsp/jdsp/Effects/liveprogWrapper.c	2026-02-07 15:32:41.975037318 +0100
+@@ -1,5 +1,6 @@
+ void NSEEL_HOSTSTUB_EnterMutex() { }
+ void NSEEL_HOSTSTUB_LeaveMutex() { }
++#include <math.h>
+ #include "../jdsp_header.h"
+ void LiveProgConstructor(JamesDSPLib *jdsp)
+ {
+diff -Naur JDSP4Linux.orig/libjamesdsp/subtree/Main/libjamesdsp/jni/jamesdsp/jdsp/jdspController.c JDSP4Linux/libjamesdsp/subtree/Main/libjamesdsp/jni/jamesdsp/jdsp/jdspController.c
+--- JDSP4Linux.orig/libjamesdsp/subtree/Main/libjamesdsp/jni/jamesdsp/jdsp/jdspController.c	2024-01-09 15:44:55.000000000 +0100
++++ JDSP4Linux/libjamesdsp/subtree/Main/libjamesdsp/jni/jamesdsp/jdsp/jdspController.c	2026-02-07 15:32:41.975104184 +0100
+@@ -3,11 +3,14 @@
+ #include <string.h>
+ #include <math.h>
+ #include <time.h>
++#include <sys/time.h>
+ #include <float.h>
++#include <unistd.h>
+ #include "Effects/eel2/dr_flac.h"
+ #include "Effects/eel2/ns-eel.h"
+ #include "jdsp_header.h"
+ #define TAG "EffectDSPMain"
++#include "PrintfStdOutExtension.h"
+ 
+ #ifdef __ANDROID_API__
+ #if __ANDROID_API__ < __ANDROID_API_J_MR2__
+@@ -1259,4 +1262,4 @@
+ 		FreeIntegerASRCHandler(&jdsp->asrc[1]);
+ 	}
+ 	jdsp_unlock(jdsp);
+-}
+\ No newline at end of file
++}
+diff -Naur JDSP4Linux.orig/libjamesdsp/subtree/Main/libjamesdsp/jni/jamesdsp/jdsp/jdsp_header.h JDSP4Linux/libjamesdsp/subtree/Main/libjamesdsp/jni/jamesdsp/jdsp/jdsp_header.h
+--- JDSP4Linux.orig/libjamesdsp/subtree/Main/libjamesdsp/jni/jamesdsp/jdsp/jdsp_header.h	2024-01-09 15:44:55.000000000 +0100
++++ JDSP4Linux/libjamesdsp/subtree/Main/libjamesdsp/jni/jamesdsp/jdsp/jdsp_header.h	2026-02-07 15:31:43.150369404 +0100
+@@ -440,6 +440,7 @@
+ void BS2BInit(t_bs2bdp *bs2bdp, unsigned int samplerate, int flevel);
+ /* sample poits to double floats native endians */
+ void BS2BProcess(t_bs2bdp *bs2bdp, double *sampleL, double *sampleR);
++typedef struct dspsys dspsys;
+ typedef struct
+ {
+ 	int mode; // 0: BS2B Lv 1, 1: BS2B Lv 2, 2: HRTF crossfeed, 2: HRTF surround 1, 2: HRTF surround 2, 2: HRTF surround 3
+@@ -449,7 +450,6 @@
+ 	FFTConvolver2x4x2 *convLong_S_S;
+ 	void(*process)(struct dspsys *, size_t);
+ } Crossfeed;
+-typedef struct dspsys dspsys;
+ typedef struct
+ {
+ 	FFTConvolver2x2 *conv1d2x2_S_S;
